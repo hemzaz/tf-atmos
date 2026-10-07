@@ -620,9 +620,9 @@ run "lambda_uploader_requires_github_oidc" {
   expect_failures = [var.lambda_uploader_trusted_github_repos]
 }
 
-# Both CI roles may start in-VPC runners: SetDesiredCapacity on groups tagged
-# as runner pools only.
-run "ci_roles_may_resize_only_runner_pools" {
+# Both CI roles may start in-VPC runners: ExecutePolicy on this stack's named
+# runner pools only (never SetDesiredCapacity, never another group).
+run "ci_roles_may_only_execute_their_runner_pools_policies" {
   command = plan
 
   variables {
@@ -633,6 +633,7 @@ run "ci_roles_may_resize_only_runner_pools" {
     ci_apply_role_enabled              = true
     ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
     ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+    ci_runner_pool_names               = ["ue1-github-runners"]
   }
 
   assert {
@@ -643,13 +644,14 @@ run "ci_roles_may_resize_only_runner_pools" {
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.ci_runner_pools["plan"].policy).Statement :
-      s.Action != "autoscaling:SetDesiredCapacity" || s.Condition.StringEquals["autoscaling:ResourceTag/Component"] == "GitHubRunners"
+      s.Action == "autoscaling:ExecutePolicy" && length(s.Resource) == 1
+      && endswith(s.Resource[0], ":autoScalingGroupName/ue1-github-runners")
     ])
-    error_message = "SetDesiredCapacity only on groups tagged Component=GitHubRunners."
+    error_message = "Only autoscaling:ExecutePolicy, on the named runner pool only."
   }
 }
 
-run "no_runner_pool_policy_when_the_tag_is_null" {
+run "no_runner_pool_policy_without_pools" {
   command = plan
 
   variables {
@@ -657,11 +659,20 @@ run "no_runner_pool_policy_when_the_tag_is_null" {
     github_oidc_repository   = "hemzaz/tf-atmos"
     github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix      = "test-ci"
-    ci_runner_pool_tag       = null
   }
 
   assert {
     condition     = length(aws_iam_role_policy.ci_runner_pools) == 0
-    error_message = "ci_runner_pool_tag = null grants nothing."
+    error_message = "No ci_runner_pool_names grants nothing."
   }
+}
+
+run "runner_pool_names_reject_a_wildcard" {
+  command = plan
+
+  variables {
+    ci_runner_pool_names = ["ue1-*"]
+  }
+
+  expect_failures = [var.ci_runner_pool_names]
 }

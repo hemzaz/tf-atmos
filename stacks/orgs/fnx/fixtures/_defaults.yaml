@@ -50,6 +50,11 @@ components:
         github_oidc_default_branch: "master"
         github_oidc_create_provider: true
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        # Every pool a fixture can hold: a stack's own, and the
+        # microservices-platform template's (iam ci-runner-pools.tf).
+        ci_runner_pool_names:
+          - "{{ .settings.prefix }}-github-runners"
+          - "{{ .settings.prefix }}-microservices-runners"
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
 

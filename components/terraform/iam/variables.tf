@@ -470,14 +470,14 @@ variable "enable_autoscaling_service_linked_role" {
   default     = false
 }
 
-variable "ci_runner_pool_tag" {
-  type = object({
-    key   = string
-    value = string
-  })
-  description = "Tag that marks the self-hosted runner pools' Auto Scaling groups (the github-runners catalog's Component tag): the CI roles may set the desired capacity of those groups only, to start runners (ci-runner-pools.tf). Null grants nothing"
-  default = {
-    key   = "Component"
-    value = "GitHubRunners"
+variable "ci_runner_pool_names" {
+  type        = list(string)
+  description = "Auto Scaling groups of this stack's self-hosted runner pools (github-runners' autoscaling_group_name, <Environment>-<name>): the CI roles may execute their start policies only, to start runners (ci-runner-pools.tf). Empty grants nothing"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for n in var.ci_runner_pool_names : can(regex("^[A-Za-z0-9._-]{1,255}$", n))])
+    error_message = "ci_runner_pool_names must be Auto Scaling group names (letters, digits, '.', '_', '-'; no wildcards)."
   }
 }
