@@ -9,7 +9,7 @@
 import:
   - orgs/fnx/prod/us-east-1/components/globals
   - catalog/apigateway/defaults
-  - catalog/cognito/defaults
+  - catalog/cognito/prod
   - catalog/monitoring/defaults
   - catalog/s3/lambda-artifacts
   - catalog/sqs/defaults
@@ -26,18 +26,25 @@ components:
       metadata:
         component: cognito
         inherits:
-          - cognito/defaults
+          - cognito/prod
       vars:
         name_prefix: '{{ .atmos_stack }}'
-        # Production tightens both knobs over the inherited defaults: MFA is
-        # mandatory rather than opt-in, and the pool cannot be deleted while it
-        # holds real users.
-        mfa_configuration: "ON"
-        deletion_protection: true
         clients:
           api:
             generate_secret: true
             access_token_validity_minutes: 30
+          # DR (owner decision 2026-10-07): fnx-ue2-prod's
+          # lambda/cognito-user-migration checks a user's password against this
+          # pool with AdminInitiateAuth, which needs a client allowing the
+          # admin password flow and, without a secret, no SECRET_HASH. Admin
+          # flows are IAM-signed calls, so no browser can use this client. The
+          # tokens it issues are discarded: the shortest lifetimes.
+          dr-migration:
+            generate_secret: false
+            explicit_auth_flows: ["ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+            access_token_validity_minutes: 5
+            id_token_validity_minutes: 5
+            refresh_token_validity_days: 1
 
     # ==========================================================================
     # API Gateway - Main API (Production)

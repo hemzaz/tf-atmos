@@ -25,6 +25,11 @@ rotation configuration.
   `monitoring` (`.function_name`).
 - The `microservices-platform` template runs two rotation functions from this component
   (`functions/redis-auth-rotation`, `functions/jwt-secret-rotation`).
+- `lambda/cognito-user-migration` in `fnx-ue2-prod` (`functions/cognito-user-migration`) is the
+  user-migration trigger of that stack's `cognito/main`, which reads `.function_arn`; it reads
+  `fnx-ue1-prod`'s `cognito/main` and may call only `AdminInitiateAuth`/`AdminGetUser` on it. It
+  deploys before the pool (deploy-full-stack's connectivity layer). Its handler's tests are
+  `workflows/scripts/common/test_cognito_user_migration.py`, outside the package.
 
 ## Notes
 

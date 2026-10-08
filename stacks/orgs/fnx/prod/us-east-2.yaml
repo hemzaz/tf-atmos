@@ -16,9 +16,12 @@
 #     failover; elasticache/main: a Global Datastore secondary;
 #   - eks/main: the same node groups at their minimum; the in-cluster services
 #     are deployed on failover;
-#   - apigateway/main: the SECONDARY half of api.<domain>'s failover pair.
+#   - apigateway/main: the SECONDARY half of api.<domain>'s failover pair,
+#     authorized by this region's cognito/main;
+#   - cognito/main: its own pool (AWS has no cross-region user pools), filled
+#     from fnx-ue1-prod's by a user-migration trigger.
 # Not replicated: rds/data and the data VPC (restored from backup/main's
-# copies in us-east-2), Cognito (no cross-region replication in AWS).
+# copies in us-east-2).
 # =============================================================================
 
 import:

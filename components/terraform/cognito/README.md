@@ -8,10 +8,14 @@ its `schemas`/`number_schemas` are not ported).
 
 ## Wiring
 
-- Instance: `cognito/main` in the three AWS stacks and `fnx-ue1-local-sandbox` (applied for real by
-  `atmos workflow sandbox`). Dev disables deletion protection; prod sets `mfa_configuration: ON`
-  and 30-minute access tokens.
-- Used by: `apigateway/main` and `apigateway/data` (`.user_pool_arn`).
+- Instance: `cognito/main` in the AWS stacks and `fnx-ue1-local-sandbox` (applied for real by
+  `atmos workflow sandbox`). Dev disables deletion protection; both prod pools inherit
+  `cognito/prod` (`mfa_configuration: ON`, deletion protection) and set 30-minute access tokens.
+- DR: `fnx-ue2-prod`'s pool has `lambda/cognito-user-migration` as its `user_migration` trigger,
+  which checks users against `fnx-ue1-prod`'s pool through that pool's `dr-migration` client
+  (`.user_pool_id`, `.user_pool_arn`, `.client_ids["dr-migration"]`); docs/OPERATIONS.md, "Auth
+  during failover".
+- Used by: `apigateway/main` and `apigateway/data` (`.user_pool_arn`), each region's own pool.
 
 ## Notes
 
