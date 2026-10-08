@@ -130,12 +130,13 @@ class CognitoUserMigrationTest(unittest.TestCase):
             self.run_handler(FakeCognito(), event("PreSignUp_SignUp"))
 
     def test_the_password_is_never_logged(self):
+        canary = "log-canary-value"
         client = FakeCognito(auth_error=ClientError("NotAuthorizedException"))
         with mock.patch.object(handler, "source_client", return_value=client), \
                 self.assertLogs(handler.LOGGER, level="WARNING") as logs, \
                 self.assertRaises(handler.MigrationError):
-            handler.lambda_handler(event("UserMigration_Authentication", password="s3cret-Pw"), None)
-        self.assertFalse(any("s3cret-Pw" in line or "user@example.com" in line for line in logs.output))
+            handler.lambda_handler(event("UserMigration_Authentication", password=canary), None)
+        self.assertFalse(any(canary in line or "user@example.com" in line for line in logs.output))
 
     def test_the_client_targets_the_source_pools_region(self):
         fake_boto3 = mock.MagicMock()
