@@ -175,6 +175,74 @@ run "instance_reads_only_its_own_parameter" {
     condition     = length(aws_iam_role_policy_attachment.additional) == 0
     error_message = "No managed policy is attached by default."
   }
+
+  assert {
+    condition = !anytrue([
+      for s in local.runner_policy.Statement :
+      anytrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:")])
+    ])
+    error_message = "The runner role has no Auto Scaling action (it could end a sibling runner): runners leave through their lease."
+  }
+}
+
+run "a_deleted_lease_ends_its_runner" {
+  command = plan
+
+  assert {
+    condition = (
+      jsondecode(aws_cloudwatch_event_rule.lease[0].event_pattern) == {
+        source        = ["aws.ssm"]
+        "detail-type" = ["Parameter Store Change"]
+        detail = {
+          operation = ["Delete"]
+          name      = [{ prefix = "/github/runners/github-runners/jit/lease/" }]
+        }
+      }
+      && aws_cloudwatch_event_target.lease[0].rule == "test-github-runners-lease"
+      && aws_lambda_permission.lease[0].principal == "events.amazonaws.com"
+      && aws_lambda_permission.lease[0].statement_id == "AllowLeaseEvents"
+      && aws_lambda_function.jit[0].environment[0].variables["AUTOSCALING_GROUP_NAME"] == "test-github-runners"
+    )
+    error_message = "Deleting <prefix>/lease/<instance id> invokes the jit function, which ends that runner of this group."
+  }
+
+  assert {
+    condition = anytrue([
+      for s in local.jit_policy.Statement :
+      contains(flatten([s.Action]), "autoscaling:DescribeAutoScalingInstances")
+    ])
+    error_message = "The jit function checks that a lease's instance is an InService runner of this group."
+  }
+}
+
+run "a_sweep_bounds_lost_lease_events" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_rule.sweep[0].schedule_expression == "rate(15 minutes)"
+      && aws_cloudwatch_event_target.sweep[0].rule == "test-github-runners-sweep"
+      && aws_lambda_permission.sweep[0].statement_id == "AllowSweepSchedule"
+      && anytrue([
+        for st in local.jit_policy.Statement :
+        st.Action == "ssm:GetParameter" && st.Resource == "arn:aws:ssm:us-east-1:123456789012:parameter/github/runners/github-runners/jit/lease/*"
+      ])
+    )
+    error_message = "Every 15 minutes the jit function ends InService runners without a lease; it may read leases only."
+  }
+}
+
+run "a_refused_job_leaves_without_lowering_capacity" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(local.user_data, "install -d -m 0700 -o runner -g runner /var/lib/runner-state"),
+      strcontains(local.user_data, "REFUSED_MARKER='/var/lib/runner-state/refused'"),
+      strcontains(local.user_data, "if [ -e \"$${REFUSED_MARKER}\" ]; then"),
+    ])
+    error_message = "A runner whose job the fork guard refused powers off with its lease kept, so the group replaces it."
+  }
 }
 
 run "instances_are_hardened" {
@@ -215,10 +283,12 @@ run "user_data_runs_one_checksummed_jit_runner_and_always_leaves" {
       strcontains(local.user_data, "trap 'shutdown -h now' EXIT"),
       strcontains(local.user_data, "actions-runner-linux-x64-2.337.0.tar.gz"),
       strcontains(local.user_data, "sha256sum -c"),
-      strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/jit/$${INSTANCE_ID}\""),
+      strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/github-runners/jit/$${INSTANCE_ID}\""),
       strcontains(local.user_data, "aws ssm delete-parameter"),
       strcontains(local.user_data, "./run.sh --jitconfig"),
-      strcontains(local.user_data, "--should-decrement-desired-capacity"),
+      strcontains(local.user_data, "aws ssm delete-parameter --region \"$${REGION}\" --name \"/github/runners/github-runners/jit/lease/$${INSTANCE_ID}\""),
+      strcontains(local.user_data, "sleep 600"),
+      !strcontains(local.user_data, "terminate-instance-in-auto-scaling-group"),
       !strcontains(local.user_data, "config.sh"),
     ])
     error_message = "The bootstrap verifies the pinned runner, reads and deletes its JIT configuration, runs once, and leaves on any exit."
@@ -287,4 +357,62 @@ run "rejects_a_non_numeric_app_id" {
   }
 
   expect_failures = [var.github_app_id]
+}
+
+run "every_pool_installs_the_fork_guard_hook" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(local.user_data, "ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/runner-hooks/job-started.sh"),
+      strcontains(local.user_data, "ALLOWED_SCOPE='hemzaz/tf-atmos'"),
+      strcontains(local.user_data, "ALLOWED_REFS=''"),
+      # The hook's rules (files/job-started.sh), rendered verbatim.
+      strcontains(local.user_data, "push | workflow_dispatch | schedule | merge_group) ;;"),
+      strcontains(local.user_data, ".pull_request.head.repo.full_name // empty"),
+      strcontains(local.user_data, "*) refuse \"event '$event'\" ;;"),
+    ])
+    error_message = "Every pool's runners refuse fork pull requests and unlisted events in their job-started hook, whatever allowed_refs says."
+  }
+}
+
+run "allowed_refs_fail_other_jobs_before_their_first_step" {
+  command = plan
+
+  variables {
+    name         = "prod-runners"
+    allowed_refs = ["refs/heads/master"]
+  }
+
+  assert {
+    condition = alltrue([
+      strcontains(local.user_data, "ALLOWED_REFS='refs/heads/master'"),
+      strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/prod-runners/jit/$${INSTANCE_ID}\""),
+    ])
+    error_message = "A pool with allowed_refs hands them to its hook; its JIT path is per pool."
+  }
+}
+
+run "ci_starts_runners_with_a_plus_one_policy_and_scale_in_spares_them" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_autoscaling_group.runner[0].protect_from_scale_in
+      && aws_autoscaling_policy.start[0].name == "test-github-runners-start"
+      && aws_autoscaling_policy.start[0].adjustment_type == "ChangeInCapacity"
+      && aws_autoscaling_policy.start[0].scaling_adjustment == 1
+    )
+    error_message = "CI's only lever is a +1 SimpleScaling policy (capped at max_size); scale-in never ends a runner mid-job."
+  }
+}
+
+run "allowed_refs_rejects_a_pattern" {
+  command = plan
+
+  variables {
+    allowed_refs = ["refs/heads/*"]
+  }
+
+  expect_failures = [var.allowed_refs]
 }

@@ -169,12 +169,24 @@ variable "github_app_private_key_parameter_name" {
 
 variable "jit_parameter_prefix" {
   type        = string
-  description = "SSM path under which the jit function writes each instance's JIT configuration (<prefix>/<instance id>)"
-  default     = "/github/runners/jit"
+  description = "SSM path under which the jit function writes each instance's JIT configuration (<prefix>/<instance id>); null for /github/runners/<name>/jit, so two pools in one account never share a path (or the IAM scopes on it)"
+  default     = null
 
   validation {
-    condition     = can(regex("^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", var.jit_parameter_prefix))
+    condition     = var.jit_parameter_prefix == null || can(regex("^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", coalesce(var.jit_parameter_prefix, "-")))
     error_message = "jit_parameter_prefix must be an absolute SSM path without a trailing slash."
+  }
+}
+
+variable "allowed_refs" {
+  type        = list(string)
+  description = "When non-empty, a runner also fails any job whose GITHUB_REF is not one of these refs before its first step (the runner's job-started hook, files/job-started.sh, which always enforces the fork guard and which a workflow cannot change). A production pool sets [\"refs/heads/master\"]: its runners then serve master's push, dispatch and schedule runs only, whatever a pull request's workflow asks for. Empty: any job with the pool's labels"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for r in var.allowed_refs : can(regex("^refs/(heads|tags)/[A-Za-z0-9._/-]+$", r))])
+    error_message = "allowed_refs must be full refs such as refs/heads/master (letters, digits, '.', '_', '/', '-')."
   }
 }
 
@@ -220,7 +232,7 @@ variable "instance_type" {
 
 variable "min_size" {
   type        = number
-  description = "Minimum runners. 0: CI starts them by raising desired capacity"
+  description = "Minimum runners. 0: CI starts them with the +1 start policy"
   default     = 0
 
   validation {

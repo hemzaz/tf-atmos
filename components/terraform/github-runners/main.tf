@@ -7,12 +7,14 @@
 #     launch lifecycle hook holds each new instance while the jit function
 #     (functions/jit) authenticates as a GitHub App and writes the instance's
 #     single-use JIT configuration to SSM; the instance reads it, deletes it,
-#     runs one job and leaves its group, lowering desired capacity. No
+#     runs one job and leaves by deleting its lease, which makes the jit
+#     function end it, lowering desired capacity. No
 #     reusable registration credential exists on any host, and a copied
 #     configuration is dead once its runner starts. Cloud Posse's component
 #     reads a registration token (and its token-rotator component keeps one
 #     in SSM); their philips-labs variant uses JIT the same way. CI raises
-#     desired capacity to start runners (min_size 0), so there are no CPU
+#     desired capacity by one (a +1 start policy, min_size 0) to start
+#     runners, so there are no CPU
 #     scaling policies, graceful scale-in hook or instance refresh.
 #   - The App's private key is on this component's own KMS key, whose policy
 #     lets only the jit function decrypt (no IAM delegation for Decrypt), so
@@ -34,7 +36,8 @@ locals {
 
   app_key_parameter_name = coalesce(var.github_app_private_key_parameter_name, "/github/runners/${var.name}/app-private-key")
   app_key_parameter_arn  = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${local.app_key_parameter_name}" : null
-  jit_parameter_arns     = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${var.jit_parameter_prefix}/*" : null
+  jit_parameter_prefix   = coalesce(var.jit_parameter_prefix, "/github/runners/${var.name}/jit")
+  jit_parameter_arns     = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${local.jit_parameter_prefix}/*" : null
   # The group's ARN carries a generated id; this matches it by name.
   asg_arn_pattern = local.enabled ? "arn:${local.partition}:autoscaling:${var.region}:${local.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.name}" : null
 
@@ -43,8 +46,11 @@ locals {
     post_install         = var.userdata_post_install
     runner_version       = var.runner_version
     runner_sha256        = var.runner_sha256
-    jit_parameter_prefix = var.jit_parameter_prefix
+    jit_parameter_prefix = local.jit_parameter_prefix
     idle_timeout_seconds = var.idle_timeout_seconds
+    allowed_refs         = var.allowed_refs
+    github_scope         = var.github_scope
+    job_started_hook     = trimspace(file("${path.module}/files/job-started.sh"))
   })
 }
 
@@ -102,12 +108,29 @@ locals {
         Resource  = var.kms_key_arn
         Condition = { StringEquals = local.ssm_via }
       },
-      # Release a launch, or end a failed one lowering desired capacity.
+      # Release a launch, end a failed one, or end a runner whose lease was
+      # deleted, lowering desired capacity: this group's instances only.
       {
-        Sid      = "ReleaseOrEndLaunches"
+        Sid      = "ReleaseOrEndRunners"
         Effect   = "Allow"
         Action   = ["autoscaling:CompleteLifecycleAction", "autoscaling:TerminateInstanceInAutoScalingGroup"]
         Resource = local.asg_arn_pattern
+      },
+      # Whether a lease's instance is an InService runner of this group, and
+      # (the sweep) which runners are InService since when (no resource-level
+      # permissions for these).
+      {
+        Sid      = "DescribeRunners"
+        Effect   = "Allow"
+        Action   = ["autoscaling:DescribeAutoScalingInstances", "autoscaling:DescribeAutoScalingGroups", "ec2:DescribeInstances"]
+        Resource = "*"
+      },
+      # The sweep: whether a runner still has its lease (String, no KMS).
+      {
+        Sid      = "ReadLeases"
+        Effect   = "Allow"
+        Action   = "ssm:GetParameter"
+        Resource = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${local.jit_parameter_prefix}/lease/*" : null
       },
       {
         Sid      = "Logs"
@@ -150,11 +173,11 @@ locals {
           StringLike   = { "kms:EncryptionContext:PARAMETER_ARN" = local.jit_parameter_arns }
         }
       },
-      # A runner removes itself from its own group after its job. IAM has no
-      # key for the instance an Auto Scaling call targets, so this is scoped
-      # to the group: a job could end a sibling runner in the same pool.
-      # TODO(owner): accept or reject that in-pool denial of service (#303).
-      { Sid = "LeaveOwnGroup", Effect = "Allow", Action = "autoscaling:TerminateInstanceInAutoScalingGroup", Resource = local.asg_arn_pattern },
+      # No Auto Scaling action: IAM cannot scope TerminateInstanceInAutoScalingGroup
+      # to the caller's own instance, so a job could end a sibling runner. A
+      # runner leaves by deleting its own lease (OwnJitConfiguration above:
+      # <prefix>/lease/<instance id>, tagged with its ARN); the jit function
+      # then ends it, lowering desired capacity.
       # Session Manager (debugging a runner without SSH) without
       # AmazonSSMManagedInstanceCore, which also grants ssm:GetParameter* on *.
       # The instance registers itself; the message channels take no
@@ -280,8 +303,9 @@ resource "aws_lambda_function" "jit" {
   filename         = data.archive_file.jit[0].output_path
   source_code_hash = data.archive_file.jit[0].output_base64sha256
   memory_size      = 128
-  timeout          = 60
-  kms_key_arn      = var.kms_key_arn
+  # A sweep may end up to max_size runners, each retried for up to 35 s.
+  timeout     = 180
+  kms_key_arn = var.kms_key_arn
 
   # No secret here: the App key stays in SSM.
   environment {
@@ -292,10 +316,11 @@ resource "aws_lambda_function" "jit" {
       APP_KEY_PARAMETER      = local.app_key_parameter_name
       RUNNER_LABELS          = jsonencode(var.runner_labels)
       RUNNER_GROUP_ID        = tostring(var.runner_group_id)
-      JIT_PARAMETER_PREFIX   = var.jit_parameter_prefix
+      JIT_PARAMETER_PREFIX   = local.jit_parameter_prefix
       JIT_KMS_KEY_ID         = var.kms_key_arn
       PARTITION              = local.partition
       ACCOUNT_ID             = local.account_id
+      AUTOSCALING_GROUP_NAME = local.name
     }
   }
 
@@ -340,6 +365,71 @@ resource "aws_cloudwatch_event_rule" "lifecycle" {
     detail-type = ["EC2 Instance-launch Lifecycle Action", "EC2 Instance Terminate Successful"]
     detail      = { AutoScalingGroupName = [local.name] }
   })
+}
+
+# A runner done with its job deletes its lease (<prefix>/lease/<instance id>);
+# the jit function ends that instance, lowering desired capacity. EventBridge
+# delivery is best effort: a runner whose lease event is lost powers itself
+# off after 600 s (user-data), and the group replaces it.
+resource "aws_cloudwatch_event_rule" "lease" {
+  count = local.enabled ? 1 : 0
+
+  name        = "${local.name}-lease"
+  description = "${local.name} runners leaving (their lease parameter deleted)"
+  event_pattern = jsonencode({
+    source      = ["aws.ssm"]
+    detail-type = ["Parameter Store Change"]
+    detail = {
+      operation = ["Delete"]
+      name      = [{ prefix = "${local.jit_parameter_prefix}/lease/" }]
+    }
+  })
+}
+
+# The bound on a lease event lost anyway (EventBridge's delivery, or a
+# terminate that failed past its retries): every 15 minutes the jit function
+# ends, lowering capacity, each InService runner of this group launched over
+# 10 minutes ago that has no lease.
+resource "aws_cloudwatch_event_rule" "sweep" {
+  count = local.enabled ? 1 : 0
+
+  name                = "${local.name}-sweep"
+  description         = "${local.name} runners whose lease is gone but which are still InService"
+  schedule_expression = "rate(15 minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "sweep" {
+  count = local.enabled ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.sweep[0].name
+  arn  = aws_lambda_function.jit[0].arn
+}
+
+resource "aws_lambda_permission" "sweep" {
+  count = local.enabled ? 1 : 0
+
+  statement_id  = "AllowSweepSchedule"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.jit[0].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.sweep[0].arn
+}
+
+resource "aws_cloudwatch_event_target" "lease" {
+  count = local.enabled ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.lease[0].name
+  arn  = aws_lambda_function.jit[0].arn
+}
+
+resource "aws_lambda_permission" "lease" {
+  count = local.enabled ? 1 : 0
+
+  statement_id  = "AllowLeaseEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.jit[0].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.lease[0].arn
 }
 
 resource "aws_cloudwatch_event_target" "lifecycle" {
@@ -495,7 +585,12 @@ resource "aws_autoscaling_group" "runner" {
   health_check_type     = "EC2"
   max_instance_lifetime = var.max_instance_lifetime
 
-  # CI sets desired capacity; Terraform must not reset it on every apply.
+  # Scale-in never picks a runner (it may be mid-job): runners leave by
+  # TerminateInstanceInAutoScalingGroup, which protection does not block.
+  protect_from_scale_in = true
+
+  # CI raises desired capacity (the start policy below); Terraform must not
+  # reset it on every apply.
   # Capacity is never waited for: with min_size 0 there is nothing to wait for.
   wait_for_capacity_timeout = "0"
 
@@ -531,5 +626,19 @@ resource "aws_autoscaling_group" "runner" {
   }
 
   # The jit function and its trigger exist before any instance launches.
-  depends_on = [aws_cloudwatch_event_target.lifecycle, aws_lambda_permission.lifecycle]
+  depends_on = [aws_cloudwatch_event_target.lifecycle, aws_lambda_permission.lifecycle, aws_cloudwatch_event_target.lease, aws_lambda_permission.lease]
+}
+
+# CI starts a runner by executing this policy (autoscaling:ExecutePolicy on
+# this group only, iam/ci ci_runner_pool_names): an atomic +1, which Auto
+# Scaling caps at max_size. CI cannot set any other capacity.
+resource "aws_autoscaling_policy" "start" {
+  count = local.enabled ? 1 : 0
+
+  name                   = "${local.name}-start"
+  autoscaling_group_name = aws_autoscaling_group.runner[0].name
+  policy_type            = "SimpleScaling"
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = 1
+  cooldown               = 0
 }

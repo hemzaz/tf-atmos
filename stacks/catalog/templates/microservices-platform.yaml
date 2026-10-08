@@ -223,7 +223,9 @@ components:
         vpc_id: !terraform.state microservices/vpc .vpc_id
         subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
         # Alarms to microservices/monitoring's topic, <Environment>-monitoring-alarms,
-        # named rather than read: monitoring deploys in the last layer.
+        # named rather than read: monitoring deploys in the last layer. monitoring
+        # names it from tags.Environment, this ARN from settings.prefix: it relies
+        # on tags.Environment staying settings.prefix (stacks/orgs/fnx/_defaults.yaml).
         alarm_sns_topic_arns:
           - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-monitoring-alarms"
         runner_labels:

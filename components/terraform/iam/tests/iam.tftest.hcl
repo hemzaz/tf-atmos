@@ -619,3 +619,69 @@ run "lambda_uploader_requires_github_oidc" {
 
   expect_failures = [var.lambda_uploader_trusted_github_repos]
 }
+
+# Only the apply role starts in-VPC runners: ExecutePolicy on this stack's
+# named runner pools only (never SetDesiredCapacity, never another group); the
+# plan role, which trusts pull requests, gets nothing.
+run "apply_role_may_only_execute_its_runner_pools_policies" {
+  command = plan
+
+  variables {
+    github_oidc_enabled                = true
+    github_oidc_repository             = "hemzaz/tf-atmos"
+    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                = "test-ci"
+    ci_apply_role_enabled              = true
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
+    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+    ci_runner_pool_names               = ["ue1-github-runners"]
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.ci_runner_pools) == 1 && aws_iam_role_policy.ci_runner_pools[0].role == "test-ci-apply"
+    error_message = "Only the apply role gets the runner-pool policy."
+  }
+
+  assert {
+    condition = (
+      [for s in jsondecode(aws_iam_role_policy.ci_runner_pools[0].policy).Statement : s.Action]
+      == ["autoscaling:DescribeAutoScalingGroups", "autoscaling:ExecutePolicy"]
+    )
+    error_message = "The apply role may describe the groups (read-only) and execute the pools' start policies, nothing else."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.ci_runner_pools[0].policy).Statement :
+      s.Action != "autoscaling:ExecutePolicy" || (length(s.Resource) == 1
+      && endswith(s.Resource[0], ":autoScalingGroupName/ue1-github-runners"))
+    ])
+    error_message = "ExecutePolicy on the named runner pool only."
+  }
+}
+
+run "no_runner_pool_policy_without_pools" {
+  command = plan
+
+  variables {
+    github_oidc_enabled      = true
+    github_oidc_repository   = "hemzaz/tf-atmos"
+    github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix      = "test-ci"
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.ci_runner_pools) == 0
+    error_message = "No ci_runner_pool_names grants nothing."
+  }
+}
+
+run "runner_pool_names_reject_a_wildcard" {
+  command = plan
+
+  variables {
+    ci_runner_pool_names = ["ue1-*"]
+  }
+
+  expect_failures = [var.ci_runner_pool_names]
+}

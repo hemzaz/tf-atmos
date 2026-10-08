@@ -35,6 +35,12 @@ components:
         # The owner's GitHub App (settings.github_app, stacks/orgs/fnx/_defaults.yaml).
         github_app_id: "{{ .settings.github_app.app_id }}"
         github_app_installation_id: "{{ .settings.github_app.installation_id }}"
+        # Every in-VPC job runs on the default branch (owner decision, #343):
+        # the runners' job-started hook fails any other ref's job before its
+        # first step, whatever a pull request's workflow asks for
+        # (check-cluster-api-ci.py requires allowed_refs on every pool).
+        allowed_refs:
+          - refs/heads/master
         instance_type: t3.medium
         min_size: 0
         max_size: 4

@@ -253,16 +253,21 @@ workflows:
           python3 workflows/scripts/common/check-secret-attributes.py components/terraform < "$stacks_json"
       # A component that configures a kubernetes/helm/kubectl provider needs
       # the EKS API, which GitHub-hosted runners cannot reach where the
-      # endpoint is private: each such instance must set
-      # settings.github.actions_enabled: false (docs/OPERATIONS.md,
-      # "In-cluster components"), and each eks cluster admin role there
+      # endpoint is private: each such instance must run on the in-VPC
+      # runners (settings.github.runner: in-vpc, with a pool its clusters
+      # admit) or set settings.github.actions_enabled: false
+      # (docs/OPERATIONS.md, "In-cluster components"); every runner pool
+      # must set allowed_refs and a max_size of at least 3 (the in-VPC jobs per
+      # pool); each pool must be in its stack's
+      # iam/ci ci_runner_pool_names; each provider exec command needs its
+      # tool in dependencies.tools; and each eks cluster admin role there
       # (map_additional_iam_roles) must be trusted by its stage's state write
       # role; a cluster with none only warns. Also run by validate-all.
       - name: check-cluster-api-ci
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py
+          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py workflows/scripts/common/test_ci_in_vpc.py workflows/scripts/common/test_runner_scripts.py workflows/scripts/common/test_in_vpc_workflows.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"

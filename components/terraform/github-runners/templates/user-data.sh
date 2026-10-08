@@ -21,11 +21,26 @@ imds() {
 INSTANCE_ID=$(imds instance-id)
 REGION=$(imds placement/region)
 
-# Leave the Auto Scaling group and lower its desired capacity, so the group
-# does not replace this instance: work arrives by raising desired capacity.
+# Leave. The instance role has no Auto Scaling permission (it could not be
+# scoped to this instance): deleting this instance's lease, which the jit
+# function wrote at launch, makes the function end the instance and lower
+# desired capacity, so the group does not replace it (work arrives by raising
+# desired capacity). If that event is lost, power off after 600 s: the group
+# replaces the instance, and the replacement idles out with a decrement.
+# A job the fork guard refused (its marker, files/job-started.sh) leaves
+# WITHOUT lowering desired capacity: powering off with the lease kept, the
+# group replaces this runner, and the replacement takes the next queued job.
+REFUSED_MARKER=/var/lib/runner-state/refused
 terminate() {
-  aws autoscaling terminate-instance-in-auto-scaling-group --region "$${REGION}" \
-    --instance-id "$${INSTANCE_ID}" --should-decrement-desired-capacity || shutdown -h now
+  if [ -e "$${REFUSED_MARKER}" ]; then
+    echo "The fork guard refused this runner's job; leaving so a replacement takes the next one."
+    shutdown -h now
+    return
+  fi
+  aws ssm delete-parameter --region "$${REGION}" --name "${jit_parameter_prefix}/lease/$${INSTANCE_ID}" ||
+    echo "Could not delete the lease; powering off in 600 s instead."
+  sleep 600
+  shutdown -h now
 }
 # Whatever happens from here on, failed bootstrap or finished job, the
 # instance leaves: an ephemeral runner never serves a second job.
@@ -40,6 +55,8 @@ systemctl enable --now docker
 # container jobs (the atmos image) start.
 id runner >/dev/null 2>&1 || useradd --create-home runner
 usermod -aG docker runner
+# The fork guard's refusal marker (the hook runs as the runner user).
+install -d -m 0700 -o runner -g runner /var/lib/runner-state
 
 RUNNER_DIR=/opt/actions-runner
 mkdir -p "$${RUNNER_DIR}"
@@ -52,6 +69,24 @@ rm -f "$${TARBALL}"
 chown -R runner:runner "$${RUNNER_DIR}"
 
 ${post_install}
+
+# The fork guard (files/job-started.sh): the runner's job-started hook, named
+# in .env (which the runner loads), fails a job before its first step unless
+# it comes from github_scope by push, dispatch, schedule or merge queue, or
+# from a same-repository pull request, and (allowed_refs) on an allowed ref.
+# Workflow files are pull-request controlled; this hook and its policy are not.
+install -d -m 0755 /opt/runner-hooks
+cat > /opt/runner-hooks/job-started.sh <<'HOOK'
+${job_started_hook}
+HOOK
+cat > /opt/runner-hooks/policy <<'POLICY'
+ALLOWED_SCOPE='${github_scope}'
+ALLOWED_REFS='${join(" ", allowed_refs)}'
+REFUSED_MARKER='/var/lib/runner-state/refused'
+POLICY
+chmod 0755 /opt/runner-hooks/job-started.sh
+chmod 0644 /opt/runner-hooks/policy
+echo "ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/runner-hooks/job-started.sh" > "$${RUNNER_DIR}/.env"
 
 # The jit function writes the configuration while the launch hook holds this
 # instance (it may still be on its way); read it once, then delete it.

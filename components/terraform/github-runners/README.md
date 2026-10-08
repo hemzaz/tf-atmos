@@ -13,22 +13,36 @@ API takes.
 
 ## How a runner starts
 
-1. CI raises the group's desired capacity (`min_size` 0).
+1. CI executes the group's `<name>-start` policy, a +1 that Auto Scaling caps at `max_size`
+   (`min_size` 0). CI's roles can do nothing else to the group; scale-in never picks a runner
+   (`protect_from_scale_in`).
 2. The launch lifecycle hook holds the new instance (Pending:Wait).
 3. EventBridge invokes the `jit` function (`functions/jit`, Node.js 22, no dependencies). It:
    - reads the GitHub App private key from SSM;
    - takes an installation token scoped to this repository and Administration write only;
    - calls `generate-jitconfig` for a runner named after the instance;
    - revokes the token;
+   - writes the instance's lease, `<jit_parameter_prefix>/lease/<instance id>` (String, tagged
+     with the instance's ARN);
    - writes the single-use configuration to `<jit_parameter_prefix>/<instance id>` (SecureString
-     on `kms_key_arn`, tagged with the instance's ARN);
+     on `kms_key_arn`, tagged with the instance's ARN). The prefix defaults to
+     `/github/runners/<name>/jit`, so two pools in one account never share a path or its grants;
    - completes the lifecycle action. On any failure it abandons the launch, so the instance is
      terminated.
 4. The instance reads its configuration, deletes it, and runs `run.sh --jitconfig` for one job.
-5. It leaves the group, lowering desired capacity. An EXIT trap does this after any bootstrap
-   failure, too. An instance that gets no job within `idle_timeout_seconds` leaves as well.
-6. On termination the function deletes an unread configuration and any runner registration left
-   behind.
+5. It leaves by deleting its own lease (an EXIT trap: after its job, after any bootstrap failure,
+   and when it gets no job within `idle_timeout_seconds`). The deletion's EventBridge event
+   ("Parameter Store Change", Delete) invokes the function, which ends that instance, lowering
+   desired capacity, if it is an InService runner of this group.
+6. On termination the function deletes an unread configuration, the lease and any runner
+   registration left behind.
+
+The instance role has no Auto Scaling action. Cloud Posse's `aws-github-runners` and
+philips-labs' runners let the instance end itself (`TerminateInstanceInAutoScalingGroup` on the
+instance role, or a scale-down Lambda); IAM cannot scope that call to the caller's own instance, so
+a job could end a sibling runner. Here the only thing a runner can do is delete its own lease
+(the parameter is tagged with its ARN; the role may delete only parameters tagged with
+`ec2:SourceInstanceARN`), and the function ends exactly that instance.
 
 A JIT configuration registers one ephemeral runner, once. A copy taken after its runner started
 is useless, and no reusable registration credential exists anywhere.
@@ -42,7 +56,7 @@ is useless, and no reusable registration credential exists anywhere.
     (`{{ .atmos_stack }}`).
 - Used by:
   - an eks instance admits `.security_group_id` in `allowed_security_group_ids`;
-  - CI raises `.autoscaling_group_name`'s desired capacity for `runs-on: [self-hosted, <full id>]`
+  - CI executes `.start_policy_name` for `runs-on: [self-hosted, <full id>]`
     jobs.
 
 ## One-time GitHub App setup (owner)
@@ -72,16 +86,14 @@ is useless, and no reusable registration credential exists anywhere.
   `kms:PutKeyPolicy` or `kms:CreateGrant` on that key (the account keeps PutKeyPolicy, so the key
   stays recoverable; it gets no CreateGrant).
 - **The instance role reaches nothing of value.**
-  - It may read and delete only its own JIT parameter (`aws:ResourceTag/RunnerInstanceArn` against
-    `ec2:SourceInstanceARN`). An explicit deny covers every other parameter.
-  - It may leave its own group.
+  - It may read and delete only its own JIT parameter and lease (`aws:ResourceTag/RunnerInstanceArn`
+    against `ec2:SourceInstanceARN`). An explicit deny covers reading any other parameter.
+  - It has no Auto Scaling action: it leaves through its lease, so a job cannot end another
+    runner of the pool.
   - It has minimal Session Manager actions instead of `AmazonSSMManagedInstanceCore` (which allows
     `ssm:GetParameter*` on `*`).
   - Terraform jobs get AWS access from GitHub OIDC (the stack's `iam/ci` roles), not from the
     instance.
-  - IAM has no key for the instance an Auto Scaling call targets, so "leave the group" is scoped
-    to the group: a job could end a sibling runner of the same pool, and nothing else.
-    TODO(owner): that in-pool denial of service is not accepted yet (tracked in #303).
 - **The docker group is root-equivalent.** Jobs run as the unprivileged `runner` user, which is in
   the `docker` group so container jobs (the atmos image) start. That is acceptable only because
   the instance runs a single job and its role reaches nothing of value.
@@ -95,17 +107,64 @@ is useless, and no reusable registration credential exists anywhere.
   (`alarm_sns_topic_arns`). EventBridge's invoke is not retried (`maximum_retry_attempts` 0): a
   retry would mint a second configuration. A runner whose bootstrap fails before it knows its
   instance id can only power off, which the group replaces.
+- **The lease event is best effort.** EventBridge may drop or delay the deletion's event, the
+  delete itself may fail, or Auto Scaling may refuse the terminate. Three bounds, cheapest first:
+  - the function retries Throttling, ResourceContention and ScalingActivityInProgress after 5, 10
+    and 20 s (the InService check keeps it idempotent);
+  - every 15 minutes (`<name>-sweep`) the function ends, lowering capacity, each InService runner
+    of this group launched over 10 minutes ago that has no lease;
+  - the runner powers off 600 s after deleting its lease (`instance_initiated_shutdown_behavior`
+    terminate): the group replaces it with a runner that, finding no job, idles out after
+    `idle_timeout_seconds` and leaves through its lease.
+
+  The lease is written first at launch, before anything that can fail, so even a launch that
+  fails and continues boots with one: no instance can only power off into a replacement loop.
 - **A pinned runner release.** `runner_version` with `runner_sha256` (the release notes'
   linux-x64 SHA) replaces Cloud Posse's latest release. Bump both before GitHub stops accepting
   the release.
 - **Instance hardening.** Amazon Linux 2023, IMDSv2 only with hop limit 1, no public IP, an
   egress-only security group (`name_prefix`, `create_before_destroy`), and a gp3 root volume on
   `kms_key_arn` (`kms/main` grants the Auto Scaling service-linked role, `allow_autoscaling_ebs`).
+- **Bounded demand; a full pool fails fast.** At `max_size` Auto Scaling silently caps the start
+  policy's +1, and a job queued for a runner that never starts waits up to GitHub's 24 h queue
+  limit (`timeout-minutes` only counts once a runner takes it), holding its workflow's
+  concurrency group: CD would halt. So:
+  - at most 3 in-VPC jobs want one pool at once: CD's (`terraform-cd-main`, one matrix entry at
+    a time), one plan (`in-vpc-plan-<stack>-<asg>`, a newer push cancels it) and one drift check
+    (`in-vpc-drift-<stack>-<asg>`); `check-cluster-api-ci.py` requires `max_size` >= 3
+    (`IN_VPC_JOBS_PER_POOL`, which `test_in_vpc_workflows.py` ties to those groups);
+  - `start-runner.sh` reads the group's desired capacity and `max_size` first and fails the job
+    ("runner pool ... is full") instead of queueing it, so a pool held full by runners that never
+    left (the sweep ends those) shows up as a red job, not a stalled CD.
+
+  The alternative, an "owed runner" ledger (record each start that got no runner and start it
+  when capacity frees), was left out: it adds state and a second scaler for a case the bound
+  rules out.
 - **No `instance_refresh`.** It would end running jobs. `max_instance_lifetime` (one day) is the
   backstop.
-- **Public repository.** Self-hosted runners on a public repository must never run fork code.
-  - CI's self-hosted jobs run only on push to master, `workflow_dispatch`, `merge_group`,
-    schedule, and same-repository pull requests.
-  - The owner must also turn on Settings → Actions → General → "Require approval for all
-    outside collaborators".
+- **Public repository: the fork guard is on the runner.** Self-hosted runners on a public
+  repository must never run fork code, and workflow files are pull-request controlled (a fork
+  can ask for `runs-on: [self-hosted, <label>]` and drop `container:`). So every runner's
+  job-started hook (`files/job-started.sh`, set by the bootstrap in the runner's `.env`) fails a
+  job before its first step unless:
+  - `GITHUB_REPOSITORY` is `github_scope` (or one of its repositories, for an organization);
+  - the event is `push`, `workflow_dispatch`, `schedule` or `merge_group`, or `pull_request`
+    whose head repository (`.pull_request.head.repo.full_name` in the event payload) is that
+    repository. `pull_request_target`, `workflow_run`, `issue_comment` and any other event are
+    refused;
+  - with `allowed_refs` (every pool in this repository: `[refs/heads/master]`, from the catalog),
+    `GITHUB_REF` is one of them.
+
+  `GITHUB_*` and the payload come from GitHub; the hook and its policy are root-owned.
+  `test_runner_scripts.py` runs the hook for fork, `pull_request_target` and same-repository
+  events. The owner also keeps Settings → Actions → General → "Require approval for all outside
+  collaborators" on.
+- **A refused job does not cost a runner.** The hook's refusal leaves a marker
+  (`/var/lib/runner-state/refused`, owned by the runner user). The EXIT trap then powers the
+  instance off with its lease kept, without lowering desired capacity, so the group launches a
+  replacement that takes the next queued job. Queueing jobs for a label (say production's) cannot
+  starve the master job the runner was started for. There is no loop: each replacement consumes
+  one refused job, and an idle replacement leaves through its lease, lowering capacity. A job the
+  hook admitted can write the marker too (it runs as the same `runner` user): that costs one idle
+  runner per such job, which the job queue bounds, and grants nothing.
 - The `jit` function's flow is tested with `node --test functions/jit/`.

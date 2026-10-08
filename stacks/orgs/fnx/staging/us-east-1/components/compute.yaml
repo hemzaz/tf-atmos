@@ -409,6 +409,9 @@ components:
         # Alarms to the stack's monitoring/main topic, <Environment>-main-alarms,
         # named rather than read: monitoring deploys in the last layer, this
         # pool in connectivity (kms/main lets CloudWatch alarms publish to it).
+        # monitoring names it from tags.Environment, this ARN from
+        # settings.prefix: it relies on tags.Environment staying settings.prefix
+        # (stacks/orgs/fnx/_defaults.yaml).
         alarm_sns_topic_arns:
           - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
       dependencies:

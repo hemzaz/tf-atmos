@@ -8,11 +8,10 @@ components:
       metadata:
         component: eks-backend-services
         type: abstract
-      # Talks to the private EKS API: on the in-VPC runners, off hosted-runner
-      # CI/CD/drift (see catalog/eks-addons/defaults.yaml).
+      # Talks to the private EKS API: CI/CD/drift run it on the in-VPC runners
+      # (see catalog/eks-addons/defaults.yaml).
       settings:
         github:
-          actions_enabled: false
           runner: in-vpc
       vars:
         # Only fnx-ue1-prod runs an elasticache/main instance today

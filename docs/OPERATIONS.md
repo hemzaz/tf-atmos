@@ -222,12 +222,56 @@ Template readiness follows `KNOWN_BROKEN_FIXTURES` in `workflows/scripts/common/
 `eks-addons`, `external-secrets`, `eks-backend-services` and `alb-controller-ingress-group` talk to
 the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint is private
 (`eks_public_access: false`), so GitHub-hosted runners cannot reach it. Their catalog defaults set
-`settings.github.actions_enabled: false`: PR plans, CD (push and dispatch) and drift detection skip
-them with a `::notice::`, and `check-cluster-api-ci.py` (lint, validate-all) fails any such instance
-in a private-endpoint stack that lacks the flag.
+`settings.github.runner: in-vpc`, so CI runs them on the stack's self-hosted runners in the VPC
+(`components/terraform/github-runners`):
 
-An operator applies them through the VPC with their own role, a named cluster admin (the creator
-gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master):
+- `.github/workflows/in-vpc.yml` is called once per (stack, runner label) for the plan on push to
+  master (`terraform-ci.yml`), CD and dispatch (`terraform-cd.yml`, after the stack's hosted
+  instances; `deployed/<stack>` moves only when both parts succeeded) and drift detection.
+- **Master only, apply role only** (owner decision): these plans refresh Helm releases, whose
+  state is in cluster Secrets, and the plan role (AmazonEKSViewPolicy, no Secrets) trusts pull
+  requests. So every in-VPC job runs on the default branch with the stack's CI apply role, which
+  trusts only master and is the cluster admin. A pull request that changes an in-cluster
+  component gets a `::notice::` (no in-VPC plan). On master they are planned by the push plan
+  (prod, like every prod plan), deployed by CD (whose log shows the plan it applies), and checked
+  by drift detection; `workflow_dispatch` plans any stack's.
+- Its first job starts one runner in the label's pool by executing the pool's +1 start policy
+  (`atmos workflow start-runner -f ci-runners`; only the apply role may, on its stack's pools,
+  `iam/ci` `ci_runner_pool_names`). Its second job runs on the ephemeral runner that starts.
+- The label is the stack's full id (its name, `{{ .atmos_stack }}`), or
+  `settings.github.runner_label`. The `microservices-platform` template runs its own pool in its
+  own VPC.
+- The repository is public. The workflow skips these jobs for a fork's pull request, but a
+  pull request controls workflow files, so the guard is on the runner: every pool's job-started
+  hook fails, before its first step, any job that is not this repository's push,
+  `workflow_dispatch`, schedule, `merge_group` or same-repository pull request (github-runners
+  README, "Public repository"). Keep "Require approval for all outside collaborators" on
+  (First-deploy inputs, GitHub App).
+- Every runner serves master only. Every in-VPC job runs on the default branch, the apply roles
+  that start runners trust only master's OIDC subject, and every pool sets
+  `allowed_refs: [refs/heads/master]` (`catalog/github-runners/defaults`): the runner's
+  job-started hook fails any other ref's job before its first step, even one that asks for a
+  pool's label while a master job started the runner. `check-cluster-api-ci.py` fails a pool
+  without `allowed_refs`.
+- Demand per pool is bounded: CD (serialized by `terraform-cd-main`), one plan
+  (`in-vpc-plan-<stack>-<asg>`) and one drift check (`in-vpc-drift-<stack>-<asg>`) at most, and
+  every pool's `max_size` must be at least 3 (`check-cluster-api-ci.py`). A job that finds its
+  pool full fails ("runner pool ... is full") rather than queueing for a runner that never starts
+  (github-runners README, "Bounded demand").
+- A refused job does not cost a runner: the instance powers off without lowering desired
+  capacity and the pool launches a replacement for the next queued job, so jobs queued for a
+  label cannot starve the master job that started the runner. Runners have no Auto Scaling
+  permission: each leaves by deleting its own lease parameter, and the pool's `jit` function ends
+  it (github-runners README).
+- `check-cluster-api-ci.py` (lint, validate-all) fails an in-vpc instance whose label has no runner
+  pool, or whose clusters do not admit the pool's security group; a pool missing from its
+  stack's `iam/ci` `ci_runner_pool_names`; and an instance whose providers exec a command
+  (`aws eks get-token`) without its tool in `dependencies.tools` (the atmos image has no aws CLI). An instance with
+  `settings.github.actions_enabled: false` instead is left to an operator.
+
+Break-glass, or before the runners exist: an operator applies them through the VPC with their own
+role, a named cluster admin (the creator gets no implicit admin, and the CI apply role trusts only
+GitHub OIDC on master):
 
 1. Once per stack, the owner names the role (full ARN, path kept, e.g.
    `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>`
@@ -342,7 +386,7 @@ or `aws sqs start-message-move-task --source-arn <dlq arn>`. A change to `data-t
 
 | Task | Command |
 |------|---------|
-| Drift (hourly in CI, [in-cluster components](#in-cluster-components) excluded) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
+| Drift (hourly in CI, [in-cluster components](#in-cluster-components) on the in-VPC runners) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
 | Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-scan-report -f lint` lists every finding without failing. No baselines: fix a finding or suppress it inline with a reason (`#checkov:skip=<ID>:<reason>` in the block, `#trivy:ignore:<ID> <reason>` above it) |
 | Security Hub findings | `atmos workflow security-audit -f security-hardening -s <stack>` |
 | Compliance | `atmos workflow check -f compliance-check -s <stack>`; `report` writes `compliance-report.md` |

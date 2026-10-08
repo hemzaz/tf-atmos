@@ -318,6 +318,91 @@ class CheckClusterApiCiTest(unittest.TestCase):
         self.assertEqual(len(errors), 3, errors)
         self.assertIn("admits github-runners/main (in vpc/services), but no network instance peers", errors[0])
 
+    def pool_with(self, allowed_refs=None, pull_request_plans_enabled=None):
+        pool = instance("github-runners")
+        if pull_request_plans_enabled is not None:
+            pool["settings"] = {"github": {"pull_request_plans_enabled": pull_request_plans_enabled}}
+        if allowed_refs is not None:
+            pool["vars"]["allowed_refs"] = allowed_refs
+        return stacks_with(**{"github-runners/main": pool})
+
+    def test_every_pool_without_allowed_refs_fails(self):
+        for refs in (None, []):
+            for pr_plans in (None, True, False):
+                errors = check_cluster_api_ci.check_protected_pools(self.pool_with(refs, pr_plans))
+                self.assertEqual(len(errors), 1, (refs, pr_plans, errors))
+                self.assertIn("github-runners/main sets no allowed_refs", errors[0])
+
+    def test_pool_with_allowed_refs_passes_and_other_components_are_ignored(self):
+        self.assertEqual(check_cluster_api_ci.check_protected_pools(self.pool_with(["refs/heads/master"])), [])
+        self.assertEqual(check_cluster_api_ci.check_protected_pools(stacks_with(**{"vpc/main": instance("vpc")})), [])
+
+    def sized_pool(self, **vars_):
+        pool = instance("github-runners")
+        pool["vars"].update(vars_)
+        return stacks_with(**{"github-runners/main": pool})
+
+    def test_pool_max_size_covers_the_in_vpc_jobs_per_pool(self):
+        self.assertEqual(check_cluster_api_ci.IN_VPC_JOBS_PER_POOL, 3)
+        for ok in ({"max_size": 3}, {"max_size": 4}, {"max_size": "5"}, {}):
+            self.assertEqual(check_cluster_api_ci.check_pool_sizes(self.sized_pool(**ok)), [], ok)
+
+    def test_pool_max_size_below_the_jobs_per_pool_fails(self):
+        errors = check_cluster_api_ci.check_pool_sizes(self.sized_pool(max_size=2))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("github-runners/main max_size 2 is below 3", errors[0])
+        errors = check_cluster_api_ci.check_pool_sizes(self.sized_pool(max_size="{{ .x }}"))
+        self.assertIn("is not a number", errors[0])
+
+    def pool_stack(self, granted, name=None):
+        pool = instance("github-runners")
+        pool["vars"]["tags"] = {"Environment": "ue1"}
+        if name:
+            pool["vars"]["name"] = name
+        ci = instance("iam")
+        ci["vars"]["ci_runner_pool_names"] = granted
+        return stacks_with(**{"github-runners/main": pool, "iam/ci": ci})
+
+    def test_runner_pool_granted_to_its_stack_ci_roles_passes(self):
+        self.assertEqual(check_cluster_api_ci.check_pool_start_grants(self.pool_stack(["ue1-github-runners"])), [])
+        stacks = self.pool_stack(["ue1-microservices-runners"], name="microservices-runners")
+        self.assertEqual(check_cluster_api_ci.check_pool_start_grants(stacks), [])
+
+    def test_runner_pool_missing_from_ci_runner_pool_names_fails(self):
+        errors = check_cluster_api_ci.check_pool_start_grants(self.pool_stack(["ue1-other"]))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("github-runners/main (ue1-github-runners) is not in iam/ci ci_runner_pool_names", errors[0])
+
+    def test_exec_commands_reads_both_exec_block_forms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for component, body in {
+                "addons": 'provider "kubernetes" {\n  exec {\n    api_version = "v1"\n    command = "aws"\n  }\n}\n',
+                "secrets": 'provider "helm" {\n  kubernetes = {\n    exec = {\n      command = "aws"\n    }\n  }\n}\n',
+                "plain": 'provider "aws" {\n  region = var.region\n}\n',
+            }.items():
+                (pathlib.Path(tmp) / component).mkdir()
+                (pathlib.Path(tmp) / component / "provider.tf").write_text(body)
+            self.assertEqual(check_cluster_api_ci.exec_commands(pathlib.Path(tmp)), {"addons": {"aws"}, "secrets": {"aws"}})
+
+    def test_exec_command_needs_its_tool(self):
+        bare = instance("eks-addons")
+        tooled = instance("eks-addons")
+        tooled["dependencies"] = {"tools": {"aws/aws-cli": "2.36.49", "terraform": "1.16.3"}}
+        stacks = stacks_with(**{"eks-addons/main": bare, "eks-addons/data": tooled})
+        errors = check_cluster_api_ci.check_exec_tools(stacks, {"eks-addons": {"aws"}})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("eks-addons/main runs provider exec command 'aws' but dependencies.tools lacks aws/aws-cli", errors[0])
+
+    def test_unknown_exec_command_fails(self):
+        errors = check_cluster_api_ci.check_exec_tools(stacks_with(**{"x/main": instance("x")}), {"x": {"kubelogin"}})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("'kubelogin', which no tool maps to", errors[0])
+
+    def test_real_components_exec_only_aws(self):
+        commands = check_cluster_api_ci.exec_commands(pathlib.Path(__file__).resolve().parents[3] / "components/terraform")
+        self.assertTrue(commands, "the eks-addons and external-secrets providers exec aws")
+        self.assertTrue(all(c <= set(check_cluster_api_ci.EXEC_TOOLS) for c in commands.values()), commands)
+
     def test_cluster_components_reads_provider_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
