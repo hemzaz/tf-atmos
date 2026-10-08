@@ -638,11 +638,11 @@ aws cognito-idp describe-user-pool --region us-east-1 --user-pool-id "$UE1" --qu
 #    migrate (enabled, CONFIRMED or RESET_REQUIRED), again straight to SSE-KMS S3.
 HEADER=$(aws cognito-idp get-csv-header --region us-east-2 --user-pool-id "$UE2" --query CSVHeader --output text | tr '\t' ',')
 aws s3 cp "$EXPORT" - --region us-east-2 | jq -r --arg h "$HEADER" '
-  ($h | split(",")) as $cols | $cols,
+  ($h | split(",")) as $cols | $h,
   (.Users[] | select(.Enabled == true and (.UserStatus == "CONFIRMED" or .UserStatus == "RESET_REQUIRED"))
    | (.Attributes | map({(.Name): .Value}) | add) as $a
    | ($a + {"cognito:username": $a.email, "cognito:mfa_enabled": "false"}) as $row
-   | [$cols[] | $row[.] // ""]) | @csv' |
+   | [$cols[] | $row[.] // ""] | @csv)' |
   aws s3 cp - "$OBJ/users.csv" --sse aws:kms --sse-kms-key-id "$KMS" --region us-east-2
 # 3. Import with a role that lets Cognito write the job's CloudWatch logs
 #    (trust cognito-idp.amazonaws.com; logs:CreateLogGroup/CreateLogStream/DescribeLogStreams/PutLogEvents).
