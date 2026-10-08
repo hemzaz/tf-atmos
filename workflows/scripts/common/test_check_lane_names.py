@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import unittest
 
 _spec = importlib.util.spec_from_file_location(
@@ -218,6 +219,45 @@ class GroupTest(unittest.TestCase):
             "fnx-ue1-dev-perf": stack(**{"kms/defaults": abstract, "kms/off": disabled, "kms/x": off}),
         }), [])
 
+    def test_account_wide_component_in_two_regions_fails(self):
+        # s3 builds <Environment>-<name>-<account id>, alb <Environment>-<name>-access-logs-<account id>:
+        # global bucket names without a region.
+        for component in ("s3", "alb"):
+            errors = self.errors({
+                "fnx-ue1-prod": stack(**{f"{component}/main": instance("ue1", component=component, stage="prod")}),
+                "fnx-ue2-prod": stack(**{f"{component}/main": instance(
+                    "ue1", component=component, stage="prod", region="us-east-2")}),
+            })
+            self.assertEqual(len(errors), 1, (component, errors))
+            self.assertIn("both use tags.Environment 'ue1' in account prod", errors[0])
+            self.assertIn("IAM/S3 names", errors[0])
+
+
+class ComponentSetTest(unittest.TestCase):
+    """ACCOUNT_WIDE_COMPONENTS is hand-kept: it must cover every component that creates IAM
+    roles/policies or an Environment-named S3 bucket."""
+
+    ROOT = pathlib.Path(__file__).resolve().parents[3] / "components" / "terraform"
+    # iam: names are RAW_NAMES; backend: names built from its bucket name; apigateway-account: role name carries the region.
+    EXCLUDED = {"iam", "backend", "apigateway-account"}
+
+    def scan(self, pattern):
+        regex = re.compile(pattern)
+        return {
+            path.parent.name
+            for path in self.ROOT.glob("*/*.tf")
+            if regex.search(path.read_text())
+        }
+
+    def test_iam_creating_components_are_covered(self):
+        found = self.scan(r'resource\s+"aws_iam_(role|policy|instance_profile|user)"') - self.EXCLUDED
+        self.assertEqual(found - check_lane_names.ACCOUNT_WIDE_COMPONENTS, set())
+
+    def test_bucket_creating_components_are_covered(self):
+        # Every component creating a bucket (aws_s3_bucket) is either covered or builds its name elsewhere (backend).
+        found = self.scan(r'resource\s+"aws_s3_bucket"') - self.EXCLUDED
+        self.assertEqual(found - check_lane_names.ACCOUNT_WIDE_COMPONENTS, set())
+
 
 class InstanceTest(unittest.TestCase):
     def errors(self, stacks):
@@ -266,6 +306,26 @@ class InstanceTest(unittest.TestCase):
             "iam/ci": instance("ue1", component="iam", policy_name="p", ci_role_name_prefix="fnx-ue1-dev-ci",
                                create_cross_account_role=False),
             "iam/dev": instance("ue1", component="iam", policy_name="p"),
+        })}), [])
+
+    def test_cluster_name_that_names_the_attached_cluster_is_not_primary(self):
+        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
+            "alb-controller-ingress-group/a": instance("ue1", component="alb-controller-ingress-group", stage="prod",
+                                                       cluster_name="main", group_name="a"),
+            "alb-controller-ingress-group/b": instance("ue1", component="alb-controller-ingress-group", stage="prod",
+                                                       cluster_name="main", group_name="b"),
+        })}), [])
+
+    def test_default_lambda_alias_is_not_primary(self):
+        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
+            "lambda/a": instance("ue1", component="lambda", stage="prod", function_name="a", alias_name="live"),
+            "lambda/b": instance("ue1", component="lambda", stage="prod", function_name="b", alias_name="live"),
+        })}), [])
+
+    def test_empty_primary_values_do_not_match(self):
+        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
+            "rds/a": instance("ue1", component="rds", stage="prod", identifier="", db_name="a"),
+            "rds/b": instance("ue1", component="rds", stage="prod", identifier="", db_name="b"),
         })}), [])
 
 

@@ -33,7 +33,8 @@ the prod account, so they cannot create the same IAM role or both the GitHub
 OIDC provider. Most IAM names are built from tags.Environment inside a
 component (backup <Environment>-backup-service-role, rds
 <Environment>-<identifier>-monitoring-role, ...), so two regions of one account
-whose IAM-creating instances (IAM_COMPONENTS) share a tags.Environment fail too.
+whose IAM- or S3-creating instances (ACCOUNT_WIDE_COMPONENTS: s3 and alb build
+bucket names <Environment>-<name>-<account id>) share a tags.Environment fail too.
 Within one stack, two deployable instances of one component build the same
 <Environment>-<input> names when a primary name key both set (PRIMARY_NAMES:
 name, identifier, function_name, ...) is equal: vpc/main and vpc/services
@@ -74,14 +75,20 @@ PRIMARY_NAMES = (
     "alias_name",
 )
 # Not event_bus_name: eventbridge rule instances name the bus they attach to.
-# Components whose IAM role or policy names are built from tags.Environment
-# (or a name built from it): IAM is account-wide. Not iam (its names are
-# RAW_NAMES), backend (built from its bucket name) or apigateway-account (its
-# role name carries the region).
-IAM_COMPONENTS = frozenset({
-    "awsconfig", "backup", "batch", "cloudtrail", "cost-optimization", "ec2", "ecs-service", "eks",
+# (component, key) pairs of PRIMARY_NAMES that name ANOTHER resource there:
+# alb-controller-ingress-group's cluster_name is the cluster it attaches to (its
+# own name is group_name); lambda's alias_name (default "live") is scoped to
+# its function.
+NOT_PRIMARY = {("alb-controller-ingress-group", "cluster_name"), ("lambda", "alias_name")}
+# Components whose IAM role or policy names, or S3 bucket names, are built from
+# tags.Environment (or a name built from it): both are account-wide (S3 names
+# are global and carry no region). Not iam (its names are RAW_NAMES), backend
+# (built from its bucket name) or apigateway-account (its role name carries the
+# region).
+ACCOUNT_WIDE_COMPONENTS = frozenset({
+    "alb", "awsconfig", "backup", "batch", "cloudtrail", "cost-optimization", "ec2", "ecs-service", "eks",
     "eks-addons", "external-secrets", "firehose", "github-runners", "glue", "lambda", "monitoring", "rds",
-    "security-monitoring", "stepfunctions", "vpc",
+    "s3", "security-monitoring", "stepfunctions", "vpc",
 })
 # (component, key) -> (resource, gate): keys the component uses verbatim in an
 # account- or region-unique name. A gate (var, default) must be true for the
@@ -243,7 +250,7 @@ def check_account(stacks: dict) -> list[str]:
 
 
 def check_account_environments(stacks: dict) -> list[str]:
-    """IAM_COMPONENTS instances in two regions of one account that share a tags.Environment."""
+    """ACCOUNT_WIDE_COMPONENTS instances in two regions of one account that share a tags.Environment."""
     owners, errors = {}, []
     for stack_name in sorted(stacks):
         group = group_of(stacks[stack_name])
@@ -253,14 +260,14 @@ def check_account_environments(stacks: dict) -> list[str]:
         reported = set()
         for name, instance in instances_of(stacks[stack_name]):
             environment = ((instance.get("vars") or {}).get("tags") or {}).get("Environment")
-            if instance.get("component") not in IAM_COMPONENTS or not environment:
+            if instance.get("component") not in ACCOUNT_WIDE_COMPONENTS or not environment:
                 continue
             first = owners.setdefault((account, environment), (stack_name, name, region))
             if first[2] != region and (first[0], environment) not in reported:
                 reported.add((first[0], environment))
                 errors.append(
                     f"{stack_name}: {name} ({region}) and {first[0]}: {first[1]} ({first[2]}) both use "
-                    f"tags.Environment {environment!r} in account {account}: the IAM names built from it are "
+                    f"tags.Environment {environment!r} in account {account}: the IAM/S3 names built from it are "
                     "account-wide, so another region's must carry its region code (settings.prefix)"
                 )
     return errors
@@ -270,11 +277,11 @@ def name_inputs(variables: dict) -> dict:
     return {k: v for k, v in variables.items() if NAME_INPUT.search(k) and k not in SKIP_VARS}
 
 
-def same_names(a: dict, b: dict):
+def same_names(a: dict, b: dict, component=None):
     """Why two instances' vars of one component build the same names, or None."""
-    shared = [key for key in PRIMARY_NAMES if key in a and key in b]
+    shared = [key for key in PRIMARY_NAMES if key in a and key in b and (component, key) not in NOT_PRIMARY]
     for key in shared:
-        if a[key] == b[key]:
+        if a[key] and a[key] == b[key]:
             return f"the same {key} {json.dumps(a[key])}"
     if shared:
         return None
@@ -294,7 +301,7 @@ def check_instances(stacks: dict) -> list[str]:
         for component, members in sorted(by_component.items()):
             for index, (name_a, vars_a) in enumerate(members):
                 for name_b, vars_b in members[index + 1:]:
-                    why = same_names(vars_a, vars_b)
+                    why = same_names(vars_a, vars_b, component)
                     if why:
                         errors.append(
                             f"{stack_name}: {name_a}, {name_b} ({component}) set {why}, so they build the "
@@ -332,7 +339,7 @@ def main() -> int:
         return 1
     print(
         "no two stacks of one account and region share a tags.Environment, no two instances there create "
-        "the same name or singleton, no two regions of an account share a tags.Environment in IAM names, no two "
+        "the same name or singleton, no two regions of an account share a tags.Environment in IAM/S3 names, no two "
         "instances of a component in one stack set the same name, and no S3 bucket or Cognito domain name is "
         "set twice"
     )
