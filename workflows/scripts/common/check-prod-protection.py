@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that every prod rds and elasticache instance keeps its data-loss protections.
+"""Check that every prod rds, elasticache and cognito instance keeps its data-loss protections.
 
 Usage: check-prod-protection.py <components/terraform dir> < describe-stacks.json
 (`atmos describe stacks --process-functions=false --format json`).
@@ -18,6 +18,8 @@ the component's variables.tf) must be safe:
   elasticache:  automatic_failover_enabled and multi_az_enabled true, at least
                 2 nodes (num_cache_nodes) unless cluster_mode_enabled, and
                 snapshot_retention_limit >= 7
+  cognito:      deletion_protection true (a deleted user pool loses every user,
+                including those fnx-ue2-prod's DR pool migrated in)
 
 And every deployable iam instance in a stack of stage prod that creates the
 GitHub OIDC CI roles (github_oidc_enabled) must set ci_plan_role_subjects
@@ -60,6 +62,9 @@ RULES: dict[str, list[tuple[str, Callable[[Any, dict], bool], str]]] = {
          ">= 2 (or cluster_mode_enabled)"),
         ("snapshot_retention_limit", lambda v, _: isinstance(v, (int, float)) and v >= MIN_RETENTION_DAYS,
          f">= {MIN_RETENTION_DAYS}"),
+    ],
+    "cognito": [
+        ("deletion_protection", lambda v, _: v is True, "true"),
     ],
 }
 DEFAULT = re.compile(r'^\s*default\s*=\s*("(?:[^"\\]|\\.)*"|true|false|-?\d+(?:\.\d+)?|null)\s*(?:#.*)?$')
@@ -180,7 +185,8 @@ def main() -> int:
     print(
         "every prod rds instance is environment prod, Multi-AZ, deletion-protected, keeps a final "
         f"snapshot and {MIN_RETENTION_DAYS}+ days of backups; every prod elasticache instance fails over "
-        f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots; every prod CI plan role trusts its "
+        f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots; every prod cognito pool is "
+        "deletion-protected; every prod CI plan role trusts its "
         "repository's master ref only"
     )
     return 0

@@ -18,6 +18,9 @@
 locals {
   enabled     = var.enabled
   name_prefix = var.name_prefix
+
+  # The triggers that are set ("" counts as unset, as Cloud Posse's defaults).
+  lambda_triggers = { for k, arn in var.lambda_config : k => arn if try(length(arn), 0) > 0 }
 }
 
 resource "aws_cognito_user_pool" "this" {
@@ -72,6 +75,23 @@ resource "aws_cognito_user_pool" "this" {
     reply_to_email_address = try(length(var.email_configuration.reply_to_email_address), 0) > 0 ? var.email_configuration.reply_to_email_address : null
   }
 
+  # Cloud Posse aws-cognito's lambda_config: one block, only when a trigger is set.
+  dynamic "lambda_config" {
+    for_each = length(local.lambda_triggers) > 0 ? [1] : []
+    content {
+      create_auth_challenge          = lookup(local.lambda_triggers, "create_auth_challenge", null)
+      custom_message                 = lookup(local.lambda_triggers, "custom_message", null)
+      define_auth_challenge          = lookup(local.lambda_triggers, "define_auth_challenge", null)
+      post_authentication            = lookup(local.lambda_triggers, "post_authentication", null)
+      post_confirmation              = lookup(local.lambda_triggers, "post_confirmation", null)
+      pre_authentication             = lookup(local.lambda_triggers, "pre_authentication", null)
+      pre_sign_up                    = lookup(local.lambda_triggers, "pre_sign_up", null)
+      pre_token_generation           = lookup(local.lambda_triggers, "pre_token_generation", null)
+      user_migration                 = lookup(local.lambda_triggers, "user_migration", null)
+      verify_auth_challenge_response = lookup(local.lambda_triggers, "verify_auth_challenge_response", null)
+    }
+  }
+
   # Cloud Posse aws-cognito's string_schemas (its number_schemas and generic
   # schemas are not ported).
   dynamic "schema" {
@@ -89,6 +109,23 @@ resource "aws_cognito_user_pool" "this" {
       }
     }
   }
+}
+
+# Cognito invokes a trigger through the function's resource policy, which must
+# allow cognito-idp.amazonaws.com scoped to this pool's ARN
+# (https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-migrate-user.html#user-pool-lambda-migrate-user-troubleshooting).
+# Deviation from Cloud Posse aws-cognito, which leaves this grant to the
+# caller: here the pool's component grants it, because only it knows the pool
+# ARN before the function's component could (that would read the pool, which
+# reads the function: a cycle).
+resource "aws_lambda_permission" "cognito" {
+  for_each = local.enabled ? local.lambda_triggers : {}
+
+  statement_id  = "${local.name_prefix}-${each.key}"
+  action        = "lambda:InvokeFunction"
+  function_name = each.value
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.this[0].arn
 }
 
 # OAuth resource servers (Cloud Posse aws-cognito's resource_servers): the

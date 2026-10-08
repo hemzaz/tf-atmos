@@ -45,6 +45,14 @@ class CheckProdProtectionTest(unittest.TestCase):
                          "skip_final_snapshot is true (set); a prod instance needs false"):
             self.assertTrue(any(fragment in e for e in found), (fragment, found))
 
+    def test_cognito_without_deletion_protection_fails(self):
+        found = errors(stacks(**{"cognito/main": instance("cognito", deletion_protection=False)}))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("(cognito) deletion_protection is false (set); a prod instance needs true", found[0])
+
+    def test_cognito_default_deletion_protection_passes(self):
+        self.assertEqual(errors(stacks(**{"cognito/main": instance("cognito")})), [])
+
     def test_prevent_destroy_off_fails(self):
         found = errors(stacks(**{"rds/main": instance("rds", prevent_destroy=False, **SAFE_RDS)}))
         self.assertEqual(len(found), 1, found)

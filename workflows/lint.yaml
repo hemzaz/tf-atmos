@@ -287,7 +287,8 @@ workflows:
       # The stack templates leave the prod values of their rds and elasticache
       # instances to the importing stack; this fails a stage prod instance
       # without them (deletion protection, Multi-AZ/failover, final snapshot,
-      # 7+ days of backups or snapshots). Also run by validate-all.
+      # 7+ days of backups or snapshots), and a prod cognito pool without
+      # deletion protection. Also run by validate-all.
       - name: check-prod-protection
         type: shell
         command: |

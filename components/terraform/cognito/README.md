@@ -38,3 +38,9 @@ its `schemas`/`number_schemas` are not ported).
 - `string_schemas` attributes cannot be changed or removed once the pool exists (AWS); adding one
   is in place. Name custom attributes without `custom:`; only standard attributes can be
   `required` (validated).
+- `lambda_config` takes Cloud Posse `aws-cognito`'s trigger keys as one typed object (its
+  `kms_key_id` and custom sender triggers are not ported). Each function must be in the pool's
+  region (validated). The component grants `cognito-idp.amazonaws.com` `lambda:InvokeFunction` on
+  each, scoped to the pool's ARN; Cloud Posse leaves that grant to the caller, but the function's
+  own component cannot scope it without reading the pool, which reads the function.
+- A prod pool keeps `deletion_protection` (`check-prod-protection.py`).
