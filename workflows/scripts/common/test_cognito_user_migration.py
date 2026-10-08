@@ -100,12 +100,23 @@ class CognitoUserMigrationTest(unittest.TestCase):
         with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(client, event("UserMigration_Authentication"))
 
-    def test_a_verified_phone_alone_is_enough(self):
+    def test_a_verified_phone_alone_is_refused(self):
         attrs = [a for a in ATTRIBUTES if a["Name"] != "email_verified"] + [
             {"Name": "phone_number_verified", "Value": "true"}]
         client = FakeCognito(auth={"AuthenticationResult": {}}, user=confirmed_user(UserAttributes=attrs))
-        response = self.run_handler(client, event("UserMigration_Authentication"))["response"]
-        self.assertEqual(response["finalUserStatus"], "RESET_REQUIRED")
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
+            self.run_handler(client, event("UserMigration_Authentication"))
+
+    def test_a_malformed_event_is_rejected_with_the_same_message(self):
+        evt = event("UserMigration_Authentication")
+        del evt["request"]["password"]
+        with self.assertLogs(handler.LOGGER, level="WARNING") as logs, \
+                self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
+            self.run_handler(FakeCognito(), evt)
+        self.assertIn("KeyError", " ".join(logs.output))
+        del evt["userName"]
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
+            self.run_handler(FakeCognito(), evt)
 
     def test_a_wrong_password_is_not_migrated(self):
         client = FakeCognito(auth_error=ClientError("NotAuthorizedException"))

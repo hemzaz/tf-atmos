@@ -578,7 +578,7 @@ regions today; the authorizer is wired for when it returns. On failover nothing 
   `ue2-cognito-user-migration`. On a password sign-in (`UserMigration_Authentication`) it checks the
   password against `fnx-ue1-prod`'s pool (`AdminInitiateAuth` with its `dr-migration` client) and
   returns the user's attributes; Cognito creates the user `RESET_REQUIRED` (never `CONFIRMED`), and
-  only for a user with a verified email or phone. On a
+  only for a user with a verified email (the pool has no SMS, so a phone alone is refused). On a
   forgot-password (`UserMigration_ForgotPassword`) it reads the user (`AdminGetUser`), and Cognito
   sends the reset code to the verified email. Its role may call only those two actions, on that
   pool's ARN.
@@ -596,13 +596,15 @@ regions today; the authorizer is wired for when it returns. On failover nothing 
   never migrated before it cannot sign in to us-east-2 until they are imported (below). Users
   migrated earlier and finished the reset and MFA enrolment sign in normally.
 - A migrated user is a snapshot: a later password change, disable or attribute change in
-  `fnx-ue1-prod`'s pool does not reach us-east-2 (the old password keeps working there). To
+  `fnx-ue1-prod`'s pool does not reach us-east-2. To
   re-sync one user, delete it in us-east-2 (`aws cognito-idp admin-delete-user --region us-east-2
   --user-pool-id <ue2 pool id> --username <email>`); the next sign-in migrates it again.
 
-- During failover, also disable or delete (`admin-disable-user`/`admin-delete-user`) the us-east-2
-  users whose `fnx-ue1-prod` copy is disabled or gone: a migrated user is a snapshot and would
-  otherwise keep working there.
+- During failover, and after each monthly export, reconcile: compare the us-east-2 users with the
+  latest export (`ue1-users.json`: `Enabled`, `UserStatus`, absence) and run
+  `aws cognito-idp admin-disable-user --region us-east-2` (or `admin-delete-user`) on any user
+  whose `fnx-ue1-prod` copy is disabled, not `CONFIRMED`/`RESET_REQUIRED`, or gone: a migrated user
+  is a snapshot and would otherwise keep working there.
 
 Do not pre-migrate users with a shadow sign-in: each would sit in us-east-2 with no MFA device until
 a reset. Compare the two pools' sizes monthly, with `dr-status`
@@ -623,26 +625,40 @@ monthly with the coverage check and keep it outside us-east-1 (it is personal da
 storage in us-east-2, access as for the database):
 
 ```bash
-UE1=<ue1 pool id>; UE2=<ue2 pool id>
-# 1. Export (us-east-1 healthy): every user's attributes as JSON, streamed to an SSE-KMS object in
-#    us-east-2, never to a local file. Build users.csv the same way (pipe it into `aws s3 cp -`).
+set -o pipefail
+UE1=<ue1 pool id>; UE2=<ue2 pool id>; OBJ=s3://<bucket>/<prefix>; KMS=<kms key id>
+EXPORT="$OBJ/ue1-users-$(date -u +%Y%m%d).json"
+# 1. Export (us-east-1 healthy), streamed to an SSE-KMS object in us-east-2, never to a local file,
+#    then check it holds the pool's users (the pool count is an estimate: expect a close match).
 aws cognito-idp list-users --region us-east-1 --user-pool-id "$UE1" --output json |
-  aws s3 cp - s3://<bucket>/<key>/ue1-users.json --sse aws:kms --sse-kms-key-id <key> --region us-east-2
-# 2. The CSV header us-east-2 expects; fill one row per user from ue1-users.json
-#    (email, email_verified, cognito:mfa_enabled=false, cognito:username=<email>, custom attributes).
-aws cognito-idp get-csv-header --region us-east-2 --user-pool-id "$UE2"
+  aws s3 cp - "$EXPORT" --sse aws:kms --sse-kms-key-id "$KMS" --region us-east-2
+aws s3 cp "$EXPORT" - --region us-east-2 | jq '.Users | length'
+aws cognito-idp describe-user-pool --region us-east-1 --user-pool-id "$UE1" --query 'UserPool.EstimatedNumberOfUsers'
+# 2. users.csv from the export, with the header us-east-2 expects and only the users the Lambda would
+#    migrate (enabled, CONFIRMED or RESET_REQUIRED), again straight to SSE-KMS S3.
+HEADER=$(aws cognito-idp get-csv-header --region us-east-2 --user-pool-id "$UE2" --query CSVHeader --output text | tr '\t' ',')
+aws s3 cp "$EXPORT" - --region us-east-2 | jq -r --arg h "$HEADER" '
+  ($h | split(",")) as $cols | $cols,
+  (.Users[] | select(.Enabled == true and (.UserStatus == "CONFIRMED" or .UserStatus == "RESET_REQUIRED"))
+   | (.Attributes | map({(.Name): .Value}) | add) as $a
+   | ($a + {"cognito:username": $a.email, "cognito:mfa_enabled": "false"}) as $row
+   | [$cols[] | $row[.] // ""]) | @csv' |
+  aws s3 cp - "$OBJ/users.csv" --sse aws:kms --sse-kms-key-id "$KMS" --region us-east-2
 # 3. Import with a role that lets Cognito write the job's CloudWatch logs
 #    (trust cognito-idp.amazonaws.com; logs:CreateLogGroup/CreateLogStream/DescribeLogStreams/PutLogEvents).
 aws cognito-idp create-user-import-job --region us-east-2 --user-pool-id "$UE2" \
   --job-name "dr-$(date -u +%Y%m%d%H%M)" --cloud-watch-logs-role-arn <role arn>
-aws s3 cp s3://<bucket>/<key>/users.csv - --region us-east-2 |
-  curl -sf --upload-file - -H 'x-amz-server-side-encryption: aws:kms' "<PreSignedUrl from above>"
+# A presigned PUT needs a Content-Length (no chunked upload) and the header Cognito's URL is signed with.
+aws s3 cp "$OBJ/users.csv" - --region us-east-2 |
+  curl -sf -X PUT --data-binary @- -H 'Content-Type:' -H 'x-amz-server-side-encryption: aws:kms' "<PreSignedUrl from above>"
 aws cognito-idp start-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
 aws cognito-idp describe-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
 ```
 
+The bucket holds personal data: it needs SSE-KMS by default and a lifecycle expiry (no stack here
+provides one yet, so create or pick it first).
+
 Leave out users already in us-east-2 (`list-users` there): an existing username fails its row.
-Remove any local copy of the export or CSV afterwards (`rm -P`, then check `ls`).
 
 **Reconcile Terraform** once the state bucket answers again (us-east-2 still primary). Each PR's
 plan is read before merging; re-enable CD for these merges only (`gh workflow enable

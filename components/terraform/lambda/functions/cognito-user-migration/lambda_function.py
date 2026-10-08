@@ -8,9 +8,9 @@ the user here (https://docs.aws.amazon.com/cognito/latest/developerguide/user-po
   UserMigration_Authentication  AdminInitiateAuth (ADMIN_USER_PASSWORD_AUTH) on the
                                 source pool verifies the password, AdminGetUser reads
                                 the attributes; the user is created RESET_REQUIRED,
-                                never CONFIRMED, and needs a verified email or phone.
+                                never CONFIRMED, and needs a verified email.
   UserMigration_ForgotPassword  AdminGetUser only (Cognito sends no password); the
-                                user needs a verified email or phone for the code.
+                                user needs a verified email for the code.
 
 Why RESET_REQUIRED: this pool's only MFA type is software token and TOTP secrets
 do not migrate, so a CONFIRMED user's first sign-in gets MFA_SETUP, and anyone
@@ -121,16 +121,17 @@ def source_user(client, username: str, statuses: frozenset) -> dict:
 
 
 def require_verified_contact(attributes: dict) -> None:
-    """The reset code goes to a verified email or phone; without one the user cannot finish."""
-    if "true" not in (attributes.get("email_verified"), attributes.get("phone_number_verified")):
-        raise MigrationError("source user has no verified email or phone for the reset code", attributes.get("sub"))
+    """The reset code goes to the verified email: this pool has no SMS configuration, so a
+    verified phone alone would leave the user stuck."""
+    if attributes.get("email_verified") != "true":
+        raise MigrationError("source user has no verified email for the reset code", attributes.get("sub"))
 
 
 def lambda_handler(event, context):
     trigger = event.get("triggerSource")
-    username = event["userName"]
-    client = source_client()
     try:
+        username = event["userName"]
+        client = source_client()
         if trigger == "UserMigration_Authentication":
             verify_password(client, username, event["request"]["password"])
             source = source_user(client, username, SIGN_IN_STATUSES)
@@ -146,6 +147,11 @@ def lambda_handler(event, context):
         # Audit: trigger, outcome, reason and (when the user was found) the opaque sub. No
         # username, email or password, so the log never says whose password was tried.
         LOGGER.warning("%s: not migrated: %s (sub %s)", trigger, error, error.sub)
+        raise MigrationError(REJECTED) from None
+    except Exception as error:
+        # Anything unexpected (a malformed event, a client that cannot be built) rejects the same
+        # way; only the exception type is logged, never its value.
+        LOGGER.warning("%s: not migrated: unexpected %s", trigger, type(error).__name__)
         raise MigrationError(REJECTED) from None
     attributes = {name: value for name, value in source.items() if name not in NOT_COPIED}
     event["response"].update(userAttributes=attributes, messageAction="SUPPRESS")
