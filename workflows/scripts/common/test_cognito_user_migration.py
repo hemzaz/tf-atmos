@@ -97,7 +97,7 @@ class CognitoUserMigrationTest(unittest.TestCase):
     def test_sign_in_needs_a_verified_contact(self):
         unverified = [a for a in ATTRIBUTES if a["Name"] != "email_verified"]
         client = FakeCognito(auth={"AuthenticationResult": {}}, user=confirmed_user(UserAttributes=unverified))
-        with self.assertRaisesRegex(handler.MigrationError, "verified"):
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(client, event("UserMigration_Authentication"))
 
     def test_a_verified_phone_alone_is_enough(self):
@@ -109,18 +109,18 @@ class CognitoUserMigrationTest(unittest.TestCase):
 
     def test_a_wrong_password_is_not_migrated(self):
         client = FakeCognito(auth_error=ClientError("NotAuthorizedException"))
-        with self.assertRaisesRegex(handler.MigrationError, "NotAuthorizedException"):
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(client, event("UserMigration_Authentication", password="wrong"))
         self.assertEqual([c[0] for c in client.calls], ["admin_initiate_auth"])
 
     def test_an_unreachable_source_pool_fails_the_sign_in(self):
         client = FakeCognito(auth_error=TimeoutError("connect timeout"))
-        with self.assertRaisesRegex(handler.MigrationError, "TimeoutError"):
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(client, event("UserMigration_Authentication"))
 
     def test_a_new_password_challenge_is_not_migrated(self):
         client = FakeCognito(auth={"ChallengeName": "NEW_PASSWORD_REQUIRED"}, user=confirmed_user())
-        with self.assertRaisesRegex(handler.MigrationError, "NEW_PASSWORD_REQUIRED"):
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(client, event("UserMigration_Authentication"))
 
     def test_a_disabled_user_is_not_migrated(self):
@@ -139,17 +139,51 @@ class CognitoUserMigrationTest(unittest.TestCase):
     def test_forgot_password_needs_a_verified_contact(self):
         unverified = [a for a in ATTRIBUTES if a["Name"] != "email_verified"]
         client = FakeCognito(user=confirmed_user(UserAttributes=unverified))
-        with self.assertRaisesRegex(handler.MigrationError, "verified"):
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(client, event("UserMigration_ForgotPassword"))
 
     def test_an_unknown_user_is_not_migrated(self):
         client = FakeCognito(user_error=ClientError("UserNotFoundException"))
-        with self.assertRaisesRegex(handler.MigrationError, "UserNotFoundException"):
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(client, event("UserMigration_ForgotPassword"))
 
     def test_another_trigger_is_refused(self):
-        with self.assertRaisesRegex(handler.MigrationError, "unsupported trigger"):
+        with self.assertRaisesRegex(handler.MigrationError, "^not migrated$"):
             self.run_handler(FakeCognito(), event("PreSignUp_SignUp"))
+
+    def test_every_reject_raises_the_same_message(self):
+        unverified = [a for a in ATTRIBUTES if a["Name"] != "email_verified"]
+        auth_ok = {"AuthenticationResult": {}}
+        cases = [
+            (FakeCognito(auth_error=ClientError("NotAuthorizedException")), "UserMigration_Authentication"),
+            (FakeCognito(auth_error=ClientError("UserNotFoundException")), "UserMigration_Authentication"),
+            (FakeCognito(auth={"ChallengeName": "NEW_PASSWORD_REQUIRED"}), "UserMigration_Authentication"),
+            (FakeCognito(auth=auth_ok, user=confirmed_user(UserStatus="UNCONFIRMED")), "UserMigration_Authentication"),
+            (FakeCognito(auth=auth_ok, user=confirmed_user(UserAttributes=unverified)), "UserMigration_Authentication"),
+            (FakeCognito(user_error=ClientError("UserNotFoundException")), "UserMigration_ForgotPassword"),
+            (FakeCognito(user=confirmed_user(Enabled=False)), "UserMigration_ForgotPassword"),
+            (FakeCognito(user=confirmed_user(UserAttributes=unverified)), "UserMigration_ForgotPassword"),
+            (FakeCognito(), "PreSignUp_SignUp"),
+        ]
+        messages = set()
+        for client, trigger in cases:
+            with self.assertRaises(handler.MigrationError) as raised:
+                self.run_handler(client, event(trigger))
+            messages.add(str(raised.exception))
+        self.assertEqual(messages, {"not migrated"})
+
+    def test_the_audit_log_carries_the_sub_and_the_outcome(self):
+        client = FakeCognito(auth={"AuthenticationResult": {}}, user=confirmed_user())
+        with self.assertLogs(handler.LOGGER, level="INFO") as logs:
+            response = self.run_handler(client, event("UserMigration_Authentication"))["response"]
+        self.assertIn("0000-1111", " ".join(logs.output))
+        self.assertIn("UserMigration_Authentication", " ".join(logs.output))
+        self.assertNotIn("sub", response["userAttributes"])
+        rejected = FakeCognito(auth={"AuthenticationResult": {}}, user=confirmed_user(Enabled=False))
+        with self.assertLogs(handler.LOGGER, level="WARNING") as logs, self.assertRaises(handler.MigrationError):
+            self.run_handler(rejected, event("UserMigration_Authentication"))
+        self.assertIn("0000-1111", " ".join(logs.output))
+        self.assertFalse("user@example.com" in " ".join(logs.output))
 
     def test_the_password_is_never_logged(self):
         canary = "log-canary-value"

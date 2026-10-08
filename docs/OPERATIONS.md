@@ -594,11 +594,15 @@ regions today; the authorizer is wired for when it returns. On failover nothing 
   `PasswordResetRequiredException` during failover (send the user to forgot-password).
 - **The limit:** the trigger needs us-east-1's Cognito to answer. During a us-east-1 outage a user
   never migrated before it cannot sign in to us-east-2 until they are imported (below). Users
-  migrated earlier sign in normally.
+  migrated earlier and finished the reset and MFA enrolment sign in normally.
 - A migrated user is a snapshot: a later password change, disable or attribute change in
   `fnx-ue1-prod`'s pool does not reach us-east-2 (the old password keeps working there). To
   re-sync one user, delete it in us-east-2 (`aws cognito-idp admin-delete-user --region us-east-2
   --user-pool-id <ue2 pool id> --username <email>`); the next sign-in migrates it again.
+
+- During failover, also disable or delete (`admin-disable-user`/`admin-delete-user`) the us-east-2
+  users whose `fnx-ue1-prod` copy is disabled or gone: a migrated user is a snapshot and would
+  otherwise keep working there.
 
 Do not pre-migrate users with a shadow sign-in: each would sit in us-east-2 with no MFA device until
 a reset. Compare the two pools' sizes monthly, with `dr-status`
@@ -620,8 +624,10 @@ storage in us-east-2, access as for the database):
 
 ```bash
 UE1=<ue1 pool id>; UE2=<ue2 pool id>
-# 1. Export (us-east-1 healthy): every user's attributes as JSON.
-aws cognito-idp list-users --region us-east-1 --user-pool-id "$UE1" --output json > ue1-users.json
+# 1. Export (us-east-1 healthy): every user's attributes as JSON, streamed to an SSE-KMS object in
+#    us-east-2, never to a local file. Build users.csv the same way (pipe it into `aws s3 cp -`).
+aws cognito-idp list-users --region us-east-1 --user-pool-id "$UE1" --output json |
+  aws s3 cp - s3://<bucket>/<key>/ue1-users.json --sse aws:kms --sse-kms-key-id <key> --region us-east-2
 # 2. The CSV header us-east-2 expects; fill one row per user from ue1-users.json
 #    (email, email_verified, cognito:mfa_enabled=false, cognito:username=<email>, custom attributes).
 aws cognito-idp get-csv-header --region us-east-2 --user-pool-id "$UE2"
@@ -629,12 +635,14 @@ aws cognito-idp get-csv-header --region us-east-2 --user-pool-id "$UE2"
 #    (trust cognito-idp.amazonaws.com; logs:CreateLogGroup/CreateLogStream/DescribeLogStreams/PutLogEvents).
 aws cognito-idp create-user-import-job --region us-east-2 --user-pool-id "$UE2" \
   --job-name "dr-$(date -u +%Y%m%d%H%M)" --cloud-watch-logs-role-arn <role arn>
-curl -sf --upload-file users.csv -H 'x-amz-server-side-encryption: aws:kms' "<PreSignedUrl from above>"
+aws s3 cp s3://<bucket>/<key>/users.csv - --region us-east-2 |
+  curl -sf --upload-file - -H 'x-amz-server-side-encryption: aws:kms' "<PreSignedUrl from above>"
 aws cognito-idp start-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
 aws cognito-idp describe-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
 ```
 
 Leave out users already in us-east-2 (`list-users` there): an existing username fails its row.
+Remove any local copy of the export or CSV afterwards (`rm -P`, then check `ls`).
 
 **Reconcile Terraform** once the state bucket answers again (us-east-2 still primary). Each PR's
 plan is read before merging; re-enable CD for these merges only (`gh workflow enable
@@ -714,8 +722,9 @@ explicit `-replace` from an operator, not a merge:
    user an administrator created in us-east-2 is created again in us-east-1. List them with
    `aws cognito-idp list-users --region us-east-2 --user-pool-id <ue2 pool id> --filter
    'cognito:user_status = "RESET_REQUIRED"'` and by `UserCreateDate` after the failover. The
-   us-east-2 users stay (pre-migrated for the next failover); delete any whose us-east-1 password
-   was reset since, so they migrate again ([Auth during failover](#auth-during-failover)).
+   us-east-2 users do not stay: delete the migrated ones (`admin-delete-user`), so stale passwords
+   and statuses do not carry into the next failover; they migrate again then
+   ([Auth during failover](#auth-during-failover)).
 8. Re-enable CD: `gh workflow enable terraform-cd.yml`.
 
 ## Deploys green, does not serve

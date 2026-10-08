@@ -50,8 +50,21 @@ FORGOT_PASSWORD_STATUSES = frozenset({"CONFIRMED", "RESET_REQUIRED"})
 _client = None
 
 
+# The only text Cognito (and so the caller) sees on any reject: the same for an unknown
+# user, a wrong password, a bad status or no verified contact, so it does not tell which
+# usernames exist in the source pool. The reason goes to the log only.
+REJECTED = "not migrated"
+
+
 class MigrationError(Exception):
-    """The user is not migrated; Cognito fails the sign-in."""
+    """The user is not migrated; Cognito fails the sign-in.
+
+    sub is the source user's opaque ID once the user was found, for the audit log.
+    """
+
+    def __init__(self, reason: str, sub: str = None):
+        super().__init__(reason)
+        self.sub = sub
 
 
 def source_client():
@@ -94,20 +107,23 @@ def verify_password(client, username: str, password: str) -> None:
 
 
 def source_user(client, username: str, statuses: frozenset) -> dict:
-    """The user's writable attributes in the source pool, if it may migrate."""
+    """The user's attributes in the source pool (sub included), if it may migrate."""
     try:
         user = client.admin_get_user(UserPoolId=os.environ["SOURCE_USER_POOL_ID"], Username=username)
     except Exception as error:
         raise MigrationError(f"source lookup failed: {error_code(error)}") from None
+    attributes = {a["Name"]: a["Value"] for a in user.get("UserAttributes", [])}
     if not user.get("Enabled", False) or user.get("UserStatus") not in statuses:
-        raise MigrationError(f"source user is {user.get('UserStatus')}, enabled {user.get('Enabled')}")
-    return {a["Name"]: a["Value"] for a in user.get("UserAttributes", []) if a["Name"] not in NOT_COPIED}
+        raise MigrationError(
+            f"source user is {user.get('UserStatus')}, enabled {user.get('Enabled')}", attributes.get("sub")
+        )
+    return attributes
 
 
 def require_verified_contact(attributes: dict) -> None:
     """The reset code goes to a verified email or phone; without one the user cannot finish."""
     if "true" not in (attributes.get("email_verified"), attributes.get("phone_number_verified")):
-        raise MigrationError("source user has no verified email or phone for the reset code")
+        raise MigrationError("source user has no verified email or phone for the reset code", attributes.get("sub"))
 
 
 def lambda_handler(event, context):
@@ -117,20 +133,23 @@ def lambda_handler(event, context):
     try:
         if trigger == "UserMigration_Authentication":
             verify_password(client, username, event["request"]["password"])
-            attributes = source_user(client, username, SIGN_IN_STATUSES)
-            require_verified_contact(attributes)
-            event["response"].update(
-                userAttributes=attributes, finalUserStatus="RESET_REQUIRED", messageAction="SUPPRESS"
-            )
+            source = source_user(client, username, SIGN_IN_STATUSES)
+            require_verified_contact(source)
+            final_status = "RESET_REQUIRED"
         elif trigger == "UserMigration_ForgotPassword":
-            attributes = source_user(client, username, FORGOT_PASSWORD_STATUSES)
-            require_verified_contact(attributes)
-            event["response"].update(userAttributes=attributes, messageAction="SUPPRESS")
+            source = source_user(client, username, FORGOT_PASSWORD_STATUSES)
+            require_verified_contact(source)
+            final_status = None
         else:
             raise MigrationError(f"unsupported trigger {trigger}")
     except MigrationError as error:
-        # No username or password in the log: the reason is enough to diagnose.
-        LOGGER.warning("%s: not migrated: %s", trigger, error)
-        raise
-    LOGGER.info("%s: migrated", trigger)
+        # Audit: trigger, outcome, reason and (when the user was found) the opaque sub. No
+        # username, email or password, so the log never says whose password was tried.
+        LOGGER.warning("%s: not migrated: %s (sub %s)", trigger, error, error.sub)
+        raise MigrationError(REJECTED) from None
+    attributes = {name: value for name, value in source.items() if name not in NOT_COPIED}
+    event["response"].update(userAttributes=attributes, messageAction="SUPPRESS")
+    if final_status:
+        event["response"]["finalUserStatus"] = final_status
+    LOGGER.info("%s: migrated sub %s as %s", trigger, source.get("sub"), final_status or "forgot-password")
     return event
