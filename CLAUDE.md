@@ -30,7 +30,7 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   input needs `| tojson` (`'.producer_policy | tojson'`); otherwise Atmos decodes it into an object.
 - A stack template that repeats a component's `<Environment>-<x>` name writes `{{ .settings.prefix }}-<x>`
   (the region code, plus `-<name>` on a lane), never `settings.context.environment`; the full id is
-  `{{ .atmos_stack }}`. `check-lane-names.py` fails two stacks or instances of one account and region that create the same name.
+  `{{ .atmos_stack }}`. `check-lane-names.py` fails two stacks or instances of one account and region that create the same name (and IAM/S3 names across the regions of one account).
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - Each stack's state is an exact `object_key_patterns` pair on its stage's backend roles
   (`stacks/orgs/fnx/root/us-east-1.yaml`): a new stack needs its pair (`check-state-keys.py`).

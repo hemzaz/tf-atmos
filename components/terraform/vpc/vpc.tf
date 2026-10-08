@@ -22,6 +22,14 @@ locals {
   private_subnets  = { for i, cidr in var.private_subnets : cidr => { index = i, az = local.availability_zones[i] } }
   public_subnets   = { for i, cidr in var.public_subnets : cidr => { index = i, az = local.availability_zones[i] } }
   database_subnets = { for i, cidr in var.database_subnets : cidr => { index = i, az = local.availability_zones[i % length(local.availability_zones)] } }
+
+  # The instance id: <Environment>-vpc-<name> (ue1-vpc-main), or
+  # <Environment>-vpc for the default name. It names the VPC and starts the
+  # account- and region-unique flow-logs names (flow-logs.tf); the subnet and
+  # internet gateway Name tags start with it too, so vpc/main and vpc/services
+  # differ in the console (the default name keeps <Environment>-<resource>).
+  id         = var.name == "vpc" ? "${var.tags["Environment"]}-vpc" : "${var.tags["Environment"]}-vpc-${var.name}"
+  tag_prefix = var.name == "vpc" ? var.tags["Environment"] : local.id
 }
 
 resource "aws_vpc" "main" {
@@ -29,7 +37,7 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
-  tags = { Name = "${var.tags["Environment"]}-vpc" }
+  tags = { Name = local.id }
 
   lifecycle {
     precondition {
@@ -45,7 +53,7 @@ resource "aws_subnet" "private" {
   cidr_block        = each.key
   availability_zone = each.value.az
 
-  tags = merge(var.private_subnets_additional_tags, { Name = "${var.tags["Environment"]}-private-subnet-${each.value.index + 1}" })
+  tags = merge(var.private_subnets_additional_tags, { Name = "${local.tag_prefix}-private-subnet-${each.value.index + 1}" })
 }
 
 resource "aws_subnet" "public" {
@@ -55,7 +63,7 @@ resource "aws_subnet" "public" {
   availability_zone       = each.value.az
   map_public_ip_on_launch = var.map_public_ip_on_launch
 
-  tags = merge(var.public_subnets_additional_tags, { Name = "${var.tags["Environment"]}-public-subnet-${each.value.index + 1}" })
+  tags = merge(var.public_subnets_additional_tags, { Name = "${local.tag_prefix}-public-subnet-${each.value.index + 1}" })
 }
 
 resource "aws_subnet" "database" {
@@ -67,7 +75,7 @@ resource "aws_subnet" "database" {
   tags = merge(
     var.tags,
     {
-      Name = "${var.tags["Environment"]}-database-subnet-${each.value.index + 1}"
+      Name = "${local.tag_prefix}-database-subnet-${each.value.index + 1}"
       Type = "Database"
     }
   )
@@ -76,5 +84,5 @@ resource "aws_subnet" "database" {
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
-  tags = { Name = "${var.tags["Environment"]}-igw" }
+  tags = { Name = "${local.tag_prefix}-igw" }
 }

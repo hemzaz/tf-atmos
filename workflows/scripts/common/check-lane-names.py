@@ -12,7 +12,8 @@ environment-derived prefix, settings.prefix, is <region code>-<name>
 component's <Environment>-<name> names, start with.
 
 Stacks are grouped by account (settings.environment.account) and region
-(vars.region). Within a group this fails:
+(vars.region); a stack with deployable instances but neither is an error, as
+it cannot be checked. Within a group this fails:
   - two stacks whose deployable instances share a tags.Environment value;
   - two instances that create the same name from a key a component uses
     VERBATIM (RAW_NAMES: kms alias_name, iam policy_name, ecs cluster_name,
@@ -29,11 +30,17 @@ Stacks are grouped by account (settings.environment.account) and region
 Account-wide names (IAM, the account singletons) are also compared between
 the regions of one account: fnx-ue1-prod and its DR stack fnx-ue2-prod share
 the prod account, so they cannot create the same IAM role or both the GitHub
-OIDC provider.
-Within one stack, two deployable instances of one component that set the same
-name inputs (NAME_INPUT: name, identifier, *_name, *_prefix, domains, zones,
-...) build the same <Environment>-<input> names, so they must differ in one
-(vpc/main and vpc/services differ in name).
+OIDC provider. Most IAM names are built from tags.Environment inside a
+component (backup <Environment>-backup-service-role, rds
+<Environment>-<identifier>-monitoring-role, ...), so two regions of one account
+whose IAM- or S3-creating instances (ACCOUNT_WIDE_COMPONENTS: s3 and alb build
+bucket names <Environment>-<name>-<account id>) share a tags.Environment fail too.
+Within one stack, two deployable instances of one component build the same
+<Environment>-<input> names when a primary name key both set (PRIMARY_NAMES:
+name, identifier, function_name, ...) is equal: vpc/main and vpc/services
+differ in name, and an incidental difference (availability_zones, db_name)
+does not separate them. Instances sharing no primary key compare all their
+name inputs (NAME_INPUT: *_name, *_prefix, domains, zones, ...) instead.
 Across every stack (any account or region): an S3 bucket name or Cognito
 domain prefix (GLOBAL_KEYS, at any depth of vars) set twice.
 Exits 1 on any collision.
@@ -52,6 +59,37 @@ SKIP_VARS = {"tags", "description"}
 NAME_INPUT = re.compile(
     r"(^|_)(name|names|identifier|prefix|cluster_id|alias|bucket|domain|domains|zones|function_name|queue_name|topic_name)(_|$)"
 )
+# vars keys that are an instance's own name: two instances of one component in
+# one stack that set one of these to the same value build the same names,
+# whatever else differs.
+PRIMARY_NAMES = (
+    "name",
+    "identifier",
+    "cluster_id",
+    "cluster_name",
+    "function_name",
+    "table_name",
+    "bucket_name",
+    "queue_name",
+    "topic_name",
+    "alias_name",
+)
+# Not event_bus_name: eventbridge rule instances name the bus they attach to.
+# (component, key) pairs of PRIMARY_NAMES that name ANOTHER resource there:
+# alb-controller-ingress-group's cluster_name is the cluster it attaches to (its
+# own name is group_name); lambda's alias_name (default "live") is scoped to
+# its function.
+NOT_PRIMARY = {("alb-controller-ingress-group", "cluster_name"), ("lambda", "alias_name")}
+# Components whose IAM role or policy names, or S3 bucket names, are built from
+# tags.Environment (or a name built from it): both are account-wide (S3 names
+# are global and carry no region). Not iam (its names are RAW_NAMES), backend
+# (built from its bucket name) or apigateway-account (its role name carries the
+# region).
+ACCOUNT_WIDE_COMPONENTS = frozenset({
+    "alb", "awsconfig", "backup", "batch", "cloudtrail", "cost-optimization", "ec2", "ecs-service", "eks",
+    "eks-addons", "external-secrets", "firehose", "github-runners", "glue", "lambda", "monitoring", "rds",
+    "s3", "security-monitoring", "stepfunctions", "vpc",
+})
 # (component, key) -> (resource, gate): keys the component uses verbatim in an
 # account- or region-unique name. A gate (var, default) must be true for the
 # instance to create it.
@@ -149,12 +187,16 @@ def group_of(stack: dict):
 
 
 def check_groups(stacks: dict) -> list[str]:
-    groups = collections.defaultdict(list)
-    for stack_name, stack in stacks.items():
+    groups, errors = collections.defaultdict(list), []
+    for stack_name, stack in sorted(stacks.items()):
         group = group_of(stack)
         if group:
             groups[group].append(stack_name)
-    errors = []
+        elif next(instances_of(stack), None):
+            errors.append(
+                f"{stack_name}: no deployable instance sets both settings.environment.account and vars.region, "
+                "so its names cannot be checked against the other stacks of its account and region"
+            )
     for group, members in sorted(groups.items()):
         where_group = f"account {group[0]}, {group[1]}"
         environments, owners = {}, {}
@@ -204,28 +246,67 @@ def check_account(stacks: dict) -> list[str]:
                         f"in account {account}: IAM names are account-wide, so another region's must carry "
                         "its region code (settings.prefix), and a singleton belongs to one stack"
                     )
+    return errors + check_account_environments(stacks)
+
+
+def check_account_environments(stacks: dict) -> list[str]:
+    """ACCOUNT_WIDE_COMPONENTS instances in two regions of one account that share a tags.Environment."""
+    owners, errors = {}, []
+    for stack_name in sorted(stacks):
+        group = group_of(stacks[stack_name])
+        if not group:
+            continue
+        account, region = group
+        reported = set()
+        for name, instance in instances_of(stacks[stack_name]):
+            environment = ((instance.get("vars") or {}).get("tags") or {}).get("Environment")
+            if instance.get("component") not in ACCOUNT_WIDE_COMPONENTS or not environment:
+                continue
+            first = owners.setdefault((account, environment), (stack_name, name, region))
+            if first[2] != region and (first[0], environment) not in reported:
+                reported.add((first[0], environment))
+                errors.append(
+                    f"{stack_name}: {name} ({region}) and {first[0]}: {first[1]} ({first[2]}) both use "
+                    f"tags.Environment {environment!r} in account {account}: the IAM/S3 names built from it are "
+                    "account-wide, so another region's must carry its region code (settings.prefix)"
+                )
     return errors
 
 
+def name_inputs(variables: dict) -> dict:
+    return {k: v for k, v in variables.items() if NAME_INPUT.search(k) and k not in SKIP_VARS}
+
+
+def same_names(a: dict, b: dict, component=None):
+    """Why two instances' vars of one component build the same names, or None."""
+    shared = [key for key in PRIMARY_NAMES if key in a and key in b and (component, key) not in NOT_PRIMARY]
+    for key in shared:
+        if a[key] and a[key] == b[key]:
+            return f"the same {key} {json.dumps(a[key])}"
+    if shared:
+        return None
+    inputs = name_inputs(a)
+    if inputs != name_inputs(b):
+        return None
+    return f"the same name inputs {json.dumps(inputs, sort_keys=True) if inputs else '(none)'}"
+
+
 def check_instances(stacks: dict) -> list[str]:
-    """Instances of one component in one stack with the same name inputs."""
+    """Instances of one component in one stack that build the same names."""
     errors = []
     for stack_name, stack in sorted(stacks.items()):
-        by_inputs = collections.defaultdict(list)
+        by_component = collections.defaultdict(list)
         for name, instance in instances_of(stack):
-            variables = instance.get("vars") or {}
-            inputs = json.dumps(
-                {k: v for k, v in variables.items() if NAME_INPUT.search(k) and k not in SKIP_VARS},
-                sort_keys=True,
-            )
-            by_inputs[(instance.get("component"), inputs)].append(name)
-        for (component, inputs), names in sorted(by_inputs.items(), key=lambda item: (str(item[0][0]), item[0][1])):
-            if len(names) > 1:
-                errors.append(
-                    f"{stack_name}: {', '.join(names)} ({component}) set the same name inputs "
-                    f"{inputs if inputs != '{}' else '(none)'}, so they build the same resource names: "
-                    "give each its own name"
-                )
+            by_component[str(instance.get("component"))].append((name, instance.get("vars") or {}))
+        for component, members in sorted(by_component.items()):
+            for index, (name_a, vars_a) in enumerate(members):
+                for name_b, vars_b in members[index + 1:]:
+                    why = same_names(vars_a, vars_b, component)
+                    if why:
+                        errors.append(
+                            f"{stack_name}: {name_a}, {name_b} ({component}) set {why}, so they build the "
+                            "same resource names: give each its own name"
+                        )
     return errors
 
 
@@ -258,8 +339,9 @@ def main() -> int:
         return 1
     print(
         "no two stacks of one account and region share a tags.Environment, no two instances there create "
-        "the same name or singleton, no two instances of a component in one stack set the same name inputs, "
-        "and no S3 bucket or Cognito domain name is set twice"
+        "the same name or singleton, no two regions of an account share a tags.Environment in IAM/S3 names, no two "
+        "instances of a component in one stack set the same name, and no S3 bucket or Cognito domain name is "
+        "set twice"
     )
     return 0
 

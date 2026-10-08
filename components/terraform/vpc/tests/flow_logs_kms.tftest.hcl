@@ -136,15 +136,48 @@ run "account_unique_names_carry_the_instance_name" {
 
   assert {
     condition = (
-      aws_kms_alias.flow_logs[0].name == "alias/test-services-flow-logs" &&
-      aws_iam_role.flow_logs[0].name == "test-services-flow-logs-role" &&
-      aws_iam_role_policy.flow_logs[0].name == "test-services-flow-logs-policy" &&
-      aws_s3_bucket.flow_logs[0].bucket == "test-services-flow-logs-123456789012" &&
-      aws_cloudwatch_metric_alarm.ssh_access[0].alarm_name == "test-services-high-ssh-access-attempts" &&
-      aws_cloudwatch_metric_alarm.ssh_access[0].namespace == "VPC/FlowLogs/test-services" &&
-      aws_cloudwatch_log_metric_filter.ssh_access[0].metric_transformation[0].namespace == "VPC/FlowLogs/test-services"
+      aws_kms_alias.flow_logs[0].name == "alias/test-vpc-services-flow-logs" &&
+      aws_iam_role.flow_logs[0].name == "test-vpc-services-flow-logs-role" &&
+      aws_iam_role_policy.flow_logs[0].name == "test-vpc-services-flow-logs-policy" &&
+      aws_s3_bucket.flow_logs[0].bucket == "test-vpc-services-flow-logs-123456789012" &&
+      aws_cloudwatch_metric_alarm.ssh_access[0].alarm_name == "test-vpc-services-high-ssh-access-attempts" &&
+      aws_cloudwatch_metric_alarm.ssh_access[0].namespace == "VPC/FlowLogs/test-vpc-services" &&
+      aws_cloudwatch_log_metric_filter.ssh_access[0].metric_transformation[0].namespace == "VPC/FlowLogs/test-vpc-services"
     )
-    error_message = "The KMS alias, IAM role and policy, archive bucket, alarms and metric namespace are <Environment>-<name>-..."
+    error_message = "The KMS alias, IAM role and policy, archive bucket, alarms and metric namespace are <Environment>-vpc-<name>-..."
+  }
+
+  assert {
+    condition = (
+      aws_vpc.main.tags["Name"] == "test-vpc-services" &&
+      aws_subnet.private["10.40.0.0/18"].tags["Name"] == "test-vpc-services-private-subnet-1" &&
+      aws_subnet.public["10.40.196.0/22"].tags["Name"] == "test-vpc-services-public-subnet-2" &&
+      aws_internet_gateway.main.tags["Name"] == "test-vpc-services-igw"
+    )
+    error_message = "The VPC, subnet and internet gateway Name tags carry the instance's name: <Environment>-vpc-<name>[-...]."
+  }
+}
+
+# The default name keeps the pre-name names: <Environment>-vpc-flow-logs-...
+# and <Environment>-vpc, -igw, -private-subnet-N.
+run "default_name_keeps_the_vpc_names" {
+  command = plan
+
+  variables {
+    vpc_flow_logs_enabled = true
+    flow_logs_s3_backup   = true
+  }
+
+  assert {
+    condition = (
+      aws_iam_role.flow_logs[0].name == "test-vpc-flow-logs-role" &&
+      aws_s3_bucket.flow_logs[0].bucket == "test-vpc-flow-logs-123456789012" &&
+      aws_cloudwatch_metric_alarm.ssh_access[0].alarm_name == "test-vpc-high-ssh-access-attempts" &&
+      aws_vpc.main.tags["Name"] == "test-vpc" &&
+      aws_subnet.private["10.40.0.0/18"].tags["Name"] == "test-private-subnet-1" &&
+      aws_internet_gateway.main.tags["Name"] == "test-igw"
+    )
+    error_message = "name = \"vpc\" builds <Environment>-vpc-flow-logs-... and the <Environment>-<resource> Name tags."
   }
 }
 
@@ -153,6 +186,46 @@ run "name_must_fit_a_bucket_name" {
 
   variables {
     name = "Services_1"
+  }
+
+  expect_failures = [var.name]
+}
+
+# The archive bucket <Environment>-vpc-<name>-flow-logs-<account id> is the
+# longest built name: <Environment>-vpc-<name> may be 40 characters (63 for S3).
+run "longest_name_fits_the_bucket_and_role" {
+  command = plan
+
+  variables {
+    name                  = "abcdefghijklmnopqrstuvwxyz-abcd" # test-vpc- + 31 = 40
+    vpc_flow_logs_enabled = true
+    flow_logs_s3_backup   = true
+  }
+
+  assert {
+    condition     = length(aws_s3_bucket.flow_logs[0].bucket) == 63 && length(aws_iam_role.flow_logs[0].name) <= 64
+    error_message = "A 40-character <Environment>-vpc-<name> builds a 63-character archive bucket name."
+  }
+}
+
+run "name_too_long_for_the_bucket" {
+  command = plan
+
+  variables {
+    name = "abcdefghijklmnopqrstuvwxyz-abcde" # test-vpc- + 32 = 41
+  }
+
+  expect_failures = [var.name]
+}
+
+run "lane_environment_counts_toward_the_limit" {
+  command = plan
+
+  variables {
+    name = "services"
+    tags = {
+      Environment = "ue1-a-very-long-lane-name-here" # + -vpc-services = 43
+    }
   }
 
   expect_failures = [var.name]
