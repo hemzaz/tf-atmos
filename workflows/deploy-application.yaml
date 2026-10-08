@@ -48,6 +48,23 @@ workflows:
       # own phase, planned only after API Gateway is applied - the same
       # layering as deploy-full-stack.yaml's services (apigateway) then
       # monitoring layers.
+      # A user pool's trigger function comes before the pool, whose
+      # lambda_config reads its ARN (fnx-ue2-prod cognito/main reads
+      # lambda/cognito-user-migration): its own phase, as in deploy-full-stack
+      # (connectivity before security). A stack without one plans nothing here.
+      - name: plan-triggers
+        type: atmos
+        command: terraform plan --log-order grouped --query '.atmos_component == "lambda/cognito-user-migration"'
+      - name: confirm_triggers
+        type: confirm
+        prompt: Apply the Cognito trigger plan above (none in most stacks)?
+        default: false
+      - name: guard-triggers
+        type: shell
+        command: test "{{ .steps.confirm_triggers.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy-triggers
+        type: atmos
+        command: terraform deploy --from-plan --query '.atmos_component == "lambda/cognito-user-migration"'
       - name: plan-prerequisites
         type: atmos
         command: >-
@@ -71,7 +88,7 @@ workflows:
       # deploy-full-stack (security before compute).
       - name: plan-compute
         type: atmos
-        command: terraform plan --log-order grouped --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
+        command: terraform plan --log-order grouped --query '(.metadata.component == "lambda" and .atmos_component != "lambda/cognito-user-migration") or .metadata.component == "ecs"'
       - name: confirm_compute
         type: confirm
         prompt: Apply the Lambda and ECS plans above?
@@ -81,7 +98,7 @@ workflows:
         command: test "{{ .steps.confirm_compute.value }}" = "true" || { echo "Deployment cancelled after the second phase."; exit 1; }
       - name: deploy-compute
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
+        command: terraform deploy --from-plan --query '(.metadata.component == "lambda" and .atmos_component != "lambda/cognito-user-migration") or .metadata.component == "ecs"'
       - name: plan-api
         type: atmos
         command: terraform plan --log-order grouped --query '.metadata.component == "apigateway"'
@@ -120,13 +137,19 @@ workflows:
       # Unreviewed by design (see the header): no saved plans and no confirm. Each
       # instance is planned just before it is applied, in dependency order, so
       # apigateway sees cognito's and lambda's state.
-      # Cognito first: apigateway/main reads cognito/main .user_pool_arn.
+      # A pool's trigger function first (the pool reads its ARN), then Cognito:
+      # apigateway/main reads cognito/main .user_pool_arn.
+      - name: deploy-triggers
+        type: atmos
+        command: terraform deploy --query '.atmos_component == "lambda/cognito-user-migration"'
       - name: deploy-identity
         type: atmos
         command: terraform deploy --query '.metadata.component == "cognito"'
       - name: deploy
         type: atmos
-        command: terraform deploy --query '.metadata.component == "lambda" or .metadata.component == "apigateway"'
+        command: >-
+          terraform deploy --query '(.metadata.component == "lambda" and .atmos_component != "lambda/cognito-user-migration")
+          or .metadata.component == "apigateway"'
 
   component:
     description: Plan, confirm and deploy a single component

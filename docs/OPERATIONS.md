@@ -469,7 +469,7 @@ What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
 | `eks-backend-services/main` | `metadata.enabled: false` | deploy |
 | `apigateway/main` | SECONDARY half of `api.<domain>`'s Route 53 failover pair | automatic |
 | `rds/data`, `vpc/services`, `eks/data` | not run | restore `rds/data` from backup copies |
-| Cognito | not replicated (AWS has no cross-region user pools) | see below |
+| `cognito/main` | its own pool, filled from `fnx-ue1-prod`'s by `lambda/cognito-user-migration` on each user's first sign-in or reset | nothing (see [Auth during failover](#auth-during-failover)) |
 
 `backup/main` in `fnx-ue1-prod` copies every recovery point to `ue1-backup-replica` in us-east-2.
 Readiness: `STACK=fnx-ue1-prod atmos workflow dr-status -f disaster-recovery` (it reports both
@@ -559,11 +559,79 @@ with it, so nothing here needs Terraform. Terraform catches up after recovery (b
 7. Analytics, if needed: restore `rds/data` from `ue1-backup-replica` in us-east-2
    (`aws backup list-recovery-points-by-backup-vault --backup-vault-name ue1-backup-replica
    --region us-east-2`, then `aws backup start-restore-job`).
-8. Verify: `curl -sf https://api.<domain>/` and
+8. Auth needs no step while us-east-1's Cognito answers: users sign in again and are migrated
+   ([Auth during failover](#auth-during-failover)). If it does not, import the users not yet in
+   us-east-2 from the latest export (the bulk import there); they reset their password by email.
+9. Verify: `curl -sf https://api.<domain>/` and
    `STACK=fnx-ue2-prod atmos workflow dr-status -f disaster-recovery`.
 
-Cognito: `/api` (the only authorized route) is disabled today, so nothing fails over. When it is
-enabled, `fnx-ue2-prod`'s `apigateway/main` needs an authorizer whose pool exists in us-east-2.
+#### Auth during failover
+
+AWS has no cross-region user pools, so `fnx-ue2-prod` runs its own `cognito/main` (settings shared
+with `fnx-ue1-prod`'s through `catalog/cognito/prod`), and its `apigateway/main` authorizer uses
+that pool only (owner decision 2026-10-07). `/api`, the only authorized route, is disabled in both
+regions today; the authorizer is wired for when it returns. On failover nothing is switched:
+
+- A token issued by one pool is valid only at that region's authorizer: every user signs in again.
+- A user the us-east-2 pool does not have yet is copied in by its user-migration trigger
+  ([AWS](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-migrate-user.html)),
+  `ue2-cognito-user-migration`. On a password sign-in (`UserMigration_Authentication`) it checks the
+  password against `fnx-ue1-prod`'s pool (`AdminInitiateAuth` with its `dr-migration` client) and
+  returns the user's attributes; Cognito creates the user `CONFIRMED` with that password. On a
+  forgot-password (`UserMigration_ForgotPassword`) it reads the user (`AdminGetUser`), and Cognito
+  sends the reset code to the verified email. Its role may call only those two actions, on that
+  pool's ARN.
+- The trigger runs only for a password sign-in (`ADMIN_USER_PASSWORD_AUTH` with the `api` client,
+  which allows it in us-east-2 only) or a forgot-password, never for SRP: the backend signs in a
+  user us-east-2 does not know with `AdminInitiateAuth` `ADMIN_USER_PASSWORD_AUTH` (on
+  `UserNotFoundException` from SRP, retry that way).
+- MFA is mandatory in both pools and TOTP secrets do not migrate: a migrated user enrols an
+  authenticator again (`MFA_SETUP`) on their first us-east-2 sign-in.
+- **The limit:** the trigger needs us-east-1's Cognito to answer. During a us-east-1 outage a user
+  never migrated before it cannot sign in to us-east-2 until they are imported (below). Users
+  migrated earlier sign in normally.
+- A migrated user is a snapshot: a later password change, disable or attribute change in
+  `fnx-ue1-prod`'s pool does not reach us-east-2 (the old password keeps working there). To
+  re-sync one user, delete it in us-east-2 (`aws cognito-idp admin-delete-user --region us-east-2
+  --user-pool-id <ue2 pool id> --username <email>`); the next sign-in migrates it again.
+
+Pre-migration keeps the outage gap small. Recommended: migrate users while us-east-1 is healthy,
+either with a shadow sign-in (after each successful sign-in in us-east-1, the backend also signs
+the user in to us-east-2 with `ADMIN_USER_PASSWORD_AUTH`, which runs the trigger), or by asking
+users to sign in once against us-east-2. Compare the two pools' sizes monthly, with `dr-status`
+(`<ue1 pool id>`/`<ue2 pool id>`: `cognito/main`'s `user_pool_id` output in each stack):
+
+```bash
+aws cognito-idp describe-user-pool --region us-east-1 --user-pool-id <ue1 pool id> --query 'UserPool.EstimatedNumberOfUsers'
+aws cognito-idp describe-user-pool --region us-east-2 --user-pool-id <ue2 pool id> --query 'UserPool.EstimatedNumberOfUsers'
+```
+
+**Bulk import** (an operator step, before or during an outage) puts the users not yet migrated into
+us-east-2 with a Cognito CSV import job
+([AWS](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-using-import-tool.html)).
+Passwords cannot be exported: imported users are `RESET_REQUIRED` and reset by email before their
+first sign-in, and an imported user no longer runs the trigger (it exists). So import during an
+outage only, or for users who accept a reset. The export needs us-east-1's Cognito, so take it
+monthly with the coverage check and keep it outside us-east-1 (it is personal data: encrypted
+storage in us-east-2, access as for the database):
+
+```bash
+UE1=<ue1 pool id>; UE2=<ue2 pool id>
+# 1. Export (us-east-1 healthy): every user's attributes as JSON.
+aws cognito-idp list-users --region us-east-1 --user-pool-id "$UE1" --output json > ue1-users.json
+# 2. The CSV header us-east-2 expects; fill one row per user from ue1-users.json
+#    (email, email_verified, cognito:mfa_enabled=false, cognito:username=<email>, custom attributes).
+aws cognito-idp get-csv-header --region us-east-2 --user-pool-id "$UE2"
+# 3. Import with a role that lets Cognito write the job's CloudWatch logs
+#    (trust cognito-idp.amazonaws.com; logs:CreateLogGroup/CreateLogStream/DescribeLogStreams/PutLogEvents).
+aws cognito-idp create-user-import-job --region us-east-2 --user-pool-id "$UE2" \
+  --job-name "dr-$(date -u +%Y%m%d%H%M)" --cloud-watch-logs-role-arn <role arn>
+curl -sf --upload-file users.csv -H 'x-amz-server-side-encryption: aws:kms' "<PreSignedUrl from above>"
+aws cognito-idp start-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
+aws cognito-idp describe-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
+```
+
+Leave out users already in us-east-2 (`list-users` there): an existing username fails its row.
 
 **Reconcile Terraform** once the state bucket answers again (us-east-2 still primary). Each PR's
 plan is read before merging; re-enable CD for these merges only (`gh workflow enable
@@ -637,7 +705,15 @@ explicit `-replace` from an operator, not a merge:
 6. Back to warm: a PR reverting reconciliation steps 2 and 3, and the desired sizes Terraform
    ignores by CLI (`update-nodegroup-config ... --scaling-config minSize=2,desiredSize=2,maxSize=12`
    for `workers`, `0/0/<max>` for the others).
-7. Re-enable CD: `gh workflow enable terraform-cd.yml`.
+7. Auth: once DNS is back on us-east-1, users sign in to `fnx-ue1-prod`'s pool again (us-east-2
+   tokens are not valid there). Nothing flows back from us-east-2: a password a user changed or
+   reset there is not us-east-1's, so they reset it again in us-east-1 (forgot-password), and a
+   user an administrator created in us-east-2 is created again in us-east-1. List them with
+   `aws cognito-idp list-users --region us-east-2 --user-pool-id <ue2 pool id> --filter
+   'cognito:user_status = "RESET_REQUIRED"'` and by `UserCreateDate` after the failover. The
+   us-east-2 users stay (pre-migrated for the next failover); delete any whose us-east-1 password
+   was reset since, so they migrate again ([Auth during failover](#auth-during-failover)).
+8. Re-enable CD: `gh workflow enable terraform-cd.yml`.
 
 ## Deploys green, does not serve
 

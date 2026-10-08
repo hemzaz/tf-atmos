@@ -825,6 +825,11 @@ def resolve_ref(s, var, resolver, warnings=None):
                             resolver.keys(stack, instance, output)) if known(shape) else None
         if value is None:
             return done('fallback', None)
+        # A stack's outputs are in its own region: fnx-ue2-prod's cognito/main
+        # validates that its trigger's function_arn is in us-east-2 (B1d).
+        region = (target.get('vars') or {}).get('region')
+        if isinstance(region, str) and REGION.match(region):
+            value = in_region(value, region)
         doc[output] = value
         if shape[0] == 'map':
             maps.append(output)
@@ -1147,6 +1152,8 @@ def self_test(components_dir, tmp):
         # A component that is not in components/terraform: an absolute
         # component path wins the os.path.join in Resolver.component.
         'fake/main': {'component': os.path.join(tmp, 'fake'), 'vars': {}},
+        # An instance's outputs are in its own region (B1d).
+        'lambda/ue2': {'component': 'lambda', 'vars': {'region': 'us-east-2'}},
     }}}}
     os.makedirs(os.path.join(tmp, 'fake'), exist_ok=True)
     with open(os.path.join(tmp, 'fake', 'main.tf'), 'w') as fh:
@@ -1275,6 +1282,9 @@ def self_test(components_dir, tmp):
     check('region-keyed map leaf is in its region',
           synth_value(MAP(OBJ({'key_arn': SCALAR})), ['replica_keys'], ['us-east-2'])['us-east-2']['key_arn'],
           'arn:aws:kms:us-east-2:123456789012:key/12345678-1234-1234-1234-123456789012')
+    check('an output is in its instance region',
+          resolve_ref('!terraform.state lambda/ue2 .function_arn', 'user_migration', res),
+          ('shaped', 'arn:aws:lambda:us-east-2:123456789012:function:example-function'))
     dns = res.component('dns')
     check('dns zone_ids shape', shape_of(dns.outputs.get('zone_ids', ''), Ctx(dns)), MAP(SCALAR))
     # acm's zone_id is validated ^Z[A-Z0-9]{1,32}$: the synthetic leaf must match.

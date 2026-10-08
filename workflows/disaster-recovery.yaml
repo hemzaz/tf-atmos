@@ -72,7 +72,9 @@ workflows:
           6. Deploy eks-backend-services/main in-VPC from a branch: enabled, database_secret_arn set to
              MasterUserSecret.SecretArn of ue2-prod-main-db, database_name productionapp; with the bucket down,
              TFSTATE_SOURCE=replica for its reads and local state for its own (migrate later).
-          7. Verify: `curl -sf https://api.<domain>/`, then dr-status for fnx-ue2-prod.
+          7. Auth: nothing while us-east-1 Cognito answers (users sign in again; ue2-cognito-user-migration
+             copies them). If it does not, bulk-import the users not yet in fnx-ue2-prod's pool from the latest export.
+          8. Verify: `curl -sf https://api.<domain>/`, then dr-status for fnx-ue2-prod.
           After recovery, reconcile Terraform: fnx-ue2-prod rds/main without replicate_source_db (plan must be
           update-in-place, never a replacement), eks/main sizes, eks-backend-services/main enabled; apply no
           elasticache/main until failback.
@@ -113,7 +115,9 @@ workflows:
           5. Re-seed fnx-ue2-prod rds/main from us-east-1 the same way (deletion protection, final snapshot,
              replicate_source_db restored, `-replace=aws_db_instance.main` on fnx-ue2-prod).
           6. fnx-ue2-prod back to warm sizes (PR + desired sizes by CLI), eks-backend-services/main disabled.
-          7. `gh workflow enable terraform-cd.yml`.
+          7. Auth: users sign in to fnx-ue1-prod again; passwords changed in us-east-2 and users created there
+             do not flow back (reset in us-east-1, create again).
+          8. `gh workflow enable terraform-cd.yml`.
 
   recover-state:
     description: List Terraform state object versions available for recovery

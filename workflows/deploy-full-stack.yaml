@@ -23,6 +23,8 @@
 # does apigateway-account (security: the account's CloudWatch role REST stage
 # logging needs; apigateway lists it in dependencies.components only), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
+# lambda/cognito-user-migration (connectivity: it reads only fnx-ue1-prod) precedes
+# fnx-ue2-prod cognito/main (security), whose lambda_config reads its ARN.
 # network/main writes the NS record delegating network/services' zone from
 # its own zone_name_servers, so network/services has a dns-zones layer before
 # dns. acm validates its certificates in the dns instances' zones (zone_ids), so it
@@ -170,7 +172,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "securitygroup" or .metadata.component == "network"
-          or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
+          or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"
+          or .atmos_component == "lambda/cognito-user-migration"'
       - name: confirm_connectivity
         type: confirm
         prompt: Apply the connectivity layer plan above?
@@ -182,7 +185,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "securitygroup"
-          or .metadata.component == "network" or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
+          or .metadata.component == "network" or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"
+          or .atmos_component == "lambda/cognito-user-migration"'
       - name: plan-security
         type: atmos
         command: >-
@@ -226,7 +230,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null
+          and .atmos_component != "lambda/cognito-user-migration") or .metadata.component == "glue"
           or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm_compute
         type: confirm
@@ -239,7 +244,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null
+          and .atmos_component != "lambda/cognito-user-migration") or .metadata.component == "glue"
           or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: plan-platform
         type: atmos
@@ -504,7 +510,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "vpc"'
 
   deploy-connectivity:
-    description: "Deploy the connectivity layer: security groups, VPC peering and bastion hosts (they read the VPCs)"
+    description: "Deploy the connectivity layer: security groups, VPC peering, bastion hosts (they read the VPCs) and Cognito trigger functions (the pools read them)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -512,7 +518,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "securitygroup" or .metadata.component == "network"
-          or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
+          or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"
+          or .atmos_component == "lambda/cognito-user-migration"'
       - name: confirm
         type: confirm
         prompt: Deploy the connectivity layer?
@@ -524,7 +531,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "securitygroup"
-          or .metadata.component == "network" or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
+          or .metadata.component == "network" or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"
+          or .atmos_component == "lambda/cognito-user-migration"'
 
   deploy-security:
     description: "Deploy the security layer: secrets, GuardDuty, Security Hub, Inspector, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
@@ -584,7 +592,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null
+          and .atmos_component != "lambda/cognito-user-migration") or .metadata.component == "glue"
           or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm
         type: confirm
@@ -597,7 +606,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null
+          and .atmos_component != "lambda/cognito-user-migration") or .metadata.component == "glue"
           or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
 
   deploy-platform:
