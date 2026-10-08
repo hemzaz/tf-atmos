@@ -12,7 +12,9 @@ locals {
   # Cloud Posse context name does, so two vpc instances of one stack (vpc/main,
   # vpc/services) do not create the same ones. Names scoped to this VPC or its
   # log group (security groups, metric filters) keep the Environment alone.
-  flow_logs_name_prefix = "${var.tags["Environment"]}-${var.name}"
+  # The id is in vpc.tf: <Environment>-vpc-<name>, or <Environment>-vpc for the
+  # default name.
+  flow_logs_name_prefix = local.id
   # The metric filters publish without dimensions, so each instance gets its
   # own namespace: a shared one would sum every VPC's traffic in the account
   # into one metric, and each instance's alarms would fire on the others'.

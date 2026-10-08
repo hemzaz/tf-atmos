@@ -282,6 +282,15 @@ variable "name" {
     condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.name))
     error_message = "name must be lowercase letters, digits and hyphens, not starting or ending with a hyphen (it is part of an S3 bucket name)."
   }
+
+  # The longest built names start with the id <Environment>-vpc-<name>
+  # (<Environment>-vpc for the default name, vpc.tf): the archive bucket
+  # <id>-flow-logs-<12-digit account> (S3: at most 63, so the id at most 40)
+  # and the IAM role <id>-flow-logs-role (at most 64, so at most 49).
+  validation {
+    condition     = length(var.name == "vpc" ? "${lookup(var.tags, "Environment", "")}-vpc" : "${lookup(var.tags, "Environment", "")}-vpc-${var.name}") <= 40
+    error_message = "<tags.Environment>-vpc-<name> must be at most 40 characters: it starts the flow-logs archive bucket <Environment>-vpc-<name>-flow-logs-<account id> (S3: at most 63)."
+  }
 }
 
 variable "tags" {

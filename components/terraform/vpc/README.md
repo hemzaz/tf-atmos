@@ -19,11 +19,14 @@ names follow Cloud Posse `aws-vpc` where an input maps one to one.
   would create a stray real instance).
 - `tags` must carry a non-empty `Environment`: it is used in resource names.
 - `name` (Cloud Posse's context name; `vpc/defaults` sets the instance's last path segment, `main`
-  for `vpc/main`) goes into the account- and region-unique names: the flow-logs KMS alias, IAM role
-  and policy, alarms, metric namespace (`VPC/FlowLogs/<Environment>-<name>`) and archive bucket. So
-  `vpc/main` and `vpc/services` of one stack create distinct ones (`check-lane-names.py` fails two
-  instances of a component in one stack that set the same name inputs). Names scoped to the VPC or
-  its log group keep `<Environment>` alone.
+  for `vpc/main`) makes the id `<Environment>-vpc-<name>` (`<Environment>-vpc` for the default
+  `vpc`). The id starts the account- and region-unique names: the flow-logs KMS alias, IAM role and
+  policy, alarms, metric namespace (`VPC/FlowLogs/<id>`) and archive bucket. So `vpc/main` and
+  `vpc/services` of one stack create distinct ones (`check-lane-names.py` fails two instances of a
+  component in one stack that set the same `name`). It also names the VPC and starts the subnet
+  and internet gateway Name tags (`ue1-vpc-main-private-subnet-1`); other names scoped to the VPC
+  or its log group keep `<Environment>` alone. The id is at most 40 characters: the archive bucket
+  `<id>-flow-logs-<account id>` must fit S3's 63.
 - Set exactly one of `availability_zone_ids` and `availability_zones`. The AWS stacks use IDs
   (`use1-az1`, `use1-az2`, `use1-az4`): in us-east-1 each account maps the names a/b/c to its own
   physical zones, and EKS rejects a cluster subnet in `use1-az3`, so a name could land there.

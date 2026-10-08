@@ -214,10 +214,10 @@ workflows:
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_lane_names.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          LANE_NAMES_STACKS_JSON="$stacks_json" python3 -m unittest workflows/scripts/common/test_check_lane_names.py
           python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
       # The templates/stacks samples, copied in as the lanes their headers name,
       # resolve and pass the stack checks beside the real stacks (plan-sweep

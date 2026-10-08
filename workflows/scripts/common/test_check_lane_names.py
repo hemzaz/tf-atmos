@@ -1,6 +1,8 @@
 """Tests for check-lane-names.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
 
 import importlib.util
+import json
+import os
 import pathlib
 import unittest
 
@@ -170,6 +172,41 @@ class GroupTest(unittest.TestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("in account shared, us-east-1", errors[0])
 
+    def test_stack_without_account_or_region_fails(self):
+        no_account = instance("ue1-perf", "perf")
+        no_account["settings"]["environment"] = {}
+        no_region = instance("ue1-qa", stage="qa")
+        del no_region["vars"]["region"]
+        abstract_only = instance("ue1-x")
+        abstract_only["metadata"] = {"type": "abstract"}
+        del abstract_only["vars"]["region"]
+        errors = self.errors({
+            "fnx-ue1-dev": stack(**{"kms/main": instance("ue1")}),
+            "fnx-ue1-dev-perf": stack(**{"kms/main": no_account}),
+            "fnx-ue1-qa": stack(**{"kms/main": no_region}),
+            "fnx-ue1-x": stack(**{"kms/defaults": abstract_only}),
+        })
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("fnx-ue1-dev-perf: no deployable instance sets both settings.environment.account and "
+                      "vars.region", errors[0])
+        self.assertIn("fnx-ue1-qa: no deployable instance", errors[1])
+
+    def test_dr_region_sharing_an_iam_environment_fails(self):
+        # backup builds <Environment>-backup-service-role: one IAM role in the account.
+        errors = self.errors({
+            "fnx-ue1-prod": stack(**{"backup/main": instance("ue1", component="backup", stage="prod")}),
+            "fnx-ue2-prod": stack(**{"backup/main": instance(
+                "ue1", component="backup", stage="prod", region="us-east-2")}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("fnx-ue2-prod: backup/main (us-east-2) and fnx-ue1-prod: backup/main (us-east-1) both use "
+                      "tags.Environment 'ue1' in account prod", errors[0])
+        self.assertEqual(self.errors({
+            "fnx-ue1-prod": stack(**{"backup/main": instance("ue1", component="backup", stage="prod")}),
+            "fnx-ue2-prod": stack(**{"backup/main": instance(
+                "ue2", component="backup", stage="prod", region="us-east-2")}),
+        }), [])
+
     def test_abstract_and_disabled_instances_are_skipped(self):
         abstract = instance("ue1")
         abstract["metadata"] = {"type": "abstract"}
@@ -203,6 +240,45 @@ class InstanceTest(unittest.TestCase):
             "acm/main": instance("ue1", component="acm", stage="prod", dns_domains=["a.example.com"]),
             "acm/services": instance("ue1", component="acm", stage="prod", dns_domains=["b.example.com"]),
         })}), [])
+
+    def test_same_name_with_other_differences_fails(self):
+        # availability_zones differs, but both build <Environment>-vpc-main-flow-logs-role.
+        errors = self.errors({"fnx-ue1-prod": stack(**{
+            "vpc/main": instance("ue1", component="vpc", stage="prod", name="main",
+                                 availability_zones=["us-east-1a"]),
+            "vpc/other": instance("ue1", component="vpc", stage="prod", name="main",
+                                  availability_zones=["us-east-1b"]),
+        })})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn('fnx-ue1-prod: vpc/main, vpc/other (vpc) set the same name "main"', errors[0])
+
+    def test_same_identifier_with_another_db_name_fails(self):
+        errors = self.errors({"fnx-ue1-prod": stack(**{
+            "rds/main": instance("ue1", component="rds", stage="prod", identifier="orders", db_name="orders"),
+            "rds/data": instance("ue1", component="rds", stage="prod", identifier="orders", db_name="reports"),
+        })})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn('rds/data, rds/main (rds) set the same identifier "orders"', errors[0])
+
+    def test_instances_without_primary_keys_compare_all_name_inputs(self):
+        # iam/ci and iam/dev share policy_name but differ in ci_role_name_prefix.
+        self.assertEqual(self.errors({"fnx-ue1-dev": stack(**{
+            "iam/ci": instance("ue1", component="iam", policy_name="p", ci_role_name_prefix="fnx-ue1-dev-ci",
+                               create_cross_account_role=False),
+            "iam/dev": instance("ue1", component="iam", policy_name="p"),
+        })}), [])
+
+
+class RealStacksTest(unittest.TestCase):
+    """No false positives on the repository's stacks: the lint step check-lane-names sets
+    $LANE_NAMES_STACKS_JSON to its `atmos describe stacks` JSON."""
+
+    def test_real_stacks_pass(self):
+        path = os.environ.get("LANE_NAMES_STACKS_JSON")
+        if not path:
+            self.skipTest("set LANE_NAMES_STACKS_JSON to an `atmos describe stacks` JSON file")
+        with open(path, encoding="utf-8") as handle:
+            self.assertEqual(check_lane_names.check(json.load(handle)), [])
 
 
 class GlobalTest(unittest.TestCase):
