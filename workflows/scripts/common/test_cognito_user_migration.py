@@ -67,12 +67,12 @@ class CognitoUserMigrationTest(unittest.TestCase):
         with mock.patch.object(handler, "source_client", return_value=client):
             return handler.lambda_handler(evt, None)
 
-    def test_sign_in_migrates_a_confirmed_user(self):
+    def test_sign_in_migrates_a_confirmed_user_as_reset_required(self):
         client = FakeCognito(auth={"AuthenticationResult": {"AccessToken": "x"}}, user=confirmed_user())
         response = self.run_handler(client, event("UserMigration_Authentication"))["response"]
         self.assertEqual(response["userAttributes"],
                          {"email": "user@example.com", "email_verified": "true", "custom:tenant_id": "t1"})
-        self.assertEqual(response["finalUserStatus"], "CONFIRMED")
+        self.assertEqual(response["finalUserStatus"], "RESET_REQUIRED")
         self.assertEqual(response["messageAction"], "SUPPRESS")
         name, auth = client.calls[0]
         self.assertEqual(name, "admin_initiate_auth")
@@ -80,10 +80,32 @@ class CognitoUserMigrationTest(unittest.TestCase):
                                 "AuthFlow": "ADMIN_USER_PASSWORD_AUTH",
                                 "AuthParameters": {"USERNAME": "user@example.com", "PASSWORD": "Correct-Horse-1"}})
 
-    def test_an_mfa_challenge_means_the_password_was_right(self):
+    def test_an_mfa_challenge_means_the_password_was_right_but_the_user_must_reset(self):
         client = FakeCognito(auth={"ChallengeName": "SOFTWARE_TOKEN_MFA", "Session": "s"}, user=confirmed_user())
         response = self.run_handler(client, event("UserMigration_Authentication"))["response"]
-        self.assertEqual(response["finalUserStatus"], "CONFIRMED")
+        self.assertEqual(response["finalUserStatus"], "RESET_REQUIRED")
+
+    def test_no_path_ever_returns_confirmed(self):
+        for challenge in sorted(handler.PASSWORD_ACCEPTED_CHALLENGES) + [None]:
+            auth = {"AuthenticationResult": {}} if challenge is None else {"ChallengeName": challenge}
+            response = self.run_handler(FakeCognito(auth=auth, user=confirmed_user()),
+                                        event("UserMigration_Authentication"))["response"]
+            self.assertNotEqual(response.get("finalUserStatus"), "CONFIRMED", challenge)
+        response = self.run_handler(FakeCognito(user=confirmed_user()), event("UserMigration_ForgotPassword"))["response"]
+        self.assertNotEqual(response.get("finalUserStatus"), "CONFIRMED")
+
+    def test_sign_in_needs_a_verified_contact(self):
+        unverified = [a for a in ATTRIBUTES if a["Name"] != "email_verified"]
+        client = FakeCognito(auth={"AuthenticationResult": {}}, user=confirmed_user(UserAttributes=unverified))
+        with self.assertRaisesRegex(handler.MigrationError, "verified"):
+            self.run_handler(client, event("UserMigration_Authentication"))
+
+    def test_a_verified_phone_alone_is_enough(self):
+        attrs = [a for a in ATTRIBUTES if a["Name"] != "email_verified"] + [
+            {"Name": "phone_number_verified", "Value": "true"}]
+        client = FakeCognito(auth={"AuthenticationResult": {}}, user=confirmed_user(UserAttributes=attrs))
+        response = self.run_handler(client, event("UserMigration_Authentication"))["response"]
+        self.assertEqual(response["finalUserStatus"], "RESET_REQUIRED")
 
     def test_a_wrong_password_is_not_migrated(self):
         client = FakeCognito(auth_error=ClientError("NotAuthorizedException"))

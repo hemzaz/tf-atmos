@@ -577,7 +577,8 @@ regions today; the authorizer is wired for when it returns. On failover nothing 
   ([AWS](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-migrate-user.html)),
   `ue2-cognito-user-migration`. On a password sign-in (`UserMigration_Authentication`) it checks the
   password against `fnx-ue1-prod`'s pool (`AdminInitiateAuth` with its `dr-migration` client) and
-  returns the user's attributes; Cognito creates the user `CONFIRMED` with that password. On a
+  returns the user's attributes; Cognito creates the user `RESET_REQUIRED` (never `CONFIRMED`), and
+  only for a user with a verified email or phone. On a
   forgot-password (`UserMigration_ForgotPassword`) it reads the user (`AdminGetUser`), and Cognito
   sends the reset code to the verified email. Its role may call only those two actions, on that
   pool's ARN.
@@ -585,8 +586,12 @@ regions today; the authorizer is wired for when it returns. On failover nothing 
   which allows it in us-east-2 only) or a forgot-password, never for SRP: the backend signs in a
   user us-east-2 does not know with `AdminInitiateAuth` `ADMIN_USER_PASSWORD_AUTH` (on
   `UserNotFoundException` from SRP, retry that way).
-- MFA is mandatory in both pools and TOTP secrets do not migrate: a migrated user enrols an
-  authenticator again (`MFA_SETUP`) on their first us-east-2 sign-in.
+- MFA is mandatory in both pools and TOTP secrets do not migrate. A `CONFIRMED` user would get
+  `MFA_SETUP` on first sign-in, so anyone with only the password could enrol their own
+  authenticator. A migrated user is therefore reset first: the first us-east-2 sign-in fails with
+  `PasswordResetRequiredException`, the user finishes forgot-password with the code sent to the
+  verified contact, and only then enrols an authenticator (`MFA_SETUP`). The app must handle
+  `PasswordResetRequiredException` during failover (send the user to forgot-password).
 - **The limit:** the trigger needs us-east-1's Cognito to answer. During a us-east-1 outage a user
   never migrated before it cannot sign in to us-east-2 until they are imported (below). Users
   migrated earlier sign in normally.
@@ -595,10 +600,8 @@ regions today; the authorizer is wired for when it returns. On failover nothing 
   re-sync one user, delete it in us-east-2 (`aws cognito-idp admin-delete-user --region us-east-2
   --user-pool-id <ue2 pool id> --username <email>`); the next sign-in migrates it again.
 
-Pre-migration keeps the outage gap small. Recommended: migrate users while us-east-1 is healthy,
-either with a shadow sign-in (after each successful sign-in in us-east-1, the backend also signs
-the user in to us-east-2 with `ADMIN_USER_PASSWORD_AUTH`, which runs the trigger), or by asking
-users to sign in once against us-east-2. Compare the two pools' sizes monthly, with `dr-status`
+Do not pre-migrate users with a shadow sign-in: each would sit in us-east-2 with no MFA device until
+a reset. Compare the two pools' sizes monthly, with `dr-status`
 (`<ue1 pool id>`/`<ue2 pool id>`: `cognito/main`'s `user_pool_id` output in each stack):
 
 ```bash

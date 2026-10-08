@@ -7,10 +7,18 @@ the user here (https://docs.aws.amazon.com/cognito/latest/developerguide/user-po
 
   UserMigration_Authentication  AdminInitiateAuth (ADMIN_USER_PASSWORD_AUTH) on the
                                 source pool verifies the password, AdminGetUser reads
-                                the attributes; the user is created CONFIRMED with
-                                that password.
+                                the attributes; the user is created RESET_REQUIRED,
+                                never CONFIRMED, and needs a verified email or phone.
   UserMigration_ForgotPassword  AdminGetUser only (Cognito sends no password); the
                                 user needs a verified email or phone for the code.
+
+Why RESET_REQUIRED: this pool's only MFA type is software token and TOTP secrets
+do not migrate, so a CONFIRMED user's first sign-in gets MFA_SETUP, and anyone
+holding only the password (an MFA challenge in the source pool already counts as
+proof of it) could enrol their own authenticator: an MFA bypass and account
+takeover. RESET_REQUIRED makes the first sign-in fail with
+PasswordResetRequiredException; the user finishes forgot-password with a code sent
+to the verified contact, and only then reaches MFA_SETUP.
 
 It only works while the source pool answers: a user never migrated before a
 us-east-1 outage cannot sign in here during it (docs/OPERATIONS.md, "Disaster
@@ -27,7 +35,8 @@ LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)
 
 # A sign-in with these challenges got past the password check (MFA comes after
-# it). TOTP secrets do not migrate: the user enrols MFA again in this pool.
+# it). Proof of the password only, never of the second factor: see "Why
+# RESET_REQUIRED" above.
 PASSWORD_ACCEPTED_CHALLENGES = frozenset(
     {"SOFTWARE_TOKEN_MFA", "SMS_MFA", "EMAIL_OTP", "MFA_SETUP", "SELECT_MFA_TYPE"}
 )
@@ -95,6 +104,12 @@ def source_user(client, username: str, statuses: frozenset) -> dict:
     return {a["Name"]: a["Value"] for a in user.get("UserAttributes", []) if a["Name"] not in NOT_COPIED}
 
 
+def require_verified_contact(attributes: dict) -> None:
+    """The reset code goes to a verified email or phone; without one the user cannot finish."""
+    if "true" not in (attributes.get("email_verified"), attributes.get("phone_number_verified")):
+        raise MigrationError("source user has no verified email or phone for the reset code")
+
+
 def lambda_handler(event, context):
     trigger = event.get("triggerSource")
     username = event["userName"]
@@ -103,13 +118,13 @@ def lambda_handler(event, context):
         if trigger == "UserMigration_Authentication":
             verify_password(client, username, event["request"]["password"])
             attributes = source_user(client, username, SIGN_IN_STATUSES)
+            require_verified_contact(attributes)
             event["response"].update(
-                userAttributes=attributes, finalUserStatus="CONFIRMED", messageAction="SUPPRESS"
+                userAttributes=attributes, finalUserStatus="RESET_REQUIRED", messageAction="SUPPRESS"
             )
         elif trigger == "UserMigration_ForgotPassword":
             attributes = source_user(client, username, FORGOT_PASSWORD_STATUSES)
-            if "true" not in (attributes.get("email_verified"), attributes.get("phone_number_verified")):
-                raise MigrationError("source user has no verified email or phone for the reset code")
+            require_verified_contact(attributes)
             event["response"].update(userAttributes=attributes, messageAction="SUPPRESS")
         else:
             raise MigrationError(f"unsupported trigger {trigger}")

@@ -73,7 +73,7 @@ workflows:
              MasterUserSecret.SecretArn of ue2-prod-main-db, database_name productionapp; with the bucket down,
              TFSTATE_SOURCE=replica for its reads and local state for its own (migrate later).
           7. Auth: nothing while us-east-1 Cognito answers (users sign in again; ue2-cognito-user-migration
-             copies them). If it does not, bulk-import the users not yet in fnx-ue2-prod's pool from the latest export.
+             copies them as RESET_REQUIRED: forgot-password, then MFA enrolment). If it does not, bulk-import the users not yet in fnx-ue2-prod's pool from the latest export.
           8. Verify: `curl -sf https://api.<domain>/`, then dr-status for fnx-ue2-prod.
           After recovery, reconcile Terraform: fnx-ue2-prod rds/main without replicate_source_db (plan must be
           update-in-place, never a replacement), eks/main sizes, eks-backend-services/main enabled; apply no
