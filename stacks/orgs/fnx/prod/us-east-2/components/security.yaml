@@ -50,6 +50,11 @@ components:
         github_oidc_create_provider: false
         github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        # This stack's runner pools (github-runners' <Environment>-<name>):
+        # only the apply role may execute their +1 start policies, nothing else
+        # (iam ci-runner-pools.tf; check-cluster-api-ci.py checks the list).
+        ci_runner_pool_names:
+          - "{{ .settings.prefix }}-github-runners"
         ci_apply_role_enabled: true
         ci_apply_role_trusted_github_repos:
           - "hemzaz/tf-atmos:master"
