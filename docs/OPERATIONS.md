@@ -346,7 +346,8 @@ importing stack (each template's ENVIRONMENT-SPECIFIC OVERRIDES). `check-prod-pr
 `lint` and `validate-all`) fails a stage `prod` rds instance that is not `environment: prod`,
 Multi-AZ, deletion-protected (`deletion_protection`, `prevent_destroy`), without a final snapshot
 or with under 7 days of backups, and a prod elasticache instance without failover across AZs (at
-least 2 nodes) or with under 7 days of snapshots. Unset values count as the component's defaults.
+least 2 nodes) or with under 7 days of snapshots, and a prod cognito pool without
+`deletion_protection`. Unset values count as the component's defaults.
 
 ## Lambda packages
 

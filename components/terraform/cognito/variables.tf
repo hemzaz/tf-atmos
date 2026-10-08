@@ -328,3 +328,40 @@ variable "email_configuration" {
     error_message = "email_configuration.from_email_address only applies with email_sending_account DEVELOPER."
   }
 }
+
+# Cloud Posse aws-cognito's lambda_config trigger keys, as one typed object
+# instead of its lambda_config (any) plus one lambda_config_* variable per key.
+# Not ported: kms_key_id, custom_email_sender and custom_sms_sender (the custom
+# sender triggers), which nothing here uses.
+variable "lambda_config" {
+  type = object({
+    create_auth_challenge          = optional(string)
+    custom_message                 = optional(string)
+    define_auth_challenge          = optional(string)
+    post_authentication            = optional(string)
+    post_confirmation              = optional(string)
+    pre_authentication             = optional(string)
+    pre_sign_up                    = optional(string)
+    pre_token_generation           = optional(string)
+    user_migration                 = optional(string)
+    verify_auth_challenge_response = optional(string)
+  })
+  description = "Lambda triggers of the pool, each a function ARN in the pool's region (Cloud Posse aws-cognito's lambda_config keys). Unset or \"\" means no trigger. The component grants cognito-idp.amazonaws.com lambda:InvokeFunction on each function, scoped to this pool's ARN"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition = alltrue([
+      for arn in values(var.lambda_config) : try(length(arn), 0) == 0 || can(regex("^arn:aws[a-z-]*:lambda:[a-z0-9-]+:[0-9]{12}:function:[A-Za-z0-9_-]+$", arn))
+    ])
+    error_message = "lambda_config values must be unqualified Lambda function ARNs (arn:aws:lambda:<region>:<account>:function:<name>)."
+  }
+
+  # Cognito invokes a trigger in the pool's own region only.
+  validation {
+    condition = alltrue([
+      for arn in values(var.lambda_config) : try(length(arn), 0) == 0 || try(split(":", arn)[3], "") == var.region
+    ])
+    error_message = "lambda_config functions must be in the pool's region (var.region): Cognito invokes triggers in its own region only."
+  }
+}
