@@ -16,7 +16,6 @@ components:
         component: backend
         type: abstract
       vars:
-        tenant: "{{ .settings.context.tenant }}"
         account_id: "{{ .settings.environment.account_id }}"
         # The bucket and role names come from settings.tfstate
         # (stacks/orgs/fnx/_defaults.yaml), the same values every stack's

@@ -98,7 +98,6 @@ mock_provider "aws" {
 # The patterns are the ones backend/main renders in stacks/orgs/fnx/root/us-east-1.yaml.
 variables {
   region      = "us-east-1"
-  tenant      = "fnx"
   account_id  = "111111111111"
   bucket_name = "fnx-terraform-state"
   access_roles = {

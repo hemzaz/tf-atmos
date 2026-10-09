@@ -1,10 +1,4 @@
 # Core backend configuration variables
-variable "tenant" {
-  type        = string
-  description = "Tenant name for resource naming"
-  default     = "" # Will be set by Atmos
-}
-
 variable "account_id" {
   type        = string
   description = "AWS Account ID for resource policies"
