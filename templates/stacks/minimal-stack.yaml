@@ -63,8 +63,8 @@ components:
         ci_apply_policy_arns:
           - "arn:aws:iam::aws:policy/AdministratorAccess"
         ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
-        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-role"
         ci_apply_kms_key_aliases:
           - "alias/{{ .settings.prefix }}-main"
         lambda_uploader_trusted_github_repos: []
@@ -72,7 +72,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-root
+            stack: "{{ .settings.tfstate.stack }}"
           - component: iam/ci
             stack: fnx-ue1-dev
 

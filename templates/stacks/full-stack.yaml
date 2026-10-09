@@ -122,8 +122,8 @@ components:
         ci_plan_role_subjects:
           - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
         ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
-        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-role"
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
         ci_apply_kms_key_aliases:
           - "alias/{{ .settings.prefix }}-main"
         lambda_uploader_trusted_github_repos: []
@@ -131,7 +131,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-root
+            stack: "{{ .settings.tfstate.stack }}"
           - component: iam/ci
             stack: fnx-ue1-prod
 
