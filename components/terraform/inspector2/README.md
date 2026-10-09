@@ -7,8 +7,9 @@ resource scanned.
 
 ## Wiring
 
-- Instance: `inspector2/main` in the three AWS stacks, `enabled: false` from
-  `stacks/catalog/inspector2/defaults.yaml`. A stack opts in by setting `enabled: true` on it.
+- Instance: `inspector2/main` in the three AWS stacks, `fnx-ue2-prod` and `fnx-ew1-prod`,
+  `enabled: false` from `stacks/catalog/inspector2/defaults.yaml`. A stack opts in by setting
+  `enabled: true` on it.
 - Deploys in the `security` layer of `workflows/deploy-full-stack.yaml`.
 - Used by: `security-monitoring` (`.account_id` as `inspector2_account_id`). The output is null
   while the component is disabled, which keeps security-monitoring's Inspector finding route off;

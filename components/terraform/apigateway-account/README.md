@@ -9,8 +9,8 @@ managed policy instead of Cloud Posse's inline `logs:*` grant.
 
 ## Wiring
 
-- Instance: `apigateway-account/main` in the three AWS stacks (`components/security.yaml`),
-  deployed in the `security` layer, before `services`.
+- Instance: `apigateway-account/main` in the three AWS stacks, `fnx-ue2-prod` and `fnx-ew1-prod`
+  (`components/security.yaml`), deployed in the `security` layer, before `services`.
 - Used by: `apigateway/main` and `apigateway/data` list it in `dependencies.components` (ordering
   only; they read no output). Templates that create a REST API with logging need it in the stack.
 

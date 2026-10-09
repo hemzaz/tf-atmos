@@ -238,6 +238,11 @@ def notices() -> list:
         Finding("notice", "repository", "", "the GitHub App's private key in each account's SSM, and "
                 "\"Require approval for all outside collaborators\" on (self-hosted runners, public repository)",
                 "GitHub App"),
+        Finding("notice", "repository", "", "each stack's monthly budget (settings.environment.monitoring."
+                "budget_monthly_limit) is a placeholder copy until the owner sets it", "Budgets"),
+        Finding("notice", "repository", "", "the Environment cost-allocation tag activated in the payer "
+                "(management) account's Billing console, or every budget filter matches nothing",
+                "Cost-allocation tags"),
     ]
 
 

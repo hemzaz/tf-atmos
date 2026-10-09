@@ -15,7 +15,9 @@ deployable instance:
     settings.depends_on (unused here and retired by Atmos; dependencies.components is
     the one dependency list);
   - if a dns instance, turns on enable_query_logging for no zone: Route 53 public
-    query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf).
+    query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
+  - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
+    each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions.
 EXEMPTIONS lists the (instance pattern, field) pairs that may name one non-EU region.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
@@ -158,8 +160,14 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
         errors.append(f"{where} is in a GDPR-scoped stack but its tags.Compliance does not contain {GDPR!r}")
     if (instance.get("settings") or {}).get("depends_on"):
         errors.append(f"{where} sets settings.depends_on: list dependencies in dependencies.components")
-    if ((instance.get("metadata") or {}).get("component") or name) == "dns":
+    component = (instance.get("metadata") or {}).get("component") or name
+    if component == "dns":
         errors += query_logging_errors(where, (instance.get("vars") or {}).get("zones"))
+    if component == "security-monitoring" and flag_on((instance.get("vars") or {}).get("enable_alert_enrichment")):
+        errors.append(
+            f"{where} sets enable_alert_enrichment: its Lambda sends findings to Slack/PagerDuty, "
+            "outside the EU"
+        )
     for dep in (instance.get("dependencies") or {}).get("components") or []:
         if not isinstance(dep, dict):
             errors.append(f"{where} dependencies.components entry {dep!r} is not a {{component, stack}} map")

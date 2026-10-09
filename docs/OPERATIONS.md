@@ -14,8 +14,10 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
-| Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it |
-| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml`; each address must confirm its SNS subscription |
+| Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names) |
+| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml` (`settings.environment.monitoring`, which `backup/main`'s `notification_emails` and `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach them only through `security-monitoring/main`'s topic, whose `security_email_subscriptions` is empty |
+| Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in `components/globals.yaml` (dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s) |
+| Cost-allocation tags | the `Environment` tag activated as a cost-allocation tag in the payer (management) account's Billing console; until then every budget's `Environment` filter matches nothing and the budget never alerts |
 | Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main`: unset, so its CloudWatch alarms have no action |
 | Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on each stack's `iam/ci` (`components/security.yaml`), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
@@ -49,7 +51,8 @@ the following, naming the stack, the key and the row above:
 - an EU (GDPR-scoped) stack sharing an account with a US one (`prod-eu` equal to `prod`).
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
-packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval) as notices. The `local` and `fixtures` stacks are exempt.
+packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval, budgets,
+cost-allocation tags) as notices. The `local` and `fixtures` stacks are exempt.
 `bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
 `backend-only`, `full`) before any AWS call. `atmos workflow lint` runs it with `--warn`: it
 never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
@@ -492,7 +495,8 @@ What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
 | `rds/data`, `vpc/services`, `eks/data` | not run | restore `rds/data` from backup copies |
 | `cognito/main` | its own pool, filled from `fnx-ue1-prod`'s by `lambda/cognito-user-migration` on each user's first sign-in or reset | nothing (see [Auth during failover](#auth-during-failover)) |
 
-`backup/main` in `fnx-ue1-prod` copies every recovery point to `ue1-backup-replica` in us-east-2.
+`backup/main` in `fnx-ue1-prod` copies every recovery point to `ue1-backup-replica` in us-east-2;
+the EU's, in `fnx-ew1-prod`, to `ew1-backup-replica` in eu-central-1 (never a US region).
 Readiness: `STACK=fnx-ue1-prod atmos workflow dr-status -f disaster-recovery` (it reports both
 vaults and the state bucket's replication) and the same for `fnx-ue2-prod`. CD deploys
 `fnx-ue2-prod` right after `fnx-ue1-prod`, whose state it reads (`kms/main`, `rds/main`,

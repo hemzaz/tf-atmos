@@ -6,8 +6,14 @@
 # (kms/main) and the prod-eu account's singletons: the multi-region CloudTrail
 # trail (cloudtrail/main) and AWS Config's global-resource recording
 # (awsconfig/main); the account budget is cost-optimization/main
-# (services.yaml). As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/
-# security.yaml, which explains each input), except:
+# (services.yaml). Then the regional security services: GuardDuty, Security
+# Hub, Inspector and finding routing with the CIS metric filters on this
+# stack's trail (security-monitoring/main); the API Gateway account settings,
+# backups, the EU apex's certificate and the prod secret sets. As in fnx-ue1-prod
+# (orgs/fnx/prod/us-east-1/components/security.yaml, which explains each
+# input; the shared prod settings are catalog/<component>/prod), except:
+#   - DR copies (kms/main's replica, backup/main's copies) go to
+#     eu-central-1, the EU DR region, never us-east-2;
 #   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
 #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
 #     role, the trail, global-resource recording, the budget); nothing here
@@ -17,8 +23,10 @@
 #   - no ci_runner_pool_names or lambda uploader yet: the PRs adding the
 #     runner pool and the Lambda bucket add them.
 # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
-# Not yet here: the regional security services (GuardDuty, Security Hub,
-# Inspector, finding routing with the trail's CIS metric filters, backups).
+# Every finding stays in eu-west-1: no Security Hub cross-region aggregation,
+# no GuardDuty export, the alert topic on kms/main, and no enrichment Lambda
+# (check-data-residency.py fails enable_alert_enrichment in a GDPR-scoped
+# stack: it posts findings, IPs included, to Slack/PagerDuty).
 # =============================================================================
 
 # catalog/iam/defaults comes through globals, which imports it before its own
@@ -30,6 +38,14 @@ import:
   - catalog/kms/defaults
   - catalog/cloudtrail/defaults
   - catalog/awsconfig/defaults
+  - catalog/guardduty/prod
+  - catalog/securityhub/prod
+  - catalog/inspector2/defaults
+  - catalog/security-monitoring/defaults
+  - catalog/apigateway-account/defaults
+  - catalog/backup/prod
+  - catalog/acm/defaults
+  - catalog/secretsmanager/prod
 
 components:
   terraform:
@@ -118,3 +134,92 @@ components:
         component: awsconfig
         inherits:
           - awsconfig/defaults
+
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/prod
+
+    # This region records the account's global resources (awsconfig/main) and
+    # holds the trail's log group, so unlike fnx-ue2-prod no IAM, KMS or
+    # CloudWatch control is disabled.
+    securityhub/main:
+      metadata:
+        component: securityhub
+        inherits:
+          - securityhub/prod
+
+    # Off, as in fnx-ue1-prod: Inspector bills per resource scanned.
+    inspector2/main:
+      metadata:
+        component: inspector2
+        inherits:
+          - inspector2/defaults
+
+    # Finding routing (GuardDuty, Security Hub, Inspector, security group
+    # changes) to an SNS topic on kms/main, and the CIS metric filters on
+    # cloudtrail/main's log group: all in this stack and region.
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+        inherits:
+          - security-monitoring/defaults
+
+    # The region's API Gateway CloudWatch Logs role setting, for the EU REST
+    # APIs to come (a per-account, per-region singleton).
+    apigateway-account/main:
+      metadata:
+        component: apigateway-account
+        inherits:
+          - apigateway-account/defaults
+
+    # Retention and notifications as in fnx-ue1-prod (catalog/backup/prod).
+    # Recovery points are copied to the EU DR region only, never a US one:
+    # vault <Environment>-backup-replica in eu-central-1 on kms/main's replica
+    # there (ec1-main), created by this stack until fnx-ec1-prod exists.
+    # check-data-residency.py fails a non-EU replica_region or key.
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/prod
+      vars:
+        enable_cross_region_backup: true
+        replica_region: eu-central-1
+        replica_kms_key_arn: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'
+
+    # The EU apex's certificate, as fnx-ue1-prod's acm/main: validated in
+    # network/main's zone (networking.yaml), which holds every name below
+    # (check-domains.py). No acm/services: there is no services zone here.
+    acm/main:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        zone_id: !terraform.state network/main .zone_ids.main
+        dns_domains:
+          main_wildcard:
+            domain_name: "*.{{ .settings.environment.domain_name }}"
+            subject_alternative_names:
+              - "{{ .settings.environment.domain_name }}"
+              - "*.api.{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/main
+
+    # The prod secret sets (catalog/secretsmanager/prod), in this region on
+    # kms/main. No replica regions: the values never leave eu-west-1.
+    secretsmanager/app:
+      metadata:
+        component: secretsmanager
+        inherits:
+          - secretsmanager/app-prod
+    secretsmanager/infra:
+      metadata:
+        component: secretsmanager
+        inherits:
+          - secretsmanager/infra-prod
