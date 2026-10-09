@@ -24,7 +24,7 @@ vars:
     Application: "Production"
     Provisioner: "Atmos"
     DataClassification: "confidential"
-    Compliance: "pci-sox-gdpr"
+    Compliance: "pci-sox"
     CriticalityLevel: "high"
     SLA: "99.9"
     BackupRequired: "true"

@@ -37,7 +37,10 @@ stage stack in the same account and region: its names carry the lane (below), an
 `templates/stacks` samples are such lanes: `scripts/check-stack-samples.sh` copies them in and runs
 the stack checks (lint) and plan-sweep (validate-enhanced) over them. Only files under `stacks/orgs/` are stack manifests;
 each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/components/` domain files
-(`globals`, `networking`, `security`, `compute`, `services`).
+(`globals`, `networking`, `security`, `compute`, `services`). EU personal data lives only in EU
+stacks, tagged `Compliance: "pci-sox-gdpr"` (US prod is `"pci-sox"`): `check-data-residency.py`
+(lint) fails a gdpr-tagged or `eu-` stack that lacks the tag, names a non-`eu-` region or depends
+on a non-gdpr stack.
 
 | Stack | Manifest (`stacks/orgs/fnx/...`) | Purpose |
 |-------|----------------------------------|---------|
