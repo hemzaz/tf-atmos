@@ -424,7 +424,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
 
   deploy-iam:
-    description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main in fnx-ue1-root)"
+    description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures

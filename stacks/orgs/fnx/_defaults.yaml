@@ -97,14 +97,17 @@ settings:
   # tf-atmos org layer (turnkey Wave E) can replace it with that component's
   # output without touching any reader. Keys are the account names: `root` is
   # the management account (stack fnx-ue1-root); the workload accounts are
-  # each stage's settings.environment.account. Wave E adds Cloud Posse's other
+  # each stage's settings.environment.account; prod-eu is the EU prod account
+  # (fnx-ew1-prod, GDPR: its own account, not prod's), whose stack overrides
+  # settings.environment.account. Wave E adds Cloud Posse's other
   # core accounts (audit, security, network, identity, artifacts); until then
   # the identity account is root. Placeholder IDs: see
   # docs/OPERATIONS.md#first-deploy-inputs.
   #
   # Readers: settings.environment.management_account_id (below) and each
   # stage's settings.environment.account_id (stacks/orgs/fnx/<stage>/_defaults.yaml),
-  # plus the CI role ARNs in fnx-ue1-root's backend access_roles. Those
+  # plus the CI role ARNs in fnx-ue1-root's and fnx-ew1-root's backend
+  # access_roles (prod-eu by index: a hyphenated key is no template field). Those
   # settings are templates read by other templates, which is why atmos.yaml
   # renders templates in two evaluations.
   account_map:
@@ -113,6 +116,7 @@ settings:
       dev: "123456789012"
       staging: "123456789012"
       prod: "123456789012"
+      prod-eu: "123456789012"
     root_account_account_name: root
     identity_account_account_name: root
   # The state backend every stack's terraform.backend reads (above): the bucket

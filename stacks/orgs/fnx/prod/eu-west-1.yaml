@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# fnx-ew1-prod: EU production, eu-west-1, its own account (prod-eu)
+# =============================================================================
+# Owner decision (B5, GDPR data residency): EU personal data lives only in EU
+# stacks. This is the EU prod stack: stage prod, region eu-west-1, in its OWN
+# AWS account (account map key prod-eu), never the US prod account. Tagged
+# Compliance "pci-sox-gdpr" (components/globals.yaml); check-data-residency.py
+# fails it if it names a non-EU region or depends on a US stack.
+#
+# Its state is in the EU backend, fnx-ew1-root's backend/main (bucket
+# fnx-ew1-terraform-state in eu-west-1, replica in eu-central-1), through that
+# backend's prod_read/prod_write roles (stacks/orgs/fnx/root/eu-west-1.yaml).
+#
+# A new account, so this stack owns the account's singletons: the GitHub OIDC
+# provider (iam/ci) and the Auto Scaling service-linked role (iam/main).
+# Today only the account and identity layer (iam/main, iam/ci); the EU core
+# subset (networking, KMS, data, services; like fnx-ue2-prod's subset of
+# fnx-ue1-prod) follows in later PRs, as does the EU DR stack fnx-ec1-prod.
+#
+# First deploy: docs/OPERATIONS.md ("Deploying a stack"), with
+# administrator credentials in the prod-eu account:
+#   atmos workflow full -f bootstrap -s fnx-ew1-prod
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  # Region mixin: region eu-west-1, environment (region code) ew1
+  - mixins/region/eu-west-1
+  - orgs/fnx/prod/_defaults
+  - orgs/fnx/prod/eu-west-1/components/globals
+  - orgs/fnx/prod/eu-west-1/components/security
+
+vars:
+  region: eu-west-1
+
+settings:
+  environment:
+    # The EU prod account (stacks/orgs/fnx/_defaults.yaml account map), not
+    # prod's: prod/_defaults derives account_id from this key.
+    account: prod-eu
+  context:
+    tenant: fnx
+    stage: prod
+  # The EU backend, overriding every settings.tfstate key (literal
+  # .settings.context.* references only, see stacks/orgs/fnx/_defaults.yaml);
+  # the same values as fnx-ew1-root's, which owns it.
+  tfstate:
+    region: eu-west-1
+    replica_region: eu-central-1
+    bucket: '{{ .settings.context.tenant }}-ew1-terraform-state'
+    role_prefix: '{{ .settings.context.tenant }}-ew1-terraform-backend'
+    stack: '{{ .settings.context.tenant }}-ew1-root'

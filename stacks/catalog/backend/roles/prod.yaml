@@ -1,8 +1,7 @@
 ---
 # The prod access roles of a backend whose bucket holds prod state
 # (catalog/backend/defaults has the key layout and the stage table).
-# fnx-ue1-root imports it; fnx-ew1-root will once fnx-ew1-prod keeps its state
-# there: check-state-keys.py fails a role that matches no state.
+# fnx-ue1-root (US prod) and fnx-ew1-root (EU prod, fnx-ew1-prod) import it.
 import:
   - catalog/backend/defaults
 
