@@ -1,0 +1,106 @@
+---
+# =============================================================================
+# Networking for fnx-ew1-prod (EU production, its own account)
+# =============================================================================
+# fnx-ue2-prod's core subset (orgs/fnx/prod/us-east-2/components/networking.yaml,
+# which mirrors fnx-ue1-prod): vpc/main with three AZs, a NAT gateway per AZ and
+# flow logs. No vpc/services or peering: the EU data plane (data VPC, eks/data,
+# rds/data) is not in this stack; 10.31.0.0/16 is reserved for it, and
+# 10.32.0.0/16 for the EU DR stack fnx-ec1-prod.
+#
+# Unlike fnx-ue2-prod it owns its DNS: network/main holds the EU apex
+# (settings.environment.domain_name, globals.yaml), delegated at the registrar,
+# never from a US zone. Everything stays in eu-west-1 (check-data-residency.py):
+#   - flow logs: the vpc component's own key and log group, in this region;
+#   - Route 53 public query logging is OFF: its log group, resource policy and
+#     key can only be in us-east-1 (components/terraform/dns/query-logging.tf),
+#     and the logs hold client IPs. check-data-residency.py fails a GDPR-scoped
+#     dns zone with enable_query_logging. The dns component has no Resolver
+#     (in-VPC) query logging yet.
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-1/components/globals
+
+settings:
+  network:
+    vpc_cidrs:
+      main: "10.30.0.0/16"
+
+components:
+  terraform:
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - euw1-az1
+          - euw1-az2
+          - euw1-az3
+        private_subnets:
+          - "10.30.1.0/24"
+          - "10.30.2.0/24"
+          - "10.30.3.0/24"
+        public_subnets:
+          - "10.30.101.0/24"
+          - "10.30.102.0/24"
+          - "10.30.103.0/24"
+        database_subnets:
+          - "10.30.201.0/24"
+          - "10.30.202.0/24"
+          - "10.30.203.0/24"
+        nat_gateway_enabled: true
+        nat_gateway_strategy: "one_per_az"
+        default_sg_ingress_self_only: true
+        default_sg_egress_self_only: false
+        default_sg_allow_all_outbound: true
+        # Load balancer subnet discovery for eks/main's AWS Load Balancer
+        # Controller, as in fnx-ue1-prod (cluster "<Environment>-main": ew1-main).
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
+        vpc_flow_logs_enabled: true
+        # No flow_logs_kms_key_arn yet: this stack has no kms/main, so the
+        # component creates its own key (eu-west-1). The PR adding kms/main
+        # sets `!terraform.state kms/main .key_arn` and its dependency, as in
+        # fnx-ue1-prod (nothing is applied, so the key swap needs no migration).
+        tags:
+          NetworkTier: "primary"
+          HighAvailability: "true"
+          CriticalityLevel: "high"
+
+    network/main:
+      metadata:
+        component: dns
+        inherits:
+          - dns
+      vars:
+        root_domain: "{{ .settings.environment.domain_name }}"
+        create_root_zone: false
+        multi_account_dns_delegation: false
+        zones:
+          main:
+            name: "{{ .settings.environment.domain_name }}"
+            comment: "EU production main zone"
+            force_destroy: false # Protected in production
+            # Off for every EU zone: Route 53 writes query logs only to us-east-1.
+            enable_query_logging: false
+          internal:
+            name: "internal.{{ .settings.environment.domain_name }}"
+            comment: "EU production internal DNS"
+            force_destroy: false
+            enable_query_logging: false
+            vpc_associations:
+              - !terraform.state vpc/main .vpc_id
+        # db.internal.<domain> (rds/main) comes with rds/main.
+        records: {}
+      dependencies:
+        components:
+          - component: vpc/main

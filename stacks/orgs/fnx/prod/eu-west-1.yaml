@@ -14,9 +14,10 @@
 #
 # A new account, so this stack owns the account's singletons: the GitHub OIDC
 # provider (iam/ci) and the Auto Scaling service-linked role (iam/main).
-# Today only the account and identity layer (iam/main, iam/ci); the EU core
-# subset (networking, KMS, data, services; like fnx-ue2-prod's subset of
-# fnx-ue1-prod) follows in later PRs, as does the EU DR stack fnx-ec1-prod.
+# Today the account and identity layer (iam/main, iam/ci) and networking
+# (vpc/main, the EU apex zone network/main); the rest of the EU core subset
+# (KMS, data, services; like fnx-ue2-prod's subset of fnx-ue1-prod) follows in
+# later PRs, as does the EU DR stack fnx-ec1-prod.
 #
 # First deploy: docs/OPERATIONS.md ("Deploying a stack"), with
 # administrator credentials in the prod-eu account:
@@ -29,6 +30,7 @@ import:
   - mixins/region/eu-west-1
   - orgs/fnx/prod/_defaults
   - orgs/fnx/prod/eu-west-1/components/globals
+  - orgs/fnx/prod/eu-west-1/components/networking
   - orgs/fnx/prod/eu-west-1/components/security
 
 vars:

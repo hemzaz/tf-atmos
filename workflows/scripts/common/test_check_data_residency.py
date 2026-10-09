@@ -138,6 +138,24 @@ class DataResidencyTest(unittest.TestCase):
         off["metadata"] = {"enabled": False}
         self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(off=off)}), [])
 
+    def test_dns_query_logging_fails_in_eu_only(self):
+        def dns(main_logging):
+            spec = instance(zones={"main": {"name": "d", "enable_query_logging": main_logging},
+                                   "internal": {"name": "internal.d", "vpc_associations": ["vpc-1"]}})
+            spec["metadata"] = {"component": "dns"}
+            return spec
+
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": dns(False)})}), [])
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": dns(True)})}), [
+            "fnx-ew1-prod: network/main zone main sets enable_query_logging: Route 53 query logs are only "
+            "written to us-east-1, outside the EU",
+        ])
+        us = dns(True)
+        us["vars"].update(region="us-east-1", tags={"Compliance": US})
+        us["settings"]["tfstate"] = {"region": "us-east-1"}
+        us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
+        self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"network/main": us})}), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,14 +13,16 @@ deployable instance:
   - carries a Compliance tag containing "gdpr" (EU stacks carry pci-sox-gdpr);
   - lists in dependencies.components only GDPR-scoped stacks, and sets no
     settings.depends_on (unused here and retired by Atmos; dependencies.components is
-    the one dependency list).
+    the one dependency list);
+  - if a dns instance, turns on enable_query_logging for no zone: Route 53 public
+    query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf).
 EXEMPTIONS lists the (instance pattern, field) pairs that may name one non-EU region.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
 
-Out of scope: us-east-1 regions hard-coded inside component code (the apigateway
-health-check alarm, dns query logging, cloudfront log delivery) are not stack config;
-they are reviewed per component.
+Out of scope: other us-east-1 regions hard-coded inside component code (the apigateway
+health-check alarm, cloudfront log delivery) are not stack config; they are reviewed
+per component.
 """
 import fnmatch
 import json
@@ -133,6 +135,11 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
         errors.append(f"{where} is in a GDPR-scoped stack but its tags.Compliance does not contain {GDPR!r}")
     if (instance.get("settings") or {}).get("depends_on"):
         errors.append(f"{where} sets settings.depends_on: list dependencies in dependencies.components")
+    if ((instance.get("metadata") or {}).get("component") or name) == "dns":
+        for key, zone in sorted(((instance.get("vars") or {}).get("zones") or {}).items()):
+            if isinstance(zone, dict) and zone.get("enable_query_logging") is True:
+                errors.append(f"{where} zone {key} sets enable_query_logging: Route 53 query logs are only "
+                              "written to us-east-1, outside the EU")
     for dep in (instance.get("dependencies") or {}).get("components") or []:
         if not isinstance(dep, dict):
             errors.append(f"{where} dependencies.components entry {dep!r} is not a {{component, stack}} map")
