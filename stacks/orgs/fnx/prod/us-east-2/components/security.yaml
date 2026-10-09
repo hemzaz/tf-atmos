@@ -28,7 +28,7 @@ import:
   - catalog/inspector2/defaults
   - catalog/apigateway-account/defaults
   - catalog/security-monitoring/defaults
-  - catalog/backup/defaults
+  - catalog/backup/prod
 
 components:
   terraform:
@@ -200,22 +200,16 @@ components:
 
     # This region's own vault and plans. While warm it selects nothing
     # (rds/main is a replica, Role=read-replica); once promoted, rds/main is
-    # backed up here like fnx-ue1-prod's. Retention as in fnx-ue1-prod. No
-    # copies back to us-east-1 until a failback is planned (docs/OPERATIONS.md).
+    # backed up here like fnx-ue1-prod's. Retention as in fnx-ue1-prod
+    # (catalog/backup/prod). No copies back to us-east-1 until a failback is
+    # planned (docs/OPERATIONS.md).
     backup/main:
       metadata:
         component: backup
         inherits:
-          - backup/defaults
+          - backup/prod
       vars:
         kms_key_arn: !terraform.state kms/main fnx-ue1-prod '.replica_keys["us-east-2"].key_arn'
-        daily_retention_days: 35
-        weekly_retention_days: 90
-        monthly_retention_days: 2555 # 7 years, SOX
-        monthly_cold_storage_days: 90
-        notification_emails:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"
       dependencies:
         components:
           - component: kms/main

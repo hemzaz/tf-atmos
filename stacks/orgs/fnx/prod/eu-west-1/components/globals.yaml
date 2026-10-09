@@ -41,7 +41,8 @@ settings:
     # Alert contacts and the prod-eu account's monthly budget
     # (cost-optimization/main, services.yaml): fnx-ue1-prod's placeholder
     # values until the owner sets the EU ones (the preflight flags the
-    # example.com addresses, row "Alert recipients").
+    # example.com addresses, row "Alert recipients"; the budget is row
+    # "Budgets", a preflight notice).
     monitoring:
       critical_alerts:
         - "prod-critical@example.com"

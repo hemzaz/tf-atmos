@@ -8,11 +8,12 @@
 # (awsconfig/main); the account budget is cost-optimization/main
 # (services.yaml). Then the regional security services: GuardDuty, Security
 # Hub, Inspector and finding routing with the CIS metric filters on this
-# stack's trail (security-monitoring/main). As in fnx-ue1-prod
+# stack's trail (security-monitoring/main); the API Gateway account settings,
+# backups, the EU apex's certificate and the prod secret sets. As in fnx-ue1-prod
 # (orgs/fnx/prod/us-east-1/components/security.yaml, which explains each
 # input; the shared prod settings are catalog/<component>/prod), except:
-#   - kms/main's DR replica is in eu-central-1, the EU DR region, never
-#     us-east-2;
+#   - DR copies (kms/main's replica, backup/main's copies) go to
+#     eu-central-1, the EU DR region, never us-east-2;
 #   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
 #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
 #     role, the trail, global-resource recording, the budget); nothing here
@@ -26,8 +27,6 @@
 # no GuardDuty export, the alert topic on kms/main, and no enrichment Lambda
 # (check-data-residency.py fails enable_alert_enrichment in a GDPR-scoped
 # stack: it posts findings, IPs included, to Slack/PagerDuty).
-# Not yet here: backups, the apex certificate, secrets and the API Gateway
-# account settings.
 # =============================================================================
 
 # catalog/iam/defaults comes through globals, which imports it before its own
@@ -43,6 +42,10 @@ import:
   - catalog/securityhub/prod
   - catalog/inspector2/defaults
   - catalog/security-monitoring/defaults
+  - catalog/apigateway-account/defaults
+  - catalog/backup/prod
+  - catalog/acm/defaults
+  - catalog/secretsmanager/prod
 
 components:
   terraform:
@@ -162,3 +165,61 @@ components:
         component: security-monitoring
         inherits:
           - security-monitoring/defaults
+
+    # The region's API Gateway CloudWatch Logs role setting, for the EU REST
+    # APIs to come (a per-account, per-region singleton).
+    apigateway-account/main:
+      metadata:
+        component: apigateway-account
+        inherits:
+          - apigateway-account/defaults
+
+    # Retention and notifications as in fnx-ue1-prod (catalog/backup/prod).
+    # Recovery points are copied to the EU DR region only, never a US one:
+    # vault <Environment>-backup-replica in eu-central-1 on kms/main's replica
+    # there (ec1-main), created by this stack until fnx-ec1-prod exists.
+    # check-data-residency.py fails a non-EU replica_region or key.
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/prod
+      vars:
+        enable_cross_region_backup: true
+        replica_region: eu-central-1
+        replica_kms_key_arn: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'
+
+    # The EU apex's certificate, as fnx-ue1-prod's acm/main: validated in
+    # network/main's zone (networking.yaml), which holds every name below
+    # (check-domains.py). No acm/services: there is no services zone here.
+    acm/main:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        zone_id: !terraform.state network/main .zone_ids.main
+        dns_domains:
+          main_wildcard:
+            domain_name: "*.{{ .settings.environment.domain_name }}"
+            subject_alternative_names:
+              - "{{ .settings.environment.domain_name }}"
+              - "*.api.{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/main
+
+    # The prod secret sets (catalog/secretsmanager/prod), in this region on
+    # kms/main. No replica regions: the values never leave eu-west-1.
+    secretsmanager/app:
+      metadata:
+        component: secretsmanager
+        inherits:
+          - secretsmanager/app-prod
+    secretsmanager/infra:
+      metadata:
+        component: secretsmanager
+        inherits:
+          - secretsmanager/infra-prod

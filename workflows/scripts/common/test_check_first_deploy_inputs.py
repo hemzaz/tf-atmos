@@ -62,7 +62,7 @@ class CleanTest(unittest.TestCase):
 
     def test_repository_notices_are_always_printed(self):
         rows = {f.row for f in preflight.check(clean()) if f.level == "notice"}
-        self.assertEqual(rows, {"Lambda packages", "GitHub", "Deploy tags", "GitHub App"})
+        self.assertEqual(rows, {"Lambda packages", "GitHub", "Deploy tags", "GitHub App", "Budgets", "Cost-allocation tags"})
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -330,7 +330,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(out.count("\nWARN ") + out.startswith("WARN "), preflight.WARN_LIMIT)
         self.assertNotIn("NOTICE repository", out)
-        self.assertIn("... 5 more WARN and 4 NOTICE line(s) not shown; see them all with --warn --all", out)
+        self.assertIn("... 5 more WARN and 6 NOTICE line(s) not shown; see them all with --warn --all", out)
         self.assertIn(f"By row: Alert recipients {preflight.WARN_LIMIT + 5}", out)
 
     def test_warn_all_and_fatal_mode_show_everything(self):
@@ -338,7 +338,7 @@ class MainTest(unittest.TestCase):
             with self.subTest(argv=argv):
                 _, out, _ = self.run_main(self.many_placeholder_stacks(), *argv)
                 self.assertEqual(out.count(f"{label} fnx-ue1-dev"), preflight.WARN_LIMIT + 5)
-                self.assertEqual(out.count("NOTICE repository"), 4)
+                self.assertEqual(out.count("NOTICE repository"), 6)
                 self.assertNotIn("not shown", out)
 
     def test_clean_passes(self):

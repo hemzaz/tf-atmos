@@ -5,8 +5,10 @@ One Secrets Manager secret per `secrets` entry, with an optional value, resource
 
 ## Wiring
 
-- Instances: `secretsmanager/app` in the three AWS stacks and `fnx-ue1-local-sandbox`;
-  `secretsmanager/infra` in the three AWS stacks. Both read `kms/main .key_arn`.
+- Instances: `secretsmanager/app` in the three AWS stacks, `fnx-ew1-prod` and
+  `fnx-ue1-local-sandbox`; `secretsmanager/infra` in the three AWS stacks and `fnx-ew1-prod`. Both
+  read `kms/main .key_arn`. The prod stacks' secret sets are `secretsmanager/app-prod` and
+  `/infra-prod` (`stacks/catalog/secretsmanager/prod.yaml`).
   `secretsmanager/api`, `/app-db` and `/infra-defaults` in the catalog are abstract.
 - Used by: nothing via state in the real stacks. Consumers read values at runtime (ESO, the
   application) by `secret_arns` / `secret_names`; no output carries a value.

@@ -10,7 +10,7 @@ import:
   - orgs/fnx/prod/us-east-1/components/globals
   - catalog/iam/defaults
   - catalog/kms/defaults
-  - catalog/secretsmanager/defaults
+  - catalog/secretsmanager/prod
   - catalog/acm/defaults
   - catalog/cloudtrail/defaults
   - catalog/awsconfig/defaults
@@ -19,7 +19,7 @@ import:
   - catalog/inspector2/defaults
   - catalog/apigateway-account/defaults
   - catalog/security-monitoring/defaults
-  - catalog/backup/defaults
+  - catalog/backup/prod
 
 components:
   terraform:
@@ -244,57 +244,18 @@ components:
     # ==========================================================================
     # Secrets Manager - Production with Rotation
     # ==========================================================================
+    # The secret sets are catalog/secretsmanager/prod's, shared with
+    # fnx-ew1-prod.
     secretsmanager/app:
       metadata:
         component: secretsmanager
         inherits:
-          - secretsmanager/defaults
-      vars:
-        # No rotation Lambdas are deployed: rotation settings were removed.
-        # The RDS master password is rotated by RDS itself.
-        secrets:
-          app_credentials:
-            name: "credentials"
-            description: "Production application credentials"
-            path: "app"
-            generate_random_password: true
-            password_length: 48
-          api_keys:
-            name: "api-keys"
-            description: "Production API integration keys"
-            path: "app/api"
-            generate_random_password: true
-            password_length: 64
-          database_credentials:
-            name: "db-credentials"
-            description: "Production database credentials"
-            path: "app/database"
-            generate_random_password: true
-            password_length: 32
-        context_name: "app"
-        default_recovery_window_in_days: 30
+          - secretsmanager/app-prod
     secretsmanager/infra:
       metadata:
         component: secretsmanager
         inherits:
-          - secretsmanager/infra-defaults
-      vars:
-        secrets:
-          tls_certificates:
-            name: "tls-certificates"
-            description: "Production TLS certificates"
-            path: "certificates"
-          ssh_keys:
-            name: "ssh-keys"
-            description: "Production SSH keys"
-            path: "ssh"
-          service_accounts:
-            name: "service-accounts"
-            description: "Production service account credentials"
-            path: "service-accounts"
-
-        context_name: "infra"
-        default_recovery_window_in_days: 30
+          - secretsmanager/infra-prod
 
     # ==========================================================================
     # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,
@@ -371,31 +332,20 @@ components:
     # ==========================================================================
     # AWS Backup - vault, plans and tag-based selection for rds/main,
     # rds/data (Backup=true in their own services.yaml vars.tags) and any
-    # EC2/EBS resource tagged the same way. Retention matches the account's
-    # pci-sox compliance tag (globals.yaml): 7-year monthly retention for
-    # SOX. Every recovery point is also copied to the DR region (owner
-    # decision Q5): vault <Environment>-backup-replica in us-east-2, on
-    # kms/main's replica key, kept as long as the source point (Cloud Posse
-    # aws-backup's copy_action destination_vault_arn). Vault lock stays off.
+    # EC2/EBS resource tagged the same way. Retention and notifications are
+    # catalog/backup/prod's (7-year monthly retention for SOX, the account's
+    # pci-sox compliance tag). Every recovery point is also copied to the DR
+    # region (owner decision Q5): vault <Environment>-backup-replica in
+    # us-east-2, on kms/main's replica key, kept as long as the source point
+    # (Cloud Posse aws-backup's copy_action destination_vault_arn). Vault lock
+    # stays off.
     # ==========================================================================
     backup/main:
       metadata:
         component: backup
         inherits:
-          - backup/defaults
+          - backup/prod
       vars:
-        daily_retention_days: 35
-        weekly_retention_days: 90
-        monthly_retention_days: 2555 # 7 years, SOX
-        # Only prod re-enables cold storage: 2555 days of retention easily
-        # clears AWS Backup's delete_after >= cold_storage_after + 90
-        # requirement. backup/defaults sets this to null so dev's and
-        # staging's shorter monthly retention (30/90 days) don't inherit a
-        # cold-storage floor they can't satisfy (round-5 review HIGH fix).
-        monthly_cold_storage_days: 90
         enable_cross_region_backup: true
         replica_region: us-east-2
         replica_kms_key_arn: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'
-        notification_emails:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"

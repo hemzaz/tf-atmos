@@ -1,0 +1,62 @@
+---
+import:
+  - catalog/secretsmanager/defaults
+
+# Production secret sets, shared by the prod stacks with their own key
+# (fnx-ue1-prod and fnx-ew1-prod: secretsmanager/app and secretsmanager/infra).
+# Secrets are regional and each stack reads its own kms/main, so the copies
+# never leave their region. No rotation Lambdas are deployed: rotation
+# settings were removed, and the RDS master password is rotated by RDS itself.
+components:
+  terraform:
+    secretsmanager/app-prod:
+      metadata:
+        component: secretsmanager
+        type: abstract
+        inherits:
+          - secretsmanager/defaults
+      vars:
+        secrets:
+          app_credentials:
+            name: "credentials"
+            description: "Production application credentials"
+            path: "app"
+            generate_random_password: true
+            password_length: 48
+          api_keys:
+            name: "api-keys"
+            description: "Production API integration keys"
+            path: "app/api"
+            generate_random_password: true
+            password_length: 64
+          database_credentials:
+            name: "db-credentials"
+            description: "Production database credentials"
+            path: "app/database"
+            generate_random_password: true
+            password_length: 32
+        context_name: "app"
+        default_recovery_window_in_days: 30
+
+    secretsmanager/infra-prod:
+      metadata:
+        component: secretsmanager
+        type: abstract
+        inherits:
+          - secretsmanager/infra-defaults
+      vars:
+        secrets:
+          tls_certificates:
+            name: "tls-certificates"
+            description: "Production TLS certificates"
+            path: "certificates"
+          ssh_keys:
+            name: "ssh-keys"
+            description: "Production SSH keys"
+            path: "ssh"
+          service_accounts:
+            name: "service-accounts"
+            description: "Production service account credentials"
+            path: "service-accounts"
+        context_name: "infra"
+        default_recovery_window_in_days: 30

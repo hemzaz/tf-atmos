@@ -5,7 +5,8 @@ then waited on by `aws_acm_certificate_validation` (45 minute timeout).
 
 ## Wiring
 
-- `acm/main` (`*.<d>` + `<d>`; prod adds `*.api.<d>`) reads `network/main .zone_ids.main`.
+- `acm/main` (`*.<d>` + `<d>`; prod adds `*.api.<d>`) reads `network/main .zone_ids.main`;
+  `fnx-ew1-prod`'s is the EU apex's, in its own zone.
 - `acm/services` (`*.services.<d>` + `api.services.<d>`) reads `network/services .zone_ids.services`.
 - Used by: `apigateway` (`certificate_arns`), `monitoring` (`certificate_arns`,
   `certificate_domains`, expiry alarms).

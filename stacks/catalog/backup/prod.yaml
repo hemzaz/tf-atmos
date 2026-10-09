@@ -1,0 +1,29 @@
+---
+import:
+  - catalog/backup/defaults
+
+# Production retention, shared by the prod stacks' backup/main (fnx-ue1-prod,
+# fnx-ue2-prod, fnx-ew1-prod). It matches the prod accounts' pci-sox
+# compliance tag: 7-year monthly retention for SOX. Only prod re-enables cold
+# storage: 2555 days of retention easily clears AWS Backup's delete_after >=
+# cold_storage_after + 90 requirement (backup/defaults sets it to null so dev's
+# and staging's shorter monthly retention don't inherit a cold-storage floor
+# they can't satisfy). Failure notifications go to both critical contacts of
+# the stack's settings.environment.monitoring. The cross-region copy is per
+# stack: each names its own DR region and replica key.
+components:
+  terraform:
+    backup/prod:
+      metadata:
+        component: backup
+        type: abstract
+        inherits:
+          - backup/defaults
+      vars:
+        daily_retention_days: 35
+        weekly_retention_days: 90
+        monthly_retention_days: 2555 # 7 years, SOX
+        monthly_cold_storage_days: 90
+        notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"
