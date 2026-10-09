@@ -219,9 +219,9 @@ workflows:
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           LANE_NAMES_STACKS_JSON="$stacks_json" python3 -m unittest workflows/scripts/common/test_check_lane_names.py
           python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
-      # EU personal data lives only in EU stacks: a stack tagged Compliance
-      # *gdpr* names only eu- regions (vars, settings.tfstate, s3 backend) and
-      # depends only on GDPR-scoped stacks, outside the script's EXEMPTIONS.
+      # EU personal data lives only in EU stacks: a gdpr-tagged or eu- stack is
+      # tagged gdpr, names only eu- regions (vars and their ARNs, state, backends,
+      # providers) and depends only on GDPR-scoped stacks, outside EXEMPTIONS.
       - name: check-data-residency
         type: shell
         command: |
