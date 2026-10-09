@@ -1,0 +1,21 @@
+---
+# The dev/staging access roles of a backend whose bucket holds dev/staging
+# state (catalog/backend/defaults has the key layout and the stage table).
+# fnx-ue1-root imports it. A root stack imports it only once its bucket holds
+# dev/staging state: check-state-keys.py fails a role that matches no state.
+import:
+  - catalog/backend/defaults
+
+components:
+  terraform:
+    backend:
+      vars:
+        access_roles:
+          read:
+            role_name: "{{ .settings.tfstate.role_prefix }}-read-role"
+            write_enabled: false
+            object_key_patterns: []
+          write:
+            role_name: "{{ .settings.tfstate.role_prefix }}-role"
+            write_enabled: true
+            object_key_patterns: []

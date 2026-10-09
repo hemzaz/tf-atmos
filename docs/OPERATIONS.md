@@ -64,16 +64,28 @@ lockfiles (`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-ue1-
 (`settings.tfstate.stack`, which every `iam` instance that inherits `catalog/iam` depends on), and every stack's
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
 with management-account administrator credentials. The bucket lives in one region,
-`settings.tfstate.region` (`us-east-1`), and every stack's backend uses it whatever the stack's own
-region is, so a DR or EU stack keeps its state here too. S3 replicates it to
+`settings.tfstate.region` (`us-east-1`), and every US stack's backend uses it whatever the stack's
+own region is, so a DR stack (`fnx-ue2-prod`) keeps its state here too. S3 replicates it to
 `fnx-terraform-state-replica` in `settings.tfstate.replica_region` (`us-east-2`), encrypted with
 the state key's multi-region replica (`backend/main`'s `s3_replication_enabled`; see
-[State during a us-east-1 outage](#state-during-a-us-east-1-outage)):
+[State during a us-east-1 outage](#state-during-a-us-east-1-outage)).
+
+The EU stacks keep their state in the EU (GDPR residency): `backend/main` in `fnx-ew1-root`
+(`stacks/orgs/fnx/root/eu-west-1.yaml`, same management account), bucket
+`fnx-ew1-terraform-state` in `eu-west-1`, replicated to `fnx-ew1-terraform-state-replica` in
+`eu-central-1`, roles `fnx-ew1-terraform-backend-*`. An EU stack overrides all of
+`settings.tfstate` to point there; `check-data-residency.py` fails one that names a non-EU region.
+Until an EU workload stack exists its only role is `root_write`.
+
+The backend workflows default to `fnx-ue1-root`; `-s fnx-ew1-root` runs them on the EU backend
+(the bucket and roles come from that stack's `settings.tfstate`):
 
 ```bash
 atmos workflow backend-cold-start -f bootstrap   # once: apply with local state, then migrate it into the bucket
 atmos workflow backend-only -f bootstrap         # later backend changes
 atmos workflow verify -f bootstrap               # backend describe + outputs
+atmos workflow backend-cold-start -f bootstrap -s fnx-ew1-root   # the EU backend (same for backend-only, verify)
+atmos workflow apply -f apply-backend [-s fnx-ew1-root]          # plan + deploy, no preflight
 ```
 
 An existing bucket must be imported first: see `components/terraform/backend/README.md`.
@@ -89,7 +101,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 | `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
 | `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (`fnx-ue1-prod`, DR `fnx-ue2-prod`) | the prod stacks' CI plan roles |
 | `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
-| `<role_prefix>-root-role` (`root_write`) | read/write, `fnx-ue1-root` state | none |
+| `<role_prefix>-root-role` (`root_write`) | read/write, the root stack's own state (`fnx-ue1-root`, `fnx-ew1-root`) | none |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml`. Add a new stack's

@@ -1,0 +1,70 @@
+---
+# =============================================================================
+# fnx-ew1-root - the management account's EU stack
+# =============================================================================
+# Owns the EU stacks' Terraform state backend (owner decision, B5: GDPR data
+# residency): bucket fnx-ew1-terraform-state in eu-west-1, replicated to
+# fnx-ew1-terraform-state-replica in eu-central-1 (the EU DR region, never a
+# US one), its KMS key and access roles fnx-ew1-terraform-backend-*. Same
+# management account and same `backend` component as fnx-ue1-root's US
+# backend (stacks/orgs/fnx/root/us-east-1.yaml); its own stack, so EU state,
+# keys and roles never share a bucket, policy or name with the US ones.
+#
+# An EU stack points its settings.tfstate here, all of it
+# (stacks/orgs/fnx/_defaults.yaml). Until fnx-ew1-prod exists the bucket holds
+# only this stack's own state, so only the root role is defined
+# (check-state-keys.py fails a role that matches no state); fnx-ew1-prod adds
+# its prod roles and their pattern pair.
+#
+# Bootstrap (cold start, once):
+#   atmos workflow backend-cold-start -f bootstrap -s fnx-ew1-root
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  # The region code (ew1) of the state bucket's region, settings.tfstate.region
+  - mixins/region/eu-west-1
+  - orgs/fnx/root/_defaults
+  - catalog/backend/defaults
+
+vars:
+  region: "{{ .settings.tfstate.region }}"
+  tags:
+    Compliance: "pci-sox-gdpr"
+
+settings:
+  context:
+    tenant: fnx
+    stage: root
+  # The EU backend, overriding every settings.tfstate key (literal
+  # .settings.context.* references only, see stacks/orgs/fnx/_defaults.yaml).
+  # The ew1 in the bucket and role names keeps them apart from the US
+  # backend's in the one management account (IAM and S3 names are global).
+  tfstate:
+    region: eu-west-1
+    replica_region: eu-central-1
+    bucket: '{{ .settings.context.tenant }}-ew1-terraform-state'
+    role_prefix: '{{ .settings.context.tenant }}-ew1-terraform-backend'
+    stack: '{{ .settings.context.tenant }}-ew1-root'
+
+components:
+  terraform:
+    backend/main:
+      metadata:
+        component: backend
+        inherits:
+          - backend
+      vars:
+        account_id: "{{ .settings.environment.management_account_id }}"
+        enable_access_logging: true
+        # State replicated to <bucket>-replica in eu-central-1, read-only for
+        # every access role (as fnx-ue1-root's to us-east-2).
+        s3_replication_enabled: true
+        replica_region: "{{ .settings.tfstate.replica_region }}"
+        # Who may use the state: only this stack's own state for now, through
+        # the root role (no principals: the applying administrator only).
+        access_roles:
+          root_write:
+            object_key_patterns:
+              - "*/fnx-ew1-root/*"
+              - "*/fnx-ew1-root-*"

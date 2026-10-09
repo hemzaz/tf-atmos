@@ -15,7 +15,7 @@
 # later layer than that instance: on the first deploy the state does not exist
 # yet. A dependency only declared in dependencies.components may share a layer
 # (Atmos applies a layer in dependency order). The backend layer has an instance
-# only in fnx-ue1-root (the single state backend), which is deployed before any
+# only in the root stacks (fnx-ue1-root; fnx-ew1-root, the EU state backend), deployed before any
 # workload stack; iam/ci reads it cross-stack. Connectivity follows networking, security-monitoring
 # follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
@@ -405,7 +405,7 @@ workflows:
         content: All layers deployed
 
   deploy-backend:
-    description: "Deploy the backend layer: the Terraform state backend (only fnx-ue1-root has one)"
+    description: "Deploy the backend layer: the Terraform state backends (only the root stacks fnx-ue1-root and fnx-ew1-root have one)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures

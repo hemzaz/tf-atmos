@@ -9,8 +9,17 @@ caller is always trusted).
 
 ## Wiring
 
-- One instance, `backend/main` in `fnx-ue1-root` (management account). CI never plans or applies
-  it (`settings.github.actions_enabled: false`); a management-account administrator does.
+- One instance per root stack in the management account: `backend/main` in `fnx-ue1-root` (the US
+  stacks' bucket) and in `fnx-ew1-root` (the EU stacks', `fnx-ew1-terraform-state`, replicated to
+  `eu-central-1`). Names derive from `settings.tfstate` (bucket, role prefix), so the two never
+  collide. CI never plans or applies them (`settings.github.actions_enabled: false`); a
+  management-account administrator does (`atmos workflow backend-cold-start -f bootstrap [-s fnx-ew1-root]`).
+- `catalog/backend/defaults` defines only `root_write`; `catalog/backend/roles/nonprod` (`read`,
+  `write`) and `catalog/backend/roles/prod` (`prod_read`, `prod_write`) add a stage's roles to a
+  root stack whose bucket holds that stage's state (`fnx-ue1-root` imports both).
+- Every name derives from `bucket_name` or the role prefix: the state key's alias is
+  `alias/<bucket_name>-key` in both regions (`alias/fnx-terraform-state-key`,
+  `alias/fnx-ew1-terraform-state-key`), so the two backends share no IAM, S3 or KMS name.
 - Every stack's backend (`stacks/orgs/fnx/_defaults.yaml`) assumes a role by naming convention;
   `iam/ci` names the same roles. Nothing reads this instance's state.
 
@@ -23,8 +32,8 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
   objects, trusted by those stages' CI plan / apply roles.
 - `prod_read` / `prod_write` (`fnx-terraform-backend-prod-read-role` / `-prod-role`): the prod
   stacks' objects only, trusted by prod's plan / apply role only.
-- `root_write` (`fnx-terraform-backend-root-role`): `fnx-ue1-root`'s objects, trusted by nobody but
-  the administrator who applies `backend/main`.
+- `root_write` (`fnx-terraform-backend-root-role`, EU `fnx-ew1-terraform-backend-root-role`): the
+  root stack's own objects, trusted by nobody but the administrator who applies `backend/main`.
 
 `TFSTATE_ACCESS=read` selects the read role (run plans with `-lock=false`).
 
@@ -76,6 +85,7 @@ Posse's tfstate-backend guide). With management-account admin credentials:
 ```bash
 atmos workflow backend-cold-start -f bootstrap   # apply with local state, then migrate it into the bucket
 atmos workflow backend-only -f bootstrap         # later changes
+# the EU backend: the same workflows with -s fnx-ew1-root
 ```
 
 The first apply trusts the caller in every role and makes it the root role's only principal; the

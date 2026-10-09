@@ -85,25 +85,31 @@ for stack in "${stacks[@]}"; do
         printf '%s\t%s\t%s\n' "$stack" "$kind" "${arn##*: }" >> roles.tsv
     done
 done
-# The manual step: the roles on backend/main's access roles for each lane's
-# stage. Python picks the instance, its manifest and the role for each ARN
-# from the resolved stacks; yq (mikefarah v4) appends the ARN in that
-# manifest, so nothing depends on its layout or indentation.
+# The manual step: the roles on the access roles of the backend that owns each
+# lane's state bucket, for the lane's stage. Python picks the instance, its
+# manifest and the role for each ARN from the resolved stacks
+# (workflows/scripts/common/backends.py); yq (mikefarah v4) appends the ARN in
+# that manifest, so nothing depends on its layout or indentation.
 python3 - stacks.json roles.tsv > additions.tsv <<'ROLES'
 import json, sys
 
+sys.path.insert(0, "workflows/scripts/common")
+import backends  # noqa: E402
+
 stacks = json.load(open(sys.argv[1]))
-backends = [
-    (name, i["atmos_stack_file"]) for s in stacks.values()
-    for name, i in (s.get("components") or {}).get("terraform", {}).items()
-    if i.get("component") == "backend" and (i.get("metadata") or {}).get("type") != "abstract"
-]
-if len(backends) != 1:
-    sys.exit(f"ERROR expected one deployable backend instance, found {backends}")
-instance, manifest = backends[0]
+owned, errors = backends.owned(stacks)
+if errors:
+    sys.exit("ERROR " + "; ".join(errors))
 for row in open(sys.argv[2]):
     stack, kind, arn = row.rstrip("\n").split("\t")
-    stage = next(i["settings"]["context"]["stage"] for i in stacks[stack]["components"]["terraform"].values()
+    lane = backends.instances(stacks[stack])
+    owners = {backends.owner_of(owned, i) for i in lane.values() if backends.bucket_of(i)}
+    if len(owners) != 1 or None in owners:
+        sys.exit(f"ERROR {stack}: its state is not in exactly one owned bucket ({sorted(map(str, owners))})")
+    owner = owners.pop()
+    instance = owner.instance
+    manifest = backends.instances(stacks[owner.stack])[instance]["atmos_stack_file"]
+    stage = next(i["settings"]["context"]["stage"] for i in lane.values()
                  if ((i.get("settings") or {}).get("context") or {}).get("stage"))
     role = ("prod_" if stage == "prod" else "") + ("read" if kind == "plan" else "write")
     print(f"stacks/{manifest}.yaml\t{instance}\t{role}\t{arn}\t{stack}\t{kind}")
