@@ -193,16 +193,16 @@ workflows:
             exit 1
           fi
           echo "tflint: all component directories clean"
-      # The state backend's roles are split by stage with S3 key patterns, a
+      # Each state bucket's backend roles are split by stage with S3 key patterns, a
       # "*/<stack>/*" and "*/<stack>-*" pair per stack
       # (stacks/orgs/fnx/root/us-east-1.yaml); this evaluates them against
-      # every s3-backend state key and fails one not matched by exactly its
-      # stage's roles. Also run by validate-all (validate-enhanced.yaml).
+      # every s3-backend state key in that bucket and fails one not matched by
+      # exactly its stage's roles. Also run by validate-all (validate-enhanced.yaml).
       - name: check-state-keys
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_state_keys.py
+          python3 -m unittest workflows/scripts/common/test_check_state_keys.py workflows/scripts/common/test_backends.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"

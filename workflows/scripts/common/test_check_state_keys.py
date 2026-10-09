@@ -19,48 +19,74 @@ def pair(stack):
     return [f"*/{stack}/*", f"*/{stack}-*"]
 
 
+US_BUCKET = "fnx-terraform-state"
+# The EU bucket (B5): its own backend/main in fnx-ew1-root, root and prod roles only.
+EU_BUCKET = "fnx-ew1-terraform-state"
+EU_PREFIX = "fnx-ew1"
+
+
 def access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging"), prod=("fnx-ue1-prod",),
-                 root=("fnx-ue1-root",), **patterns):
+                 root=("fnx-ue1-root",), prefix="fnx", **patterns):
     """backend/main's access_roles as the catalog renders them; patterns overrides one role's list."""
     non_prod_keys = [p for stack in non_prod for p in pair(stack)]
     prod_keys = [p for stack in prod for p in pair(stack)]
     roles = {
-        "read": ("fnx-terraform-backend-read-role", non_prod_keys),
-        "prod_read": ("fnx-terraform-backend-prod-read-role", prod_keys),
-        "write": (NON_PROD_ROLE, non_prod_keys),
-        "prod_write": (STAGE_ROLES["prod"], prod_keys),
-        "root_write": (STAGE_ROLES["root"], [p for stack in root for p in pair(stack)]),
+        "read": (f"{prefix}-terraform-backend-read-role", non_prod_keys),
+        "prod_read": (f"{prefix}-terraform-backend-prod-read-role", prod_keys),
+        "write": (f"{prefix}-terraform-backend-role", non_prod_keys),
+        "prod_write": (f"{prefix}-terraform-backend-prod-role", prod_keys),
+        "root_write": (f"{prefix}-terraform-backend-root-role", [p for stack in root for p in pair(stack)]),
     }
     return {
         name: {"role_name": role_name, "object_key_patterns": patterns.get(name, keys)}
-        for name, (role_name, keys) in roles.items()
+        for name, (role_name, keys) in roles.items() if non_prod or name not in ("read", "write")
     }
 
 
 def instance(workspace, key_prefix="vpc", stage="prod", backend_type="s3", key="terraform.tfstate",
-             region="us-east-1", component=None, role=None, roles=None, **metadata):
+             region="us-east-1", component=None, role=None, roles=None, bucket=US_BUCKET, **metadata):
     role_arn = f"arn:aws:iam::111111111111:role/{role or STAGE_ROLES.get(stage, NON_PROD_ROLE)}"
+    owned = {"bucket_name": bucket} if component == "backend" else {}
     return {
         "metadata": metadata,
         "component": component,
-        "vars": {"region": region, **({"access_roles": roles} if roles is not None else {})},
+        "vars": {"region": region, **owned, **({"access_roles": roles} if roles is not None else {})},
         "backend_type": backend_type,
         "backend": {
-            "workspace_key_prefix": key_prefix, "key": key, "region": region, "assume_role": {"role_arn": role_arn},
+            "bucket": bucket, "workspace_key_prefix": key_prefix, "key": key, "region": region,
+            "assume_role": {"role_arn": role_arn},
         },
         "workspace": workspace,
         "settings": {"context": {"tenant": "fnx", "stage": stage}},
     }
 
 
-def root_stack(region="us-east-1", roles=None, stack="fnx-ue1-root"):
+def root_stack(region="us-east-1", roles=None, stack="fnx-ue1-root", **kwargs):
     backend = instance(stack, key_prefix="backend", stage="root", region=region, component="backend",
-                       roles=access_roles() if roles is None else roles)
+                       roles=access_roles() if roles is None else roles, **kwargs)
     return {"components": {"terraform": {"backend/main": backend}}}
 
 
-def one(name, stage, region="us-east-1"):
-    return {"components": {"terraform": {"vpc/main": instance(name, stage=stage, region=region)}}}
+def one(name, stage, region="us-east-1", **kwargs):
+    return {"components": {"terraform": {"vpc/main": instance(name, stage=stage, region=region, **kwargs)}}}
+
+
+def eu(name, stage):
+    """An EU stack's instance: the EU bucket and region, its stage's fnx-ew1 role."""
+    return instance(name, stage=stage, region="eu-west-1", bucket=EU_BUCKET,
+                    role=f"{EU_PREFIX}-terraform-backend-{stage}-role")
+
+
+def with_eu(stacks, roles=None, prod=("fnx-ew1-prod", "fnx-ec1-prod")):
+    """stacks plus fnx-ew1-root owning the EU bucket and the EU prod stacks in it."""
+    roles = roles or access_roles(non_prod=(), prod=prod, root=("fnx-ew1-root",), prefix=EU_PREFIX)
+    root = eu("fnx-ew1-root", "root")
+    root.update(component="backend", vars={"region": "eu-west-1", "bucket_name": EU_BUCKET, "access_roles": roles})
+    root["backend"]["workspace_key_prefix"] = "backend"
+    stacks["fnx-ew1-root"] = {"components": {"terraform": {"backend/main": root}}}
+    for name in prod:
+        stacks[name] = {"components": {"terraform": {"vpc/main": eu(name, "prod")}}}
+    return stacks
 
 
 def stacks_with(roles=None, **components):
@@ -299,7 +325,8 @@ class CheckStateKeysTest(unittest.TestCase):
     def test_missing_backend_stack_fails(self):
         stacks = stacks_with(**{"vpc/main": prod()})
         del stacks["fnx-ue1-root"]
-        self.assert_errors(stacks, "expected exactly one deployed 'backend' region")
+        self.assert_errors(stacks, "no deployed 'backend' instance owns a state bucket",
+                           *["backend.bucket 'fnx-terraform-state' is created by no deployed backend instance"] * 3)
 
     def test_bucket_region_is_the_backend_stacks_own(self):
         # backend/main moved to another region: stacks still pointing at us-east-1 now fail
@@ -316,11 +343,78 @@ class CheckStateKeysTest(unittest.TestCase):
             "local": prod(backend_type="local", region="eu-west-1"),
         }))
 
-    def test_two_backend_regions_fail(self):
+    # One check per backend bucket (B5: the EU bucket beside the US one)
+
+    def test_two_backends_with_their_own_buckets_pass(self):
+        # US and EU buckets, each with its own stacks, roles and region
+        self.assert_errors(with_eu(stacks_with(**{"vpc/main": prod()})))
+
+    def test_eu_stack_in_the_us_bucket_fails(self):
+        # An EU stack pointing at the US bucket with an EU role and region
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}), prod=("fnx-ew1-prod",))
+        stray = eu("fnx-ec1-prod", "prod")
+        stray["backend"]["bucket"] = US_BUCKET
+        stacks["fnx-ec1-prod"] = {"components": {"terraform": {"vpc/main": stray}}}
+        self.assert_has(stacks,
+                        "fnx-ec1-prod: vpc/main backend.region 'eu-west-1' is not the state bucket's region 'us-east-1'",
+                        "assumes role 'fnx-ew1-terraform-backend-prod-role', which the backend's access_roles do not "
+                        "define",
+                        "'vpc/fnx-ec1-prod/terraform.tfstate' matches no access role")
+
+    def test_bucket_no_backend_owns_fails(self):
         stacks = stacks_with(**{"vpc/main": prod()})
-        other = instance("fnx-ew1-root", key_prefix="backend", stage="root", region="eu-west-1", component="backend")
-        stacks["fnx-ew1-root"] = {"components": {"terraform": {"backend/main": other}}}
-        self.assert_errors(stacks, "expected exactly one deployed 'backend' region")
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["vpc/main"]["backend"]["bucket"] = "fnx-other-state"
+        self.assert_has(stacks, "fnx-ue1-prod: vpc/main backend.bucket 'fnx-other-state' is created by no deployed "
+                                "backend instance")
+
+    def test_eu_prod_is_matched_by_the_eu_prod_roles_only(self):
+        # US prod and EU prod are separate stages: the US prod roles never need the EU pairs ...
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
+        self.assert_errors(stacks)
+        # ... and an EU prod pair on a US prod role does not stand in for the EU prod role.
+        eu_roles = access_roles(non_prod=(), prod=("fnx-ew1-prod", "fnx-ec1-prod"), root=("fnx-ew1-root",),
+                                prefix=EU_PREFIX, prod_read=pair("fnx-ew1-prod"))
+        us_roles = access_roles(prod_read=pair("fnx-ue1-prod") + pair("fnx-ec1-prod"))
+        stacks = with_eu(stacks_with(roles=us_roles, **{"vpc/main": prod()}), roles=eu_roles)
+        self.assert_has(stacks,
+                        "bucket 'fnx-ew1-terraform-state' (fnx-ew1-root: backend/main): fnx-ec1-prod: vpc/main state "
+                        "object 'vpc/fnx-ec1-prod/terraform.tfstate' is not matched by ['prod_read']",
+                        "bucket 'fnx-terraform-state' (fnx-ue1-root: backend/main): access role 'prod_read' pattern "
+                        "'*/fnx-ec1-prod/*' matches no state object")
+
+    def test_eu_root_assuming_the_us_root_role_fails(self):
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
+        backend = stacks["fnx-ew1-root"]["components"]["terraform"]["backend/main"]["backend"]
+        backend["assume_role"]["role_arn"] = f"arn:aws:iam::111111111111:role/{STAGE_ROLES['root']}"
+        self.assert_has(stacks, "fnx-ew1-root: backend/main assumes role 'fnx-terraform-backend-root-role', which "
+                                "the backend's access_roles do not define")
+
+    def test_stack_region_other_than_its_bucket_region_passes(self):
+        # The ec1 DR shape (as ue2 today): vars.region eu-central-1, state in the eu-west-1 bucket
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
+        stacks["fnx-ec1-prod"]["components"]["terraform"]["vpc/main"]["vars"]["region"] = "eu-central-1"
+        self.assert_errors(stacks)
+
+    def test_duplicate_bucket_name_fails(self):
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
+        stacks["fnx-ew1-root"]["components"]["terraform"]["backend/main"]["vars"]["bucket_name"] = US_BUCKET
+        self.assert_has(stacks, "state bucket 'fnx-terraform-state' is created by more than one backend instance: "
+                                "['fnx-ew1-root: backend/main', 'fnx-ue1-root: backend/main']")
+
+    def test_state_keys_are_unique_per_bucket(self):
+        # The same key in two buckets is two objects; twice in one bucket fails
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
+        twin = eu("fnx-ew1-prod", "prod")
+        twin["workspace"] = "fnx-ue1-prod"
+        stacks["fnx-ew1-prod"]["components"]["terraform"]["vpc/x"] = twin
+        self.assertFalse(any("share the state key" in e for e in check_state_keys.check(stacks)))
+        stacks["fnx-ue1-dev"]["components"]["terraform"]["vpc/x"] = instance("fnx-ue1-prod", stage="dev")
+        self.assert_has(stacks, "fnx-ue1-prod: vpc/main and fnx-ue1-dev: vpc/x share the state key")
+
+    def test_backend_without_bucket_name_fails(self):
+        stacks = stacks_with(**{"vpc/main": prod()})
+        del stacks["fnx-ue1-root"]["components"]["terraform"]["backend/main"]["vars"]["bucket_name"]
+        self.assert_has(stacks, "fnx-ue1-root: backend/main: the deployed 'backend' instance has no vars.bucket_name")
 
     def test_abstract_and_disabled_backend_do_not_count(self):
         stacks = stacks_with(**{"vpc/main": prod()})
