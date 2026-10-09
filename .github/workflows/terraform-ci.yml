@@ -730,6 +730,7 @@ jobs:
       stack: ${{ matrix.stack }}
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
+      region: ${{ matrix.region }}
       mode: plan
       components: ${{ matrix.components }}
 
