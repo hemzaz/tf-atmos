@@ -36,10 +36,12 @@ import fixtures  # noqa: E402
 CHECK = "check-data-residency"
 GDPR = "gdpr"
 EU_PREFIX = "eu-"
-AWS_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
+REGION = r"[a-z]{2}(?:-[a-z]+)+-\d+"
+AWS_REGION = re.compile(rf"^{REGION}$")
 REGION_KEY = re.compile(r"(^|_)regions?$")
+# Every ARN in a string, also inside a JSON policy document passed as a string var.
 # IAM, S3 and Route 53 ARNs have an empty region field, which this does not match.
-ARN_REGION = re.compile(r"^arn:aws[a-z-]*:[^:]+:([a-z]{2}(?:-[a-z]+)+-\d+):")
+ARN_REGION = re.compile(rf"(?<![A-Za-z0-9:/_-])arn:aws[a-z-]*:[a-z0-9-]+:({REGION}):")
 
 
 class Exemption(NamedTuple):
@@ -94,10 +96,9 @@ def region_fields(value: Any, path: str, region_key: bool = False) -> Iterator[t
         for item in value:
             yield from region_fields(item, path, region_key)
     elif isinstance(value, str):
-        arn = ARN_REGION.match(value)
-        if arn:
+        for arn in ARN_REGION.finditer(value):
             yield path, arn.group(1)
-        elif region_key and AWS_REGION.match(value):
+        if region_key and AWS_REGION.match(value):
             yield path, value
 
 
@@ -133,6 +134,9 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
     if (instance.get("settings") or {}).get("depends_on"):
         errors.append(f"{where} sets settings.depends_on: list dependencies in dependencies.components")
     for dep in (instance.get("dependencies") or {}).get("components") or []:
+        if not isinstance(dep, dict):
+            errors.append(f"{where} dependencies.components entry {dep!r} is not a {{component, stack}} map")
+            continue
         target = dep.get("stack") or stack_name
         if target not in scoped:
             errors.append(f"{where} depends on {dep.get('component')} in {target}, which is not GDPR-scoped")

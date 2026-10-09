@@ -74,6 +74,20 @@ class DataResidencyTest(unittest.TestCase):
             f"fnx-ew1-prod: apigateway/main vars.health_check_alarm_actions is 'us-east-1', {OUTSIDE}",
         ])
 
+    def test_arns_inside_policy_strings(self):
+        bad = instance(topic_policy='{"Statement":[{"Resource":"arn:aws:sns:us-east-1:111111111111:t"}]}')
+        self.assertEqual(residency.check({"fnx-ew1-prod": stack(sns=bad)}), [
+            f"fnx-ew1-prod: sns vars.topic_policy is 'us-east-1', {OUTSIDE}",
+        ])
+        good = instance(topic_policy='{"Statement":[{"Resource":"arn:aws:sns:eu-west-1:111111111111:t",'
+                                     '"Principal":{"AWS":"arn:aws:iam::111111111111:root"}}]}')
+        self.assertEqual(residency.check({"fnx-ew1-prod": stack(sns=good)}), [])
+
+    def test_non_map_dependency_is_an_error(self):
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(app=instance(deps=["vpc"]))}), [
+            "fnx-ew1-prod: app dependencies.components entry 'vpc' is not a {component, stack} map",
+        ])
+
     def test_dependency_on_us_stack_fails(self):
         stacks = {
             "fnx-ew1-prod": eu_stack(app=instance(deps=[{"component": "vpc", "stack": "fnx-ue1-prod"}])),
