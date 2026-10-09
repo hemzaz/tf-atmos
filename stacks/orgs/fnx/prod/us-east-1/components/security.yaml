@@ -394,7 +394,7 @@ components:
     # AWS Backup - vault, plans and tag-based selection for rds/main,
     # rds/data (Backup=true in their own services.yaml vars.tags) and any
     # EC2/EBS resource tagged the same way. Retention matches the account's
-    # pci-sox-gdpr compliance tag (globals.yaml): 7-year monthly retention for
+    # pci-sox compliance tag (globals.yaml): 7-year monthly retention for
     # SOX. Every recovery point is also copied to the DR region (owner
     # decision Q5): vault <Environment>-backup-replica in us-east-2, on
     # kms/main's replica key, kept as long as the source point (Cloud Posse

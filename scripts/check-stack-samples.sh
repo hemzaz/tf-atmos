@@ -19,8 +19,8 @@
 #     stage (read/write; prod_read/prod_write for stage prod). No state pattern
 #     pair: the stage stack's "*/<stack>-*" pattern already covers a lane;
 #   - check-dependencies.py, check-deploy-layers.py, check-lane-names.py,
-#     check-prod-protection.py, check-cluster-api-ci.py, check-state-keys.py and
-#     check-ci-state-roles.py over the result;
+#     check-prod-protection.py, check-cluster-api-ci.py, check-state-keys.py,
+#     check-ci-state-roles.py and check-data-residency.py over the result;
 #   - with --sweep, scripts/plan-sweep.sh on the sample stacks.
 #
 # Usage: scripts/check-stack-samples.sh [--sweep]
@@ -126,6 +126,7 @@ python3 workflows/scripts/common/check-prod-protection.py components/terraform <
 python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < stacks.json
 python3 workflows/scripts/common/check-state-keys.py < stacks.json
 python3 workflows/scripts/common/check-ci-state-roles.py < stacks.json
+python3 workflows/scripts/common/check-data-residency.py < stacks.json
 
 if [[ "$SWEEP" == "true" ]]; then
     # plan-sweep mirrors components/terraform with git ls-files.
