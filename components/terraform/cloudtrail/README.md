@@ -7,7 +7,8 @@ names follow Cloud Posse's.
 
 ## Wiring
 
-- Instance: `cloudtrail/main` in the three AWS stacks; reads `kms/main .key_arn`.
+- Instance: `cloudtrail/main` in one stack per account (dev, staging, `fnx-ue1-prod`,
+  `fnx-ew1-prod`; `fnx-ue2-prod` shares `fnx-ue1-prod`'s trail); reads `kms/main .key_arn`.
 - Used by: `security-monitoring` (`.cloudtrail_logs_log_group_name`, CIS metric filters and
   alarms).
 

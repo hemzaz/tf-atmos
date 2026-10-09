@@ -11,7 +11,7 @@
 # Unlike fnx-ue2-prod it owns its DNS: network/main holds the EU apex
 # (settings.environment.domain_name, globals.yaml), delegated at the registrar,
 # never from a US zone. Everything stays in eu-west-1 (check-data-residency.py):
-#   - flow logs: the vpc component's own key and log group, in this region;
+#   - flow logs: a log group in this region on kms/main (security.yaml);
 #   - Route 53 public query logging is OFF: its log group, resource policy and
 #     key can only be in us-east-1 (components/terraform/dns/query-logging.tf),
 #     and the logs hold client IPs. check-data-residency.py fails a GDPR-scoped
@@ -67,14 +67,16 @@ components:
           "kubernetes.io/role/internal-elb": "1"
           "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
         vpc_flow_logs_enabled: true
-        # No flow_logs_kms_key_arn yet: this stack has no kms/main, so the
-        # component creates its own key (eu-west-1). The PR adding kms/main
-        # sets `!terraform.state kms/main .key_arn` and its dependency, as in
-        # fnx-ue1-prod (nothing is applied, so the key swap needs no migration).
+        # The stack's key (eu-west-1), as in fnx-ue1-prod: kms/main's
+        # allow_cloudwatch_logs covers the flow-log group.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
         tags:
           NetworkTier: "primary"
           HighAvailability: "true"
           CriticalityLevel: "high"
+      dependencies:
+        components:
+          - component: kms/main
 
     network/main:
       metadata:

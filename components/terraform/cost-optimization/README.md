@@ -9,8 +9,9 @@ Cloud Posse equivalent; the Lambdas are packaged like Cloud Posse `aws-lambda` (
 
 ## Wiring
 
-- Instance: `cost-optimization/main` in the three AWS stacks; reads `kms/main .key_arn` (log groups
-  and SNS topic). Deploys in the `monitoring` layer.
+- Instance: `cost-optimization/main` in one stack per account (dev, staging, `fnx-ue1-prod`,
+  `fnx-ew1-prod`); reads `kms/main .key_arn` (log groups and SNS topic). Deploys in the
+  `monitoring` layer.
 
 ## Notes
 

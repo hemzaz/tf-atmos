@@ -2,26 +2,34 @@
 # =============================================================================
 # Security for fnx-ew1-prod (EU production, its own account)
 # =============================================================================
-# The account and identity layer: iam/main (cross-account role, Auto Scaling
-# service-linked role) and iam/ci (GitHub OIDC provider and CI roles). As in
-# fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/security.yaml, which
-# explains each input), except:
-#   - a new account: iam/ci creates the account's GitHub OIDC provider and
-#     iam/main the Auto Scaling service-linked role; nothing here reads a US
-#     stack (fnx-ue2-prod shares the US prod account's, this stack cannot);
+# The account and identity layer (iam/main, iam/ci), the stack's key
+# (kms/main) and the prod-eu account's singletons: the multi-region CloudTrail
+# trail (cloudtrail/main) and AWS Config's global-resource recording
+# (awsconfig/main); the account budget is cost-optimization/main
+# (services.yaml). As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/
+# security.yaml, which explains each input), except:
+#   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
+#     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
+#     role, the trail, global-resource recording, the budget); nothing here
+#     reads a US stack;
 #   - state: the EU backend's prod roles (settings.tfstate, fnx-ew1-root),
 #     which trust these CI roles (stacks/orgs/fnx/root/eu-west-1.yaml);
-#   - no ci_apply_kms_key_aliases, ci_runner_pool_names or lambda uploader
-#     yet: the PRs adding kms/main, the runner pool and the Lambda bucket add
-#     them.
+#   - no ci_runner_pool_names or lambda uploader yet: the PRs adding the
+#     runner pool and the Lambda bucket add them.
 # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
+# Not yet here: the regional security services (GuardDuty, Security Hub,
+# Inspector, finding routing with the trail's CIS metric filters, backups).
 # =============================================================================
 
 # catalog/iam/defaults comes through globals, which imports it before its own
 # vars; importing it again here, after globals, would let catalog/_base's
-# tags (Project) override the globals' ones.
+# tags (Project) override the globals' ones. The catalogs below import no
+# _base.
 import:
   - orgs/fnx/prod/eu-west-1/components/globals
+  - catalog/kms/defaults
+  - catalog/cloudtrail/defaults
+  - catalog/awsconfig/defaults
 
 components:
   terraform:
@@ -65,3 +73,48 @@ components:
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
         ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
+        # kms/main's key, by alias (iam/ci applies before the kms layer):
+        # must match kms/main's alias_name below.
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+
+    kms/main:
+      metadata:
+        component: kms
+        inherits:
+          - kms/defaults
+      vars:
+        description: EU production main encryption key
+        alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
+        deletion_window_in_days: 30
+        # Multi-region, replicated to the EU DR region only (never a US one):
+        # fnx-ec1-prod, the planned EU DR stack, reaches the replica by its own
+        # prefix's alias, as fnx-ue2-prod does ue1's (ue2-main).
+        is_multi_region: true
+        replica_regions:
+          - eu-central-1
+        replica_alias_names:
+          eu-central-1: ec1-main
+      dependencies:
+        components:
+          # The Auto Scaling service-linked role that
+          # allow_autoscaling_ebs (kms/defaults) names.
+          - component: iam/main
+
+    # The prod-eu account's multi-region trail: it records every region's API
+    # events into this region's bucket and log group (both on kms/main), so
+    # the logs stay in the EU. fnx-ec1-prod adds no trail.
+    cloudtrail/main:
+      metadata:
+        component: cloudtrail
+        inherits:
+          - cloudtrail/defaults
+
+    # The prod-eu account's global-resource (IAM) recorder:
+    # include_global_resource_types stays true (catalog default) here and
+    # only here; fnx-ec1-prod's awsconfig sets it false, as fnx-ue2-prod does.
+    awsconfig/main:
+      metadata:
+        component: awsconfig
+        inherits:
+          - awsconfig/defaults

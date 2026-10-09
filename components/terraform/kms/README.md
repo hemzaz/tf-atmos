@@ -7,7 +7,8 @@ use through their own IAM policies.
 
 ## Wiring
 
-- Instance: `kms/main` in the three AWS stacks and `fnx-ue1-local-sandbox` (not `fnx-ue1-local-localemu`).
+- Instance: `kms/main` in dev, staging, `fnx-ue1-prod`, `fnx-ew1-prod` and `fnx-ue1-local-sandbox`
+  (not `fnx-ue1-local-localemu`; `fnx-ue2-prod` uses `fnx-ue1-prod`'s replica).
 - Depends on `iam/dev` (dev) or `iam/main` (staging, prod), which creates the Auto Scaling
   service-linked role this key policy names.
 - Used by (`.key_arn`): `vpc`, `eks`, `eks-addons`, `external-secrets`, `rds`, `elasticache`, `ec2`,
@@ -38,7 +39,8 @@ use through their own IAM policies.
   to the replica's `key_arn` and alias; `backup/main` and `fnx-ue2-prod` read it. Cloud Posse's
   `aws-kms` has no replicas (one key per region stack): `aws_kms_replica_key` is this library's
   deviation, chosen so data copied to the DR region (backups, replicas) decrypts with the same key
-  material.
+  material. `fnx-ew1-prod`'s key replicates only to `eu-central-1` (alias `ec1-main`, for the EU DR
+  stack `fnx-ec1-prod`), never to a US region.
 - A replica's policy is generated from the same `allow_*` set as the primary, scoped to the
   replica's region; there is no per-region override, by choice. The DR region runs the same
   services as the primary (it is the failover target), and the policy otherwise delegates to the
