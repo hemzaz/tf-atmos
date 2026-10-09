@@ -11,10 +11,10 @@
 # keys and roles never share a bucket, policy or name with the US ones.
 #
 # An EU stack points its settings.tfstate here, all of it
-# (stacks/orgs/fnx/_defaults.yaml). Until fnx-ew1-prod exists the bucket holds
-# only this stack's own state, so only the root role is defined
-# (check-state-keys.py fails a role that matches no state); fnx-ew1-prod adds
-# its prod roles and their pattern pair.
+# (stacks/orgs/fnx/_defaults.yaml). The bucket holds prod state only
+# (fnx-ew1-prod, in the prod-eu account), so this stack has the prod roles
+# (catalog/backend/roles/prod) and no read/write: check-state-keys.py fails a
+# role that matches no state.
 #
 # Bootstrap (cold start, once):
 #   atmos workflow backend-cold-start -f bootstrap -s fnx-ew1-root
@@ -25,7 +25,7 @@ import:
   # The region code (ew1) of the state bucket's region, settings.tfstate.region
   - mixins/region/eu-west-1
   - orgs/fnx/root/_defaults
-  - catalog/backend/defaults
+  - catalog/backend/roles/prod
 
 vars:
   region: "{{ .settings.tfstate.region }}"
@@ -61,9 +61,28 @@ components:
         # every access role (as fnx-ue1-root's to us-east-2).
         s3_replication_enabled: true
         replica_region: "{{ .settings.tfstate.replica_region }}"
-        # Who may use the state: only this stack's own state for now, through
-        # the root role (no principals: the applying administrator only).
+        # Who may use the state, as in fnx-ue1-root (whose comment explains
+        # the patterns and the CI role ARNs): each stack's exact pattern pair
+        # on its stage's roles, and its CI roles, named from iam/ci's
+        # ci_role_name_prefix in that stack's account. The EU CI roles live
+        # in the prod-eu account (a hyphenated account map key: index).
+        # fnx-ec1-prod (EU DR) adds its pair and roles when it exists.
         access_roles:
+          prod_read:
+            # EU prod state: ONLY fnx-ew1-prod's plan role (master branch
+            # subject alone, owner decision D3).
+            object_key_patterns: &prod_state
+              - "*/fnx-ew1-prod/*"
+              - "*/fnx-ew1-prod-*"
+            allowed_principal_arns:
+              - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-plan'
+          prod_write:
+            # EU prod state: ONLY fnx-ew1-prod's apply role.
+            object_key_patterns: *prod_state
+            allowed_principal_arns:
+              - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-apply'
+          # This stack's own state (backend/main). No principals listed: the
+          # applying administrator only (stacks/catalog/backend/defaults.yaml).
           root_write:
             object_key_patterns:
               - "*/fnx-ew1-root/*"

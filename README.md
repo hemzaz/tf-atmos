@@ -48,6 +48,7 @@ on a non-gdpr stack.
 | `fnx-ue1-staging` | `staging/us-east-1.yaml` | staging |
 | `fnx-ue1-prod` | `prod/us-east-1.yaml` | production |
 | `fnx-ue2-prod` | `prod/us-east-2.yaml` | production DR warm standby, same account; runs a subset of `fnx-ue1-prod` ([Disaster recovery](./docs/OPERATIONS.md#disaster-recovery)) |
+| `fnx-ew1-prod` | `prod/eu-west-1.yaml` | EU production (GDPR), its own account (`prod-eu`), state in `fnx-ew1-root`'s backend; today the account and identity layer only (`iam/main`, `iam/ci`) |
 | `fnx-ue1-root` | `root/us-east-1.yaml` | management account: the US stacks' state backend (`backend/main`); not run by CI |
 | `fnx-ew1-root` | `root/eu-west-1.yaml` | management account: the EU stacks' state backend (`backend/main`, `eu-west-1`, replica `eu-central-1`); not run by CI |
 | `fnx-ue1-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |

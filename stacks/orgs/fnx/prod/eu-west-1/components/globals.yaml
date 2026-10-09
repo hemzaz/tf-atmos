@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Global settings for fnx-ew1-prod (EU production, GDPR)
+# =============================================================================
+# fnx-ue1-prod's tags (orgs/fnx/prod/us-east-1/components/globals.yaml) with
+# Compliance "pci-sox-gdpr": the EU stacks' tag, which check-data-residency.py
+# requires on every instance of a GDPR-scoped stack. The domain, alert
+# contacts and EKS settings come with the components that read them.
+# =============================================================================
+
+vars:
+  tags:
+    Team: "Platform"
+    CostCenter: "Production"
+    Project: "Infrastructure"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Production"
+    Provisioner: "Atmos"
+    DataClassification: "confidential"
+    Compliance: "pci-sox-gdpr"
+    CriticalityLevel: "high"
+    SLA: "99.9"
+    BackupRequired: "true"

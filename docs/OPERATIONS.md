@@ -10,7 +10,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 
 | Input | Where |
 |-------|-------|
-| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`. Each stage's `settings.environment.account_id`, `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. `scripts/new-environment.sh` adds a new account here (`AWS_ACCOUNT_ID`). The emulator and fixture stacks keep the emulator's `000000000000` |
+| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`, `prod-eu` (the EU prod account, `fnx-ew1-prod`; GDPR keeps it apart from `prod`). Each stage's `settings.environment.account_id` (`fnx-ew1-prod`'s from `prod-eu`), `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and `fnx-ew1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. `scripts/new-environment.sh` adds a new account here (`AWS_ACCOUNT_ID`). The emulator and fixture stacks keep the emulator's `000000000000` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
@@ -75,7 +75,8 @@ The EU stacks keep their state in the EU (GDPR residency): `backend/main` in `fn
 `fnx-ew1-terraform-state` in `eu-west-1`, replicated to `fnx-ew1-terraform-state-replica` in
 `eu-central-1`, roles `fnx-ew1-terraform-backend-*`. An EU stack overrides all of
 `settings.tfstate` to point there; `check-data-residency.py` fails one that names a non-EU region.
-Until an EU workload stack exists its only role is `root_write`.
+It holds only prod state (`fnx-ew1-prod`, in the `prod-eu` account), so it has the `prod_read`,
+`prod_write` and `root_write` roles, trusting `fnx-ew1-prod`'s CI roles.
 
 The backend workflows default to `fnx-ue1-root`; `-s fnx-ew1-root` runs them on the EU backend
 (the bucket and roles come from that stack's `settings.tfstate`):
@@ -99,12 +100,13 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 |---------------------------|--------|-----------------|
 | `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
 | `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
-| `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (`fnx-ue1-prod`, DR `fnx-ue2-prod`) | the prod stacks' CI plan roles |
+| `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`) | the prod stacks' CI plan roles |
 | `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
 | `<role_prefix>-root-role` (`root_write`) | read/write, the root stack's own state (`fnx-ue1-root`, `fnx-ew1-root`) | none |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
-- Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml`. Add a new stack's
+- Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU:
+  `root/eu-west-1.yaml`). Add a new stack's
   `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles there (iam/ci's `ci_role_name_prefix`),
   and any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
   and `validate-all`) fails a CI role that its stage's read or write role, of the backend owning its
