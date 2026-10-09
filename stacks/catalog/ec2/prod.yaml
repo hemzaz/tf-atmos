@@ -1,0 +1,53 @@
+---
+import:
+  - catalog/ec2/defaults
+
+# The production bastion, shared by fnx-ue1-prod's and fnx-ew1-prod's
+# ec2/bastion: the operator's SSM port-forward path to the private EKS
+# endpoints, in vpc/main's first private subnet, with every key on the
+# stack's kms/main. Each stack sets allowed_egress_rules, whose SSH rule
+# names its own VPC CIDRs.
+components:
+  terraform:
+    ec2/bastion-prod:
+      metadata:
+        component: ec2
+        type: abstract
+        inherits:
+          - ec2
+      vars:
+        name: bastion
+        vpc_id: !terraform.state vpc/main .vpc_id
+        # No ssh_key_pair: the component generates the bastion's key (catalog
+        # defaults, ED25519) and stores the private key in Secrets Manager,
+        # encrypted with kms/main.
+        ssh_key_secret_kms_key_id: !terraform.state kms/main .key_arn
+        # Required in prod by the ec2 `environment` validation. The component
+        # defaults it false, which suits dev and staging where instances are
+        # torn down routinely; the validation stops that default reaching prod.
+        disable_api_termination: true
+        tags:
+          Role: bastion
+          Access: restricted
+          CriticalityLevel: "high"
+        metadata_http_tokens_required: true
+        metadata_http_put_response_hop_limit: 1
+        instance_type: "t3.small"
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
+        ebs_optimized: true
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal VPN only"
+        monitoring: true
+        root_volume_type: "gp3"
+        root_volume_size: 20
+        root_block_device_encrypted: true
+        root_block_device_kms_key_id: !terraform.state kms/main .key_arn
+        delete_on_termination: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main

@@ -1,0 +1,103 @@
+---
+import:
+  - catalog/eks/defaults
+
+# The production main cluster, shared by fnx-ue1-prod's and fnx-ew1-prod's
+# eks/main (the warm standby fnx-ue2-prod keeps its own floor sizes and
+# replica key): "<Environment>-main" (ue1-main, ew1-main) in vpc/main's
+# private subnets, a private-only endpoint, every control-plane log type,
+# secrets and node volumes on the stack's kms/main, and the three node groups.
+# The operator's path to the private endpoint (docs/OPERATIONS.md, "In-cluster
+# components"): TCP 443 on the cluster security group from the bastion's own
+# security group, whose SSM port-forward carries it, and from the stack's
+# in-VPC CI runners (github-runners/main), for the in-cluster instances.
+components:
+  terraform:
+    eks/prod:
+      metadata:
+        component: eks
+        type: abstract
+        inherits:
+          - eks/defaults
+      vars:
+        # The cluster is "<Environment>-<name>".
+        name: main
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
+          - !terraform.state github-runners/main .security_group_id
+        tags:
+          Cluster: "{{ .settings.prefix }}-main"
+          Purpose: "application-workloads"
+          CriticalityLevel: "high"
+          SLA: "99.9"
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        # Private-only endpoint for production
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        cluster_log_retention_period: 90
+        node_groups:
+          # General purpose workers
+          workers:
+            instance_types: ["m5.xlarge"]
+            desired_group_size: 6
+            min_group_size: 3
+            max_group_size: 12
+            kubernetes_labels:
+              role: worker
+              environment: "{{ .settings.context.stage }}"
+            capacity_type: "ON_DEMAND" # Stable capacity for production
+            # gp3 and encrypted are the component defaults, so only the
+            # size is stated.
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+            # Spread across AZs
+            subnet_ids: !terraform.state vpc/main .private_subnet_ids
+            tags:
+              NodeGroup: workers
+          # Monitoring and observability
+          monitoring:
+            instance_types: ["m5.large"]
+            desired_group_size: 3
+            min_group_size: 2
+            max_group_size: 4
+            kubernetes_labels:
+              role: monitoring
+            kubernetes_taints:
+              - key: dedicated
+                value: monitoring
+                effect: "NO_SCHEDULE"
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 200 # Extra space for metrics
+          # High-memory workloads
+          memory-optimized:
+            instance_types: ["r5.xlarge"]
+            desired_group_size: 3
+            min_group_size: 2
+            max_group_size: 6
+            kubernetes_labels:
+              role: memory-optimized
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+          - component: iam/ci
+          - component: ec2/bastion
+          - component: github-runners/main

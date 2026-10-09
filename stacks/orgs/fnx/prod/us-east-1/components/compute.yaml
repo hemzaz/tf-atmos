@@ -8,9 +8,9 @@
 
 import:
   - orgs/fnx/prod/us-east-1/components/globals
-  - catalog/eks/defaults
-  - catalog/github-runners/defaults
-  - catalog/ec2/defaults
+  - catalog/eks/prod
+  - catalog/github-runners/prod
+  - catalog/ec2/prod
   - catalog/external-secrets/defaults
   - catalog/eks-addons/defaults
   - catalog/eks-backend-services/defaults
@@ -20,97 +20,12 @@ components:
     # ==========================================================================
     # EKS Cluster - Main Application Workloads (Production HA)
     # ==========================================================================
+    # catalog/eks/prod: the cluster is "<Environment>-<name>": ue1-main.
     eks/main:
       metadata:
         component: eks
         inherits:
-          - eks/defaults
-      vars:
-        # The cluster is "<Environment>-<name>": ue1-main.
-        name: main
-        subnet_ids: !terraform.state vpc/main .private_subnet_ids
-        # The operator's path to the private endpoint (docs/OPERATIONS.md,
-        # "In-cluster components"): TCP 443 on the cluster security group from
-        # the bastion's own security group, whose SSM port-forward carries it.
-        allowed_security_group_ids:
-          - !terraform.state ec2/bastion .security_group_id
-          # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
-          - !terraform.state github-runners/main .security_group_id
-        tags:
-          Cluster: "{{ .settings.prefix }}-main"
-          Purpose: "application-workloads"
-          CriticalityLevel: "high"
-          SLA: "99.9"
-        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
-        # Private-only endpoint for production
-        cluster_endpoint_private_access: true
-        cluster_endpoint_public_access: false
-        enabled_cluster_log_types:
-          - "api"
-          - "audit"
-          - "authenticator"
-          - "controllerManager"
-          - "scheduler"
-        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
-        cluster_log_retention_period: 90
-        node_groups:
-          # General purpose workers
-          workers:
-            instance_types: ["m5.xlarge"]
-            desired_group_size: 6
-            min_group_size: 3
-            max_group_size: 12
-            kubernetes_labels:
-              role: worker
-              environment: "{{ .settings.context.stage }}"
-            capacity_type: "ON_DEMAND" # Stable capacity for production
-            # gp3 and encrypted are the component defaults, so only the
-            # size is stated.
-            block_device_map:
-              "/dev/xvda":
-                ebs:
-                  volume_size: 100
-            # Spread across AZs
-            subnet_ids: !terraform.state vpc/main .private_subnet_ids
-            tags:
-              NodeGroup: workers
-          # Monitoring and observability
-          monitoring:
-            instance_types: ["m5.large"]
-            desired_group_size: 3
-            min_group_size: 2
-            max_group_size: 4
-            kubernetes_labels:
-              role: monitoring
-            kubernetes_taints:
-              - key: dedicated
-                value: monitoring
-                effect: "NO_SCHEDULE"
-            capacity_type: "ON_DEMAND"
-            block_device_map:
-              "/dev/xvda":
-                ebs:
-                  volume_size: 200 # Extra space for metrics
-          # High-memory workloads
-          memory-optimized:
-            instance_types: ["r5.xlarge"]
-            desired_group_size: 3
-            min_group_size: 2
-            max_group_size: 6
-            kubernetes_labels:
-              role: memory-optimized
-            capacity_type: "ON_DEMAND"
-            block_device_map:
-              "/dev/xvda":
-                ebs:
-                  volume_size: 100
-      dependencies:
-        components:
-          - component: vpc/main
-          - component: kms/main
-          - component: iam/ci
-          - component: ec2/bastion
-          - component: github-runners/main
+          - eks/prod
 
     # ==========================================================================
     # EKS Cluster - Data Processing Workloads (Production HA)
@@ -186,37 +101,13 @@ components:
     # ==========================================================================
     # EC2 Bastion Host (Production Hardened)
     # ==========================================================================
+    # catalog/ec2/prod; the SSH rule names vpc/main's and vpc/services' CIDRs.
     ec2/bastion:
       metadata:
         component: ec2
         inherits:
-          - ec2
+          - ec2/bastion-prod
       vars:
-        name: bastion
-        vpc_id: !terraform.state vpc/main .vpc_id
-        # No ssh_key_pair: the component generates the bastion's key (catalog
-        # defaults, ED25519) and stores the private key in Secrets Manager,
-        # encrypted with kms/main.
-        ssh_key_secret_kms_key_id: !terraform.state kms/main .key_arn
-        # Required in prod by the ec2 `environment` validation. The component
-        # defaults it false, which suits dev and staging where instances are
-        # torn down routinely; the validation stops that default reaching prod.
-        disable_api_termination: true
-        tags:
-          Role: bastion
-          Access: restricted
-          CriticalityLevel: "high"
-        metadata_http_tokens_required: true
-        metadata_http_put_response_hop_limit: 1
-        instance_type: "t3.small"
-        subnet: !terraform.state vpc/main .private_subnet_ids[0]
-        ebs_optimized: true
-        allowed_ingress_rules:
-          - from_port: 22
-            to_port: 22
-            protocol: "tcp"
-            cidr_blocks: ["10.0.0.0/8"]
-            description: "SSH from internal VPN only"
         allowed_egress_rules:
           - from_port: 443
             to_port: 443
@@ -228,16 +119,6 @@ components:
             protocol: "tcp"
             cidr_blocks: ["10.20.0.0/16", "10.21.0.0/16"]
             description: "SSH to VPC resources"
-        monitoring: true
-        root_volume_type: "gp3"
-        root_volume_size: 20
-        root_block_device_encrypted: true
-        root_block_device_kms_key_id: !terraform.state kms/main .key_arn
-        delete_on_termination: true
-      dependencies:
-        components:
-          - component: vpc/main
-          - component: kms/main
 
     # ==========================================================================
     # External Secrets Operator - Main Cluster
@@ -410,19 +291,4 @@ components:
       metadata:
         component: github-runners
         inherits:
-          - github-runners/defaults
-      vars:
-        vpc_id: !terraform.state vpc/main .vpc_id
-        subnet_ids: !terraform.state vpc/main .private_subnet_ids
-        # Alarms to the stack's monitoring/main topic, <Environment>-main-alarms,
-        # named rather than read: monitoring deploys in the last layer, this
-        # pool in connectivity (kms/main lets CloudWatch alarms publish to it).
-        # monitoring names it from tags.Environment, this ARN from
-        # settings.prefix: it relies on tags.Environment staying settings.prefix
-        # (stacks/orgs/fnx/_defaults.yaml).
-        alarm_sns_topic_arns:
-          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
-      dependencies:
-        components:
-          - component: kms/main
-          - component: vpc/main
+          - github-runners/prod

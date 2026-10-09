@@ -1,0 +1,63 @@
+---
+# =============================================================================
+# Compute for fnx-ew1-prod (EU production, its own account)
+# =============================================================================
+# fnx-ue1-prod's main cluster and its access paths, from the shared prod
+# catalogs (catalog/<component>/prod): eks/main (ew1-main, the name vpc/main's
+# load balancer subnet tags expect), the bastion and the in-VPC runner pool.
+# Not yet here: the in-cluster external-secrets/main and eks-addons/main (next
+# commit), and eks-backend-services/main, which comes with rds/main and
+# elasticache/main (the services PR). No eks/data: the EU data plane (data VPC, eks/data,
+# rds/data) is not in this stack.
+#
+# The endpoint is private, so CI runs the in-cluster instances on this
+# stack's own pool (settings.github.runner: in-vpc, owner decision Q8), which
+# CI starts in eu-west-1 (its vars.region, #350); iam/ci lets only this
+# stack's apply role start it (ci_runner_pool_names, security.yaml).
+#
+# Everything stays in eu-west-1 (check-data-residency.py): control-plane logs
+# and Container Insights go to this region's CloudWatch on kms/main, the
+# runners' JIT configuration to this region's SSM. The GitHub App private key
+# is a parameter in the prod-eu account's SSM (docs/OPERATIONS.md,
+# "First-deploy inputs", GitHub App).
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-1/components/globals
+  - catalog/eks/prod
+  - catalog/github-runners/prod
+  - catalog/ec2/prod
+
+components:
+  terraform:
+    # The cluster is "<Environment>-<name>": ew1-main.
+    eks/main:
+      metadata:
+        component: eks
+        inherits:
+          - eks/prod
+
+    # The SSH rule names this stack's one VPC.
+    ec2/bastion:
+      metadata:
+        component: ec2
+        inherits:
+          - ec2/bastion-prod
+      vars:
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["{{ .settings.network.vpc_cidrs.main }}"]
+            description: "SSH to VPC resources"
+
+    github-runners/main:
+      metadata:
+        component: github-runners
+        inherits:
+          - github-runners/prod
