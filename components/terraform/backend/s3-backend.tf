@@ -109,8 +109,10 @@ resource "aws_kms_key" "terraform_state_key" {
   })
 }
 
+# Named from the bucket (alias/fnx-terraform-state-key, EU alias/fnx-ew1-terraform-state-key),
+# so each backend's key is unambiguous by name, whatever region it is listed in.
 resource "aws_kms_alias" "terraform_state_key_alias" {
-  name          = "alias/${var.tenant}-terraform-state-key"
+  name          = "alias/${var.bucket_name}-key"
   target_key_id = aws_kms_key.terraform_state_key.key_id
 }
 

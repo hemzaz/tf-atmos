@@ -43,7 +43,7 @@ resource "aws_kms_alias" "terraform_state_replica" {
   count = local.replication_enabled ? 1 : 0
 
   region        = var.replica_region
-  name          = "alias/${var.tenant}-terraform-state-key"
+  name          = "alias/${var.bucket_name}-key"
   target_key_id = aws_kms_replica_key.terraform_state[0].key_id
 }
 

@@ -6,8 +6,9 @@
 # Workload stacks never create one.
 #
 # This file holds what every backend has: its own state's root_write role.
-# The stage roles come from catalog/backend/stage-roles, imported by a root
-# stack whose bucket holds dev/staging/prod state.
+# The stage roles come from catalog/backend/roles/nonprod (read, write) and
+# catalog/backend/roles/prod (prod_read, prod_write), each imported by a root
+# stack whose bucket holds that stage's state.
 components:
   terraform:
     backend:

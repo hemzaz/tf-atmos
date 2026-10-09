@@ -19,7 +19,8 @@ import:
   # The region code (ue1) of the state bucket's region, settings.tfstate.region
   - mixins/region/us-east-1
   - orgs/fnx/root/_defaults
-  - catalog/backend/stage-roles
+  - catalog/backend/roles/nonprod
+  - catalog/backend/roles/prod
 
 vars:
   region: "{{ .settings.tfstate.region }}"
