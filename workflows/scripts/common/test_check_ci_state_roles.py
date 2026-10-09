@@ -266,6 +266,31 @@ class CheckCiStateRolesTest(unittest.TestCase):
                            "plan role may assume [] (ci_backend_read_role_arns)",
                            "apply role may assume [] (ci_backend_write_role_arn)")
 
+    def test_grant_of_the_right_role_in_another_account_fails(self):
+        prod = ci("prod")
+        prod["vars"]["ci_backend_read_role_arns"] = [
+            "arn:aws:iam::999999999999:role/fnx-terraform-backend-prod-read-role"]
+        self.assert_errors(stacks(**today(**{"fnx-ue1-prod": prod})),
+                           "fnx-ue1-prod: iam/ci plan role may assume ['arn:aws:iam::999999999999:role/"
+                           "fnx-terraform-backend-prod-read-role'] (ci_backend_read_role_arns), not fnx-ue1-root: "
+                           "backend/main access_roles.prod_read (fnx-terraform-backend-prod-read-role) in "
+                           "aws:111111111111")
+        prod["vars"]["ci_backend_read_role_arns"] = [
+            "arn:aws-us-gov:iam::111111111111:role/fnx-terraform-backend-prod-read-role"]
+        self.assert_errors(stacks(**today(**{"fnx-ue1-prod": prod})), "fnx-ue1-prod: iam/ci plan role may assume")
+
+    def test_grant_with_a_role_path_passes(self):
+        prod = ci("prod")
+        prod["vars"]["ci_backend_read_role_arns"] = [role_arn("path/x/fnx-terraform-backend-prod-read-role")]
+        self.assert_errors(stacks(**today(**{"fnx-ue1-prod": prod})))
+
+    def test_write_grant_is_not_checked_without_the_apply_role(self):
+        roles = access_roles(prod_write=[])
+        for wrong in (None, role_arn(ROLE_NAMES["write"]), "arn:aws:iam::999999999999:role/x"):
+            prod = ci("prod", apply=False)
+            prod["vars"]["ci_backend_write_role_arn"] = wrong
+            self.assert_errors(stacks(roles=roles, **today(**{"fnx-ue1-prod": prod})))
+
     def test_eu_ci_assuming_a_us_role_fails(self):
         # backend.assume_role.role_arn rendered from the US backend: not a role of the backend owning its state
         self.assert_errors(

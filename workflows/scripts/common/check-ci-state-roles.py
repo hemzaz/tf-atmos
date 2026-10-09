@@ -22,8 +22,9 @@ instance's own backend must assume one of its stage's two roles of that owner
 (backend.assume_role.role_arn, the role_arn template in stacks/orgs/fnx/_defaults.yaml).
 The other side of the trust: the plan role may assume only that owner's stage read
 role (every ci_backend_read_role_arns entry names it, at least one) and the apply
-role only its write role (ci_backend_write_role_arn), so an EU CI role pointed at
-the US backend's roles fails.
+role only its write role (ci_backend_write_role_arn), each in the partition and
+account of the role its backend assumes (the management account), so an EU CI role
+pointed at the US backend's roles, or at a same-named role elsewhere, fails.
 
 The reverse holds too, per backend: an allowed_principal_arns entry shaped like a
 CI role (":role/...-ci-plan" / "-ci-apply") must be the plan or apply ARN of an
@@ -87,10 +88,19 @@ def check_grant(where: str, instance: dict, kind: str, owner: backends.Backend, 
     value = (instance.get("vars") or {}).get(variable)
     granted = (value or []) if kind == "plan" else ([value] if value else [])
     want = (owner.access_roles.get(key) or {}).get("role_name")
-    if granted and all(backends.role_name_of(arn) == want for arn in granted):
+    # The state roles live in the account of the role the instance's own backend assumes (management).
+    home = partition_account(((instance.get("backend") or {}).get("assume_role") or {}).get("role_arn"))
+    if granted and all(backends.role_name_of(arn) == want and partition_account(arn) == home for arn in granted):
         return []
     return [f"{where} {kind} role may assume {granted} ({variable}), not {owner.where} access_roles.{key} "
-            f"({want}), so its CI cannot assume the state role of the backend owning its state"]
+            f"({want}) in {':'.join(home or ('?', '?'))} (the partition:account of backend.assume_role.role_arn), "
+            "so its CI cannot assume the state role of the backend owning its state"]
+
+
+def partition_account(arn) -> "tuple[str, str] | None":
+    """(partition, account) of an IAM role ARN, or None."""
+    parts = arn.split(":", 5) if isinstance(arn, str) else []
+    return (parts[1], parts[4]) if len(parts) == 6 and parts[0] == "arn" and parts[5].startswith("role/") else None
 
 
 def check_ci(where: str, instance: dict, stage: str, owner: backends.Backend, expected: dict) -> list[str]:
