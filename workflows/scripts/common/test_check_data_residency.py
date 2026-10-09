@@ -196,6 +196,28 @@ class DataResidencyTest(unittest.TestCase):
         us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
         self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"security-monitoring/main": us})}), [])
 
+    def test_us_stack_depending_on_an_eu_stack_fails(self):
+        # A US read replica, Global Datastore secondary or state read of an EU
+        # instance copies EU data out: the US stack lists the EU one.
+        replica = instance(region="us-east-1", compliance=US,
+                           deps=[{"component": "rds/main", "stack": "fnx-ew1-prod"}])
+        stacks = {
+            "fnx-ew1-prod": eu_stack(**{"rds/main": instance()}),
+            "fnx-ue1-prod": stack(**{"rds/main": replica}),
+        }
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ue1-prod: rds/main depends on rds/main in fnx-ew1-prod, which is GDPR-scoped: "
+            "EU data may not be read outside the EU",
+        ])
+        replica["dependencies"]["components"] = [{"component": "rds/main", "stack": "fnx-ue1-prod"}]
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_us_stack_depending_on_itself_or_a_us_stack_passes(self):
+        own = instance(region="us-east-1", compliance=US, deps=[{"component": "vpc"}])
+        stacks = {"fnx-ue1-prod": stack(vpc=instance(region="us-east-1", compliance=US), **{"eks/main": own}),
+                  "fnx-ew1-prod": eu_stack()}
+        self.assertEqual(residency.check(stacks), [])
+
     def test_backup_copy_outside_the_eu_fails(self):
         def backup(region, key_region):
             return instance(enable_cross_region_backup=True, replica_region=region,

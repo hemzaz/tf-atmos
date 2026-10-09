@@ -18,6 +18,10 @@ deployable instance:
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
     each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions.
+And no deployable instance of a stack that is not GDPR-scoped lists a GDPR-scoped stack in
+dependencies.components: a US read replica (replicate_source_db), Global Datastore secondary
+(global_replication_group_id) or state read of an EU instance would copy EU data out
+(check-dependencies.py makes every cross-stack read a listed dependency).
 EXEMPTIONS lists the (instance pattern, field) pairs that may name one non-EU region.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
@@ -184,7 +188,20 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
     for stack_name in sorted(scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             errors += check_instance(stack_name, name, instance, scoped, exemptions)
+    for stack_name in sorted(set(stacks) - scoped):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            errors += outside_reader_errors(stack_name, name, instance, scoped)
     return list(dict.fromkeys(errors))
+
+
+def outside_reader_errors(stack_name: str, name: str, instance: dict, scoped: set) -> list[str]:
+    """A non-GDPR stack's dependencies on GDPR-scoped stacks (replicas, Global Datastore secondaries, state reads)."""
+    return [
+        f"{stack_name}: {name} depends on {dep.get('component')} in {dep['stack']}, which is GDPR-scoped: "
+        "EU data may not be read outside the EU"
+        for dep in (instance.get("dependencies") or {}).get("components") or []
+        if isinstance(dep, dict) and dep.get("stack") in scoped
+    ]
 
 
 def main() -> int:
@@ -197,7 +214,7 @@ def main() -> int:
     print(
         "every GDPR-scoped (gdpr-tagged or eu-) stack is tagged gdpr, names only eu- regions "
         "(vars and their ARNs, settings.tfstate, backends, providers) outside its exemptions "
-        "and depends only on GDPR-scoped stacks"
+        "and depends only on GDPR-scoped stacks, and no other stack depends on one"
     )
     return 0
 

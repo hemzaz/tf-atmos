@@ -2,17 +2,41 @@
 # =============================================================================
 # Services for fnx-ew1-prod (EU production, its own account)
 # =============================================================================
-# Today only the prod-eu account's budget and cost alerting, an account
-# singleton fnx-ue2-prod leaves to fnx-ue1-prod; the EU services follow in
-# later PRs.
+# fnx-ue1-prod's serving path (orgs/fnx/prod/us-east-1/components/services.yaml,
+# which explains each input) from the shared prod catalogs
+# (catalog/<component>/prod): the main database and cache for the backend
+# services on eks/main (compute.yaml), plus the prod-eu account's budget. The
+# user pool, the main API and monitoring follow in the next commit. Without
+# fnx-ue1-prod's DR or US-only parts:
+#   - no Global Datastore or read replica: the EU DR stack (fnx-ec1-prod) does
+#     not exist yet;
+#   - no ECS cluster, analytics database, data API or Lambda functions.
+# Every database snapshot, backup copy (backup/main: eu-central-1 only) and
+# log stays in the EU (check-data-residency.py).
 # =============================================================================
 
 import:
   - orgs/fnx/prod/eu-west-1/components/globals
   - catalog/cost-optimization/defaults
+  - catalog/rds/prod
+  - catalog/elasticache/prod
 
 components:
   terraform:
+    # Multi-AZ in vpc/main's database subnets, on kms/main, selected into
+    # backup/main by its Backup tag.
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/main-prod
+
+    elasticache/main:
+      metadata:
+        component: elasticache
+        inherits:
+          - elasticache/main-prod
+
     # As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/services.yaml):
     # Savings Plan/RI analyzer, resource cleanup, cost anomaly detection and
     # the monthly budget (on this stack's Environment tag, ew1). Cost data is
