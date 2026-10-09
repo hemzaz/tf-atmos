@@ -40,8 +40,9 @@ components:
           Component: "IAM"
 
       # The single state backend lives in the management account's stack
-      # (settings.tfstate.stack). Every iam instance inherits this; one that
-      # sets its own dependencies.components replaces the list and repeats it.
+      # (settings.tfstate.stack). Every iam instance that inherits catalog/iam
+      # gets this; one that sets its own dependencies.components replaces the
+      # list and repeats it.
       dependencies:
         components:
           - component: backend/main

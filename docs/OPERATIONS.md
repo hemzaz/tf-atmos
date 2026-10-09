@@ -61,7 +61,7 @@ account IDs and the accounts layer is deployed and verified first
 
 One bucket, `fnx-terraform-state` (`settings.tfstate.bucket`), in the management account, with native S3
 lockfiles (`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-ue1-root`
-(`settings.tfstate.stack`, which every `iam` instance depends on), and every stack's
+(`settings.tfstate.stack`, which every `iam` instance that inherits `catalog/iam` depends on), and every stack's
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
 with management-account administrator credentials. The bucket lives in one region,
 `settings.tfstate.region` (`us-east-1`), and every stack's backend uses it whatever the stack's own

@@ -15,15 +15,18 @@
 # (workload-account) credentials stay in place for every other call.
 : "${STACK:?STACK is required}"
 
-STATE_READ_ROLE_ARN="$(env TFSTATE_ACCESS=read atmos describe component "${CONTEXT_COMPONENT:-vpc/main}" -s "${STACK}" \
-  --process-functions=false --provenance=false --format json | jq -er '.backend.assume_role.role_arn')"
+_state_component="$(env TFSTATE_ACCESS=read atmos describe component "${CONTEXT_COMPONENT:-vpc/main}" -s "${STACK}" \
+  --process-functions=false --provenance=false --format json)"
+STATE_READ_ROLE_ARN="$(jq -er '.backend.assume_role.role_arn' <<<"${_state_component}")"
 export STATE_READ_ROLE_ARN
 
 if ! _state_creds="$(aws sts assume-role --role-arn "${STATE_READ_ROLE_ARN}" --role-session-name "dr-${STACK}" \
   --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text)"; then
-  echo "Cannot assume ${STATE_READ_ROLE_ARN}: the caller must be a principal that role trusts (backend/main access_roles in settings.tfstate.stack)." >&2
+  _backend_stack="$(jq -r '.settings.tfstate.stack // "the settings.tfstate.stack root stack"' <<<"${_state_component}")"
+  echo "Cannot assume ${STATE_READ_ROLE_ARN}: the caller must be a principal that role trusts (backend/main access_roles in ${_backend_stack}, settings.tfstate.stack)." >&2
   exit 1
 fi
+unset _state_component
 read -r _STATE_KEY _STATE_SECRET _STATE_TOKEN <<<"${_state_creds}"
 unset _state_creds
 

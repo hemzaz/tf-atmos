@@ -103,9 +103,10 @@ components:
         # stack, settings.tfstate.stack; the prod stacks' objects) - plan ->
         # the prod read-only role, apply -> the prod read/write role. Named by
         # the same convention as this stack's own backend
-        # (stacks/orgs/fnx/_defaults.yaml), not read from backend/main's state: CI roles never read the root stack's
-        # state (root_write, the only role that can, trusts the administrator
-        # alone). The backend/main dependency (catalog/iam) orders the deploys.
+        # (stacks/orgs/fnx/_defaults.yaml), not read from backend/main's
+        # state: CI roles never read the root stack's state (root_write, the
+        # only role that can, trusts the administrator alone). The
+        # backend/main dependency (catalog/iam) orders the deploys.
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
         ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
