@@ -61,6 +61,15 @@ class InVpcWorkflowTest(unittest.TestCase):
                 self.assertIn("region: ${{ matrix.region }}", call, path.name)
         self.assertEqual(calls, 4)
 
+    def test_the_inline_matrix_builders_carry_the_pool_region(self):
+        """terraform-cd.yml and drift-detection.yml build their in-VPC matrices inline from --pools."""
+        for name in ("terraform-cd.yml", "drift-detection.yml"):
+            text = (WORKFLOWS / name).read_text()
+            entries = re.findall(r"in_vpc\.append\(\{(.*?)\}\)", text, re.S)
+            self.assertTrue(entries, name)
+            for entry in entries:
+                self.assertIn('"region": pool["region"]', entry, name)
+
     def test_no_caller_passes_a_role_or_inherits_secrets(self):
         for path in WORKFLOWS.glob("*.yml"):
             text = path.read_text()
