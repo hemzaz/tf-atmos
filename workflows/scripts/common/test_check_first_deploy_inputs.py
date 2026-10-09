@@ -239,6 +239,39 @@ class AccountModelTest(unittest.TestCase):
             "component": "rds", "sns_topic_arn": "arn:x"})
         self.assertEqual(errors(stacks), [])
 
+    @staticmethod
+    def eu_prod(account):
+        """fnx-ew1-prod: stage prod, eu- region, gdpr-tagged (GDPR-scoped)."""
+        return stack("prod", account, iam_ci={"component": "iam", "region": "eu-west-1",
+                                              "tags": {"Compliance": "pci-sox-gdpr"}})
+
+    def test_eu_prod_sharing_the_us_prod_account_fails(self):
+        stacks = clean()
+        stacks["fnx-ew1-prod"] = self.eu_prod("444444444444")
+        found = errors(stacks)
+        self.assertEqual(sorted(f.stack for f in found), ["fnx-ew1-prod", "fnx-ue1-prod"])
+        self.assertTrue(all("never share an account" in f.detail and f.row == "Account IDs" for f in found))
+        self.assertIn("fnx-ue1-prod", next(f.detail for f in found if f.stack == "fnx-ew1-prod"))
+
+    def test_eu_prod_sharing_is_reported_on_the_target_only(self):
+        stacks = clean()
+        stacks["fnx-ew1-prod"] = self.eu_prod("444444444444")
+        self.assertEqual([f.stack for f in errors(stacks, ["fnx-ew1-prod"])], ["fnx-ew1-prod"])
+
+    def test_eu_prod_in_its_own_account_passes(self):
+        stacks = clean()
+        stacks["fnx-ew1-prod"] = self.eu_prod("555555555555")
+        self.assertEqual(errors(stacks), [])
+
+    def test_eu_prod_placeholder_is_not_reported_as_shared(self):
+        stacks = clean()
+        stacks["fnx-ue1-prod"] = stack("prod", "123456789012", rds_main={
+            "component": "rds", "sns_topic_arn": "arn:x"})
+        stacks["fnx-ew1-prod"] = self.eu_prod("123456789012")
+        found = errors(stacks)
+        self.assertEqual({f.row for f in found}, {"Account IDs"})
+        self.assertFalse(any("never share an account" in f.detail for f in found))
+
     def test_placeholders_are_not_double_reported_as_shared(self):
         stacks = clean()
         for name, stage in (("fnx-ue1-dev", "dev"), ("fnx-ue1-staging", "staging")):

@@ -19,7 +19,9 @@ Errors (fatal unless --warn):
     placeholder 0
   - a workload account equal to the management account
   - two stages sharing an account (one account per stage)
-The last two skip placeholder IDs, which are already an error.
+  - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
+    region; EU prod, account prod-eu) sharing an account with a non-GDPR one
+The last three skip placeholder IDs, which are already an error.
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
 protection, deploy tags, the GitHub App's private key and outside-collaborator
@@ -32,10 +34,19 @@ every deployable stack. --warn prints errors as WARN and exits 0 (lint: the
 repo holds placeholders until the first deploy). Exit 1 on any error otherwise.
 """
 import argparse
+import importlib.util
 import json
+import pathlib
 import re
 import sys
 from dataclasses import dataclass
+
+# check-data-residency.py's GDPR scope (gdpr-tagged or eu- region), the one definition.
+_spec = importlib.util.spec_from_file_location(
+    "check_data_residency", pathlib.Path(__file__).with_name("check-data-residency.py")
+)
+residency = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(residency)
 
 DOCS = "docs/OPERATIONS.md#first-deploy-inputs"
 # Never deployed to a real account: the emulator lanes and the template fixtures.
@@ -178,6 +189,7 @@ def account_findings(stacks: dict, targets: set) -> list:
                 f"{account} is the management account: a workload stack there bypasses the state access roles",
                 "every workload account_id must differ from management_account_id"))
         by_account.setdefault(account, {}).setdefault(stage, []).append(name)
+    findings += residency_account_findings(stacks, targets)
     for account, stages in sorted(by_account.items()):
         if len(stages) < 2:
             continue
@@ -189,6 +201,28 @@ def account_findings(stacks: dict, targets: set) -> list:
                         "error", name, "settings.environment.account_id",
                         f"{account} is also the account of stage {'; '.join(others)}: one account per stage",
                         "Account IDs"))
+    return findings
+
+
+def residency_account_findings(stacks: dict, targets: set) -> list:
+    """A GDPR-scoped workload stack (check-data-residency.py's scope) sharing an account with a
+    non-GDPR one: EU prod is its own account (owner decision, B5), and the two stacks would both
+    create the account's singletons (the GitHub OIDC provider)."""
+    findings, scoped, other = [], {}, {}
+    for name in sorted(stacks):
+        env = environment(stacks[name])
+        account = str(env.get("account_id") or "")
+        if env.get("_stage") in MANAGEMENT_STAGES or not account or account in PLACEHOLDER_ACCOUNTS:
+            continue
+        (scoped if residency.gdpr_scoped(stacks[name]) else other).setdefault(account, []).append(name)
+    for account, names in sorted(scoped.items()):
+        for us in other.get(account, []):
+            for name, peer in [(n, us) for n in names] + [(us, n) for n in names]:
+                if name in targets:
+                    findings.append(Finding(
+                        "error", name, "settings.environment.account_id",
+                        f"{account} is also the account of {peer}: a GDPR-scoped (EU) stack and a non-GDPR "
+                        "stack never share an account", "Account IDs"))
     return findings
 
 

@@ -17,9 +17,11 @@
 # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
 # =============================================================================
 
+# catalog/iam/defaults comes through globals, which imports it before its own
+# vars; importing it again here, after globals, would let catalog/_base's
+# tags (Project) override the globals' ones.
 import:
   - orgs/fnx/prod/eu-west-1/components/globals
-  - catalog/iam/defaults
 
 components:
   terraform:

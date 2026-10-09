@@ -45,7 +45,8 @@ the following, naming the stack, the key and the row above:
 - an unset prod RDS alarm target;
 - a placeholder (`0`) GitHub App ID or installation ID;
 - a workload account equal to the management account;
-- two stages sharing one account.
+- two stages sharing one account;
+- an EU (GDPR-scoped) stack sharing an account with a US one (`prod-eu` equal to `prod`).
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
 packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval) as notices. The `local` and `fixtures` stacks are exempt.
