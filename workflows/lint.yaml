@@ -202,7 +202,7 @@ workflows:
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_state_keys.py
+          python3 -m unittest workflows/scripts/common/test_check_state_keys.py workflows/scripts/common/test_backends.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"

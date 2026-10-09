@@ -9,7 +9,7 @@ patterns, an exact pair per stack, "*/<stack>/*" and "*/<stack>-*"
 owned by exactly one backend instance; the rules below hold per bucket, against
 its owner's access roles only (US prod and EU prod are separate stages). A state key is
 "<workspace_key_prefix>/<workspace>/<backend.key>" (+ ".tflock"). This evaluates
-the deployed backend component's access_roles patterns against every key, with
+each owning backend's access_roles patterns against every key in its bucket, with
 IAM's resource-ARN wildcards ("*" any run of characters, "/" included; "?" any
 one character), and requires, for every instance with backend_type s3:
   - each of its state objects matches some role, including the role its
@@ -49,8 +49,7 @@ import fixtures  # noqa: E402
 
 STATE_KEY = "terraform.tfstate"
 LOCK_SUFFIX = ".tflock"
-# A template over an unset setting renders "<no value>" for both sides, which would compare equal.
-AWS_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
+AWS_REGION = backends.AWS_REGION
 
 
 def stage_of(instance: dict) -> Optional[str]:
@@ -163,32 +162,9 @@ def check_roles(objects: list[tuple], roles: dict) -> list[str]:
     return list(dict.fromkeys(errors))
 
 
-def check_owners(owners: dict) -> tuple[dict, list[str]]:
-    """(bucket -> its one owner, errors): a bucket created twice has no owner."""
-    errors = []
-    owned = {}
-    if not owners:
-        errors.append(f"no deployed '{backends.BACKEND_COMPONENT}' instance owns a state bucket (vars.bucket_name)")
-    for bucket, found in sorted(owners.items()):
-        if len(found) > 1:
-            errors.append(f"state bucket {bucket!r} is created by more than one backend instance: "
-                          f"{[b.where for b in found]}")
-            continue
-        owner = found[0]
-        owned[bucket] = owner
-        if not AWS_REGION.match(str(owner.region)):
-            errors.append(f"{owner.where}: the state bucket's region {owner.region!r} is not an AWS region "
-                          "(settings.tfstate.region unset?)")
-        if not owner.access_roles:
-            errors.append(f"{owner.where}: the deployed '{backends.BACKEND_COMPONENT}' instance has no access_roles")
-    return owned, errors
-
-
 def check(stacks: dict) -> list[str]:
-    owners = backends.owners(stacks)
-    owned, errors = check_owners(owners)
-    errors += [f"{b.where}: the deployed '{backends.BACKEND_COMPONENT}' instance has no vars.bucket_name"
-               for b in backends.backends(stacks) if b.bucket is None]
+    owned, errors = backends.owned(stacks)
+    created = set(backends.owners(stacks))  # a bucket created twice is created, but has no owner
     objects: dict = {}  # bucket -> (stage, where, object key, assumed role name)
     keys = {}  # (bucket, state key) -> (stack, where)
     for stack_name, stack in sorted(stacks.items()):
@@ -197,8 +173,8 @@ def check(stacks: dict) -> list[str]:
                 continue
             where = f"{stack_name}: {name}"
             bucket = backends.bucket_of(instance)
-            owner = owned.get(bucket)
-            if bucket not in owners:
+            owner = backends.owner_of(owned, instance)
+            if bucket not in created:
                 errors.append(f"{where} backend.bucket {bucket!r} is created by no deployed backend instance")
             region = owner.region if owner and AWS_REGION.match(str(owner.region)) else None
             errors += check_layout(where, instance, region)

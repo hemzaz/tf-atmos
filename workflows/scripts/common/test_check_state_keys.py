@@ -382,6 +382,19 @@ class CheckStateKeysTest(unittest.TestCase):
                         "bucket 'fnx-terraform-state' (fnx-ue1-root: backend/main): access role 'prod_read' pattern "
                         "'*/fnx-ec1-prod/*' matches no state object")
 
+    def test_eu_root_assuming_the_us_root_role_fails(self):
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
+        backend = stacks["fnx-ew1-root"]["components"]["terraform"]["backend/main"]["backend"]
+        backend["assume_role"]["role_arn"] = f"arn:aws:iam::111111111111:role/{STAGE_ROLES['root']}"
+        self.assert_has(stacks, "fnx-ew1-root: backend/main assumes role 'fnx-terraform-backend-root-role', which "
+                                "the backend's access_roles do not define")
+
+    def test_stack_region_other_than_its_bucket_region_passes(self):
+        # The ec1 DR shape (as ue2 today): vars.region eu-central-1, state in the eu-west-1 bucket
+        stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
+        stacks["fnx-ec1-prod"]["components"]["terraform"]["vpc/main"]["vars"]["region"] = "eu-central-1"
+        self.assert_errors(stacks)
+
     def test_duplicate_bucket_name_fails(self):
         stacks = with_eu(stacks_with(**{"vpc/main": prod()}))
         stacks["fnx-ew1-root"]["components"]["terraform"]["backend/main"]["vars"]["bucket_name"] = US_BUCKET
