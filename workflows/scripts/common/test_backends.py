@@ -67,6 +67,14 @@ class BackendsTest(unittest.TestCase):
         self.assertIn("region '<no value>' is not an AWS region", errors[0])
         self.assertIn("has no access_roles", errors[1])
 
+    def test_role_name_under_two_keys_fails(self):
+        # assumed_role_key could not tell which key an instance assuming that role means
+        roles = {**ROLES, "prod_write": {"role_name": "fnx-terraform-backend-root-role"}, "read": {}}
+        owned, errors = backends.owned(stacks_of(**{"fnx-ue1-root": {"backend/main": backend(roles=roles)}}))
+        self.assertIn("fnx-terraform-state", owned)
+        self.assertEqual(errors, ["fnx-ue1-root: backend/main: access_roles ['prod_write', 'root_write'] define "
+                                  "the same role_name 'fnx-terraform-backend-root-role'"])
+
     def test_owner_of(self):
         owned, _ = backends.owned(stacks_of(**{"fnx-ue1-root": {"backend/main": backend()},
                                                "fnx-ew1-root": {"backend/main": backend("fnx-ew1-state", "eu-west-1")}}))

@@ -274,24 +274,27 @@ workflows:
       # iam/ci ci_runner_pool_names; each provider exec command needs its
       # tool in dependencies.tools; and each eks cluster admin role there
       # (map_additional_iam_roles) must be trusted by its stage's state write
-      # role; a cluster with none only warns. Also run by validate-all.
+      # role of the backend owning its state; a cluster with none only warns.
+      # Also run by validate-all.
       - name: check-cluster-api-ci
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py workflows/scripts/common/test_ci_in_vpc.py workflows/scripts/common/test_runner_scripts.py workflows/scripts/common/test_in_vpc_workflows.py
+          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_backends.py workflows/scripts/common/test_ci_components.py workflows/scripts/common/test_ci_in_vpc.py workflows/scripts/common/test_runner_scripts.py workflows/scripts/common/test_in_vpc_workflows.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
-      # backend/main trusts each stack's CI roles as literal ARNs; this fails
-      # an iam/ci plan or apply role (<ci_role_name_prefix>-plan/-apply) its
-      # stage's backend read or write role does not trust. Also run by validate-all.
+      # The backend owning a stack's state bucket (backend/main, or its EU twin)
+      # trusts the stack's CI roles as literal ARNs; this fails an iam/ci plan
+      # or apply role (<ci_role_name_prefix>-plan/-apply) that backend's stage
+      # read or write role does not trust, or that may assume another role
+      # (ci_backend_*_role_arn). Also run by validate-all.
       - name: check-ci-state-roles
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_ci_state_roles.py
+          python3 -m unittest workflows/scripts/common/test_check_ci_state_roles.py workflows/scripts/common/test_backends.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"

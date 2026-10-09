@@ -39,9 +39,11 @@ aws/aws-cli), and an unknown command is an ERROR.
 That operator is an eks map_additional_iam_roles role with system:masters (a
 cluster-scoped AmazonEKSClusterAdminPolicy access entry, set in each stack's
 components/globals.yaml). In such a stack, every one of those roles must also be
-trusted by the stage's state write role (backend/main access_roles.write for
-dev/staging, .prod_write for prod), or it cannot write the state: an ERROR, as
-is a missing deployable backend/main (nothing to check against). An eks
+trusted by the stage's state write role of the backend instance owning the eks
+instance's state bucket (backends.owner_of: backend/main for fnx-terraform-state,
+its EU twin for the EU bucket; access_roles.write for dev/staging, .prod_write
+for prod), or it cannot write the state: an ERROR, as is no backend owning that
+bucket (nothing to check against). An eks
 instance with no such role leaves nobody able to apply the in-cluster instances
 that depend on it: one WARN per stack, while the owner has not supplied the real
 ARNs (an access entry for a placeholder role would fail eks/main's apply).
@@ -67,6 +69,7 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import backends  # noqa: E402
 import fixtures  # noqa: E402
 
 CLUSTER_PROVIDER = re.compile(r'^\s*provider\s+"(kubernetes|helm|kubectl)"', re.MULTILINE)
@@ -278,16 +281,6 @@ def admin_role_arns(eks_instance: dict) -> list[str]:
     ]
 
 
-def backend_write_principals(stacks: dict) -> "dict | None":
-    """access_roles key -> allowed_principal_arns of the deployable backend/main; None if absent."""
-    for stack in stacks.values():
-        instance = deployable_instances(stack).get("backend/main")
-        if instance is not None and instance.get("component") == "backend":
-            roles = (instance.get("vars") or {}).get("access_roles") or {}
-            return {key: set(role.get("allowed_principal_arns") or []) for key, role in roles.items()}
-    return None
-
-
 def cluster_dependents(instances: dict, cluster: set[str]) -> dict[str, list[str]]:
     """eks instance -> the in-cluster instances whose dependencies.components name it."""
     dependents = {name: [] for name, i in instances.items() if i.get("component") == "eks"}
@@ -300,20 +293,36 @@ def cluster_dependents(instances: dict, cluster: set[str]) -> dict[str, list[str
     return dependents
 
 
+def admin_role_errors(where: str, eks_instance: dict, arns: list[str], owned: dict) -> list[str]:
+    """Admin roles the stage write role of the backend owning the eks instance's state does not trust."""
+    owner = backends.owner_of(owned, eks_instance)
+    if owner is None:
+        return [f"{where} state bucket {backends.bucket_of(eks_instance)!r} has no one owning backend instance, "
+                "so its cluster admin roles cannot be checked against the state write roles"]
+    stage = ((eks_instance.get("settings") or {}).get("context") or {}).get("stage")
+    key = "prod_write" if stage == "prod" else "write"
+    trusted = (owner.access_roles.get(key) or {}).get("allowed_principal_arns") or []
+    return [
+        f"{where} admin role {arn} is not in {owner.where} access_roles.{key} allowed_principal_arns, "
+        "so it cannot write this stack's state"
+        for arn in arns if arn not in trusted
+    ]
+
+
 def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[str]]:
     """(errors, warnings) about who can apply the in-cluster components of private stacks."""
     errors, warnings = [], []
-    backend = backend_write_principals(stacks)
+    owned, _ = backends.owned(stacks)  # owned()'s own errors are check-state-keys.py's to report
     for stack_name, stack in sorted(stacks.items()):
         instances = deployable_instances(stack)
         if not is_private(instances):
             continue
         if not any(i.get("component") in cluster for i in instances.values()):
             continue
-        if backend is None:
+        if not owned:
             errors.append(
-                f"{stack_name}: no deployable backend/main instance found, so its cluster admin "
-                "roles cannot be checked against the state write roles"
+                f"{stack_name}: no state bucket has one deployable backend instance owning it, so its "
+                "cluster admin roles cannot be checked against the state write roles"
             )
         unmanaged = []
         for name, dependents in sorted(cluster_dependents(instances, cluster).items()):
@@ -323,17 +332,8 @@ def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[st
                 if dependents:
                     unmanaged.append(f"{name} ({', '.join(dependents)})")
                 continue
-            if backend is None:
-                continue
-            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
-            key = "prod_write" if stage == "prod" else "write"
-            for arn in arns:
-                if arn not in backend.get(key, set()):
-                    errors.append(
-                        f"{stack_name}: {name} admin role {arn} is not in backend/main "
-                        f"access_roles.{key} allowed_principal_arns, so it cannot write this "
-                        "stack's state"
-                    )
+            if owned:
+                errors += admin_role_errors(f"{stack_name}: {name}", instance, arns, owned)
         if unmanaged:
             warnings.append(
                 f"{stack_name}: no map_additional_iam_roles entry with system:masters on "
