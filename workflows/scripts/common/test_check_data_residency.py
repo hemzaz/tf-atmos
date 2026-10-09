@@ -176,6 +176,37 @@ class DataResidencyTest(unittest.TestCase):
             "fnx-ew1-prod: network/main vars.zones is list, not a map: its query logging cannot be checked",
         ])
 
+    def test_security_monitoring_alert_enrichment_fails_in_eu_only(self):
+        def monitoring(value, **extra):
+            spec = instance(enable_alert_enrichment=value, **extra)
+            spec["metadata"] = {"component": "security-monitoring", "inherits": ["security-monitoring/defaults"]}
+            return spec
+
+        on = ("fnx-ew1-prod: security-monitoring/main sets enable_alert_enrichment: its Lambda sends "
+              "findings to Slack/PagerDuty, outside the EU")
+        for value in (True, "true", 1):
+            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"security-monitoring/main": monitoring(value)})}),
+                             [on], value)
+        for value in (None, False, "false"):
+            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"security-monitoring/main": monitoring(value)})}),
+                             [], value)
+        us = monitoring(True)
+        us["vars"].update(region="us-east-1", tags={"Compliance": US})
+        us["settings"]["tfstate"] = {"region": "us-east-1"}
+        us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
+        self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"security-monitoring/main": us})}), [])
+
+    def test_backup_copy_outside_the_eu_fails(self):
+        def backup(region, key_region):
+            return instance(enable_cross_region_backup=True, replica_region=region,
+                            replica_kms_key_arn=f"arn:aws:kms:{key_region}:123456789012:key/mrk-1")
+
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"backup/main": backup("eu-central-1", "eu-central-1")})}), [])
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"backup/main": backup("us-east-2", "us-east-2")})}), [
+            f"fnx-ew1-prod: backup/main vars.replica_region is 'us-east-2', {OUTSIDE}",
+            f"fnx-ew1-prod: backup/main vars.replica_kms_key_arn is 'us-east-2', {OUTSIDE}",
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

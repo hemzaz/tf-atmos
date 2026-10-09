@@ -14,8 +14,8 @@ import:
   - catalog/acm/defaults
   - catalog/cloudtrail/defaults
   - catalog/awsconfig/defaults
-  - catalog/guardduty/defaults
-  - catalog/securityhub/defaults
+  - catalog/guardduty/prod
+  - catalog/securityhub/prod
   - catalog/inspector2/defaults
   - catalog/apigateway-account/defaults
   - catalog/security-monitoring/defaults
@@ -317,39 +317,25 @@ components:
           - awsconfig/defaults
 
     # ==========================================================================
-    # GuardDuty - owns the detector (security-monitoring only consumes it)
+    # GuardDuty - owns the detector (security-monitoring only consumes it).
+    # catalog/guardduty/prod: EKS and malware protection on, port scans
+    # auto-archived.
     # ==========================================================================
     guardduty/main:
       metadata:
         component: guardduty
         inherits:
-          - guardduty/defaults
-      vars:
-        # Prod turns on the protection plans the catalog leaves opt-in.
-        enable_kubernetes_protection: true
-        enable_malware_protection: true
-
-        # Auto-archive low severity findings
-        auto_archive_filter:
-          - severity: 1
-            criteria:
-              type:
-                - "Recon:EC2/Portscan"
+          - guardduty/prod
 
     # ==========================================================================
-    # Security Hub - owns the hub (security-monitoring only consumes it)
+    # Security Hub - owns the hub (security-monitoring only consumes it).
+    # catalog/securityhub/prod: PCI DSS on top of the default standards.
     # ==========================================================================
     securityhub/main:
       metadata:
         component: securityhub
         inherits:
-          - securityhub/defaults
-      vars:
-        # AWS auto-subscribes AWS-FSBP and CIS under enable_default_standards
-        # (catalog default). Listing them here as well collides at apply, so
-        # `standards` carries only what AWS does not enable for us.
-        standards:
-          - "pci-dss/v/3.2.1"
+          - securityhub/prod
 
     # ==========================================================================
     # Amazon Inspector - owns the enabler (security-monitoring only routes its

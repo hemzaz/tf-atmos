@@ -23,8 +23,8 @@ import:
   - catalog/iam/defaults
   - catalog/acm/defaults
   - catalog/awsconfig/defaults
-  - catalog/guardduty/defaults
-  - catalog/securityhub/defaults
+  - catalog/guardduty/prod
+  - catalog/securityhub/prod
   - catalog/inspector2/defaults
   - catalog/apigateway-account/defaults
   - catalog/security-monitoring/defaults
@@ -117,24 +117,14 @@ components:
       metadata:
         component: guardduty
         inherits:
-          - guardduty/defaults
-      vars:
-        enable_kubernetes_protection: true
-        enable_malware_protection: true
-        auto_archive_filter:
-          - severity: 1
-            criteria:
-              type:
-                - "Recon:EC2/Portscan"
+          - guardduty/prod
 
     securityhub/main:
       metadata:
         component: securityhub
         inherits:
-          - securityhub/defaults
+          - securityhub/prod
       vars:
-        standards:
-          - "pci-dss/v/3.2.1"
         # Controls fnx-ue1-prod evaluates, disabled here per standard. AWS
         # Security Hub User Guide, "Controls that you might want to disable"
         # (https://docs.aws.amazon.com/securityhub/latest/userguide/controls-to-disable.html):

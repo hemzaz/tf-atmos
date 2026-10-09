@@ -6,8 +6,13 @@
 # (kms/main) and the prod-eu account's singletons: the multi-region CloudTrail
 # trail (cloudtrail/main) and AWS Config's global-resource recording
 # (awsconfig/main); the account budget is cost-optimization/main
-# (services.yaml). As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/
-# security.yaml, which explains each input), except:
+# (services.yaml). Then the regional security services: GuardDuty, Security
+# Hub, Inspector and finding routing with the CIS metric filters on this
+# stack's trail (security-monitoring/main). As in fnx-ue1-prod
+# (orgs/fnx/prod/us-east-1/components/security.yaml, which explains each
+# input; the shared prod settings are catalog/<component>/prod), except:
+#   - kms/main's DR replica is in eu-central-1, the EU DR region, never
+#     us-east-2;
 #   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
 #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
 #     role, the trail, global-resource recording, the budget); nothing here
@@ -17,8 +22,12 @@
 #   - no ci_runner_pool_names or lambda uploader yet: the PRs adding the
 #     runner pool and the Lambda bucket add them.
 # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
-# Not yet here: the regional security services (GuardDuty, Security Hub,
-# Inspector, finding routing with the trail's CIS metric filters, backups).
+# Every finding stays in eu-west-1: no Security Hub cross-region aggregation,
+# no GuardDuty export, the alert topic on kms/main, and no enrichment Lambda
+# (check-data-residency.py fails enable_alert_enrichment in a GDPR-scoped
+# stack: it posts findings, IPs included, to Slack/PagerDuty).
+# Not yet here: backups, the apex certificate, secrets and the API Gateway
+# account settings.
 # =============================================================================
 
 # catalog/iam/defaults comes through globals, which imports it before its own
@@ -30,6 +39,10 @@ import:
   - catalog/kms/defaults
   - catalog/cloudtrail/defaults
   - catalog/awsconfig/defaults
+  - catalog/guardduty/prod
+  - catalog/securityhub/prod
+  - catalog/inspector2/defaults
+  - catalog/security-monitoring/defaults
 
 components:
   terraform:
@@ -118,3 +131,34 @@ components:
         component: awsconfig
         inherits:
           - awsconfig/defaults
+
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/prod
+
+    # This region records the account's global resources (awsconfig/main) and
+    # holds the trail's log group, so unlike fnx-ue2-prod no IAM, KMS or
+    # CloudWatch control is disabled.
+    securityhub/main:
+      metadata:
+        component: securityhub
+        inherits:
+          - securityhub/prod
+
+    # Off, as in fnx-ue1-prod: Inspector bills per resource scanned.
+    inspector2/main:
+      metadata:
+        component: inspector2
+        inherits:
+          - inspector2/defaults
+
+    # Finding routing (GuardDuty, Security Hub, Inspector, security group
+    # changes) to an SNS topic on kms/main, and the CIS metric filters on
+    # cloudtrail/main's log group: all in this stack and region.
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+        inherits:
+          - security-monitoring/defaults

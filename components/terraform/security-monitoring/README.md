@@ -10,7 +10,8 @@ component per service, the Cloud Posse model).
 
 ## Wiring
 
-- Instance: `security-monitoring/main` in the three AWS stacks.
+- Instance: `security-monitoring/main` in the three AWS stacks, `fnx-ue2-prod` (no CIS filters:
+  no trail there) and `fnx-ew1-prod` (on its own trail's log group).
 - Reads: `guardduty/main .detector_id`, `securityhub/main .account_arn`,
   `inspector2/main .account_id`, `cloudtrail/main .cloudtrail_logs_log_group_name`,
   `kms/main .key_arn`, `iam/ci .ci_apply_role_arn`.
@@ -39,6 +40,8 @@ component per service, the Cloud Posse model).
   exclude another role, add its exact ARN, path included, to that list in
   `stacks/catalog/security-monitoring/defaults.yaml`; wildcards are rejected. A new `eks`
   instance needs its cluster role and controller role ARNs added there.
+- The enrichment Lambda posts each finding (source IPs, principals) to Slack and PagerDuty:
+  `check-data-residency.py` fails `enable_alert_enrichment` in a GDPR-scoped stack.
 - Root, IAM user and AWSService-type calls (`userIdentity.type` `AWSService`) carry no
   `sessionIssuer` (service-linked-role calls do), and an `anything-but` never matches
   a missing field, so the pattern is an `$or` with an `exists: false` branch that keeps them

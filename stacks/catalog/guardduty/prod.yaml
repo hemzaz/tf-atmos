@@ -1,0 +1,25 @@
+---
+import:
+  - catalog/guardduty/defaults
+
+# Production detector settings, shared by the prod stacks' guardduty/main
+# (fnx-ue1-prod, its DR region fnx-ue2-prod and the EU fnx-ew1-prod): prod
+# turns on the protection plans the catalog leaves opt-in (EKS audit logs and
+# EBS malware scanning bill per event / per GB scanned) and auto-archives
+# port-scan noise.
+components:
+  terraform:
+    guardduty/prod:
+      metadata:
+        component: guardduty
+        type: abstract
+        inherits:
+          - guardduty/defaults
+      vars:
+        enable_kubernetes_protection: true
+        enable_malware_protection: true
+        auto_archive_filter:
+          - severity: 1
+            criteria:
+              type:
+                - "Recon:EC2/Portscan"
