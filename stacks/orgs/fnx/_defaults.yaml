@@ -119,13 +119,16 @@ settings:
   # backend/main creates in fnx-ue1-root, its region and the name prefix of its
   # access roles (<role_prefix>-role, -read-role, -prod-role, -prod-read-role,
   # -root-role). A stack keeps its state here, not in its own region: a DR stack
-  # (fnx-ue2-prod) too. An EU stack overrides settings.tfstate with its own
-  # bucket, region and role_prefix (backend/main in its own root stack).
+  # (fnx-ue2-prod) too. An EU stack overrides all of settings.tfstate: bucket,
+  # region, replica_region (an EU region) and role_prefix (backend/main in its
+  # own root stack, in the management account).
   # check-state-keys.py fails a stack whose backend region differs from backend/main's.
   # replica_region: where backend/main replicates the bucket (<bucket>-replica),
   # read through TFSTATE_SOURCE=replica when region is down.
-  # bucket and role_prefix are templates read by templates: the second
-  # evaluation (atmos.yaml) renders them.
+  # bucket and role_prefix are templates read by templates; the second
+  # evaluation (atmos.yaml) renders them. An override may reference only
+  # literal settings (.settings.context.*), never .settings.prefix or
+  # .settings.environment.*: a deeper chain leaks raw "{{ }}" into the backend.
   tfstate:
     region: us-east-1
     replica_region: us-east-2
