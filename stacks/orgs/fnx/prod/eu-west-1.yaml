@@ -20,8 +20,10 @@
 # (replicated to eu-central-1), those singletons, networking (vpc/main, the
 # EU apex zone network/main) and the regional security services (GuardDuty,
 # Security Hub, Inspector, finding routing, API Gateway account settings,
-# backups copied to eu-central-1, the apex certificate, secrets); the rest of
-# the EU core subset (data, services; like fnx-ue2-prod's subset of
+# backups copied to eu-central-1, the apex certificate, secrets) and compute
+# (eks/main ew1-main, the bastion, the in-VPC runner pool, external-secrets,
+# eks-addons); the rest of the EU core subset (data, services with
+# eks-backend-services and monitoring/main; like fnx-ue2-prod's subset of
 # fnx-ue1-prod) follows in later PRs, as does the EU DR stack fnx-ec1-prod.
 #
 # First deploy: docs/OPERATIONS.md ("Deploying a stack"), with
@@ -37,6 +39,7 @@ import:
   - orgs/fnx/prod/eu-west-1/components/globals
   - orgs/fnx/prod/eu-west-1/components/networking
   - orgs/fnx/prod/eu-west-1/components/security
+  - orgs/fnx/prod/eu-west-1/components/compute
   - orgs/fnx/prod/eu-west-1/components/services
 
 vars:

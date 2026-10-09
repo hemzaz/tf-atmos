@@ -9,7 +9,10 @@ Cloud Posse `eks/*` components (cluster-autoscaler follows the upstream AWS docs
 
 ## Wiring
 
-- Instances: `eks-addons/main` and `eks-addons/data` in the three AWS stacks, all switches on.
+- Instances: `eks-addons/main` and `eks-addons/data` in the three AWS stacks, all switches on;
+  `eks-addons/main` also in `fnx-ue2-prod` and `fnx-ew1-prod` (`fnx-ue1-prod`'s and
+  `fnx-ew1-prod`'s inherit `eks-addons/prod`, `stacks/catalog/eks-addons/prod.yaml`). Container
+  Insights writes to CloudWatch in the stack's own region.
 - `main` reads `eks/main` (endpoint, CA, OIDC), `vpc/main .vpc_id`, `network/main .zone_ids.main`
   and `kms/main .key_arn`; `data` reads the same from `eks/data`, `vpc/services` and
   `network/services` (`services` and `data` zones).

@@ -1,0 +1,37 @@
+---
+import:
+  - catalog/external-secrets/defaults
+
+# External Secrets Operator on the production main cluster, shared by
+# fnx-ue1-prod's and fnx-ew1-prod's external-secrets/main: wired to the
+# stack's eks/main, with the ClusterSecretStore eks-backend-services/main
+# reads rds/main's RDS-managed master user secret (name "rds!db-<id>")
+# through, open to that namespace only.
+components:
+  terraform:
+    external-secrets/prod:
+      metadata:
+        component: external-secrets
+        type: abstract
+        inherits:
+          - external-secrets/defaults
+      vars:
+        enabled: true
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+
+        namespace: "external-secrets"
+        service_account_name: "external-secrets"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
+        rds_managed_secret_access: true
+        # Least privilege: only eks-backend-services/main's namespace may use
+        # this store, now that it grants read on any RDS-managed secret.
+        allowed_namespaces: ["backend-services"]
+      dependencies:
+        components:
+          - component: eks/main
+          - component: kms/main

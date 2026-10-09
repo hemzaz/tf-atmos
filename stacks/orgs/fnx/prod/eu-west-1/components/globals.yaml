@@ -4,8 +4,8 @@
 # =============================================================================
 # fnx-ue1-prod's tags (orgs/fnx/prod/us-east-1/components/globals.yaml) with
 # Compliance "pci-sox-gdpr": the EU stacks' tag, which check-data-residency.py
-# requires on every instance of a GDPR-scoped stack. EKS settings come with
-# the components that read them.
+# requires on every instance of a GDPR-scoped stack. EKS settings and the
+# cluster admins as in fnx-ue1-prod.
 # The catalogs are imported first, as in the US globals, so these vars win
 # over catalog/_base/defaults' tags (Project).
 # =============================================================================
@@ -14,6 +14,7 @@ import:
   - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/network/defaults
+  - catalog/eks/defaults
 
 vars:
   tags:
@@ -50,3 +51,19 @@ settings:
       warning_alerts:
         - "prod-alerts@example.com"
       budget_monthly_limit: "10000"
+    eks_kubernetes_version: "1.36"
+    eks_public_access: false
+    use_external_secrets: true
+
+components:
+  terraform:
+    # Human cluster admins of eks/main, as in fnx-ue1-prod's globals.yaml
+    # (which explains the format): each rolearn, an IAM role in the prod-eu
+    # account, must also be in the EU backend's access_roles.prod_write
+    # allowed_principal_arns (stacks/orgs/fnx/root/eu-west-1.yaml);
+    # check-cluster-api-ci.py fails one that is not, and warns while this is
+    # empty. Empty until the owner supplies the ARN (the preflight flags it,
+    # row "EKS cluster admins").
+    eks/defaults:
+      vars:
+        map_additional_iam_roles: []
