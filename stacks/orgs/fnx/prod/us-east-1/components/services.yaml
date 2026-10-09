@@ -8,9 +8,9 @@
 
 import:
   - orgs/fnx/prod/us-east-1/components/globals
-  - catalog/apigateway/defaults
+  - catalog/apigateway/prod
   - catalog/cognito/prod
-  - catalog/monitoring/defaults
+  - catalog/monitoring/prod
   - catalog/s3/lambda-artifacts
   - catalog/sqs/defaults
   - catalog/cost-optimization/defaults
@@ -52,60 +52,9 @@ components:
     apigateway/main:
       metadata:
         component: apigateway
+        inherits:
+          - apigateway/main-prod
       vars:
-        description: "Production Main API Gateway"
-        stage_name: "v1"
-
-        # API resources
-        api_resources:
-          - path_part: "api"
-          - path_part: "auth"
-          - path_part: "health"
-          - path_part: "users"
-          - path_part: "products"
-
-        # Methods are addressed by resource_path ("/" is the API root), because
-        # a stack cannot know this API's resource IDs before apply.
-        # lambda/data-processor is disabled (no package yet), so "/api" has no
-        # method. When it is enabled, append these items to the two lists below
-        # (delete "#   " to keep the indentation) and add
-        # `- component: lambda/data-processor` to dependencies.components:
-        #   api_methods:
-        #     - resource_path: "/api"
-        #       http_method: "ANY"
-        #       authorization: "COGNITO_USER_POOLS"
-        #   api_integrations:
-        #     - resource_path: "/api"
-        #       http_method: "ANY"
-        #       integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
-        #       type: "AWS_PROXY"
-        #       uri: !terraform.state lambda/data-processor .function_invoke_arn
-        #       lambda_function_name: !terraform.state lambda/data-processor .function_name
-        api_methods:
-          - resource_path: "/"
-            http_method: "GET"
-            authorization: "NONE"
-
-        # "/" stays MOCK on purpose: it is a liveness endpoint, and a canned 200
-        # is the correct answer for one. The real entry point, "/api" proxied to
-        # Lambda, comes back with lambda/data-processor (see above).
-        api_integrations:
-          - resource_path: "/"
-            http_method: "GET"
-            integration_http_method: "GET"
-            type: "MOCK"
-
-        # Authorizer for the "/api" COGNITO_USER_POOLS method. A method that asks
-        # for COGNITO_USER_POOLS without a pool here fails at apply.
-        authorizer_type: "COGNITO_USER_POOLS"
-        cognito_user_pool_arns:
-          - !terraform.state cognito/main .user_pool_arn
-
-        # Domain Configuration
-        domain_name: "api.{{ .settings.environment.domain_name }}"
-        certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
-        api_name: "{{ .settings.context.stage }}-main-api"
-        zone_id: !terraform.state network/main .zone_ids.main
         # DR (owner decision Q5): the PRIMARY half of api.<domain>'s Route 53
         # failover pair, health-checked on this region's stage root;
         # fnx-ue2-prod's apigateway/main is the SECONDARY.
@@ -116,58 +65,6 @@ components:
         # component reads this one, so a !terraform.state here would be a cycle.
         health_check_alarm_actions:
           - "arn:aws:sns:us-east-1:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
-
-        throttling_burst_limit: 5000
-        throttling_rate_limit: 10000
-
-        enable_logging: true
-        log_retention_days: 90
-        create_dashboard: true
-        tracing_enabled: true
-
-        # No response caching. This used to cache "*/*", every method including
-        # COGNITO_USER_POOLS ones, keyed without the caller's identity, so one
-        # user's response could be served to another. Nothing here is worth
-        # caching today: "/" is a MOCK liveness check and "/api" is disabled.
-        # The cache cluster is billed per hour (0.5 GB, the smallest, is about
-        # $15/month), so it stays off until a method is worth caching. To cache
-        # a public GET, set:
-        #   enable_caching: true
-        #   cache_method_paths: ["GET /products"]   # an api_methods key
-        #   cache_ttl_seconds: 300
-        # An authorized method also needs method.request.header.Authorization
-        # in its request_parameters and its integration's cache_key_parameters
-        # (the component rejects it otherwise).
-        enable_caching: false
-
-        cors_configuration:
-          allow_origins:
-            - "https://{{ .settings.environment.domain_name }}"
-            - "https://www.{{ .settings.environment.domain_name }}"
-          allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-          allow_headers:
-            - "Content-Type"
-            - "Authorization"
-            - "X-Api-Key"
-            - "X-Request-Id"
-          expose_headers: []
-          max_age: 300
-          allow_credentials: false
-
-        enable_waf: true
-
-        tags:
-          Service: api-gateway
-          Tier: edge
-          CriticalityLevel: "high"
-      dependencies:
-        components:
-          # Ordering only: REST stage logging needs the account's
-          # CloudWatch role set first (no output is read).
-          - component: apigateway-account/main
-          - component: network/main
-          - component: acm/main
-          - component: cognito/main
 
     # ==========================================================================
     # API Gateway - Data API (Production)
@@ -453,81 +350,9 @@ components:
       metadata:
         component: monitoring
         inherits:
-          - monitoring/defaults
+          - monitoring/main-prod
       vars:
-        # Cloud Posse null-label style: every resource this component creates
-        # is named "<Environment>-<name>-<suffix>". monitoring/main and
-        # monitoring/data previously both named resources from Environment
-        # alone and collided (ResourceAlreadyExists) on the second apply.
-        name: main
-        # kms/main already allows CloudWatch alarms to publish to encrypted
-        # topics (catalog/kms/defaults.yaml allow_cloudwatch_alarms).
-        kms_key_id: !terraform.state kms/main .key_arn
-        create_dashboard: true
-        enable_certificate_monitoring: true
-
-        # Certificate monitoring
-        certificate_arns: !terraform.state acm/main .certificate_arns // {} | [.[]]
-        certificate_expiry_threshold: 30
-        alarm_email_subscriptions:
-          - "prod-critical@example.com"
-          - "oncall@example.com"
-
-        # Dashboard/alarm dimensions: the sources this stack actually
-        # deploys, so the infrastructure and backend dashboards plot real
-        # data instead of empty widgets (they default to [] / ""), and
-        # enable_rds_monitoring's alarms below have RDS instances to watch.
-        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
-        # eks/main's node_groups (compute.yaml): workers (min_group_size 3) +
-        # monitoring (min_group_size 2) + memory-optimized (min_group_size 2)
-        # = 7 guaranteed nodes. The eks_node_count_low alarm (monitoring's
-        # alarms.tf) only fires below this floor.
-        eks_min_node_count: 7
-        rds_instances: !terraform.state rds/main .instance_identifier | [.]
         ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
-        elasticache_clusters: !terraform.state elasticache/main .member_clusters
-        api_gateway_name: !terraform.state apigateway/main .api_name
-        api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
-
-        # PagerDuty integration
-        # Secret: export from SSM /production/pagerduty/endpoint before plan/apply
-        create_sns_topic: true
-        cpu_alarms:
-          high_cpu_warning:
-            namespace: "AWS/EC2"
-            evaluation_periods: 2
-            period: 300
-            threshold: 70
-            dimensions: {}
-          high_cpu_critical:
-            namespace: "AWS/EC2"
-            evaluation_periods: 2
-            period: 300
-            threshold: 90
-            dimensions: {}
-        memory_alarms:
-          high_memory_warning:
-            namespace: "CWAgent"
-            evaluation_periods: 2
-            period: 300
-            threshold: 80
-            dimensions: {}
-          high_memory_critical:
-            namespace: "CWAgent"
-            evaluation_periods: 1
-            period: 300
-            threshold: 95
-            dimensions: {}
-        enable_rds_monitoring: true
-        rds_cpu_threshold: 80
-        db_connection_alarms:
-          rds_connections_high:
-            evaluation_periods: 2
-            period: 300
-            threshold: 400
-        rds_storage_threshold: 10737418240
-        api_gateway_error_threshold: 10
-        api_gateway_latency_threshold: 5000
       dependencies:
         components:
           - component: vpc/main

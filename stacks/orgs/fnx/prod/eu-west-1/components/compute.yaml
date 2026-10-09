@@ -84,9 +84,8 @@ components:
           - eks-backend-services/prod
 
     # Its alarms name the <Environment>-main-alarms topic (ew1-main-alarms,
-    # catalog/github-runners/prod), which only monitoring/main creates; that
-    # comes in the services PR (B5-8), so until then the alarms have no
-    # target. Nothing is applied yet, and B5-8 lands before any deploy.
+    # catalog/github-runners/prod), which monitoring/main (services.yaml)
+    # creates.
     github-runners/main:
       metadata:
         component: github-runners

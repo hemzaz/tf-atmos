@@ -8,8 +8,10 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
 ## Wiring
 
 - Instances: `monitoring/main` (`name: main`) and `monitoring/data` (`name: data`) in the three
-  AWS stacks; `monitoring/main` also in `fnx-ue1-local-localemu`. Both read `kms/main .key_arn`.
-- `monitoring/main` reads `acm/main`, `apigateway/main`, `eks/main`, `rds/main`, `ecs/main` and, in
+  AWS stacks; `monitoring/main` also in `fnx-ue1-local-localemu`, `fnx-ue2-prod` and `fnx-ew1-prod`
+  (`fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `monitoring/main-prod`,
+  `stacks/catalog/monitoring/prod.yaml`). Both read `kms/main .key_arn`.
+- `monitoring/main` reads `acm/main`, `apigateway/main`, `eks/main`, `rds/main`, `ecs/main` (not in `fnx-ue2-prod` or `fnx-ew1-prod`) and, in
   prod, `elasticache/main .member_clusters`.
 - `monitoring/data` reads `acm/services`, `apigateway/data`, `eks/data`, `rds/data` and the stack's
   `lambda/*` functions.
