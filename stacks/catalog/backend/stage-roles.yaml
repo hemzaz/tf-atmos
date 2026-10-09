@@ -1,0 +1,30 @@
+---
+# The stage access roles of a backend whose bucket holds workload stacks'
+# state (catalog/backend/defaults has the key layout and the stage table).
+# fnx-ue1-root imports it; fnx-ew1-root's bucket holds only its own state
+# until fnx-ew1-prod adds the prod roles: check-state-keys.py fails a role
+# that matches no state.
+import:
+  - catalog/backend/defaults
+
+components:
+  terraform:
+    backend:
+      vars:
+        access_roles:
+          read:
+            role_name: "{{ .settings.tfstate.role_prefix }}-read-role"
+            write_enabled: false
+            object_key_patterns: []
+          prod_read:
+            role_name: "{{ .settings.tfstate.role_prefix }}-prod-read-role"
+            write_enabled: false
+            object_key_patterns: []
+          write:
+            role_name: "{{ .settings.tfstate.role_prefix }}-role"
+            write_enabled: true
+            object_key_patterns: []
+          prod_write:
+            role_name: "{{ .settings.tfstate.role_prefix }}-prod-role"
+            write_enabled: true
+            object_key_patterns: []

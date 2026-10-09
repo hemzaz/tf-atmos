@@ -495,19 +495,20 @@ prod: ## Switch to production environment
 # =============================================================================
 # AWS Backend Setup and Management
 # =============================================================================
-# State lives in ONE S3 bucket, <tenant>-terraform-state (native lockfile
+# US state lives in one S3 bucket, <tenant>-terraform-state (native lockfile
 # locking, no DynamoDB), created and managed by backend/main in the management
-# account's stack fnx-ue1-root. First creation: make setup-aws-backend-cold-start.
+# account's stack fnx-ue1-root (BACKEND_STACK=fnx-ew1-root: the EU stacks' bucket,
+# fnx-ew1-terraform-state). First creation: make setup-aws-backend-cold-start.
 
-BACKEND_STACK := fnx-ue1-root
+BACKEND_STACK ?= fnx-ue1-root
 
-setup-aws-backend-cold-start: ## Create the single state backend (once, management-account admin credentials)
+setup-aws-backend-cold-start: ## Create a state backend (BACKEND_STACK; once, management-account admin credentials)
 	@echo "$(BLUE)Creating the state backend in $(BACKEND_STACK)...$(NC)"
-	@atmos workflow backend-cold-start -f bootstrap
+	@atmos workflow backend-cold-start -f bootstrap -s "$(BACKEND_STACK)"
 
-setup-aws-backend: ## Plan and apply the single state backend (backend/main in fnx-ue1-root)
+setup-aws-backend: ## Plan and apply a state backend (backend/main in BACKEND_STACK, default fnx-ue1-root)
 	@echo "$(BLUE)Updating the state backend in $(BACKEND_STACK)...$(NC)"
-	@atmos workflow backend-only -f bootstrap
+	@atmos workflow backend-only -f bootstrap -s "$(BACKEND_STACK)"
 
 setup-aws-backend-dry-run: ## Show the backend configuration and plan without applying
 	@atmos terraform backend describe backend/main -s "$(BACKEND_STACK)"
@@ -515,7 +516,7 @@ setup-aws-backend-dry-run: ## Show the backend configuration and plan without ap
 
 validate-aws-setup: ## Validate the existing state backend
 	@echo "$(BLUE)Validating the state backend in $(BACKEND_STACK)...$(NC)"
-	@atmos workflow verify -f bootstrap
+	@atmos workflow verify -f bootstrap -s "$(BACKEND_STACK)"
 
 bootstrap-environment: ## Complete environment bootstrap (IAM + VPCs, backend check, validation)
 	@echo "$(BLUE)Bootstrapping complete environment: $(STACK)$(NC)"

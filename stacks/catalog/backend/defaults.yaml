@@ -1,7 +1,13 @@
 ---
-# The Terraform state backend (bucket, KMS key, access roles). Deployed ONCE,
-# as backend/main in the management account's stack fnx-ue1-root
-# (stacks/orgs/fnx/root/us-east-1.yaml); workload stacks never create one.
+# A Terraform state backend (bucket, KMS key, access roles), deployed as
+# backend/main in a management-account root stack: fnx-ue1-root
+# (stacks/orgs/fnx/root/us-east-1.yaml) for the US stacks, fnx-ew1-root
+# (stacks/orgs/fnx/root/eu-west-1.yaml) for the EU stacks (GDPR residency).
+# Workload stacks never create one.
+#
+# This file holds what every backend has: its own state's root_write role.
+# The stage roles come from catalog/backend/stage-roles, imported by a root
+# stack whose bucket holds dev/staging/prod state.
 components:
   terraform:
     backend:
@@ -21,7 +27,7 @@ components:
         # (object_key_patterns) are set on the instance, next to each other
         # (stacks/orgs/fnx/root/us-east-1.yaml).
         #
-        # Reads AND writes are split by stage within the one bucket. State keys
+        # Reads AND writes are split by stage within a bucket. State keys
         # are "<workspace_key_prefix>/<workspace>/terraform.tfstate" (+ ".tflock"):
         # Atmos sets workspace_key_prefix to the component (iam, eks, ...) and
         # the workspace to the stack name, with "-<instance>" appended for a
@@ -31,7 +37,8 @@ components:
         # depend on where the stage sits in the stack name, so it holds under
         # any name_template. S3's "*" also spans "/". check-state-keys.py
         # (validate-all, lint) evaluates these patterns against every state
-        # key and fails a key that no role, or another stage's role, matches:
+        # key and fails a key that no role, or another stage's role, matches,
+        # and a role that matches no state key:
         # a new stack needs its pair on the instance before its first init.
         # object_key_patterns is [] here, not the component's ["*"] default:
         # a role the instance forgets fails the plan (the variable requires a
@@ -42,23 +49,7 @@ components:
         #   prod         prod_read                   prod_write
         #   root         root_write                  root_write
         access_roles:
-          read:
-            role_name: "{{ .settings.tfstate.role_prefix }}-read-role"
-            write_enabled: false
-            object_key_patterns: []
-          prod_read:
-            role_name: "{{ .settings.tfstate.role_prefix }}-prod-read-role"
-            write_enabled: false
-            object_key_patterns: []
-          write:
-            role_name: "{{ .settings.tfstate.role_prefix }}-role"
-            write_enabled: true
-            object_key_patterns: []
-          prod_write:
-            role_name: "{{ .settings.tfstate.role_prefix }}-prod-role"
-            write_enabled: true
-            object_key_patterns: []
-          # The backend's own state (fnx-ue1-root). No allowed_principal_arns:
+          # The backend's own state (its root stack). No allowed_principal_arns:
           # only the administrator applying backend/main (the caller, always
           # trusted) may assume it; no CI role can read or write root state.
           root_write:

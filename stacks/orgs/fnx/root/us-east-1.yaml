@@ -2,9 +2,10 @@
 # =============================================================================
 # fnx-ue1-root - the management account's stack
 # =============================================================================
-# Owns the ONE Terraform state backend every stack uses: bucket
+# Owns the Terraform state backend every US stack uses: bucket
 # fnx-terraform-state, its KMS key, and the stage-split read-only / read-write
-# access roles (components/terraform/backend). Workload stacks have no backend
+# access roles (components/terraform/backend). The EU stacks' backend is
+# fnx-ew1-root's (stacks/orgs/fnx/root/eu-west-1.yaml). Workload stacks have no backend
 # instance; their iam/ci names this instance's roles by the same naming
 # convention the stack backend uses (stacks/orgs/fnx/_defaults.yaml), so no CI
 # role ever reads this stack's state.
@@ -18,7 +19,7 @@ import:
   # The region code (ue1) of the state bucket's region, settings.tfstate.region
   - mixins/region/us-east-1
   - orgs/fnx/root/_defaults
-  - catalog/backend/defaults
+  - catalog/backend/stage-roles
 
 vars:
   region: "{{ .settings.tfstate.region }}"

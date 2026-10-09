@@ -1,0 +1,11 @@
+---
+# eu-west-1 (the EU stacks' region, GDPR). Same shape as mixins/region/us-east-1.yaml.
+# vpc instances set availability_zone_ids themselves (components/terraform/vpc/README.md).
+import:
+  - catalog/vpc/defaults
+
+vars:
+  region: eu-west-1
+settings:
+  context:
+    environment: ew1
