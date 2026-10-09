@@ -165,7 +165,7 @@ What is safe and what is not:
 | Variable | Value |
 |----------|-------|
 | `AWS_PLAN_ROLE_ARN` | the "AWS is configured" switch: unset = AWS jobs skip. Any non-empty value enables them (by convention a `ci_plan_role_arn`); no job assumes it |
-| `AWS_REGION` | optional override (default `us-east-1`) |
+| `AWS_REGION` | optional override (default `us-east-1`) of the hosted jobs' credentials region; the in-VPC jobs (`in-vpc.yml`) always use their runner pool's `vars.region` |
 
 No role ARN is a variable. Every AWS job assumes its stack's own `iam/ci` role, in that stack's
 account, derived by `workflows/scripts/common/ci-apply-role-arn.py` as

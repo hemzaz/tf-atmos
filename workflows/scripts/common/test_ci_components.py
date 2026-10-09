@@ -79,9 +79,10 @@ def in_vpc(*deps, label=None):
     return i
 
 
-def pool(*labels, environment="ue1", var_name=None):
+def pool(*labels, environment="ue1", var_name=None, region="us-east-1"):
     i = instance(component="github-runners")
-    i["vars"] = {"runner_labels": list(labels), "tags": {"Environment": environment}, **({"name": var_name} if var_name else {})}
+    i["vars"] = {"runner_labels": list(labels), "tags": {"Environment": environment}, "region": region,
+                 **({"name": var_name} if var_name else {})}
     return i
 
 
@@ -115,10 +116,30 @@ class RunnerRoutingTest(unittest.TestCase):
         run, _ = ci_components.select(self.instances, STACK, runner="in-vpc")
         self.assertEqual(ci_components.pools(self.instances, STACK, run), [
             {"label": "fnx-ue1-dev", "pool": "github-runners/main", "asg": "ue1-github-runners",
-             "instances": ["eks-addons/main"]},
+             "region": "us-east-1", "instances": ["eks-addons/main"]},
             {"label": "ms-label", "pool": "github-runners/ms", "asg": "ue1-microservices-runners",
-             "instances": ["eks-addons/ms"]},
+             "region": "us-east-1", "instances": ["eks-addons/ms"]},
         ])
+
+    def test_a_us_east_2_pool_starts_in_us_east_2(self):
+        stack = "fnx-ue2-prod"
+        instances = {
+            "github-runners/main": pool(stack, environment="ue2", region="us-east-2"),
+            "eks/main": instance(),
+            "eks-addons/main": in_vpc("eks/main"),
+        }
+        run, _ = ci_components.select(instances, stack, runner="in-vpc")
+        self.assertEqual(ci_components.pools(instances, stack, run), [
+            {"label": stack, "pool": "github-runners/main", "asg": "ue2-github-runners",
+             "region": "us-east-2", "instances": ["eks-addons/main"]},
+        ])
+
+    def test_a_pool_without_a_valid_region_fails(self):
+        for region in (None, "", "US-EAST-2", "${region}"):
+            instances = dict(self.instances, **{"github-runners/ms": pool("ms-label", region=region)})
+            run, _ = ci_components.select(instances, STACK, runner="in-vpc", label="ms-label")
+            with self.assertRaisesRegex(LookupError, "github-runners/ms has no valid vars.region"):
+                ci_components.pools(instances, STACK, run)
 
     def test_affected_in_vpc_subset_needs_only_its_pool(self):
         run, _ = ci_components.select(self.instances, STACK, {"eks-addons/ms", "vpc/main"}, runner="in-vpc")
@@ -141,7 +162,8 @@ class RunnerRoutingTest(unittest.TestCase):
     def test_main_pools_for_one_dispatched_component(self):
         code, out = self.run_main("--pools", "--only", "eks-addons/ms")
         self.assertEqual(code, 0)
-        self.assertEqual(out.splitlines(), ['{"asg": "ue1-microservices-runners", "instances": ["eks-addons/ms"], "label": "ms-label", "pool": "github-runners/ms"}'])
+        self.assertEqual(out.splitlines(), ['{"asg": "ue1-microservices-runners", "instances": ["eks-addons/ms"], "label": "ms-label", '
+                                           '"pool": "github-runners/ms", "region": "us-east-1"}'])
 
     def test_main_pools_for_a_hosted_component_is_empty(self):
         self.assertEqual(self.run_main("--pools", "--only", "vpc/main"), (0, ""))

@@ -5,7 +5,9 @@
 #   start  (GitHub-hosted) starts one runner in the label's pool: it executes
 #          the pool's +1 start policy (atmos workflow start-runner -f
 #          ci-runners; the CI roles may execute this stack's pools' policies
-#          only, iam/ci ci-runner-pools.tf);
+#          only, iam/ci ci-runner-pools.tf), in the pool's own region
+#          (inputs.region, never a repository-wide default: a us-east-2
+#          pool's group does not exist in us-east-1);
 #   run    (self-hosted, runs-on the label) an ephemeral runner of that pool
 #          takes this job and plans, drift-checks or deploys the stack's
 #          in-vpc instances for that label (ci-components.py --runner in-vpc
@@ -54,6 +56,10 @@ on:
         description: The label's runner pool Auto Scaling group (ci-components.py --pools)
         required: true
         type: string
+      region:
+        description: The pool's region, its github-runners instance's vars.region (ci-components.py --pools); both jobs use it
+        required: true
+        type: string
       mode:
         description: "plan, deploy, or drift (plan with a detailed exit code that fails on changes)"
         required: true
@@ -99,7 +105,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ inputs.region }}
       - name: Start one runner (the pool's +1 start policy)
         env:
           ASG: ${{ inputs.asg }}
@@ -152,7 +158,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ inputs.region }}
       # Inputs reach the script through env, never interpolated into it.
       - name: Run
         shell: bash

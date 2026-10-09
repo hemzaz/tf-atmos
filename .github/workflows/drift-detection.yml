@@ -96,7 +96,7 @@ jobs:
                   ["python3", "workflows/scripts/common/ci-components.py", "--stack", stack, "--pools"], text=True)
               for line in pools.splitlines():
                   pool = json.loads(line)
-                  in_vpc.append({"stack": stack, "label": pool["label"], "asg": pool["asg"]})
+                  in_vpc.append({"stack": stack, "label": pool["label"], "asg": pool["asg"], "region": pool["region"]})
 
           with open(out_file, "a") as out:
               out.write(f"matrix={json.dumps(matrix)}\n")
@@ -188,4 +188,5 @@ jobs:
       stack: ${{ matrix.stack }}
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
+      region: ${{ matrix.region }}
       mode: drift

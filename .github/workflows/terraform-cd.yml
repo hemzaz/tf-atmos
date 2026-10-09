@@ -180,7 +180,8 @@ jobs:
                    "--base", entry["base"], "--pools"], text=True)
               for line in pools.splitlines():
                   pool = json.loads(line)
-                  in_vpc.append({"stack": entry["stack"], "base": entry["base"], "label": pool["label"], "asg": pool["asg"]})
+                  in_vpc.append({"stack": entry["stack"], "base": entry["base"], "label": pool["label"],
+                                 "asg": pool["asg"], "region": pool["region"]})
           print(f"In-VPC deploys: {in_vpc}")
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
@@ -278,6 +279,7 @@ jobs:
       stack: ${{ matrix.stack }}
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
+      region: ${{ matrix.region }}
       mode: deploy
       base: ${{ matrix.base }}
 
@@ -422,5 +424,6 @@ jobs:
       stack: ${{ inputs.stack }}
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
+      region: ${{ matrix.region }}
       mode: ${{ inputs.action }}
       components: ${{ inputs.component }}

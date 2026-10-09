@@ -11,11 +11,15 @@ _spec.loader.exec_module(ci_in_vpc)
 POOLS = {
     "fnx-ue1-dev": [
         {"label": "fnx-ue1-dev", "pool": "github-runners/main", "asg": "ue1-github-runners",
-         "instances": ["eks-addons/main", "external-secrets/main"]},
+         "region": "us-east-1", "instances": ["eks-addons/main", "external-secrets/main"]},
         {"label": "fnx-ue1-dev-microservices", "pool": "microservices/github-runners",
-         "asg": "ue1-microservices-runners", "instances": ["microservices/eks-addons"]},
+         "asg": "ue1-microservices-runners", "region": "us-east-1", "instances": ["microservices/eks-addons"]},
     ],
     "fnx-ue1-staging": [],
+    "fnx-ue2-prod": [
+        {"label": "fnx-ue2-prod", "pool": "github-runners/main", "asg": "ue2-github-runners",
+         "region": "us-east-2", "instances": ["eks-addons/main"]},
+    ],
 }
 
 
@@ -40,12 +44,19 @@ class SplitTest(unittest.TestCase):
         hosted, in_vpc, calls = self.split(include)
         self.assertEqual(hosted, [include[0], include[4]])
         self.assertEqual(in_vpc, [
-            {"stack": "fnx-ue1-dev", "label": "fnx-ue1-dev", "asg": "ue1-github-runners",
+            {"stack": "fnx-ue1-dev", "label": "fnx-ue1-dev", "asg": "ue1-github-runners", "region": "us-east-1",
              "components": "eks-addons/main external-secrets/main"},
             {"stack": "fnx-ue1-dev", "label": "fnx-ue1-dev-microservices", "asg": "ue1-microservices-runners",
-             "components": "microservices/eks-addons"},
+             "region": "us-east-1", "components": "microservices/eks-addons"},
         ])
         self.assertEqual(calls, ["fnx-ue1-dev", "fnx-ue1-staging"], "one --pools call per stack")
+
+    def test_a_us_east_2_pool_keeps_its_region(self):
+        include = [{"stack": "fnx-ue2-prod", "component": "eks-addons/main"},
+                   {"stack": "fnx-ue1-dev", "component": "eks-addons/main"}]
+        _, in_vpc, _ = self.split(include)
+        self.assertEqual({entry["asg"]: entry["region"] for entry in in_vpc},
+                         {"ue1-github-runners": "us-east-1", "ue2-github-runners": "us-east-2"})
 
     def test_no_in_vpc_instances_leave_the_matrix_unchanged(self):
         include = [{"stack": "fnx-ue1-staging", "component": "eks/main"}]

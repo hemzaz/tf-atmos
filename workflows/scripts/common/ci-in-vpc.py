@@ -4,8 +4,8 @@
   split            terraform-ci.yml: reads an affected matrix {"include": [{"stack", "component", ...}]}
                    on stdin and prints {"hosted": <matrix>, "in_vpc": <matrix>, "notice": str}:
                    the hosted runners' entries unchanged, and one in-VPC entry per (stack,
-                   runner label) {"stack", "label", "asg", "components"} (space-separated,
-                   sorted) for in-vpc.yml. In-VPC plans run with the stack's master-only
+                   runner label) {"stack", "label", "asg", "region", "components"}
+                   (space-separated, sorted) for in-vpc.yml. In-VPC plans run with the stack's master-only
                    apply role (owner decision: the plan role, which trusts pull requests,
                    never reads cluster Secrets), so only for a push to the default branch
                    (--event, --ref, --default-branch); otherwise in_vpc is empty and notice
@@ -46,7 +46,8 @@ def split(include: list[dict], pools_of: Callable[[str], list[dict]] = stack_poo
             hosted.append(item)
             continue
         group = groups.setdefault(
-            (stack, pool["label"]), {"stack": stack, "label": pool["label"], "asg": pool["asg"], "components": set()}
+            (stack, pool["label"]), {"stack": stack, "label": pool["label"], "asg": pool["asg"], "region": pool["region"],
+             "components": set()}
         )
         group["components"].add(item["component"])
     in_vpc = [dict(group, components=" ".join(sorted(group["components"]))) for _, group in sorted(groups.items())]

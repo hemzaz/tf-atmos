@@ -46,6 +46,21 @@ class InVpcWorkflowTest(unittest.TestCase):
         self.assertEqual(self.in_vpc.count("ci-apply-role-arn.py --kind apply"), 2)
         self.assertNotIn("--kind plan", self.in_vpc)
 
+    def test_both_jobs_use_the_pool_region(self):
+        """A us-east-2 pool's group exists only in us-east-2: never a repository-wide default region."""
+        self.assertNotIn("vars.AWS_REGION", self.in_vpc)
+        for name in ("start", "run"):
+            self.assertIn("aws-region: ${{ inputs.region }}", job(self.in_vpc, name), name)
+
+    def test_every_caller_passes_the_matrix_region(self):
+        calls = 0
+        for path in WORKFLOWS.glob("*.yml"):
+            for call in re.findall(r"uses: \./\.github/workflows/in-vpc\.yml\n(.*?)(?=^  \S|\Z)",
+                                   path.read_text(), re.M | re.S):
+                calls += 1
+                self.assertIn("region: ${{ matrix.region }}", call, path.name)
+        self.assertEqual(calls, 4)
+
     def test_no_caller_passes_a_role_or_inherits_secrets(self):
         for path in WORKFLOWS.glob("*.yml"):
             text = path.read_text()
