@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Check that the state backend's access roles split every state key by stage.
+"""Check that each state backend's access roles split every state key in its bucket by stage.
 
 Reads `atmos describe stacks --process-functions=false --format json` on stdin.
-The state backend's access roles are split by stage within one bucket with S3
-object-key patterns, an exact pair per stack, "*/<stack>/*" and "*/<stack>-*"
-(stacks/orgs/fnx/root/us-east-1.yaml). A state key is
+Each deployed "backend" instance (backends.py) owns one bucket, vars.bucket_name,
+and its access roles split the stages of that bucket with S3 object-key
+patterns, an exact pair per stack, "*/<stack>/*" and "*/<stack>-*"
+(stacks/orgs/fnx/root/us-east-1.yaml). Every instance's backend.bucket must be
+owned by exactly one backend instance; the rules below hold per bucket, against
+its owner's access roles only (US prod and EU prod are separate stages). A state key is
 "<workspace_key_prefix>/<workspace>/<backend.key>" (+ ".tflock"). This evaluates
 the deployed backend component's access_roles patterns against every key, with
 IAM's resource-ARN wildcards ("*" any run of characters, "/" included; "?" any
@@ -24,14 +27,14 @@ the stage sits in name_template. Stage fixtures is skipped: its stacks are
 never deployed and have no access role. Layout checks stay for every instance:
   - the workspace and backend.workspace_key_prefix contain no "/";
   - backend.key is exactly "terraform.tfstate" (every instance uses it);
-  - no two stacks share a state key. Atmos names an instance's workspace
+  - no two stacks share a state key in one bucket. Atmos names an instance's workspace
     <stack>-<instance suffix> (fnx-ue1-dev-main for vpc/main), so a lane named
     like a suffix (fnx-ue1-dev-main's vpc) would read and write its parent's state.
 
-Every s3 backend also points at the one bucket's region: backend.region must equal the
-region of the stack that deploys the "backend" component (backend/main, fnx-ue1-root),
-not the stack's own, or init of a DR/EU stack fails against a region with no bucket.
-Exits 1 on any violation.
+Every s3 backend also points at its bucket's region: backend.region must equal the
+region of the backend instance that owns backend.bucket (backend/main in fnx-ue1-root
+for fnx-terraform-state), not the stack's own, or init of a DR/EU stack fails against
+a region with no bucket. Exits 1 on any violation.
 """
 import json
 import os
@@ -39,34 +42,19 @@ import re
 import sys
 from typing import Optional
 
-# The sibling module, also when this file is loaded by path (tests).
+# The sibling modules, also when this file is loaded by path (tests).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import backends  # noqa: E402
 import fixtures  # noqa: E402
 
 STATE_KEY = "terraform.tfstate"
 LOCK_SUFFIX = ".tflock"
-BACKEND_COMPONENT = "backend"
 # A template over an unset setting renders "<no value>" for both sides, which would compare equal.
 AWS_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
-
-
 def stage_of(instance: dict) -> Optional[str]:
     return ((instance.get("settings") or {}).get("context") or {}).get("stage") or None
-
-
-def backend_instances(stacks: dict) -> list[dict]:
-    """The deployed instances of the "backend" component (the state bucket)."""
-    return [
-        instance
-        for stack in stacks.values()
-        for instance in ((stack.get("components") or {}).get("terraform") or {}).values()
-        if is_deployable(instance) and instance.get("component") == BACKEND_COMPONENT
-    ]
 
 
 WILDCARDS = {"*": ".*", "?": "."}
@@ -94,11 +82,6 @@ def dead_patterns(roles: dict, live: set) -> list[str]:
                 "(a stack renamed or removed?)"
             )
     return errors
-
-
-def assumed_role_name(instance: dict) -> Optional[str]:
-    arn = ((instance.get("backend") or {}).get("assume_role") or {}).get("role_arn") or ""
-    return arn.rsplit(":role/", 1)[1].rsplit("/", 1)[-1] if ":role/" in arn else None
 
 
 def check_layout(where: str, instance: dict, bucket_region: Optional[str]) -> list[str]:
@@ -180,48 +163,65 @@ def check_roles(objects: list[tuple], roles: dict) -> list[str]:
     return list(dict.fromkeys(errors))
 
 
-def check(stacks: dict) -> list[str]:
+def check_owners(owners: dict) -> tuple[dict, list[str]]:
+    """(bucket -> its one owner, errors): a bucket created twice has no owner."""
     errors = []
-    backends = backend_instances(stacks)
-    regions = {(instance.get("vars") or {}).get("region") for instance in backends}
-    if len(regions) != 1 or None in regions:
-        errors.append(f"expected exactly one deployed '{BACKEND_COMPONENT}' region, found {sorted(map(str, regions))}")
-    bucket_region = next(iter(regions)) if len(regions) == 1 else None
-    if bucket_region is not None and not AWS_REGION.match(str(bucket_region)):
-        errors.append(f"the state bucket's region {bucket_region!r} is not an AWS region (settings.tfstate.region unset?)")
-        bucket_region = None
-    roles = {}
-    if len(backends) == 1:
-        roles = (backends[0].get("vars") or {}).get("access_roles") or {}
-        if not roles:
-            errors.append(f"the deployed '{BACKEND_COMPONENT}' instance has no access_roles")
-    objects = []
-    owners = {}
+    owned = {}
+    if not owners:
+        errors.append(f"no deployed '{backends.BACKEND_COMPONENT}' instance owns a state bucket (vars.bucket_name)")
+    for bucket, found in sorted(owners.items()):
+        if len(found) > 1:
+            errors.append(f"state bucket {bucket!r} is created by more than one backend instance: "
+                          f"{[b.where for b in found]}")
+            continue
+        owner = found[0]
+        owned[bucket] = owner
+        if not AWS_REGION.match(str(owner.region)):
+            errors.append(f"{owner.where}: the state bucket's region {owner.region!r} is not an AWS region "
+                          "(settings.tfstate.region unset?)")
+        if not owner.access_roles:
+            errors.append(f"{owner.where}: the deployed '{backends.BACKEND_COMPONENT}' instance has no access_roles")
+    return owned, errors
+
+
+def check(stacks: dict) -> list[str]:
+    owners = backends.owners(stacks)
+    owned, errors = check_owners(owners)
+    errors += [f"{b.where}: the deployed '{backends.BACKEND_COMPONENT}' instance has no vars.bucket_name"
+               for b in backends.backends(stacks) if b.bucket is None]
+    objects: dict = {}  # bucket -> (stage, where, object key, assumed role name)
+    keys = {}  # (bucket, state key) -> (stack, where)
     for stack_name, stack in sorted(stacks.items()):
-        instances = (stack.get("components") or {}).get("terraform") or {}
-        for name, instance in sorted(instances.items()):
-            if not is_deployable(instance) or instance.get("backend_type") != "s3":
+        for name, instance in sorted(backends.instances(stack).items()):
+            if not backends.is_deployable(instance) or instance.get("backend_type") != "s3":
                 continue
             where = f"{stack_name}: {name}"
-            errors += check_layout(where, instance, bucket_region)
+            bucket = backends.bucket_of(instance)
+            owner = owned.get(bucket)
+            if bucket not in owners:
+                errors.append(f"{where} backend.bucket {bucket!r} is created by no deployed backend instance")
+            region = owner.region if owner and AWS_REGION.match(str(owner.region)) else None
+            errors += check_layout(where, instance, region)
             backend = instance.get("backend") or {}
             state = f"{backend.get('workspace_key_prefix')}/{instance.get('workspace')}/{backend.get('key')}"
-            owner = owners.setdefault(state, (stack_name, where))
-            if owner[0] != stack_name:
+            first = keys.setdefault((bucket, state), (stack_name, where))
+            if first[0] != stack_name:
                 errors.append(
-                    f"{where} and {owner[1]} share the state key {state!r}: rename the lane "
+                    f"{where} and {first[1]} share the state key {state!r}: rename the lane "
                     "(settings.context.name) so it is no instance's workspace suffix"
                 )
             stage = stage_of(instance)
             if stage is None:
                 errors.append(f"{where} has no settings.context stage to split its state by")
                 continue
-            if stage == fixtures.FIXTURE_STAGE:
+            if stage == fixtures.FIXTURE_STAGE or owner is None:
                 continue
             for obj in (state, state + LOCK_SUFFIX):
-                objects.append((stage, where, obj, assumed_role_name(instance)))
-    if roles:
-        errors += check_roles(objects, roles)
+                objects.setdefault(bucket, []).append((stage, where, obj, backends.assumed_role_name(instance)))
+    for bucket, owner in sorted(owned.items()):
+        if owner.access_roles:
+            label = f"bucket {bucket!r} ({owner.where})"
+            errors += [f"{label}: {error}" for error in check_roles(objects.get(bucket, []), owner.access_roles)]
     return errors
 
 
@@ -233,9 +233,10 @@ def main() -> int:
         print(f"{len(errors)} state key problem(s)")
         return 1
     print(
-        "every s3-backend state object is matched by exactly its stage's access roles, including "
-        "the role it assumes; its workspace_key_prefix has no '/', its backend.key is terraform.tfstate, "
-        "its backend.region is the state bucket's and no other instance shares its key"
+        "every s3-backend state object is in a bucket one backend instance owns and is matched by exactly "
+        "its stage's access roles of that owner, including the role it assumes; its workspace_key_prefix "
+        "has no '/', its backend.key is terraform.tfstate, its backend.region is its bucket's and no other "
+        "instance shares its key"
     )
     return 0
 
