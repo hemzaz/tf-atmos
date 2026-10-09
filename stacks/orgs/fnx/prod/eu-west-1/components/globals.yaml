@@ -53,6 +53,7 @@ settings:
       budget_monthly_limit: "10000"
     eks_kubernetes_version: "1.36"
     eks_public_access: false
+    use_external_secrets: true
 
 components:
   terraform:
