@@ -39,8 +39,8 @@ the stack checks (lint) and plan-sweep (validate-enhanced) over them. Only files
 each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/components/` domain files
 (`globals`, `networking`, `security`, `compute`, `services`). EU personal data lives only in EU
 stacks, tagged `Compliance: "pci-sox-gdpr"` (US prod is `"pci-sox"`): `check-data-residency.py`
-(lint) fails a gdpr-tagged or `eu-` stack that lacks the tag, names a non-`eu-` region or depends
-on a non-gdpr stack.
+(lint) fails a gdpr-tagged or `eu-` stack that lacks the tag, names a non-`eu-` region, turns on
+Route 53 query logging (written only to us-east-1) or depends on a non-gdpr stack.
 
 | Stack | Manifest (`stacks/orgs/fnx/...`) | Purpose |
 |-------|----------------------------------|---------|
@@ -48,7 +48,7 @@ on a non-gdpr stack.
 | `fnx-ue1-staging` | `staging/us-east-1.yaml` | staging |
 | `fnx-ue1-prod` | `prod/us-east-1.yaml` | production |
 | `fnx-ue2-prod` | `prod/us-east-2.yaml` | production DR warm standby, same account; runs a subset of `fnx-ue1-prod` ([Disaster recovery](./docs/OPERATIONS.md#disaster-recovery)) |
-| `fnx-ew1-prod` | `prod/eu-west-1.yaml` | EU production (GDPR), its own account (`prod-eu`), state in `fnx-ew1-root`'s backend; today the account and identity layer only (`iam/main`, `iam/ci`) |
+| `fnx-ew1-prod` | `prod/eu-west-1.yaml` | EU production (GDPR), its own account (`prod-eu`), state in `fnx-ew1-root`'s backend; today the account and identity layer (`iam/main`, `iam/ci`) and networking: `vpc/main` (10.30.0.0/16; 10.31.0.0/16 reserved for an EU data VPC, 10.32.0.0/16 for `fnx-ec1-prod`) and `network/main`, the EU apex zone (its own domain, never under the US one) |
 | `fnx-ue1-root` | `root/us-east-1.yaml` | management account: the US stacks' state backend (`backend/main`); not run by CI |
 | `fnx-ew1-root` | `root/eu-west-1.yaml` | management account: the EU stacks' state backend (`backend/main`, `eu-west-1`, replica `eu-central-1`); not run by CI |
 | `fnx-ue1-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |

@@ -4,14 +4,16 @@
 # =============================================================================
 # fnx-ue1-prod's tags (orgs/fnx/prod/us-east-1/components/globals.yaml) with
 # Compliance "pci-sox-gdpr": the EU stacks' tag, which check-data-residency.py
-# requires on every instance of a GDPR-scoped stack. The domain, alert
-# contacts and EKS settings come with the components that read them.
+# requires on every instance of a GDPR-scoped stack. Alert contacts and EKS
+# settings come with the components that read them.
 # The catalogs are imported first, as in the US globals, so these vars win
 # over catalog/_base/defaults' tags (Project).
 # =============================================================================
 
 import:
   - catalog/iam/defaults
+  - catalog/vpc/defaults
+  - catalog/network/defaults
 
 vars:
   tags:
@@ -27,3 +29,12 @@ vars:
     CriticalityLevel: "high"
     SLA: "99.9"
     BackupRequired: "true"
+
+# The stack's one domain, as in the US globals (every zone, record, certificate
+# and API domain derives from it). A SEPARATE EU apex owned by the prod-eu
+# account, never a name under the US domain: no delegation from fnx-ue1-prod's
+# zone and no read of US state. A placeholder until the owner registers the real
+# one: the first-deploy preflight flags it (example domain, row "Domains").
+settings:
+  environment:
+    domain_name: "fnx-eu.example.com"

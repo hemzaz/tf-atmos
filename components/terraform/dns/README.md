@@ -9,7 +9,8 @@ provider.
 ## Wiring
 
 Instances are named `network/main` and `network/services` (`metadata.component: dns`) in the
-three AWS stacks; `network/main` also in `fnx-ue1-local-sandbox`. `network/vpc-peering` is a
+three AWS stacks; `network/main` also in `fnx-ue1-local-sandbox` and in `fnx-ew1-prod` (the EU
+apex: `main` and `internal`, no `network/services`). `network/vpc-peering` is a
 different component (`network`).
 
 - In the AWS stacks, `network/main` reads `vpc/main .vpc_id` (private `internal` zone) and
@@ -40,7 +41,9 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   one KMS key `alias/route53-query-logs-<first zone>` (rotation on; account root plus
   `logs.us-east-1` scoped to `/aws/route53/*`), so the component works in any stack region. All
   three use the resource `region` argument, not a provider alias; DNS-account zones get theirs
-  in the DNS account. CloudWatch Logs allows 10 resource policies per region and account.
+  in the DNS account. CloudWatch Logs allows 10 resource policies per region and account. Being
+  us-east-1 only, it stays off on every zone of a GDPR-scoped (EU) stack (`check-data-residency.py` fails it); Resolver
+  (in-VPC) query logging, which would stay in the stack region, is not modelled.
 - `<first zone>` is the alphabetically first query-logged zone, so adding a zone that sorts earlier
   renames (replaces) the policy and the alias, briefly cutting Route53's write permission. Set
   `query_logging_name` once the zones are settled to pin the suffix. Setting it on an existing
