@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# Services for fnx-ew1-prod (EU production, its own account)
+# =============================================================================
+# Today only the prod-eu account's budget and cost alerting, an account
+# singleton fnx-ue2-prod leaves to fnx-ue1-prod; the EU services follow in
+# later PRs.
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-1/components/globals
+  - catalog/cost-optimization/defaults
+
+components:
+  terraform:
+    # As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/services.yaml):
+    # Savings Plan/RI analyzer, resource cleanup, cost anomaly detection and
+    # the monthly budget (on this stack's Environment tag, ew1). Cost data is
+    # account metadata, not personal data.
+    cost-optimization/main:
+      metadata:
+        component: cost-optimization
+        inherits:
+          - cost-optimization/defaults
+      vars:
+        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
+        budget_notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
+        cost_anomaly_notification_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        cost_alert_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"

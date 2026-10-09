@@ -9,8 +9,9 @@ Cloud Posse equivalent; the Lambdas are packaged like Cloud Posse `aws-lambda` (
 
 ## Wiring
 
-- Instance: `cost-optimization/main` in the three AWS stacks; reads `kms/main .key_arn` (log groups
-  and SNS topic). Deploys in the `monitoring` layer.
+- Instance: `cost-optimization/main` in one stack per account (dev, staging, `fnx-ue1-prod`,
+  `fnx-ew1-prod`); reads `kms/main .key_arn` (log groups and SNS topic). Deploys in the
+  `monitoring` layer.
 
 ## Notes
 
@@ -21,4 +22,7 @@ Cloud Posse equivalent; the Lambdas are packaged like Cloud Posse `aws-lambda` (
 - The budget filters on the user-defined `Environment` cost allocation tag. Activate it in the payer
   account's Billing console, or the budget stays at about $0 and never alerts.
 - `environment` is the lifecycle tier (`dev`/`staging`/`prod`), not `tags.Environment`.
+- In an EU stack, the savings analyzer's Cost Explorer calls and the dashboard's `AWS/Billing`
+  widget are served from us-east-1: account billing metadata only, no personal data, and in
+  component code, so `check-data-residency.py` cannot see it.
 - Handlers re-raise errors so the Lambda `Errors` alarms can fire (EventBridge ignores return values).
