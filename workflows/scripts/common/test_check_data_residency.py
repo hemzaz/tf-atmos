@@ -156,6 +156,26 @@ class DataResidencyTest(unittest.TestCase):
         us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
         self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"network/main": us})}), [])
 
+    def test_dns_query_logging_quoted_and_numeric_values_count_as_on(self):
+        on = "fnx-ew1-prod: network/main zone main sets enable_query_logging"
+        for value in ("true", "True", 1):
+            spec = instance(zones={"main": {"name": "d", "enable_query_logging": value}})
+            spec["metadata"] = {"component": "dns"}
+            errors = residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": spec})})
+            self.assertEqual(len(errors), 1, value)
+            self.assertTrue(errors[0].startswith(on), value)
+        for value in (None, False, "false", "FALSE"):
+            spec = instance(zones={"main": {"name": "d", "enable_query_logging": value}})
+            spec["metadata"] = {"component": "dns"}
+            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": spec})}), [], value)
+
+    def test_dns_non_map_zones_is_an_error(self):
+        spec = instance(zones=["main"])
+        spec["metadata"] = {"component": "dns"}
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": spec})}), [
+            "fnx-ew1-prod: network/main vars.zones is list, not a map: its query logging cannot be checked",
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()
