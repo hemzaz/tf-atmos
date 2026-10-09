@@ -27,8 +27,9 @@
 #     branch> for drift detection and disaster-recovery checks (production's plan
 #     role: the default-branch sub only).
 #   - State: deploys leave TFSTATE_ACCESS unset, so the stack backend assumes its
-#     stage's read/write state role (dev/staging: fnx-terraform-backend-role,
-#     prod: fnx-terraform-backend-prod-role), each trusted only by that stage's
+#     stage's read/write state role (dev/staging: <role_prefix>-role, prod:
+#     <role_prefix>-prod-role; settings.tfstate.role_prefix, default
+#     fnx-terraform-backend), each trusted only by that stage's
 #     CI apply roles (stacks/orgs/fnx/_defaults.yaml,
 #     stacks/orgs/fnx/root/us-east-1.yaml).
 #   - Missing, needs an organization-owned repo: a tag ruleset allowing only

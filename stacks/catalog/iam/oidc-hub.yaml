@@ -120,8 +120,9 @@ components:
         # ci_apply_role_trusted_github_repos: ["<org>/<repo>:master"]
 
         # State access through the single backend's stage-split access roles
-        # (backend/main in the management account's fnx-ue1-root), named by
-        # the stack backend's convention (stacks/orgs/fnx/_defaults.yaml): the
+        # (backend/main in the management account's settings.tfstate.stack),
+        # named <role_prefix>-* like the stack backend's (settings.tfstate in
+        # stacks/orgs/fnx/_defaults.yaml): the
         # plan role may assume the non-prod read-only role, the apply role the
         # non-prod read/write role. Add this hub's <prefix>-plan /
         # <prefix>-apply ARNs to that instance's `read` / `write`
@@ -129,9 +130,9 @@ components:
         # -prod-read / -prod roles instead (and the prod_read / prod_write
         # entries), and a master-only plan subject.
         ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
-        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-role"
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-root
+            stack: "{{ .settings.tfstate.stack }}"

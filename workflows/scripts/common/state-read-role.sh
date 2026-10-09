@@ -6,8 +6,9 @@
 # workload accounts' roles; access is only through the backend's stage-split
 # access roles (components/terraform/backend). The role used here is the one
 # the stack's own S3 backend assumes with TFSTATE_ACCESS=read
-# (stacks/orgs/fnx/_defaults.yaml): fnx-terraform-backend-prod-read-role for a
-# prod stack, fnx-terraform-backend-read-role for dev/staging. Those roles trust
+# (stacks/orgs/fnx/_defaults.yaml): <role_prefix>-prod-read-role for a prod
+# stack, <role_prefix>-read-role for dev/staging (settings.tfstate.role_prefix,
+# default fnx-terraform-backend). Those roles trust
 # the matching CI plan role (the credentials disaster-recovery.yml runs with).
 #
 # Defines state_aws: `aws` with the assumed role's credentials, so the caller's
@@ -20,7 +21,7 @@ export STATE_READ_ROLE_ARN
 
 if ! _state_creds="$(aws sts assume-role --role-arn "${STATE_READ_ROLE_ARN}" --role-session-name "dr-${STACK}" \
   --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text)"; then
-  echo "Cannot assume ${STATE_READ_ROLE_ARN}: the caller must be a principal that role trusts (backend/main access_roles in fnx-ue1-root)." >&2
+  echo "Cannot assume ${STATE_READ_ROLE_ARN}: the caller must be a principal that role trusts (backend/main access_roles in settings.tfstate.stack)." >&2
   exit 1
 fi
 read -r _STATE_KEY _STATE_SECRET _STATE_TOKEN <<<"${_state_creds}"

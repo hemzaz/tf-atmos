@@ -59,8 +59,9 @@ account IDs and the accounts layer is deployed and verified first
 
 ## State backend
 
-One bucket, `fnx-terraform-state`, in the management account, with native S3 lockfiles
-(`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-ue1-root`, and every stack's
+One bucket, `fnx-terraform-state` (`settings.tfstate.bucket`), in the management account, with native S3
+lockfiles (`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-ue1-root`
+(`settings.tfstate.stack`, which every `iam` instance depends on), and every stack's
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
 with management-account administrator credentials. The bucket lives in one region,
 `settings.tfstate.region` (`us-east-1`), and every stack's backend uses it whatever the stack's own
@@ -78,15 +79,17 @@ atmos workflow verify -f bootstrap               # backend describe + outputs
 An existing bucket must be imported first: see `components/terraform/backend/README.md`.
 
 Every role also trusts the administrator who applied `backend/main`; the stack backend picks the
-role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
+role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names start with
+`<role_prefix>` (`settings.tfstate.role_prefix`, `fnx-terraform-backend`); the CI roles' ARNs
+(`iam/ci`) are built from it too.
 
 | Role (`access_roles` key) | Access | Trusted CI role |
 |---------------------------|--------|-----------------|
-| `fnx-terraform-backend-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
-| `fnx-terraform-backend-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
-| `fnx-terraform-backend-prod-read-role` (`prod_read`) | read, prod state (`fnx-ue1-prod`, DR `fnx-ue2-prod`) | the prod stacks' CI plan roles |
-| `fnx-terraform-backend-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
-| `fnx-terraform-backend-root-role` (`root_write`) | read/write, `fnx-ue1-root` state | none |
+| `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
+| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
+| `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (`fnx-ue1-prod`, DR `fnx-ue2-prod`) | the prod stacks' CI plan roles |
+| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
+| `<role_prefix>-root-role` (`root_write`) | read/write, `fnx-ue1-root` state | none |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml`. Add a new stack's
@@ -753,7 +756,7 @@ liveness endpoint by design.
 | Symptom | Fix |
 |---------|-----|
 | `This repository requires Atmos >= 1.229.0` | Upgrade Atmos |
-| `init` cannot assume `fnx-terraform-backend-*-role` | Run `backend-cold-start`, or add the caller's role ARN to that stage's `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` |
+| `init` cannot assume `<role_prefix>-*-role` (`fnx-terraform-backend-*-role`) | Run `backend-cold-start`, or add the caller's role ARN to that stage's `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` |
 | CI plan: AccessDenied on `PutObject` at `workspace new` | Read roles cannot create a workspace; the instance's first deploy does |
 | `Error acquiring the state lock` | Another run holds it; `list-locks`, then `force-unlock` if abandoned |
 | `!terraform.state` returns nothing | The referenced instance is not deployed in that stack yet; deploy in layer order |

@@ -65,8 +65,8 @@ components:
         # Prod state access: the same prod read/write backend roles as
         # fnx-ue1-prod (both prod stacks' state is under them).
         ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
-        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-role"
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
         # eks/main's cluster encryption key, by alias (iam/ci applies before
         # any key read): the replica's alias in this region.
         ci_apply_kms_key_aliases:
@@ -74,7 +74,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-root
+            stack: "{{ .settings.tfstate.stack }}"
           # The OIDC provider this stack's roles trust.
           - component: iam/ci
             stack: fnx-ue1-prod
