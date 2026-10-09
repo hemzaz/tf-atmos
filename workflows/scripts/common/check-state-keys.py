@@ -49,7 +49,6 @@ import fixtures  # noqa: E402
 
 STATE_KEY = "terraform.tfstate"
 LOCK_SUFFIX = ".tflock"
-AWS_REGION = backends.AWS_REGION
 
 
 def stage_of(instance: dict) -> Optional[str]:
@@ -96,7 +95,7 @@ def check_layout(where: str, instance: dict, bucket_region: Optional[str]) -> li
     elif "/" in key_prefix:
         errors.append(f"{where} workspace_key_prefix {key_prefix!r} contains '/'")
     region = backend.get("region")
-    if not AWS_REGION.match(str(region)):
+    if not backends.AWS_REGION.match(str(region)):
         errors.append(f"{where} backend.region {region!r} is not an AWS region (settings.tfstate.region unset?)")
     elif bucket_region is not None and region != bucket_region:
         errors.append(f"{where} backend.region {region!r} is not the state bucket's region {bucket_region!r}")
@@ -176,7 +175,7 @@ def check(stacks: dict) -> list[str]:
             owner = backends.owner_of(owned, instance)
             if bucket not in created:
                 errors.append(f"{where} backend.bucket {bucket!r} is created by no deployed backend instance")
-            region = owner.region if owner and AWS_REGION.match(str(owner.region)) else None
+            region = owner.region if owner and backends.AWS_REGION.match(str(owner.region)) else None
             errors += check_layout(where, instance, region)
             backend = instance.get("backend") or {}
             state = f"{backend.get('workspace_key_prefix')}/{instance.get('workspace')}/{backend.get('key')}"

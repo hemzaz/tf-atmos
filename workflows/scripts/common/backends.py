@@ -60,7 +60,8 @@ def owners(stacks: dict) -> dict:
 
 def owned(stacks: dict) -> tuple[dict, list[str]]:
     """(bucket -> its one owning Backend, errors). A bucket created twice has no owner;
-    errors also name a backend without bucket_name, an invalid region or no access_roles."""
+    errors also name a backend without bucket_name, an invalid region, no access_roles or
+    a role_name shared by two access_roles keys."""
     errors = []
     found = backends(stacks)
     by_bucket = owners(stacks)
@@ -80,7 +81,19 @@ def owned(stacks: dict) -> tuple[dict, list[str]]:
                           "(settings.tfstate.region unset?)")
         if not owner.access_roles:
             errors.append(f"{owner.where}: the deployed '{BACKEND_COMPONENT}' instance has no access_roles")
+        errors += shared_role_names(owner)
     return result, errors
+
+
+def shared_role_names(owner: Backend) -> list[str]:
+    """One error per role_name that two access_roles keys define (assumed_role_key could not tell them apart)."""
+    keys_by_name: dict = {}
+    for key, role in sorted(owner.access_roles.items()):
+        name = (role or {}).get("role_name")
+        if name:
+            keys_by_name.setdefault(name, []).append(key)
+    return [f"{owner.where}: access_roles {keys} define the same role_name {name!r}"
+            for name, keys in sorted(keys_by_name.items()) if len(keys) > 1]
 
 
 def bucket_of(instance: dict) -> Optional[str]:
@@ -93,10 +106,15 @@ def owner_of(owned_map: dict, instance: dict) -> Optional[Backend]:
     return owned_map.get(bucket_of(instance))
 
 
+def role_name_of(arn) -> Optional[str]:
+    """The role name in an IAM role ARN (path stripped), or None."""
+    arn = arn if isinstance(arn, str) else ""
+    return arn.rsplit(":role/", 1)[1].rsplit("/", 1)[-1] if ":role/" in arn else None
+
+
 def assumed_role_name(instance: dict) -> Optional[str]:
     """The role name in backend.assume_role.role_arn (path stripped)."""
-    arn = ((instance.get("backend") or {}).get("assume_role") or {}).get("role_arn") or ""
-    return arn.rsplit(":role/", 1)[1].rsplit("/", 1)[-1] if ":role/" in arn else None
+    return role_name_of(((instance.get("backend") or {}).get("assume_role") or {}).get("role_arn"))
 
 
 def assumed_role_key(instance: dict, backend: Backend) -> Optional[str]:

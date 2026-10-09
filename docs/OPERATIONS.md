@@ -95,7 +95,8 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml`. Add a new stack's
   `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles there (iam/ci's `ci_role_name_prefix`),
   and any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
-  and `validate-all`) fails a CI role its stage's read or write role does not trust.
+  and `validate-all`) fails a CI role that its stage's read or write role, of the backend owning its
+  state bucket, does not trust, or that may assume another role (`ci_backend_*_role_arn`).
 - Each stack's state is an exact pattern pair on its stage's roles, `*/<stack>/*` and
   `*/<stack>-*` (`stacks/orgs/fnx/root/us-east-1.yaml`): add a new stack's pair before its first
   `init`. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against

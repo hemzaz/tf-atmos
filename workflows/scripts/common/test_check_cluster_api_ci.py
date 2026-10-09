@@ -28,9 +28,10 @@ def stacks_with(**components):
 ADMIN = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
 
 
-def admin_eks(arn, stage="dev"):
+def admin_eks(arn, stage="dev", bucket="fnx-terraform-state"):
     eks = instance("eks")
     eks["settings"] = {"context": {"stage": stage}}
+    eks["backend"] = {"bucket": bucket}
     eks["vars"]["map_additional_iam_roles"] = [{"rolearn": arn, "groups": ["system:masters"]}]
     return eks
 
@@ -42,10 +43,11 @@ def addon(component, cluster):
     return i
 
 
-def with_backend(stacks, **allowed):
+def with_backend(stacks, root="fnx-ue1-root", bucket="fnx-terraform-state", region="us-east-1", **allowed):
     backend = instance("backend")
+    backend["vars"].update(bucket_name=bucket, region=region)
     backend["vars"]["access_roles"] = {key: {"allowed_principal_arns": arns} for key, arns in allowed.items()}
-    return {**stacks, "fnx-ue1-root": {"components": {"terraform": {"backend/main": backend}}}}
+    return {**stacks, root: {"components": {"terraform": {"backend/main": backend}}}}
 
 
 class CheckClusterApiCiTest(unittest.TestCase):
@@ -142,12 +144,31 @@ class CheckClusterApiCiTest(unittest.TestCase):
         stacks = stacks_with(**{"eks/main": admin_eks(ADMIN), "eks-addons/main": addon("eks-addons", "eks/main")})
         errors, _ = check_cluster_api_ci.check_operators(stacks, CLUSTER)
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("no deployable backend/main", errors[0])
+        self.assertIn("no state bucket has one deployable backend instance owning it", errors[0])
         # A disabled backend/main counts as missing.
         off = with_backend(stacks, write=[ADMIN])
         off["fnx-ue1-root"]["components"]["terraform"]["backend/main"]["metadata"] = {"enabled": False}
         errors, _ = check_cluster_api_ci.check_operators(off, CLUSTER)
         self.assertEqual(len(errors), 1, errors)
+
+    def test_admin_role_is_checked_against_the_backend_owning_the_cluster_state(self):
+        eu_stack = {"fnx-ew1-prod": {"components": {"terraform": {
+            "eks/main": admin_eks(ADMIN, stage="prod", bucket="fnx-ew1-terraform-state"),
+            "eks-addons/main": addon("eks-addons", "eks/main"),
+        }}}}
+        us = with_backend(eu_stack, prod_write=[])
+        both = with_backend(us, "fnx-ew1-root", "fnx-ew1-terraform-state", "eu-west-1", prod_write=[ADMIN])
+        self.assertEqual(check_cluster_api_ci.check_operators(both, CLUSTER), ([], []))
+        # Trusted by the US backend only: the EU state stays out of reach.
+        us = with_backend(eu_stack, prod_write=[ADMIN])
+        both = with_backend(us, "fnx-ew1-root", "fnx-ew1-terraform-state", "eu-west-1", prod_write=[])
+        errors, _ = check_cluster_api_ci.check_operators(both, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("is not in fnx-ew1-root: backend/main access_roles.prod_write", errors[0])
+        # A bucket no backend owns has nothing to check against.
+        errors, _ = check_cluster_api_ci.check_operators(us, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("state bucket 'fnx-ew1-terraform-state' has no one owning backend instance", errors[0])
 
     def test_non_admin_roles_and_stacks_without_in_cluster_components_are_ignored(self):
         viewer = admin_eks(ADMIN)
