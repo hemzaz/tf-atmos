@@ -11,7 +11,10 @@ components:
       vars:
         tenant: "{{ .settings.context.tenant }}"
         account_id: "{{ .settings.environment.account_id }}"
-        bucket_name: "{{ .settings.context.tenant }}-terraform-state"
+        # The bucket and role names come from settings.tfstate
+        # (stacks/orgs/fnx/_defaults.yaml), the same values every stack's
+        # terraform.backend reads, so the backend and its readers agree.
+        bucket_name: "{{ .settings.tfstate.bucket }}"
         # Cloud Posse tfstate-backend access_roles. The role names are what
         # stacks/orgs/fnx/_defaults.yaml assumes (terraform.backend.s3.assume_role);
         # the allowed principals and the state each role reaches
@@ -40,25 +43,25 @@ components:
         #   root         root_write                  root_write
         access_roles:
           read:
-            role_name: "{{ .settings.context.tenant }}-terraform-backend-read-role"
+            role_name: "{{ .settings.tfstate.role_prefix }}-read-role"
             write_enabled: false
             object_key_patterns: []
           prod_read:
-            role_name: "{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
+            role_name: "{{ .settings.tfstate.role_prefix }}-prod-read-role"
             write_enabled: false
             object_key_patterns: []
           write:
-            role_name: "{{ .settings.context.tenant }}-terraform-backend-role"
+            role_name: "{{ .settings.tfstate.role_prefix }}-role"
             write_enabled: true
             object_key_patterns: []
           prod_write:
-            role_name: "{{ .settings.context.tenant }}-terraform-backend-prod-role"
+            role_name: "{{ .settings.tfstate.role_prefix }}-prod-role"
             write_enabled: true
             object_key_patterns: []
           # The backend's own state (fnx-ue1-root). No allowed_principal_arns:
           # only the administrator applying backend/main (the caller, always
           # trusted) may assume it; no CI role can read or write root state.
           root_write:
-            role_name: "{{ .settings.context.tenant }}-terraform-backend-root-role"
+            role_name: "{{ .settings.tfstate.role_prefix }}-root-role"
             write_enabled: true
             object_key_patterns: []

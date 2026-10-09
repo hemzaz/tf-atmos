@@ -20,21 +20,22 @@ terraform:
     tools:
       terraform: "1.16.3"
 
-  # ONE state backend for every stack: the bucket and access roles created by
-  # the `backend` component's single instance, backend/main in the management
-  # account's stack fnx-ue1-root (stacks/orgs/fnx/root/us-east-1.yaml).
+  # The state backend named by settings.tfstate (bucket, region, role_prefix):
+  # the bucket and access roles created by a `backend` instance, backend/main in
+  # the management account. The default is fnx-ue1-root's
+  # (stacks/orgs/fnx/root/us-east-1.yaml); an EU stack overrides settings.tfstate.
   # Native S3 locking replaces DynamoDB. Atmos derives `workspace_key_prefix`
   # from the component name and the workspace from the stack name, so every
   # instance gets its own state file.
   #
   # Access goes through one of the backend's access roles (Cloud Posse
   # tfstate-backend access_roles), split by stage (state objects "*/<stack>/*" and "*/<stack>-*"):
-  #   <tenant>-terraform-backend-role            read/write, dev/staging objects; the dev/staging CI apply roles
-  #   <tenant>-terraform-backend-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
-  #   <tenant>-terraform-backend-prod-role       read/write, prod objects; prod's apply role only
-  #   <tenant>-terraform-backend-prod-read-role  read-only, prod objects; prod's plan role only
-  #   <tenant>-terraform-backend-root-role       read/write, fnx-ue1-root objects; the administrator
-  #                                              who applies backend/main only (read or write)
+  #   <role_prefix>-role            read/write, dev/staging objects; the dev/staging CI apply roles
+  #   <role_prefix>-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
+  #   <role_prefix>-prod-role       read/write, prod objects; prod's apply role only
+  #   <role_prefix>-prod-read-role  read-only, prod objects; prod's plan role only
+  #   <role_prefix>-root-role       read/write, the backend-owning root stack's objects; the
+  #                                 administrator who applies backend/main only (read or write)
   # The role is per stack, not per job, so a job picks it with an environment
   # variable: TFSTATE_ACCESS=read selects the stage's read-only role, anything
   # else its read/write one. The plan-only CI jobs (terraform-ci.yml plan,
@@ -50,13 +51,13 @@ terraform:
   backend_type: s3
   backend:
     s3:
-      bucket: '{{ .settings.context.tenant }}-terraform-state{{ if eq (env "TFSTATE_SOURCE") "replica" }}-replica{{ end }}'
+      bucket: '{{ .settings.tfstate.bucket }}{{ if eq (env "TFSTATE_SOURCE") "replica" }}-replica{{ end }}'
       key: "terraform.tfstate"
       region: '{{ if eq (env "TFSTATE_SOURCE") "replica" }}{{ .settings.tfstate.replica_region }}{{ else }}{{ .settings.tfstate.region }}{{ end }}'
       encrypt: true
       use_lockfile: true
       assume_role:
-        role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend{{ if eq .settings.context.stage "root" }}-root{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
+        role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}{{ if eq .settings.context.stage "root" }}-root{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
 
   # Account guard: every stack's default AWS provider refuses to run in any
   # account but the stack's own (Atmos writes this into each component's
@@ -114,14 +115,25 @@ settings:
       prod: "123456789012"
     root_account_account_name: root
     identity_account_account_name: root
-  # The ONE region of the state bucket (backend/main, fnx-ue1-root). Every stack's backend
-  # reads it, not the stack's own region: a DR or EU stack still keeps its state here.
+  # The state backend every stack's terraform.backend reads (above): the bucket
+  # backend/main creates in fnx-ue1-root, its region and the name prefix of its
+  # access roles (<role_prefix>-role, -read-role, -prod-role, -prod-read-role,
+  # -root-role). A stack keeps its state here, not in its own region: a DR stack
+  # (fnx-ue2-prod) too. An EU stack overrides all of settings.tfstate: bucket,
+  # region, replica_region (an EU region) and role_prefix (backend/main in its
+  # own root stack, in the management account).
   # check-state-keys.py fails a stack whose backend region differs from backend/main's.
   # replica_region: where backend/main replicates the bucket (<bucket>-replica),
   # read through TFSTATE_SOURCE=replica when region is down.
+  # bucket and role_prefix are templates read by templates; the second
+  # evaluation (atmos.yaml) renders them. An override may reference only
+  # literal settings (.settings.context.*), never .settings.prefix or
+  # .settings.environment.*: a deeper chain leaks raw "{{ }}" into the backend.
   tfstate:
     region: us-east-1
     replica_region: us-east-2
+    bucket: '{{ .settings.context.tenant }}-terraform-state'
+    role_prefix: '{{ .settings.context.tenant }}-terraform-backend'
   environment:
     management_account_id: '{{ index .settings.account_map.full_account_map .settings.account_map.root_account_account_name }}'
   context:

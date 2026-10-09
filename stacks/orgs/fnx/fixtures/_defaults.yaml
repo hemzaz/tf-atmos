@@ -56,7 +56,7 @@ components:
           - "{{ .settings.prefix }}-github-runners"
           - "{{ .settings.prefix }}-microservices-runners"
         ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-read-role"
 
 
     iam/fixtures:
