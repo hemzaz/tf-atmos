@@ -10,6 +10,13 @@ One Secrets Manager secret per `secrets` entry, with an optional value, resource
   read `kms/main .key_arn`. The prod stacks' secret sets are `secretsmanager/app-prod` and
   `/infra-prod` (`stacks/catalog/secretsmanager/prod.yaml`).
   `secretsmanager/api`, `/app-db` and `/infra-defaults` in the catalog are abstract.
+- `replica_regions`: `fnx-ue1-prod`'s and `fnx-ew1-prod`'s `app` and `infra` replicate every
+  secret to their DR region (us-east-2, eu-central-1), each on `kms/main`'s replica key there
+  (`replica_keys["<region>"].key_arn`). The DR stack's external-secrets stores read the replicas
+  by the same names. A replica is read-only: during an outage, `aws secretsmanager
+  stop-replication-to-replica --secret-id <name> --region <dr region>` makes it writable (and
+  standalone; re-create the replica after failback). A secret already in a replica region fails
+  replication unless it is deleted first (`force_overwrite_replica_secret` is not set).
 - Used by: nothing via state in the real stacks. Consumers read values at runtime (ESO, the
   application) by `secret_arns` / `secret_names`; no output carries a value.
   `secret_access_policy` is an IAM policy document meant for a rotation Lambda's

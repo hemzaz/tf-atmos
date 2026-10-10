@@ -249,17 +249,27 @@ components:
     # Secrets Manager - Production with Rotation
     # ==========================================================================
     # The secret sets are catalog/secretsmanager/prod's, shared with
-    # fnx-ew1-prod.
+    # fnx-ew1-prod. Replicated to the DR region (fnx-ue2-prod, us-east-2) on
+    # kms/main's replica key there, so its external-secrets stores read the
+    # same names during a us-east-1 outage (promote a replica to write it).
     secretsmanager/app:
       metadata:
         component: secretsmanager
         inherits:
           - secretsmanager/app-prod
+      vars:
+        replica_regions:
+          - region: us-east-2
+            kms_key_id: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'
     secretsmanager/infra:
       metadata:
         component: secretsmanager
         inherits:
           - secretsmanager/infra-prod
+      vars:
+        replica_regions:
+          - region: us-east-2
+            kms_key_id: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'
 
     # ==========================================================================
     # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,

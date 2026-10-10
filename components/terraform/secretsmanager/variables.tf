@@ -182,6 +182,40 @@ variable "default_kms_key_id" {
   default     = null
 }
 
+variable "replica_regions" {
+  type = list(object({
+    region     = string
+    kms_key_id = string
+  }))
+  description = <<-EOT
+    Regions every secret of this instance is replicated to (the aws_secretsmanager_secret
+    `replica` blocks; the AWS provider's argument names), each with a customer managed key in
+    that region, e.g. kms/main's `replica_keys["<region>"].key_arn`. Secrets Manager keeps each
+    replica's value in sync with the primary; a replica is read-only until promoted
+    (`aws secretsmanager stop-replication-to-replica`). Cloud Posse's secrets components have no
+    replica input; this follows the provider.
+    EOT
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([
+      for r in var.replica_regions : can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", r.region)) && r.region != var.region
+    ])
+    error_message = "Each replica_regions region must be an AWS region other than var.region."
+  }
+
+  validation {
+    condition     = length(distinct([for r in var.replica_regions : r.region])) == length(var.replica_regions)
+    error_message = "replica_regions must not name a region twice."
+  }
+
+  validation {
+    condition     = alltrue([for r in var.replica_regions : can(regex("^arn:aws[a-z-]*:kms:${r.region}:[0-9]{12}:(key|alias)/.+$", r.kms_key_id))])
+    error_message = "Each replica_regions kms_key_id must be a KMS key or alias ARN in that replica's region."
+  }
+}
+
 variable "default_rotation_days" {
   type        = number
   description = "Default number of days between automatic rotation if not specified at the secret level"

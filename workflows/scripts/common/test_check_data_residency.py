@@ -54,6 +54,18 @@ class DataResidencyTest(unittest.TestCase):
         stacks = {"fnx-ew1-prod": eu_stack(**{"kms/main": instance(replica_regions=["eu-central-1", "us-east-1"])})}
         self.assertEqual(residency.check(stacks), [f"fnx-ew1-prod: kms/main vars.replica_regions is 'us-east-1', {OUTSIDE}"])
 
+    def test_secret_replica_regions(self):
+        # secretsmanager's replica_regions: a list of {region, kms_key_id} objects.
+        def secrets(*regions):
+            return instance(replica_regions=[
+                {"region": r, "kms_key_id": f"!terraform.state kms/main '.replica_keys[\"{r}\"].key_arn'"}
+                for r in regions])
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"secretsmanager/app": secrets("eu-central-1")})}), [])
+        self.assertEqual(
+            residency.check({"fnx-ew1-prod": eu_stack(**{"secretsmanager/app": secrets("eu-central-1", "us-east-1")})}),
+            [f"fnx-ew1-prod: secretsmanager/app vars.replica_regions.region is 'us-east-1', {OUTSIDE}"],
+        )
+
     def test_nested_regions_in_dicts_lists_and_state_fail(self):
         eu = instance(backup={"rules": [{"copy": {"destination_region": "us-east-2"}}]})
         eu["settings"]["tfstate"]["replica_region"] = "us-east-2"
