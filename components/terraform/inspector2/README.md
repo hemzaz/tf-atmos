@@ -7,7 +7,8 @@ resource scanned.
 
 ## Wiring
 
-- Instance: `inspector2/main` in the three AWS stacks, `fnx-ue2-prod` and `fnx-ew1-prod`,
+- Instance: `inspector2/main` in the three AWS stacks, `fnx-ue2-prod`, `fnx-ew1-prod` and
+  `fnx-ec1-prod`,
   `enabled: false` from `stacks/catalog/inspector2/defaults.yaml`. A stack opts in by setting
   `enabled: true` on it.
 - Deploys in the `security` layer of `workflows/deploy-full-stack.yaml`.

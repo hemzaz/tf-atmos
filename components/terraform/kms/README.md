@@ -8,7 +8,8 @@ use through their own IAM policies.
 ## Wiring
 
 - Instance: `kms/main` in dev, staging, `fnx-ue1-prod`, `fnx-ew1-prod` and `fnx-ue1-local-sandbox`
-  (not `fnx-ue1-local-localemu`; `fnx-ue2-prod` uses `fnx-ue1-prod`'s replica).
+  (not `fnx-ue1-local-localemu`; `fnx-ue2-prod` uses `fnx-ue1-prod`'s replica, `fnx-ec1-prod`
+  `fnx-ew1-prod`'s).
 - Depends on `iam/dev` (dev) or `iam/main` (staging, prod), which creates the Auto Scaling
   service-linked role this key policy names.
 - Used by (`.key_arn`): `vpc`, `eks`, `eks-addons`, `external-secrets`, `rds`, `elasticache`, `ec2`,
