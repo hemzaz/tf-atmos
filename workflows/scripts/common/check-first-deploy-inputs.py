@@ -14,7 +14,8 @@ Errors (fatal unless --warn):
   - a reserved example domain (RFC 2606: example.com/.net/.org, *.example,
     *.test, *.invalid) in a domain or an alert address
   - an enabled eks instance with no map_additional_iam_roles (EKS admin role)
-  - a prod-stage rds instance with no sns_topic_arn
+  - a settings.environment.backend_service_images entry still on the release
+    pipeline's placeholder (ghcr.io/fnx-platform/<service>:1.4.2)
   - a github-runners instance whose GitHub App ID or installation ID is the
     placeholder 0
   - a workload account equal to the management account
@@ -25,7 +26,8 @@ The last three skip placeholder IDs, which are already an error.
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
 protection, deploy tags, the GitHub App's private key and outside-collaborator
-approval).
+approval, the cost-allocation tag), each stack's budget amount to confirm, and
+an enabled security-monitoring instance with no security_email_subscriptions.
 
 Only deployable stacks are checked: every stage but EXEMPT_STAGES. --stacks
 limits the placeholder checks to some of them (the bootstrap workflow passes
@@ -69,6 +71,8 @@ EXAMPLE_DOMAIN_RE = re.compile(
     re.IGNORECASE,
 )
 OPERATOR_ROLE = "-cross-account-operator"
+# The release pipeline's placeholder images (the stacks' settings.environment.backend_service_images).
+PLACEHOLDER_IMAGE_RE = re.compile(r"^ghcr\.io/fnx-platform/[a-z0-9-]+:1\.4\.2$")
 
 
 @dataclass(frozen=True)
@@ -138,6 +142,11 @@ def stack_findings(name: str, config: dict) -> list:
     env = environment(config)
     for path, text in strings({k: v for k, v in env.items() if k != "_stage"}, "settings.environment"):
         add(placeholder(name, path, text))
+    for service, image in sorted((env.get("backend_service_images") or {}).items()):
+        if isinstance(image, str) and PLACEHOLDER_IMAGE_RE.match(image):
+            add(Finding("error", name, f"settings.environment.backend_service_images.{service}",
+                        f"placeholder image {image!r}: set the image the release pipeline publishes",
+                        "Backend service images"))
     operator_roles = False
     for instance_name, spec in sorted(instances(config).items()):
         spec = spec or {}
@@ -153,9 +162,16 @@ def stack_findings(name: str, config: dict) -> list:
             add(Finding("error", name, f"{instance_name} vars.map_additional_iam_roles",
                         "empty: no EKS cluster admin role (an operator's full IAM role ARN, path included)",
                         "EKS cluster admins"))
-        if component == "rds" and env.get("_stage") == "prod" and not variables.get("sns_topic_arn"):
-            add(Finding("error", name, f"{instance_name} vars.sns_topic_arn",
-                        "unset: its CloudWatch alarms have no action", "Prod RDS alarm target"))
+        if component == "security-monitoring" and not variables.get("security_email_subscriptions"):
+            add(Finding("notice", name, f"{instance_name} vars.security_email_subscriptions",
+                        "empty: GuardDuty, Security Hub and Inspector findings on its topic reach nobody until "
+                        "an address is subscribed (and confirms)", "Alert recipients"))
+        if component == "cost-optimization":
+            tag = (variables.get("tags") or {}).get("Environment", "<Environment>")
+            add(Finding("notice", name, f"{instance_name} vars.monthly_budget_limit",
+                        f"{variables.get('monthly_budget_limit')} USD a month, counting only spend tagged "
+                        f"Environment={tag} (not the account's other stacks); confirm the amount "
+                        "(settings.environment.monitoring.budget_monthly_limit)", "Budgets"))
         if component == "github-runners":
             for key in ("github_app_id", "github_app_installation_id"):
                 if str(variables.get(key, "0")) == "0":
@@ -238,13 +254,9 @@ def notices() -> list:
         Finding("notice", "repository", "", "the GitHub App's private key in each account's SSM, and "
                 "\"Require approval for all outside collaborators\" on (self-hosted runners, public repository)",
                 "GitHub App"),
-        Finding("notice", "repository", "", "each stack's monthly budget (settings.environment.monitoring."
-                "budget_monthly_limit) is a placeholder copy until the owner sets it", "Budgets"),
-        Finding("notice", "repository", "", "the Environment cost-allocation tag activated in the payer "
-                "(management) account's Billing console, or every budget filter matches nothing",
-                "Cost-allocation tags"),
-        Finding("notice", "repository", "", "settings.environment.backend_service_images hold the release "
-                "pipeline's placeholder tags until it publishes the real images", "Backend service images"),
+        Finding("notice", "repository", "", "activate the Environment tag as a cost-allocation tag in the payer "
+                "(management) account's Billing console (Cost allocation tags): until then every budget's "
+                "user:Environment$<tag> filter matches no spend, so no budget ever alerts", "Cost-allocation tags"),
     ]
 
 
