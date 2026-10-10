@@ -12,10 +12,11 @@
 #     fnx-ec1-prod's read replica, cognito/main has the dr-migration client
 #     fnx-ec1-prod's user-migration trigger signs in with, and
 #     apigateway/main is the PRIMARY half of api.<EU apex>'s Route 53
-#     failover pair. All EU to EU, except the health check's alarm and its
-#     topic, in us-east-1 (Route 53's metrics exist only there), and two of
-#     its three checker regions (eu-west-1 is the only EU one): metadata and
-#     probes only, owner decision B5;
+#     failover pair. All EU to EU, except what Route 53 has only in
+#     us-east-1: the health check, its alarm and the EventBridge rule, targets
+#     and role relaying the alarm to both EU regions (configuration only,
+#     nothing persisted, no personal data), plus two of its three checker
+#     regions (eu-west-1 is the only EU one); owner decision B5;
 #   - its own user pool, never a migration from fnx-ue1-prod's (owner
 #     decision): EU users sign up here;
 #   - no ECS cluster, analytics database, data API or Lambda functions.
@@ -93,28 +94,32 @@ components:
         route53_failover_type: PRIMARY
         route53_set_identifier: "{{ .settings.prefix }}"
         # The checkers: eu-west-1, the only EU checker region, plus two others
-        # (Route 53 needs three). Owner decision B5: probes only, no personal
-        # data; a residency exemption (check-data-residency.py EXEMPTIONS).
+        # (Route 53 needs three): probes of the API's stage root, a residency
+        # exemption (check-data-residency.py EXEMPTIONS).
         health_check_regions: ["eu-west-1", "us-east-1", "ap-southeast-1"]
         # The health check's alarm lives in us-east-1 (Route 53's metrics are
         # only there). fnx-ue1-prod's notifies its monitoring topic there; this
-        # stack has none outside the EU, so this component creates one in
-        # us-east-1 (ew1-prod-main-api-health-check-alarms, on its own us-east-1
-        # key), which fnx-ec1-prod's alarm names too. Metadata only (owner
-        # decision B5): created by this EU stack's own component, never by a
-        # non-EU stack reading EU state (check-data-residency.py EXEMPTIONS).
-        create_health_check_alarm_topic: true
-        health_check_alarm_email_subscriptions:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"
+        # stack keeps nothing persistent in us-east-1 (no topic, key or email
+        # addresses), so EventBridge relays the alarm's state changes to the
+        # default bus of BOTH EU regions, where each monitoring/main delivers
+        # them to its topic (ew1-main-alarms, ec1-main-alarms): an eu-west-1
+        # outage, the one this alarm reports, still reaches ec1-main-alarms.
+        # What sits in us-east-1 for it: the Route 53 health check, its alarm,
+        # and an EventBridge rule, its targets and their IAM role (configuration
+        # only: no topic, key, subscription, archive or queue, nothing
+        # persisted; no personal data). Owner decision B5.
+        health_check_alarm_relay_regions: ["eu-west-1", "eu-central-1"]
 
     # Owns <Environment>-main-alarms (ew1-main-alarms), the topic the runner
-    # pool's alarms name (compute.yaml).
+    # pool's alarms name (compute.yaml), and delivers the relayed us-east-1
+    # health check alarms of the EU failover pair to it (apigateway/main).
     monitoring/main:
       metadata:
         component: monitoring
         inherits:
           - monitoring/main-prod
+      vars:
+        receive_relayed_health_check_alarms: true
 
     # As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/services.yaml):
     # Savings Plan/RI analyzer, resource cleanup, cost anomaly detection and

@@ -152,38 +152,27 @@ variable "health_check_alarm_actions" {
   }
 }
 
-# A stack whose own alarm topics are outside us-east-1 (an EU stack, GDPR:
-# owner decision B5) has no us-east-1 topic to name in health_check_alarm_actions.
-# This component then creates one itself, in us-east-1 through the resource's
-# region argument (as the alarm), on its own KMS key there: health-check
-# metadata only, never a non-EU stack reading EU state
-# (check-data-residency.py EXEMPTIONS).
-variable "create_health_check_alarm_topic" {
-  type        = bool
-  description = "Create an SNS topic in us-east-1 (\"<Environment>-<api_name>-health-check-alarms\", encrypted with its own us-east-1 KMS key) that the route53_failover_type health check's alarm notifies besides health_check_alarm_actions; another stack's alarm in this account may name it there too"
-  default     = false
-  nullable    = false
-
-  validation {
-    condition     = !var.create_health_check_alarm_topic || var.route53_failover_type != null
-    error_message = "create_health_check_alarm_topic needs route53_failover_type: only a failover health check has an alarm to notify it."
-  }
-}
-
-variable "health_check_alarm_email_subscriptions" {
+# A stack that must keep nothing persistent in us-east-1 (an EU stack, GDPR:
+# owner decision B5) names no us-east-1 topic in health_check_alarm_actions.
+# Its alarm's state changes are relayed by EventBridge instead
+# (health-check-alarm-relay.tf) to the default bus of each region listed, where
+# the monitoring component delivers them to that region's alarm topic.
+variable "health_check_alarm_relay_regions" {
   type        = list(string)
-  description = "Email addresses subscribed to the create_health_check_alarm_topic topic; each must confirm its subscription"
+  description = "Regions whose default event bus receives the route53_failover_type health check alarm's state changes, relayed by a us-east-1 EventBridge rule (rule, targets and role only: nothing persisted in us-east-1). List every region whose alarm topic must hear of a failover, the failed one's peer included. Empty: no relay"
   default     = []
   nullable    = false
 
   validation {
-    condition     = alltrue([for e in var.health_check_alarm_email_subscriptions : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
-    error_message = "health_check_alarm_email_subscriptions must be email addresses."
+    condition     = length(var.health_check_alarm_relay_regions) == 0 || var.route53_failover_type != null
+    error_message = "health_check_alarm_relay_regions needs route53_failover_type: only a failover health check has an alarm to relay."
   }
 
   validation {
-    condition     = length(var.health_check_alarm_email_subscriptions) == 0 || var.create_health_check_alarm_topic
-    error_message = "health_check_alarm_email_subscriptions subscribe to the topic create_health_check_alarm_topic creates: set it to true."
+    condition = alltrue([
+      for r in var.health_check_alarm_relay_regions : can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", r)) && r != "us-east-1"
+    ]) && length(distinct(var.health_check_alarm_relay_regions)) == length(var.health_check_alarm_relay_regions)
+    error_message = "health_check_alarm_relay_regions must be distinct AWS regions other than us-east-1, where the alarm already is."
   }
 }
 

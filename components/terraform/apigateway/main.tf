@@ -694,8 +694,8 @@ resource "aws_cloudwatch_metric_alarm" "health_check" {
   statistic           = "Minimum"
   threshold           = 1
   treat_missing_data  = "breaching"
-  alarm_actions       = concat(var.health_check_alarm_actions, aws_sns_topic.health_check_alarms[*].arn)
-  ok_actions          = concat(var.health_check_alarm_actions, aws_sns_topic.health_check_alarms[*].arn)
+  alarm_actions       = var.health_check_alarm_actions
+  ok_actions          = var.health_check_alarm_actions
 
   dimensions = {
     HealthCheckId = aws_route53_health_check.api[0].id

@@ -136,25 +136,56 @@ class DataResidencyTest(unittest.TestCase):
 
     def test_eu_failover_pair_passes_with_the_exemptions_and_only_them(self):
         regions = ["eu-west-1", "us-east-1", "ap-southeast-1"]
-        primary = instance(health_check_regions=regions, create_health_check_alarm_topic=True)
+        relay = ["eu-west-1", "eu-central-1"]
+        primary = instance(health_check_regions=regions, health_check_alarm_relay_regions=relay)
         secondary = instance(region="eu-central-1", health_check_regions=regions,
-                             health_check_alarm_actions=["arn:aws:sns:us-east-1:123456789012:ew1-prod-main-api-health-check-alarms"])
+                             health_check_alarm_relay_regions=relay)
         stacks = {"fnx-ew1-prod": eu_stack(**{"apigateway/main": primary}),
                   "fnx-ec1-prod": eu_stack(**{"apigateway/main": secondary})}
         self.assertEqual(residency.check(stacks), [])
-        self.assertEqual(len(residency.check(stacks, ())), 5)
-        # Deliberately bad: another checker region, another instance, another region field.
+        self.assertEqual(len(residency.check(stacks, ())), 4)
+        # Deliberately bad: another checker region, another instance, a relay to us-east-1.
         secondary["vars"]["health_check_regions"] = ["eu-west-1", "us-east-1", "us-west-2"]
+        secondary["vars"]["health_check_alarm_relay_regions"] = ["eu-central-1", "us-east-1"]
         self.assertEqual(residency.check(stacks), [
             f"fnx-ec1-prod: apigateway/main vars.health_check_regions is 'us-west-2', {OUTSIDE}",
+            f"fnx-ec1-prod: apigateway/main vars.health_check_alarm_relay_regions is 'us-east-1', {OUTSIDE}",
         ])
-        stacks["fnx-ec1-prod"] = eu_stack(**{"apigateway/data": instance(health_check_regions=regions),
-                                             "monitoring/main": instance(sns_topic_arn="arn:aws:sns:us-east-1:123456789012:t")})
+        stacks["fnx-ec1-prod"] = eu_stack(**{"apigateway/data": instance(health_check_regions=regions)})
         self.assertEqual(residency.check(stacks), [
             f"fnx-ec1-prod: apigateway/data vars.health_check_regions is 'us-east-1', {OUTSIDE}",
             f"fnx-ec1-prod: apigateway/data vars.health_check_regions is 'ap-southeast-1', {OUTSIDE}",
-            f"fnx-ec1-prod: monitoring/main vars.sns_topic_arn is 'us-east-1', {OUTSIDE}",
         ])
+
+    def test_eu_health_check_alarm_action_in_us_east_1_fails(self):
+        # The us-east-1 alarm topic is no longer exempt: an EU alarm is relayed instead.
+        api = instance(health_check_alarm_actions=["arn:aws:sns:us-east-1:123456789012:ew1-prod-main-api-health-check-alarms"])
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"apigateway/main": api})}), [
+            f"fnx-ew1-prod: apigateway/main vars.health_check_alarm_actions is 'us-east-1', {OUTSIDE}",
+        ])
+
+    def test_us_east_1_persistent_inputs_fail_in_eu_only(self):
+        def api(**extra):
+            spec = instance(**extra)
+            spec["metadata"] = {"component": "apigateway"}
+            return spec
+
+        persists = ("it keeps a resource or personal data in us-east-1, where a GDPR-scoped stack may "
+                    "keep only its health check alarm's configuration")
+        # Deliberately bad: the removed topic and email subscription inputs.
+        for var, value in (("create_health_check_alarm_topic", True), ("create_health_check_alarm_topic", "true"),
+                           ("health_check_alarm_email_subscriptions", ["oncall@example.com"])):
+            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"apigateway/main": api(**{var: value})})}),
+                             [f"fnx-ew1-prod: apigateway/main sets {var}: {persists}"], var)
+        for var, value in (("create_health_check_alarm_topic", False), ("health_check_alarm_email_subscriptions", []),
+                           ("create_health_check_alarm_topic", None)):
+            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"apigateway/main": api(**{var: value})})}),
+                             [], var)
+        us = api(create_health_check_alarm_topic=True)
+        us["vars"].update(region="us-east-1", tags={"Compliance": US})
+        us["settings"]["tfstate"] = {"region": "us-east-1"}
+        us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
+        self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"apigateway/main": us})}), [])
 
     def test_disabled_instances_are_skipped(self):
         off = instance(region="us-east-1", compliance=US)

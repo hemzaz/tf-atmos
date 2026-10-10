@@ -35,3 +35,9 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
 - `lambda_error_alarms` keys are stable alarm ids; the watched function is each entry's
   `function_name` (validated as a name, not an ARN), never the key.
 - `create_dashboard` is a legacy alias of `create_infrastructure_dashboard`, still set by the stacks.
+- `receive_relayed_health_check_alarms` (the EU prod stacks, owner decision B5) is the receiving end
+  of `apigateway`'s `health_check_alarm_relay_regions`: an EventBridge rule on this region's
+  default bus matching this account's us-east-1 alarms named `*-health-check` (only a relay brings
+  us-east-1 events here; the wildcard also matches the peer stack's alarm, whose state this stack
+  cannot read), targeting the own topic, plus a topic policy for that rule and this region's
+  CloudWatch alarms. The topic's key must allow EventBridge (`kms` `allow_eventbridge`, on in prod).

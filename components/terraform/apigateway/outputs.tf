@@ -162,8 +162,3 @@ output "api_name" {
   description = "Real name of the REST API (the ApiName dimension monitoring's AWS/ApiGateway CloudWatch widgets and alarms are keyed on); null for an HTTP API (api_type = \"HTTP\"), which is dimensioned by ApiId instead"
   value       = local.create_rest_api ? aws_api_gateway_rest_api.rest_api[0].name : null
 }
-
-output "health_check_alarm_topic_arn" {
-  description = "ARN of the us-east-1 SNS topic the failover health check's alarm notifies (create_health_check_alarm_topic); null when this component creates none"
-  value       = one(aws_sns_topic.health_check_alarms[*].arn)
-}

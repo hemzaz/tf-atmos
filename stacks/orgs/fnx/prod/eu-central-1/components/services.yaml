@@ -20,10 +20,12 @@
 #   - apigateway/main: the SECONDARY half of api.<EU apex>'s Route 53
 #     failover pair; fnx-ew1-prod's apigateway/main is the PRIMARY. Each half
 #     has its own health check, so DNS moves without a change here. Its
-#     health check alarm, like every Route 53 health check alarm, is in
-#     us-east-1, on fnx-ew1-prod's topic there: the one residency exemption
-#     (metadata only, owner decision B5).
-#   - monitoring/main: this region's ec1-main-alarms topic and alarms.
+#     health check and alarm, like every Route 53 health check's, are in
+#     us-east-1, with the EventBridge rule, targets and role relaying the
+#     alarm to both EU regions (configuration only, nothing persisted, no
+#     personal data; owner decision B5).
+#   - monitoring/main: this region's ec1-main-alarms topic and alarms, and the
+#     relayed health check alarms of both halves.
 # No rds/data: the EU data plane is not in fnx-ew1-prod either.
 # =============================================================================
 
@@ -230,17 +232,19 @@ components:
         route53_failover_type: SECONDARY
         route53_set_identifier: "{{ .settings.prefix }}"
         # The checkers: eu-west-1, the only EU checker region, plus two others
-        # (Route 53 needs three). Owner decision B5: probes only, no personal
-        # data; a residency exemption (check-data-residency.py EXEMPTIONS).
+        # (Route 53 needs three): probes of the API's stage root, a residency
+        # exemption (check-data-residency.py EXEMPTIONS).
         health_check_regions: ["eu-west-1", "us-east-1", "ap-southeast-1"]
         # The health check's alarm is in us-east-1 (Route 53's metrics are only
-        # there), so it notifies the us-east-1 topic fnx-ew1-prod's
-        # apigateway/main creates for its own (create_health_check_alarm_topic,
-        # "<Environment>-<api_name>-health-check-alarms"), by name, as
-        # fnx-ue2-prod's names fnx-ue1-prod's ue1-main-alarms. Metadata only:
-        # a residency exemption (check-data-residency.py EXEMPTIONS).
-        health_check_alarm_actions:
-          - "arn:aws:sns:us-east-1:{{ .settings.environment.account_id }}:ew1-{{ .settings.context.stage }}-main-api-health-check-alarms"
+        # there). Where fnx-ue2-prod's notifies ue1-main-alarms, this one
+        # notifies nothing in us-east-1: EventBridge relays its state changes to
+        # the default bus of both EU regions, where each monitoring/main
+        # delivers them to its topic (ew1-main-alarms, ec1-main-alarms).
+        # What sits in us-east-1 for it: the Route 53 health check, its alarm,
+        # and an EventBridge rule, its targets and their IAM role (configuration
+        # only: no topic, key, subscription, archive or queue, nothing
+        # persisted; no personal data). Owner decision B5.
+        health_check_alarm_relay_regions: ["eu-west-1", "eu-central-1"]
         # The in-region signal: the alarm above is in us-east-1. These watch
         # this region's own API (5xx, latency) and notify monitoring/main's
         # ec1 topic, by name (monitoring/main reads this component).
@@ -291,6 +295,9 @@ components:
         api_gateway_name: !terraform.state apigateway/main .api_name
         api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
         create_sns_topic: true
+        # Delivers the relayed us-east-1 health check alarms of the EU failover
+        # pair (both apigateway/main halves) to ec1-main-alarms.
+        receive_relayed_health_check_alarms: true
         enable_rds_monitoring: true
         rds_cpu_threshold: 80
         db_connection_alarms:

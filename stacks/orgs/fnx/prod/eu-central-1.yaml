@@ -28,8 +28,10 @@
 #   - eks/main: the same node groups at their minimum; the in-cluster services
 #     are deployed on failover;
 #   - apigateway/main: the SECONDARY half of api.<EU apex>'s failover pair,
-#     authorized by this region's cognito/main; its health check alarm is in
-#     us-east-1 (Route 53's metrics exist only there), metadata only;
+#     authorized by this region's cognito/main; its health check, alarm and
+#     the EventBridge rule, targets and role relaying the alarm to both EU
+#     regions are in us-east-1 (Route 53's metrics exist only there):
+#     configuration only, nothing persisted, no personal data;
 #   - cognito/main: its own pool, filled from fnx-ew1-prod's by a
 #     user-migration trigger.
 # =============================================================================

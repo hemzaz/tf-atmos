@@ -17,7 +17,10 @@ deployable instance:
   - if a dns instance, turns on enable_query_logging for no zone: Route 53 public
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
-    each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions.
+    each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions;
+  - sets none of US_EAST_1_PERSISTENT's inputs: each would keep something in us-east-1 (a
+    topic, a key, staff email addresses, an event archive or dead-letter queue) next to the
+    Route 53 health check alarm, which the owner allows there as configuration only (B5).
 And no deployable instance of a stack that is not GDPR-scoped lists a GDPR-scoped stack in
 dependencies.components or names an ARN in an eu- region in its vars: a US read replica
 (replicate_source_db), Global Datastore secondary (global_replication_group_id) or state read
@@ -66,20 +69,26 @@ class Exemption(NamedTuple):
 
 
 # The api.<EU apex> failover pair (fnx-ew1-prod PRIMARY, fnx-ec1-prod SECONDARY), owner
-# decision B5. Route 53 publishes health-check metrics only in us-east-1, so the
-# health-check alarm (apigateway main.tf) and its SNS topic live there (metadata only, no
-# personal data). fnx-ew1-prod's apigateway/main creates that topic itself, with a
-# per-resource region = "us-east-1" (apigateway health-check-alarm-topic.tf), never a
-# non-EU stack that reads EU state: the outside-reader rule fails that. fnx-ec1-prod's
-# alarm names it. Route 53 checks from at least 3 checker regions and eu-west-1 is the
-# only EU one, so each check also calls from us-east-1 and ap-southeast-1 (probes only).
-_HEALTH_CHECK = "Route 53 health checks: metrics, alarm and topic only in us-east-1 (owner, B5)"
+# decision B5. Route 53 checks from at least 3 checker regions and eu-west-1 is the only EU
+# one, so each check also calls from us-east-1 and ap-southeast-1 (probes of the API's stage
+# root). The health checks, their alarms and the EventBridge rule, targets and role relaying
+# each alarm to both EU regions sit in us-east-1 too, but no stack var names that region:
+# the component fixes it (apigateway main.tf, health-check-alarm-relay.tf), so no exemption
+# covers them, and an EU alarm action (health_check_alarm_actions, a us-east-1 topic) fails.
 _CHECKERS = "Route 53 health checks: 3 checker regions, eu-west-1 the only EU one; probes only (owner, B5)"
 EXEMPTIONS: tuple = (
-    Exemption("apigateway/main", "vars.health_check_alarm_actions", "us-east-1", _HEALTH_CHECK),
     Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
     Exemption("apigateway/main", "vars.health_check_regions", "ap-southeast-1", _CHECKERS),
 )
+
+# Inputs that would persist something in us-east-1 beside a health check alarm, by root module:
+# the alarm topic (with its key) and email subscriptions B5-9b first added, removed by the
+# owner's decision (staff email addresses must not be stored in us-east-1). The EventBridge
+# relay has no archive or dead-letter input; one added later belongs here. A GDPR-scoped
+# stack sets none of them.
+US_EAST_1_PERSISTENT: dict = {
+    "apigateway": ("create_health_check_alarm_topic", "health_check_alarm_email_subscriptions"),
+}
 
 
 def is_deployable(instance: dict) -> bool:
@@ -188,6 +197,12 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
             f"{where} sets enable_alert_enrichment: its Lambda sends findings to Slack/PagerDuty, "
             "outside the EU"
         )
+    for var in US_EAST_1_PERSISTENT.get(component, ()):
+        if flag_on((instance.get("vars") or {}).get(var)) and (instance.get("vars") or {}).get(var) != []:
+            errors.append(
+                f"{where} sets {var}: it keeps a resource or personal data in us-east-1, where a "
+                "GDPR-scoped stack may keep only its health check alarm's configuration"
+            )
     for dep in (instance.get("dependencies") or {}).get("components") or []:
         if not isinstance(dep, dict):
             errors.append(f"{where} dependencies.components entry {dep!r} is not a {{component, stack}} map")

@@ -42,13 +42,17 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   there (the resource's `region` argument) and its topics must be us-east-1 topics: both US prod
   stacks point it at `fnx-ue1-prod` `monitoring/main`'s topic, by name (that component reads this
   one).
-- An EU stack has no topic in us-east-1 and no non-EU stack may read its state (GDPR, owner
-  decision B5), so `create_health_check_alarm_topic` makes this component create one there,
-  `<Environment>-<api_name>-health-check-alarms`, on its own rotated us-east-1 KMS key (the EU
-  `kms/main` has no us-east-1 replica), subscribing `health_check_alarm_email_subscriptions`. Its
-  policy admits CloudWatch alarms of the account in us-east-1 only. `fnx-ew1-prod`'s creates it and
-  `fnx-ec1-prod`'s alarm names it, as `fnx-ue2-prod`'s names `ue1-main-alarms`. It carries alarm
-  state only (`check-data-residency.py` EXEMPTIONS lists these fields).
+- An EU stack keeps nothing persistent in us-east-1 (GDPR, owner decision B5: no topic, key or
+  staff email addresses there), so its alarm has no action. `health_check_alarm_relay_regions`
+  relays it instead (`health-check-alarm-relay.tf`, Cloud Posse `terraform-aws-cloudwatch-events`
+  shape): a us-east-1 EventBridge rule matching only this alarm's ARN in "CloudWatch Alarm State
+  Change" events, one target per listed region's default event bus, and an IAM role that only
+  that rule may assume and that may only `events:PutEvents` on those buses. In us-east-1 that is
+  configuration only: no archive, dead-letter queue, topic or key, nothing stored. The receiving
+  end is `monitoring`'s `receive_relayed_health_check_alarms`. The EU pair relays both alarms to
+  both EU regions, so the PRIMARY's alarm still arrives while eu-west-1 is down. The bus ARNs are
+  built (every region's default bus exists unasked; `monitoring`, which receives there, deploys
+  after this component and reads it).
 - `health_check_regions` sets the checker regions (at least 3; null = every one). The EU pair uses
   `eu-west-1`, the only EU checker region, plus `us-east-1` and `ap-southeast-1` (probes only). A
   WAF geo rule (`allowed_countries`) pins the US checker regions instead, so the two cannot be

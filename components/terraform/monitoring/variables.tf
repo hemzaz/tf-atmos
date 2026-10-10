@@ -181,6 +181,18 @@ variable "create_sns_topic" {
   default     = true
 }
 
+variable "receive_relayed_health_check_alarms" {
+  type        = bool
+  description = "Deliver the us-east-1 Route 53 health check alarms (named *-health-check) that an apigateway health_check_alarm_relay_regions relay sends to this region's default event bus to this component's topic: an EventBridge rule and target here, and a topic policy letting that rule and this region's CloudWatch alarms publish. Needs create_sns_topic and a key allowing EventBridge (kms allow_eventbridge)"
+  default     = false
+  nullable    = false
+
+  validation {
+    condition     = !var.receive_relayed_health_check_alarms || var.create_sns_topic
+    error_message = "receive_relayed_health_check_alarms delivers to this component's topic: set create_sns_topic."
+  }
+}
+
 variable "alarm_sns_topic_arns" {
   type        = list(string)
   description = "SNS topics every alarm also notifies (alarm and OK actions), alongside this component's own topic when create_sns_topic is true: for subscribers the own topic cannot take (https forwarders), from an sns instance. The topic's policy must let cloudwatch.amazonaws.com publish, and its key must allow CloudWatch alarms (kms allow_cloudwatch_alarms)"
