@@ -658,8 +658,9 @@ nodes, the primary's 3) serve as they are, and are resized only if the load need
 modify, not a replacement), in the standby's region:
 `aws rds modify-db-instance --db-instance-identifier ue2-prod-main-db --db-instance-class db.r5.xlarge --apply-immediately --region us-east-2`,
 `aws elasticache increase-replica-count --replication-group-id ue2-prod-cache --new-replica-count 2 --apply-immediately --region us-east-2`.
-A resized database's `instance_class` joins reconciliation step 1 (failback step 6 sets it back);
-the cache's `num_cache_nodes` waits with the rest of `elasticache/main` (reconciliation step 4).
+A resized database's `instance_class` joins reconciliation step 1, and failback step 5 sets the
+warm one back before its `-replace`; the cache's added replica stays out of Terraform (reconciliation
+step 4) and failback step 6 removes it by CLI.
 
 #### EU failover
 
@@ -717,7 +718,8 @@ What differs beyond the names:
 - **Reconcile and failback** as above with the EU names: the failback's literal
   `replicate_source_db` on `fnx-ew1-prod` is
   `arn:aws:rds:eu-central-1:{{ .settings.environment.account_id }}:db:ec1-prod-main-db`, and
-  `fnx-ec1-prod`'s is restored to `!terraform.state rds/main fnx-ew1-prod .instance_arn`.
+  `fnx-ec1-prod`'s is restored to `!terraform.state rds/main fnx-ew1-prod .instance_arn` (with the
+  warm `db.r5.large`); step 6 removes an added replica from `ec1-prod-cache` in eu-central-1.
 
 #### Auth during failover
 
@@ -885,11 +887,16 @@ explicit `-replace` from an operator, not a merge:
 5. Make `fnx-ue2-prod`'s database a replica of us-east-1 again, the same way as step 1: lift
    `ue2-prod-main-db`'s deletion protection (in us-east-2), set aside
    `ue2-prod-main-db-final-snapshot` if it exists, restore
-   `replicate_source_db: !terraform.state rds/main fnx-ue1-prod .instance_arn` on a branch, and
+   `replicate_source_db: !terraform.state rds/main fnx-ue1-prod .instance_arn` on a branch, with
+   the warm `instance_class: db.r5.large` if failover resized it (the `-replace` creates the
+   instance at the branch's class), and
    `atmos terraform apply rds/main -s fnx-ue2-prod -- -replace=aws_db_instance.main`; merge.
 6. Back to warm: a PR reverting reconciliation steps 2 and 3, and the desired sizes Terraform
    ignores by CLI (`update-nodegroup-config ... --scaling-config minSize=2,desiredSize=2,maxSize=12`
-   for `workers`, `0/0/<max>` for the others).
+   for `workers`, `0/0/<max>` for the others). If failover added a cache replica, remove it
+   (`aws elasticache decrease-replica-count --replication-group-id ue2-prod-cache
+   --new-replica-count 1 --apply-immediately --region us-east-2`): back to the warm 2 nodes
+   `num_cache_nodes` still holds.
 7. Auth: once DNS is back on us-east-1, users sign in to `fnx-ue1-prod`'s pool again (us-east-2
    tokens are not valid there). Nothing flows back from us-east-2: a password a user changed or
    reset there is not us-east-1's, so they reset it again in us-east-1 (forgot-password), and a

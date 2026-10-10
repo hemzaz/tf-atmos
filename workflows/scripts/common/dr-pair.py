@@ -82,35 +82,53 @@ def enabled(spec: dict) -> bool:
     return ((spec or {}).get("metadata") or {}).get("enabled") is not False
 
 
-def name(spec: dict, key: str) -> str:
-    """'<tags.Environment>-<vars[key]>', the components' resource name."""
-    variables = spec.get("vars") or {}
-    return f"{(variables.get('tags') or {})['Environment']}-{variables[key]}"
+def environment(spec: dict, where: str) -> str:
+    """The instance's tags.Environment (validated non-empty by the components); ValueError when unset."""
+    value = (((spec or {}).get("vars") or {}).get("tags") or {}).get("Environment")
+    if not value:
+        raise ValueError(f"{where}: vars.tags.Environment is not set, so its resource names cannot be derived")
+    return value
 
 
-def sizes(spec: dict) -> dict:
-    return {
-        group: [cfg.get("min_group_size"), cfg.get("desired_group_size"), cfg.get("max_group_size")]
-        for group, cfg in sorted(((spec.get("vars") or {}).get("node_groups") or {}).items())
-    }
+def name(spec: dict, key: str, where: str) -> str:
+    """'<tags.Environment>-<vars[key]>', the components' resource name; ValueError when either is unset.
+
+    The stacks set every name var the runbook reads (rds identifier, elasticache
+    cluster_id, eks name, lambda function_name, monitoring name); one that relies
+    on a module default is refused rather than guessed.
+    """
+    value = (spec.get("vars") or {}).get(key)
+    if not value:
+        raise ValueError(f"{where}: vars.{key} is not set in the stack; set it explicitly (the runbook names the resource from it)")
+    return f"{environment(spec, where)}-{value}"
 
 
-def backup_replica(spec) -> tuple:
+def backup_replica(spec, where: str) -> tuple:
     """(vault, region) of backup/main's cross-region copy, or (None, None)."""
     if not spec or not enabled(spec):
         return None, None
     variables = spec.get("vars") or {}
     if variables.get("enable_cross_region_backup") is not True:
         return None, None
-    tags = variables.get("tags") or {}
-    return f"{tags['Environment']}-{tags.get('Name', 'backup')}-replica", variables.get("replica_region")
+    tag_name = (variables.get("tags") or {}).get("Name", "backup")
+    return f"{environment(spec, where)}-{tag_name}-replica", variables.get("replica_region")
 
 
 def state(stacks: dict, config: dict) -> dict:
-    """The stack's state bucket and whether its backend replicates it (backend/main in settings.tfstate.stack)."""
+    """The stack's state bucket and whether its backend replicates it (backend/main in settings.tfstate.stack).
+
+    ValueError when backend/main replicates to another region than the stack's
+    settings.tfstate.replica_region (TFSTATE_SOURCE=replica would read a bucket that is not there).
+    """
     tfstate = setting(config, "tfstate") or {}
     backend = instances(stacks.get(tfstate.get("stack")) or {}).get("backend/main") or {}
     replicated = enabled(backend) and (backend.get("vars") or {}).get("s3_replication_enabled") is True
+    backend_replica = (backend.get("vars") or {}).get("replica_region")
+    if replicated and backend_replica != tfstate.get("replica_region"):
+        raise ValueError(
+            f"{tfstate.get('stack')} backend/main replicates {tfstate.get('bucket')} to {backend_replica}, "
+            f"but settings.tfstate.replica_region is {tfstate.get('replica_region')}: make them equal"
+        )
     return {
         "bucket": tfstate.get("bucket"),
         "region": tfstate.get("region"),
@@ -131,7 +149,7 @@ def health_check(primary: dict, stacks: dict, pair: tuple) -> dict:
             config = stacks[stack_name]
             monitoring = instances(config).get("monitoring/main")
             if region(config) in relay_regions and monitoring and enabled(monitoring):
-                topics.append(f"{name(monitoring, 'name')}-alarms")
+                topics.append(f"{name(monitoring, 'name', f'{stack_name} monitoring/main')}-alarms")
         return {"relayed": True, "topics": topics}
     actions = variables.get("health_check_alarm_actions") or []
     return {"relayed": False, "topics": [arn.rsplit(":", 1)[-1] for arn in actions]}
@@ -177,25 +195,23 @@ def pair_facts(stacks: dict, primary_name: str) -> dict:
     alias = ((primary["kms/main"].get("vars") or {}).get("replica_alias_names") or {}).get(standby_region)
     if not alias:
         raise ValueError(f"{primary_name} kms/main has no replica_alias_names entry for {standby_region}")
-    vault, vault_region = backup_replica(primary.get("backup/main"))
+    vault, vault_region = backup_replica(primary.get("backup/main"), f"{primary_name} backup/main")
     facts = {
         "primary": primary_name,
         "primary_region": region(stacks[primary_name]),
-        "primary_prefix": primary["eks/main"]["vars"]["tags"]["Environment"],
+        "primary_prefix": environment(primary["eks/main"], f"{primary_name} eks/main"),
         "standby": standby_name,
         "standby_region": standby_region,
-        "standby_prefix": standby["eks/main"]["vars"]["tags"]["Environment"],
-        "primary_db_instance": name(primary["rds/main"], "identifier"),
-        "db_instance": name(standby["rds/main"], "identifier"),
+        "standby_prefix": environment(standby["eks/main"], f"{standby_name} eks/main"),
+        "primary_db_instance": name(primary["rds/main"], "identifier", f"{primary_name} rds/main"),
+        "db_instance": name(standby["rds/main"], "identifier", f"{standby_name} rds/main"),
         # The promoted instance keeps the source's database.
         "db_name": (primary["rds/main"].get("vars") or {}).get("db_name"),
-        "primary_cache": name(primary["elasticache/main"], "cluster_id"),
-        "cache": name(standby["elasticache/main"], "cluster_id"),
-        "cluster": name(standby["eks/main"], "name"),
+        "primary_cache": name(primary["elasticache/main"], "cluster_id", f"{primary_name} elasticache/main"),
+        "cache": name(standby["elasticache/main"], "cluster_id", f"{standby_name} elasticache/main"),
+        "cluster": name(standby["eks/main"], "name", f"{standby_name} eks/main"),
         "kms_alias": f"alias/{alias}",
-        "user_migration": name(standby["lambda/cognito-user-migration"], "function_name"),
-        "primary_node_groups": sizes(primary["eks/main"]),
-        "standby_node_groups": sizes(standby["eks/main"]),
+        "user_migration": name(standby["lambda/cognito-user-migration"], "function_name", f"{standby_name} lambda/cognito-user-migration"),
         "backup_replica_vault": vault,
         "backup_replica_region": vault_region,
         "health_check_alarm": health_check(primary["apigateway/main"], stacks, (primary_name, standby_name)),
@@ -210,7 +226,7 @@ def dr_region(stacks: dict, stack_name: str) -> str:
     if stack_name not in stacks:
         raise ValueError(f"Unknown stack {stack_name!r}")
     config = stacks[stack_name]
-    _, replica_region = backup_replica(instances(config).get("backup/main"))
+    _, replica_region = backup_replica(instances(config).get("backup/main"), f"{stack_name} backup/main")
     if replica_region:
         return replica_region
     standby = standby_of_stack(stacks, stack_name)
@@ -222,9 +238,13 @@ def dr_region(stacks: dict, stack_name: str) -> str:
 
 
 def describe_stacks() -> dict:
-    return json.loads(subprocess.check_output(
-        ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json",
-         "--components", ",".join(COMPONENTS), "--sections", "settings,vars,metadata"]))
+    """The stacks' resolved config; ValueError, one line, when atmos fails or returns no JSON."""
+    command = ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json",
+               "--components", ",".join(COMPONENTS), "--sections", "settings,vars,metadata"]
+    try:
+        return json.loads(subprocess.check_output(command))
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        raise ValueError(f"dr-pair: '{' '.join(command[:3])}' failed: {error}") from None
 
 
 def main() -> int:
@@ -235,8 +255,8 @@ def main() -> int:
     mode.add_argument("--dr-region", metavar="STACK")
     args = parser.parse_args()
 
-    stacks = describe_stacks()
     try:
+        stacks = describe_stacks()
         if args.dr_region is not None:
             print(dr_region(stacks, args.dr_region))
             return 0

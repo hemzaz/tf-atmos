@@ -93,7 +93,7 @@ workflows:
           7. Auth: nothing while {{ $p.primary_region }} Cognito answers (users sign in again; {{ $p.user_migration }}
              copies them as RESET_REQUIRED: forgot-password, then MFA enrolment). If it does not, bulk-import the users not yet in {{ $p.standby }}'s pool from the latest export.{{ if $eu }}
              The export and users.csv stay in {{ $p.standby_region }} (SSE-KMS), never outside the EU.{{ end }}
-          8. Verify: `curl -sf https://api.<domain>/`, then dr-status for {{ $p.standby }}.
+          8. Verify: `curl -sf https://api.{{ if $eu }}<EU apex>{{ else }}<domain>{{ end }}/`, then dr-status for {{ $p.standby }}.
           After recovery, reconcile Terraform: {{ $p.standby }} rds/main without replicate_source_db (plan must be
           update-in-place, never a replacement), eks/main sizes, eks-backend-services/main enabled; apply no
           elasticache/main until failback.

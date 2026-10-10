@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -59,9 +60,9 @@ def prod_pair(primary_env, primary_region, standby_env, standby_region, tfstate,
     }
 
 
-def root(env, region, replicated=True):
+def root(env, region, replica_region, replicated=True):
     settings = {"context": {"stage": "root"}}
-    backend = instance(env, region, settings, s3_replication_enabled=replicated)
+    backend = instance(env, region, settings, s3_replication_enabled=replicated, replica_region=replica_region)
     return {f"fnx-{env}-root": {"components": {"terraform": {"backend/main": backend, "vpc/main": instance(env, region, settings)}}}}
 
 
@@ -74,8 +75,8 @@ def today():
     stacks = {}
     stacks.update(prod_pair("ue1", "us-east-1", "ue2", "us-east-2", US_STATE))
     stacks.update(prod_pair("ew1", "eu-west-1", "ec1", "eu-central-1", EU_STATE, relay=["eu-west-1", "eu-central-1"]))
-    stacks.update(root("ue1", "us-east-1"))
-    stacks.update(root("ew1", "eu-west-1"))
+    stacks.update(root("ue1", "us-east-1", "us-east-2"))
+    stacks.update(root("ew1", "eu-west-1", "eu-central-1"))
     dev = {"vpc/main": instance("ue1", "us-east-1", {"context": {"stage": "dev"}, "tfstate": US_STATE}),
            "backup/main": instance("ue1", "us-east-1", {"context": {"stage": "dev"}})}
     stacks["fnx-ue1-dev"] = {"components": {"terraform": dev}}
@@ -114,8 +115,6 @@ class EuPairTest(unittest.TestCase):
         self.assertEqual(facts["user_migration"], "ec1-cognito-user-migration")
         self.assertEqual(facts["backup_replica_vault"], "ew1-backup-replica")
         self.assertEqual(facts["backup_replica_region"], "eu-central-1")
-        self.assertEqual(facts["primary_node_groups"]["workers"], [3, 6, 12])
-        self.assertEqual(facts["standby_node_groups"]["workers"], [2, 2, 12])
 
     def test_eu_health_check_alarm_is_relayed_to_both_eu_topics(self):
         facts = dr_pair.pair_facts(today(), "fnx-ew1-prod")
@@ -144,6 +143,7 @@ class EuPairTest(unittest.TestCase):
         for config in (stacks["fnx-ew1-prod"], stacks["fnx-ec1-prod"]):
             for spec in config["components"]["terraform"].values():
                 spec["settings"]["tfstate"] = dict(EU_STATE, replica_region="us-east-2")
+        stacks["fnx-ew1-root"]["components"]["terraform"]["backend/main"]["vars"]["replica_region"] = "us-east-2"
         with self.assertRaisesRegex(ValueError, "state replica is in us-east-2"):
             dr_pair.pair_facts(stacks, "fnx-ew1-prod")
 
@@ -165,6 +165,26 @@ class UnsupportedStackTest(unittest.TestCase):
         stacks = today()
         del stacks["fnx-ec1-prod"]["components"]["terraform"]["lambda/cognito-user-migration"]
         with self.assertRaisesRegex(ValueError, "missing fnx-ec1-prod lambda/cognito-user-migration"):
+            dr_pair.pair_facts(stacks, "fnx-ew1-prod")
+
+    def test_a_name_var_left_to_the_module_default_is_refused(self):
+        for stack, component, key in (("fnx-ec1-prod", "rds/main", "identifier"),
+                                      ("fnx-ew1-prod", "elasticache/main", "cluster_id"),
+                                      ("fnx-ec1-prod", "lambda/cognito-user-migration", "function_name")):
+            stacks = today()
+            del stacks[stack]["components"]["terraform"][component]["vars"][key]
+            with self.assertRaisesRegex(ValueError, f"{stack} {component}: vars.{key} is not set"):
+                dr_pair.pair_facts(stacks, "fnx-ew1-prod")
+        stacks = today()
+        del stacks["fnx-ec1-prod"]["components"]["terraform"]["eks/main"]["vars"]["tags"]
+        with self.assertRaisesRegex(ValueError, "fnx-ec1-prod eks/main: vars.tags.Environment is not set"):
+            dr_pair.pair_facts(stacks, "fnx-ew1-prod")
+
+    def test_a_backend_replicating_elsewhere_than_settings_tfstate_is_refused(self):
+        stacks = today()
+        stacks["fnx-ew1-root"]["components"]["terraform"]["backend/main"]["vars"]["replica_region"] = "eu-north-1"
+        with self.assertRaisesRegex(ValueError, "replicates fnx-ew1-terraform-state to eu-north-1, but "
+                                                "settings.tfstate.replica_region is eu-central-1"):
             dr_pair.pair_facts(stacks, "fnx-ew1-prod")
 
     def test_two_standbys_are_refused(self):
@@ -217,6 +237,18 @@ class MainTest(unittest.TestCase):
 
     def test_dr_region(self):
         self.assertEqual(self.run_main("--dr-region", "fnx-ec1-prod"), (0, "eu-central-1\n", ""))
+
+    def test_a_failing_atmos_is_one_line_and_exit_1(self):
+        failure = subprocess.CalledProcessError(1, ["atmos"])
+        for argv in (("fnx-ew1-prod",), ("--dr-region", "fnx-ew1-prod")):
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(dr_pair.subprocess, "check_output", side_effect=failure), \
+                    mock.patch.object(sys, "argv", ["dr-pair.py", *argv]), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = dr_pair.main()
+            self.assertEqual((code, out.getvalue()), (1, ""), argv)
+            self.assertEqual(len(err.getvalue().splitlines()), 1, err.getvalue())
+            self.assertIn("'atmos describe stacks' failed", err.getvalue())
 
 
 if __name__ == "__main__":
