@@ -532,14 +532,16 @@ The one part outside the EU is Route 53's health checking of `api.<EU apex>` (ow
 What sits in us-east-1 is configuration only, with no personal data and nothing persisted: the two
 health checks, their `HealthCheckStatus` alarms (Route 53 publishes the metric only there) and,
 per alarm, an EventBridge rule, its targets and their IAM role. No topic, key, email address,
-archive or queue is there (`check-data-residency.py` fails a GDPR-scoped stack that sets one).
+archive or queue is there: the `apigateway` component has no input for one, and an EU alarm
+action (`health_check_alarm_actions`, a us-east-1 topic) fails `check-data-residency.py`.
 The checks call from eu-west-1, us-east-1 and ap-southeast-1: Route 53 needs three checker
 regions and eu-west-1 is the only EU one (the EXEMPTIONS entries). Each alarm notifies nothing in
 us-east-1; its rule relays the alarm's state changes to the default event bus of both EU regions
 (`apigateway/main` `health_check_alarm_relay_regions`), where each stack's `monitoring/main`
 (`receive_relayed_health_check_alarms`) delivers them to its topic, `ew1-main-alarms` and
 `ec1-main-alarms`. So the PRIMARY's alarm still reaches `ec1-main-alarms` during an eu-west-1
-outage. As in the US, a us-east-1 outage silences both alarms, not the failover;
+outage, and a recipient subscribed to both topics gets each state change twice: intentional
+redundancy (`fnx-ec1-prod` can get its own recipients once the real addresses land). As in the US, a us-east-1 outage silences both alarms, not the failover;
 `fnx-ec1-prod`'s API alarms on `ec1-main-alarms` (eu-central-1) are the in-region signal.
 The failover and failback steps below are the US pair's only, and the `dr-failover` and
 `dr-failback` workflows refuse any stack but `fnx-ue1-prod`: the EU steps land in B5-9c. Route

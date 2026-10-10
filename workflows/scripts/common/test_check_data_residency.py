@@ -164,29 +164,6 @@ class DataResidencyTest(unittest.TestCase):
             f"fnx-ew1-prod: apigateway/main vars.health_check_alarm_actions is 'us-east-1', {OUTSIDE}",
         ])
 
-    def test_us_east_1_persistent_inputs_fail_in_eu_only(self):
-        def api(**extra):
-            spec = instance(**extra)
-            spec["metadata"] = {"component": "apigateway"}
-            return spec
-
-        persists = ("it keeps a resource or personal data in us-east-1, where a GDPR-scoped stack may "
-                    "keep only its health check alarm's configuration")
-        # Deliberately bad: the removed topic and email subscription inputs.
-        for var, value in (("create_health_check_alarm_topic", True), ("create_health_check_alarm_topic", "true"),
-                           ("health_check_alarm_email_subscriptions", ["oncall@example.com"])):
-            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"apigateway/main": api(**{var: value})})}),
-                             [f"fnx-ew1-prod: apigateway/main sets {var}: {persists}"], var)
-        for var, value in (("create_health_check_alarm_topic", False), ("health_check_alarm_email_subscriptions", []),
-                           ("create_health_check_alarm_topic", None)):
-            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"apigateway/main": api(**{var: value})})}),
-                             [], var)
-        us = api(create_health_check_alarm_topic=True)
-        us["vars"].update(region="us-east-1", tags={"Compliance": US})
-        us["settings"]["tfstate"] = {"region": "us-east-1"}
-        us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
-        self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"apigateway/main": us})}), [])
-
     def test_disabled_instances_are_skipped(self):
         off = instance(region="us-east-1", compliance=US)
         off["metadata"] = {"enabled": False}

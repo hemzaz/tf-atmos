@@ -17,10 +17,7 @@ deployable instance:
   - if a dns instance, turns on enable_query_logging for no zone: Route 53 public
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
-    each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions;
-  - sets none of US_EAST_1_PERSISTENT's inputs: each would keep something in us-east-1 (a
-    topic, a key, staff email addresses, an event archive or dead-letter queue) next to the
-    Route 53 health check alarm, which the owner allows there as configuration only (B5).
+    each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions.
 And no deployable instance of a stack that is not GDPR-scoped lists a GDPR-scoped stack in
 dependencies.components or names an ARN in an eu- region in its vars: a US read replica
 (replicate_source_db), Global Datastore secondary (global_replication_group_id) or state read
@@ -80,15 +77,6 @@ EXEMPTIONS: tuple = (
     Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
     Exemption("apigateway/main", "vars.health_check_regions", "ap-southeast-1", _CHECKERS),
 )
-
-# Inputs that would persist something in us-east-1 beside a health check alarm, by root module:
-# the alarm topic (with its key) and email subscriptions B5-9b first added, removed by the
-# owner's decision (staff email addresses must not be stored in us-east-1). The EventBridge
-# relay has no archive or dead-letter input; one added later belongs here. A GDPR-scoped
-# stack sets none of them.
-US_EAST_1_PERSISTENT: dict = {
-    "apigateway": ("create_health_check_alarm_topic", "health_check_alarm_email_subscriptions"),
-}
 
 
 def is_deployable(instance: dict) -> bool:
@@ -197,12 +185,6 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
             f"{where} sets enable_alert_enrichment: its Lambda sends findings to Slack/PagerDuty, "
             "outside the EU"
         )
-    for var in US_EAST_1_PERSISTENT.get(component, ()):
-        if flag_on((instance.get("vars") or {}).get(var)) and (instance.get("vars") or {}).get(var) != []:
-            errors.append(
-                f"{where} sets {var}: it keeps a resource or personal data in us-east-1, where a "
-                "GDPR-scoped stack may keep only its health check alarm's configuration"
-            )
     for dep in (instance.get("dependencies") or {}).get("components") or []:
         if not isinstance(dep, dict):
             errors.append(f"{where} dependencies.components entry {dep!r} is not a {{component, stack}} map")

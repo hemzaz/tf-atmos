@@ -223,6 +223,14 @@ run "eu_checker_regions_and_relay_to_both_eu_buses" {
   }
 
   assert {
+    condition = alltrue([
+      for t in aws_cloudwatch_event_target.health_check_relay :
+      t.retry_policy[0].maximum_event_age_in_seconds == 3600 && t.retry_policy[0].maximum_retry_attempts == 10
+    ])
+    error_message = "An undelivered event must not stay in flight in us-east-1 longer than an hour."
+  }
+
+  assert {
     condition = (
       jsondecode(aws_iam_role_policy.health_check_relay[0].policy).Statement[0].Action == "events:PutEvents"
       && length(jsondecode(aws_iam_role_policy.health_check_relay[0].policy).Statement) == 1

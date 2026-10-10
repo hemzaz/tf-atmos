@@ -15,7 +15,8 @@
 # In us-east-1 this creates only configuration: the rule, one target per
 # region and the IAM role (global) the targets use. No archive, dead-letter
 # queue, topic or key: no event is stored there. Events carry the alarm's
-# name, state and reason (health check metadata), no personal data.
+# name, state and reason (health check metadata), no personal data. A future
+# relay DLQ or archive input must get a GDPR rule in check-data-residency.py.
 #
 # Shape: Cloud Posse terraform-aws-cloudwatch-events (aws_cloudwatch_event_rule
 # + aws_cloudwatch_event_target); the cross-region event-bus target with a role
@@ -105,4 +106,13 @@ resource "aws_cloudwatch_event_target" "health_check_relay" {
   target_id = "relay-${each.key}"
   arn       = local.relay_event_bus_arns[each.key]
   role_arn  = aws_iam_role.health_check_relay[0].arn
+
+  # EventBridge retries an undeliverable event for up to 24 hours by default;
+  # during an outage of a target region it would sit in flight in us-east-1
+  # that long. An hour covers a transient failure; the other region's target
+  # carries the alarm meanwhile.
+  retry_policy {
+    maximum_event_age_in_seconds = 3600
+    maximum_retry_attempts       = 10
+  }
 }
