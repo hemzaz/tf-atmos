@@ -12,15 +12,26 @@ locals {
   # for_each keys; these come from configuration. Cloud Posse's
   # acm-request-certificate does the same (count over the distinct names).
   # Value: the first DNS-validated certificate that carries the name.
+  #
+  # Only certificates with process_domain_validation_options (Cloud Posse
+  # acm-request-certificate's name, default true) get records. One set to
+  # false relies on records another state owns: ACM gives a name the same
+  # validation CNAME in every certificate of one account, so a DR region's
+  # api.x is validated by the primary's *.api.x record.
+  record_domains = {
+    for key, domain in local.dns_domains : key => domain
+    if domain.validation_method == "DNS" && domain.process_domain_validation_options
+  }
+
   validation_names = {
     for name in distinct(flatten([
-      for key, domain in local.dns_domains : [
+      for key, domain in local.record_domains : [
         for n in concat([domain.domain_name], domain.subject_alternative_names) : trimprefix(lower(n), "*.")
-      ] if domain.validation_method == "DNS"
+      ]
     ])) :
     name => [
-      for key, domain in local.dns_domains : key
-      if domain.validation_method == "DNS" && contains([
+      for key, domain in local.record_domains : key
+      if contains([
         for n in concat([domain.domain_name], domain.subject_alternative_names) : trimprefix(lower(n), "*.")
       ], name)
     ][0]
@@ -92,6 +103,11 @@ resource "aws_route53_record" "validation" {
   }
 }
 
+# Deviation from Cloud Posse acm-request-certificate: there,
+# process_domain_validation_options = false also skips the wait
+# (aws_acm_certificate_validation counts on it). Here the wait stays, so a
+# certificate validated by another state's record is ISSUED before the
+# components reading certificate_arns use it.
 resource "aws_acm_certificate_validation" "main" {
   for_each = {
     for domain_key, domain in local.dns_domains : domain_key => domain
@@ -117,9 +133,11 @@ resource "aws_acm_certificate_validation" "main" {
 
     # Verify every distinct validation record name of THIS certificate has a
     # record. (The previous check counted every record in the instance, so any
-    # instance with two or more certificates failed here.)
+    # instance with two or more certificates failed here.) A certificate that
+    # does not process its validation options has none here: its records are
+    # another state's.
     precondition {
-      condition = length(setsubtract(
+      condition = (!each.value.process_domain_validation_options) || length(setsubtract(
         toset([for dvo in aws_acm_certificate.main[each.key].domain_validation_options : trimsuffix(lower(dvo.resource_record_name), ".")]),
         toset([for record in aws_route53_record.validation : trimsuffix(lower(record.name), ".")])
       )) == 0

@@ -13,7 +13,11 @@ variable "dns_domains" {
     subject_alternative_names = optional(list(string), [])
     validation_method         = optional(string, "DNS")
     wait_for_validation       = optional(bool, true)
-    tags                      = optional(map(string), {})
+    # Cloud Posse acm-request-certificate's flag: false writes no validation
+    # records for this certificate (another state owns them, e.g. the primary
+    # region's in a DR region). Unlike upstream, it still waits for validation.
+    process_domain_validation_options = optional(bool, true)
+    tags                              = optional(map(string), {})
   }))
   description = "Map of domain configurations to create ACM certificates for"
   default     = {}
@@ -50,11 +54,21 @@ variable "dns_domains" {
 
 variable "zone_id" {
   type        = string
-  description = "Route53 zone ID to create validation records in"
+  description = "Route53 zone ID to create validation records in; empty only when no DNS certificate processes its validation options"
+  default     = ""
 
   validation {
-    condition     = can(regex("^Z[A-Z0-9]{1,32}$", var.zone_id))
+    condition     = var.zone_id == "" || can(regex("^Z[A-Z0-9]{1,32}$", var.zone_id))
     error_message = "The zone_id must be a valid Route53 Zone ID (e.g., Z00000000000000000000)."
+  }
+
+  # Records are written only for DNS certificates that process their
+  # validation options; any such certificate needs the zone.
+  validation {
+    condition = var.zone_id != "" || alltrue([
+      for k, v in var.dns_domains : v.validation_method != "DNS" || v.process_domain_validation_options == false
+    ])
+    error_message = "zone_id is required when a DNS-validated certificate has process_domain_validation_options = true (the default)."
   }
 }
 

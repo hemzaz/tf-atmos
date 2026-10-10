@@ -503,7 +503,10 @@ Readiness: `STACK=fnx-ue1-prod atmos workflow dr-status -f disaster-recovery` (i
 vaults and the state bucket's replication) and the same for `fnx-ue2-prod`. CD deploys
 `fnx-ue2-prod` right after `fnx-ue1-prod`, whose state it reads (`kms/main`, `rds/main`,
 `elasticache/main`, `network/main`, `iam/ci`): its `settings.dr.standby_of: fnx-ue1-prod` orders it
-(`ci-stacks.py`), not the stack names. Each region's `apigateway/main` health check has a
+(`ci-stacks.py`), not the stack names. That order also validates `fnx-ue2-prod`'s `acm/main`
+(`api.<domain>`): it writes no validation record (`process_domain_validation_options: false`) and
+waits on the one `fnx-ue1-prod`'s `acm/main` writes for its `*.api.<domain>` SAN, the same CNAME
+in one account. Each region's `apigateway/main` health check has a
 `HealthCheckStatus` alarm in us-east-1 on `ue1-main-alarms`. Both alarms and that topic live in
 us-east-1 (Route 53 publishes health check metrics only there), so a us-east-1 outage silences
 them; the DNS failover itself does not depend on them. The signal outside us-east-1 is
