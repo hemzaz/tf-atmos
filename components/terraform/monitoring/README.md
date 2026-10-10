@@ -33,7 +33,14 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
 - Alarms notify the own topic when `create_sns_topic = true` (default) and every topic in
   `alarm_sns_topic_arns` (an `sns` instance, for subscribers the own email-only topic cannot take).
 - `lambda_error_alarms` keys are stable alarm ids; the watched function is each entry's
-  `function_name` (validated as a name, not an ARN), never the key.
+  `function_name` (validated as a name, not an ARN), never the key. Likewise
+  `db_connection_alarms`: the watched instance is `db_instance_identifier`
+  (`rds/* .instance_identifier`).
+- `allow_rds_event_publish` (prod `monitoring/main` and `fnx-ue1-prod`'s `monitoring/data`) adds a
+  topic policy statement letting this account's RDS event subscriptions in this region
+  (`events.rds.amazonaws.com`, `aws:SourceArn` `rds:<region>:<account>:es:*`) publish: the
+  receiving end of `rds` `sns_topic_arn`. The key must allow RDS events (`kms` `allow_rds_events`).
+  With it or the relay below the topic gets a policy; otherwise SNS's default one.
 - `create_dashboard` is a legacy alias of `create_infrastructure_dashboard`, still set by the stacks.
 - `receive_relayed_health_check_alarms` (the EU prod stacks, owner decision B5) is the receiving end
   of `apigateway`'s `health_check_alarm_relay_regions`: an EventBridge rule on this region's

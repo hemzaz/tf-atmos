@@ -597,3 +597,52 @@ run "lambda_error_alarm_rejects_arn" {
 
   expect_failures = [var.lambda_error_alarms]
 }
+
+run "db_connection_alarm_watches_the_real_instance" {
+  command = plan
+
+  variables {
+    enable_rds_monitoring = true
+    rds_instances         = ["ue1-prod-main-db"]
+    db_connection_alarms = {
+      rds_connections_high = {
+        db_instance_identifier = "ue1-prod-main-db"
+        evaluation_periods     = 2
+        period                 = 300
+        threshold              = 400
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.db_connections_high["rds_connections_high"].dimensions["DBInstanceIdentifier"] == "ue1-prod-main-db"
+    error_message = "The connection alarm's DBInstanceIdentifier dimension must be the entry's db_instance_identifier, not the map key."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.db_connections_high["rds_connections_high"].alarm_name == "test-monitoring-rds_connections_high-high-connections"
+    error_message = "Connection alarms keep their <Environment>-<name>-<key>-high-connections name."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.rds_cpu_high["ue1-prod-main-db"].dimensions["DBInstanceIdentifier"] == "ue1-prod-main-db" && aws_cloudwatch_metric_alarm.rds_storage_low["ue1-prod-main-db"].dimensions["DBInstanceIdentifier"] == "ue1-prod-main-db"
+    error_message = "The CPU and storage alarms watch each rds_instances identifier."
+  }
+}
+
+run "db_connection_alarm_rejects_an_arn" {
+  command = plan
+
+  variables {
+    db_connection_alarms = {
+      rds_connections_high = {
+        db_instance_identifier = "arn:aws:rds:us-east-1:123456789012:db:ue1-prod-main-db"
+        evaluation_periods     = 2
+        period                 = 300
+        threshold              = 400
+      }
+    }
+  }
+
+  expect_failures = [var.db_connection_alarms]
+}

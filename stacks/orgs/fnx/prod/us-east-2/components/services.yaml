@@ -277,10 +277,13 @@ components:
         api_gateway_name: !terraform.state apigateway/main .api_name
         api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
         create_sns_topic: true
+        # rds/main's event subscription publishes here (catalog/monitoring/prod).
+        allow_rds_event_publish: true
         enable_rds_monitoring: true
         rds_cpu_threshold: 80
         db_connection_alarms:
           rds_connections_high:
+            db_instance_identifier: !terraform.state rds/main .instance_identifier
             evaluation_periods: 2
             period: 300
             threshold: 400

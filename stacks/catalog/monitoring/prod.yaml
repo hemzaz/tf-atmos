@@ -53,6 +53,9 @@ components:
         # PagerDuty integration
         # Secret: export from SSM /production/pagerduty/endpoint before plan/apply
         create_sns_topic: true
+        # rds/main's event subscription (its sns_topic_arn names this topic)
+        # may publish; kms/main allows RDS events on the key (allow_rds_events).
+        allow_rds_event_publish: true
         cpu_alarms:
           high_cpu_warning:
             namespace: "AWS/EC2"
@@ -79,10 +82,14 @@ components:
             period: 300
             threshold: 95
             dimensions: {}
+        # rds/main's CPU and storage alarms (enable_rds_monitoring, on
+        # rds_instances) and its connection alarm, each on the instance's real
+        # identifier (the DBInstanceIdentifier dimension).
         enable_rds_monitoring: true
         rds_cpu_threshold: 80
         db_connection_alarms:
           rds_connections_high:
+            db_instance_identifier: !terraform.state rds/main .instance_identifier
             evaluation_periods: 2
             period: 300
             threshold: 400

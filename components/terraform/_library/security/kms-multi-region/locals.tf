@@ -415,6 +415,37 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # RDS event subscriptions (aws_db_event_subscription) publishing to an SNS
+  # topic encrypted with this key: the CloudWatch alarms statement above for
+  # the RDS events principal, the same scope (this account's topics in this
+  # document's region, calls made for this account).
+  dynamic "statement" {
+    for_each = var.allow_rds_events ? [1] : []
+
+    content {
+      sid       = "AllowRdsEventsSNSTopics"
+      actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["events.rds.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = ["arn:${data.aws_partition.current.partition}:sns:${each.key}:${data.aws_caller_identity.current.account_id}:*"]
+      }
+    }
+  }
+
   # CloudTrail trails of this account (the cloudtrail component) encrypting
   # their log files with this key. GenerateDataKey* is bound to the trail by
   # the encryption context aws:cloudtrail:arn (region wildcarded, as trail

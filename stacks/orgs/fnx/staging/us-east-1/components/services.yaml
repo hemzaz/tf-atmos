@@ -479,6 +479,7 @@ components:
         create_sns_topic: true
         db_connection_alarms:
           rds_connections:
+            db_instance_identifier: !terraform.state rds/data .instance_identifier
             evaluation_periods: 2
             period: 300
             threshold: 100

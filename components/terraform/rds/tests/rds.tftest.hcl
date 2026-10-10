@@ -725,3 +725,81 @@ run "name_base_of_47_characters_passes" {
     error_message = "The replica and monitoring role names are <Environment>-<identifier>-<suffix>."
   }
 }
+
+run "sns_topic_arn_subscribes_the_topic_to_the_instances_events" {
+  command = plan
+
+  variables {
+    sns_topic_arn       = "arn:aws:sns:us-east-1:123456789012:test-main-alarms"
+    create_read_replica = true
+  }
+
+  assert {
+    condition     = length(aws_db_event_subscription.main) == 1 && aws_db_event_subscription.main[0].sns_topic == "arn:aws:sns:us-east-1:123456789012:test-main-alarms" && aws_db_event_subscription.main[0].source_type == "db-instance"
+    error_message = "With sns_topic_arn set, one db-instance event subscription publishes to it."
+  }
+
+  assert {
+    condition     = toset(aws_db_event_subscription.main[0].source_ids) == toset(["test-test-db", "test-test-db-read-replica"])
+    error_message = "The subscription covers the instance and its read replica by identifier."
+  }
+
+  assert {
+    condition     = toset(aws_db_event_subscription.main[0].event_categories) == toset(["availability", "failover", "failure", "low storage", "maintenance", "notification", "read replica", "recovery"])
+    error_message = "The default event categories are availability, failover, failure, low storage, maintenance, notification, read replica and recovery."
+  }
+
+  # The performance alarms stay off unless asked for.
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.database_cpu) == 0
+    error_message = "create_performance_alarms stays false by default."
+  }
+}
+
+run "event_categories_are_configurable" {
+  command = plan
+
+  variables {
+    sns_topic_arn    = "arn:aws:sns:us-east-1:123456789012:test-main-alarms"
+    event_categories = ["failover", "failure"]
+  }
+
+  assert {
+    condition     = toset(aws_db_event_subscription.main[0].event_categories) == toset(["failover", "failure"]) && toset(aws_db_event_subscription.main[0].source_ids) == toset(["test-test-db"])
+    error_message = "event_categories replaces the default list; without a replica only the instance is a source."
+  }
+}
+
+run "no_sns_topic_arn_no_event_subscription" {
+  command = plan
+
+  assert {
+    condition     = length(aws_db_event_subscription.main) == 0
+    error_message = "Without sns_topic_arn (non-prod) there is no event subscription."
+  }
+}
+
+run "event_subscription_can_be_turned_off" {
+  command = plan
+
+  variables {
+    sns_topic_arn              = "arn:aws:sns:us-east-1:123456789012:test-main-alarms"
+    event_subscription_enabled = false
+  }
+
+  assert {
+    condition     = length(aws_db_event_subscription.main) == 0
+    error_message = "event_subscription_enabled false creates no subscription."
+  }
+}
+
+run "rejects_an_unknown_event_category" {
+  command = plan
+
+  variables {
+    sns_topic_arn    = "arn:aws:sns:us-east-1:123456789012:test-main-alarms"
+    event_categories = ["outage"]
+  }
+
+  expect_failures = [var.event_categories]
+}

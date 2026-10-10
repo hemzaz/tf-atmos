@@ -301,10 +301,13 @@ components:
         # Delivers the relayed us-east-1 health check alarms of the EU failover
         # pair (both apigateway/main halves) to ec1-main-alarms.
         receive_relayed_health_check_alarms: true
+        # rds/main's event subscription publishes here (catalog/monitoring/prod).
+        allow_rds_event_publish: true
         enable_rds_monitoring: true
         rds_cpu_threshold: 80
         db_connection_alarms:
           rds_connections_high:
+            db_instance_identifier: !terraform.state rds/main .instance_identifier
             evaluation_periods: 2
             period: 300
             threshold: 400

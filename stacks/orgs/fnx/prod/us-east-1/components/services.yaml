@@ -413,7 +413,22 @@ components:
           - "data-team@example.com"
 
         create_sns_topic: true
+        # rds/data's event subscription publishes here (its sns_topic_arn names
+        # ue1-data-alarms); kms/main allows RDS events (allow_rds_events).
+        allow_rds_event_publish: true
         lambda_duration_threshold: 500000
+        # rds/data's alarms, as monitoring/main's on rds/main
+        # (catalog/monitoring/prod): CPU and storage on rds_instances, and
+        # connections, on its real identifier. 10% of its 200 GiB is 20 GiB.
+        enable_rds_monitoring: true
+        rds_cpu_threshold: 80
+        db_connection_alarms:
+          rds_connections_high:
+            db_instance_identifier: !terraform.state rds/data .instance_identifier
+            evaluation_periods: 2
+            period: 300
+            threshold: 400
+        rds_storage_threshold: 21474836480
       dependencies:
         components:
           - component: vpc/main

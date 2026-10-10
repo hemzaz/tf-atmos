@@ -56,6 +56,13 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
 - The final snapshot is `final_snapshot_identifier`, else `<Environment>-<identifier>-final-snapshot`:
   stable across plans, so destroying, recreating and destroying again needs the old snapshot
   deleted or a new `final_snapshot_identifier`.
+- `sns_topic_arn` subscribes the topic to the instance's (and read replica's) RDS events,
+  `event_categories` (Cloud Posse's rds-cloudwatch-sns-alarms `aws_db_event_subscription`; off
+  with `event_subscription_enabled: false`). The topic's policy must let
+  `events.rds.amazonaws.com` publish (`monitoring` `allow_rds_event_publish`) and its key let
+  that service use it (`kms` `allow_rds_events`). The prod instances name their stack's
+  `monitoring` topic by ARN (`<Environment>-main-alarms`, `rds/data`: `-data-alarms`), since
+  monitoring reads rds. The metric alarms are monitoring's; `create_performance_alarms` stays off.
 - Use `instance_identifier` (the `DBInstanceIdentifier` dimension) for CloudWatch, not `instance_id`
   (the `db-...` resource ID since AWS provider v5).
 - `rds/main` really runs against LocalEmu in `atmos workflow localemu -f localemu`; Floci cannot run

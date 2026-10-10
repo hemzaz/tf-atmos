@@ -558,8 +558,29 @@ variable "free_storage_alarm_threshold" {
 
 variable "sns_topic_arn" {
   type        = string
-  description = "SNS topic ARN for sending alarm notifications"
+  description = "SNS topic ARN for this instance's RDS event notifications (event_subscription_enabled) and the performance alarms (create_performance_alarms)"
   default     = null
+}
+
+variable "event_subscription_enabled" {
+  type        = bool
+  description = "Subscribe sns_topic_arn to this instance's RDS events (aws_db_event_subscription, Cloud Posse's rds-cloudwatch-sns-alarms). Takes effect only when sns_topic_arn is set"
+  default     = true
+}
+
+variable "event_categories" {
+  type        = list(string)
+  description = "RDS event categories (source type db-instance) sent to sns_topic_arn"
+  default     = ["availability", "failover", "failure", "low storage", "maintenance", "notification", "read replica", "recovery"]
+
+  validation {
+    condition = length(var.event_categories) > 0 && alltrue([for c in var.event_categories : contains([
+      "availability", "backup", "configuration change", "creation", "deletion", "failover", "failure",
+      "low storage", "maintenance", "notification", "read replica", "recovery", "restoration",
+      "security", "security patching",
+    ], c)])
+    error_message = "event_categories must be non-empty db-instance RDS event categories (e.g. availability, failover, failure, low storage, maintenance, notification, read replica, recovery)."
+  }
 }
 
 # Secrets Rotation Variables
