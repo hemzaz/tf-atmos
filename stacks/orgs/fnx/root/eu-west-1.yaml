@@ -12,7 +12,8 @@
 #
 # An EU stack points its settings.tfstate here, all of it
 # (stacks/orgs/fnx/_defaults.yaml). The bucket holds prod state only
-# (fnx-ew1-prod, in the prod-eu account), so this stack has the prod roles
+# (fnx-ew1-prod and its DR standby fnx-ec1-prod, both in the prod-eu
+# account), so this stack has the prod roles
 # (catalog/backend/roles/prod) and no read/write: check-state-keys.py fails a
 # role that matches no state.
 #
@@ -66,21 +67,25 @@ components:
         # on its stage's roles, and its CI roles, named from iam/ci's
         # ci_role_name_prefix in that stack's account. The EU CI roles live
         # in the prod-eu account (a hyphenated account map key: index).
-        # fnx-ec1-prod (EU DR) adds its pair and roles when it exists.
         access_roles:
           prod_read:
-            # EU prod state: ONLY fnx-ew1-prod's plan role (master branch
-            # subject alone, owner decision D3).
+            # EU prod state: ONLY the EU prod stacks' plan roles (master
+            # branch subject alone, owner decision D3). fnx-ec1-prod is
+            # fnx-ew1-prod's DR warm standby, in the same account.
             object_key_patterns: &prod_state
               - "*/fnx-ew1-prod/*"
               - "*/fnx-ew1-prod-*"
+              - "*/fnx-ec1-prod/*"
+              - "*/fnx-ec1-prod-*"
             allowed_principal_arns:
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-plan'
+              - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-plan'
           prod_write:
-            # EU prod state: ONLY fnx-ew1-prod's apply role.
+            # EU prod state: ONLY the EU prod stacks' apply roles.
             object_key_patterns: *prod_state
             allowed_principal_arns:
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-apply'
+              - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-apply'
           # This stack's own state (backend/main). No principals listed: the
           # applying administrator only (stacks/catalog/backend/defaults.yaml).
           root_write:
