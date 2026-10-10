@@ -14,7 +14,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
-| Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex) |
+| Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex). The EU apex is its own registered domain, never under the US one, delegated at its own registrar to `fnx-ew1-prod`'s `network/main` (see [Deploying a stack](#deploying-a-stack)) |
 | Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml` (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach people only through each stack's `security-monitoring/main` topic, whose `security_email_subscriptions` is empty everywhere (a preflight notice per stack) |
 | Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in `components/globals.yaml` (USD: dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s). Each budget counts only spend tagged with its stack's `Environment` (`ue1`, `ew1`), so a DR standby's spend (`ue2`, `ec1`, no `cost-optimization` of its own) is in no budget |
 | Cost-allocation tags | the `Environment` tag activated as a user-defined cost-allocation tag in the payer (management) account's Billing console (Cost allocation tags); until then every budget's `user:Environment$<tag>` filter matches no spend and no budget alerts |
@@ -64,9 +64,11 @@ account IDs and the accounts layer is deployed and verified first
 
 ## State backend
 
-One bucket, `fnx-terraform-state` (`settings.tfstate.bucket`), in the management account, with native S3
-lockfiles (`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-ue1-root`
-(`settings.tfstate.stack`, which every `iam` instance that inherits `catalog/iam` depends on), and every stack's
+Two backends, each a bucket in the management account with native S3 lockfiles
+(`use_lockfile: true`, no DynamoDB) and a read-only replica: the US one, for every stack but the
+EU ones, and the EU one (next paragraph). The US bucket, `fnx-terraform-state`
+(`settings.tfstate.bucket`), is `backend/main` in `fnx-ue1-root`
+(`settings.tfstate.stack`, which every `iam` instance that inherits `catalog/iam` depends on), and every US stack's
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
 with management-account administrator credentials. The bucket lives in one region,
 `settings.tfstate.region` (`us-east-1`), and every US stack's backend uses it whatever the stack's
@@ -78,8 +80,9 @@ the state key's multi-region replica (`backend/main`'s `s3_replication_enabled`;
 The EU stacks keep their state in the EU (GDPR residency): `backend/main` in `fnx-ew1-root`
 (`stacks/orgs/fnx/root/eu-west-1.yaml`, same management account), bucket
 `fnx-ew1-terraform-state` in `eu-west-1`, replicated to `fnx-ew1-terraform-state-replica` in
-`eu-central-1`, roles `fnx-ew1-terraform-backend-*`. An EU stack overrides all of
-`settings.tfstate` to point there; `check-data-residency.py` fails one that names a non-EU region.
+`eu-central-1` on the EU state key's replica, roles `fnx-ew1-terraform-backend-*`. An EU stack
+overrides all of `settings.tfstate` to point there (`stack: fnx-ew1-root`), so it too is created
+first; `check-data-residency.py` fails one that names a non-EU region.
 It holds only prod state (`fnx-ew1-prod` and its DR stack `fnx-ec1-prod`, both in the `prod-eu`
 account, whose state stays in `eu-west-1` as `fnx-ue2-prod`'s stays in `us-east-1`), so it has the
 `prod_read`, `prod_write` and `root_write` roles, trusting those two stacks' CI roles.
@@ -118,7 +121,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
   and `validate-all`) fails a CI role that its stage's read or write role, of the backend owning its
   state bucket, does not trust, or that may assume another role (`ci_backend_*_role_arn`).
 - Each stack's state is an exact pattern pair on its stage's roles, `*/<stack>/*` and
-  `*/<stack>-*` (`stacks/orgs/fnx/root/us-east-1.yaml`): add a new stack's pair before its first
+  `*/<stack>-*` (`stacks/orgs/fnx/root/us-east-1.yaml`; EU: `root/eu-west-1.yaml`): add a new stack's pair before its first
   `init`. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against
   every state key, requiring exactly its stage's roles to match it, and every backend region
   equal to `backend/main`'s.
@@ -323,7 +326,7 @@ GitHub OIDC on master):
    `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
    which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
    `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
-   `stacks/orgs/fnx/root/us-east-1.yaml`, so it can write the stack's state. Apply `backend/main`
+   `stacks/orgs/fnx/root/us-east-1.yaml` (EU stacks: `root/eu-west-1.yaml`), so it can write the stack's state. Apply `backend/main`
    (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
    backend and warns while a stack has none.
 2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then
@@ -920,7 +923,7 @@ liveness endpoint by design.
 | Symptom | Fix |
 |---------|-----|
 | `This repository requires Atmos >= 1.229.0` | Upgrade Atmos |
-| `init` cannot assume `<role_prefix>-*-role` (`fnx-terraform-backend-*-role`) | Run `backend-cold-start`, or add the caller's role ARN to that stage's `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` |
+| `init` cannot assume `<role_prefix>-*-role` (`fnx-terraform-backend-*-role`) | Run `backend-cold-start`, or add the caller's role ARN to that stage's `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU stacks: `root/eu-west-1.yaml`, roles `fnx-ew1-terraform-backend-*`) |
 | CI plan: AccessDenied on `PutObject` at `workspace new` | Read roles cannot create a workspace; the instance's first deploy does |
 | `Error acquiring the state lock` | Another run holds it; `list-locks`, then `force-unlock` if abandoned |
 | `!terraform.state` returns nothing | The referenced instance is not deployed in that stack yet; deploy in layer order |
