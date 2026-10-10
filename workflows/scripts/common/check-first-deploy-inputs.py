@@ -72,6 +72,8 @@ EXAMPLE_DOMAIN_RE = re.compile(
 )
 OPERATOR_ROLE = "-cross-account-operator"
 # The release pipeline's placeholder images (the stacks' settings.environment.backend_service_images).
+# 1.4.2 is a reserved placeholder tag: a real release must never be published as
+# ghcr.io/fnx-platform/<service>:1.4.2, or this check would keep flagging it.
 PLACEHOLDER_IMAGE_RE = re.compile(r"^ghcr\.io/fnx-platform/[a-z0-9-]+:1\.4\.2$")
 
 
