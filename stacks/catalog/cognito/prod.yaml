@@ -3,12 +3,13 @@ import:
   - catalog/cognito/defaults
 
 # Production pool settings, shared by fnx-ue1-prod's cognito/main and its DR
-# copy in fnx-ue2-prod (owner decision 2026-10-07): the user-migration trigger
-# copies a user's attributes from one pool into the other, so their schema,
-# sign-in attributes, password policy and MFA must not drift apart. MFA is
+# copy in fnx-ue2-prod (owner decision 2026-10-07), and by the EU pair
+# fnx-ew1-prod and fnx-ec1-prod: the user-migration trigger copies a user's
+# attributes from one pool into the other, so their schema, sign-in
+# attributes, password policy and MFA must not drift apart. MFA is
 # mandatory rather than opt-in, and the pool cannot be deleted while it holds
-# real users (check-prod-protection.py). The api client is per instance: ue2's
-# adds the admin password flow user migration needs.
+# real users (check-prod-protection.py). The api client is per instance: the
+# DR pools' (ue2, ec1) add the admin password flow user migration needs.
 components:
   terraform:
     cognito/prod:

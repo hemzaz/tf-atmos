@@ -12,11 +12,17 @@
 #   - elasticache/main: a Global Datastore secondary of fnx-ew1-prod's
 #     elasticache/main (Cloud Posse aws-elasticache-redis
 #     global_replication_group_id).
+#   - cognito/main: this region's own user pool (owner decision B5, as
+#     fnx-ue2-prod's 2026-10-07: DR auth must not depend on eu-west-1). AWS
+#     does not replicate user pools, so lambda/cognito-user-migration copies
+#     each user from fnx-ew1-prod's pool on their first sign-in or password
+#     reset here.
 # No rds/data: the EU data plane is not in fnx-ew1-prod either.
 # =============================================================================
 
 import:
   - orgs/fnx/prod/eu-central-1/components/globals
+  - catalog/cognito/prod
   - catalog/rds/prod
   - catalog/elasticache/prod
 
@@ -96,3 +102,83 @@ components:
           - component: kms/main
             stack: fnx-ew1-prod
           - component: eks/main
+
+    # ==========================================================================
+    # Cognito - this region's pool, filled by user migration from fnx-ew1-prod
+    # ==========================================================================
+    # As fnx-ue2-prod's (owner decision B5: ec1 gets a migration trigger from
+    # ew1, as ue2 from ue1). cognito/prod keeps its settings equal to
+    # fnx-ew1-prod's pool. Cognito
+    # domains are global, but neither pool sets domain_prefix (no hosted UI),
+    # and every name carries the stack id (fnx-ec1-prod-users), so nothing
+    # collides with fnx-ew1-prod's.
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/prod
+      vars:
+        name_prefix: '{{ .atmos_stack }}'
+        clients:
+          # fnx-ew1-prod's api client plus ALLOW_ADMIN_USER_PASSWORD_AUTH:
+          # Cognito runs the migration trigger only for a password sign-in,
+          # never for SRP (the password does not reach it). The backend signs
+          # in a user this pool does not have yet with AdminInitiateAuth
+          # ADMIN_USER_PASSWORD_AUTH (an IAM-signed call); ALLOW_USER_PASSWORD_AUTH
+          # stays rejected by the component.
+          api:
+            generate_secret: true
+            explicit_auth_flows: ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH"]
+            access_token_validity_minutes: 30
+        lambda_config:
+          user_migration: !terraform.state lambda/cognito-user-migration .function_arn
+      dependencies:
+        components:
+          - component: lambda/cognito-user-migration
+
+    # The user-migration trigger of cognito/main (above). It checks a user
+    # against fnx-ew1-prod's pool in eu-west-1 (EU to EU) and returns their attributes
+    # (functions/cognito-user-migration). Its role may only call
+    # AdminInitiateAuth and AdminGetUser on that one pool. Not in the VPC: it
+    # reaches nothing but Cognito's public endpoint. Packaged from source_dir
+    # like the repo's other in-repo functions (no S3 release to upload).
+    lambda/cognito-user-migration:
+      metadata:
+        component: lambda
+      vars:
+        function_name: cognito-user-migration
+        description: "Cognito user migration from fnx-ew1-prod's user pool (DR)"
+        handler: "lambda_function.lambda_handler"
+        runtime: "python3.13"
+        source_dir: "functions/cognito-user-migration"
+        memory_size: 256
+        # Cognito waits about 5 seconds for a trigger; the handler's source
+        # calls time out first (2 s each).
+        timeout: 5
+        log_retention_days: 90
+        kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        environment_variables:
+          SOURCE_USER_POOL_ID: !terraform.state cognito/main fnx-ew1-prod .user_pool_id
+          SOURCE_CLIENT_ID: !terraform.state cognito/main fnx-ew1-prod '.client_ids["dr-migration"]'
+        iam_policies:
+          - sid: CheckUsersInTheSourcePool
+            actions:
+              - "cognito-idp:AdminInitiateAuth"
+              - "cognito-idp:AdminGetUser"
+            resources:
+              - !terraform.state cognito/main fnx-ew1-prod .user_pool_arn
+        # On monitoring/main's ec1 topic, by name (it is created later). A wrong
+        # password is a function error by design (the trigger rejects by
+        # raising), so the error alarm only fires on a burst; duration near the
+        # 5-second limit is the early sign of a failing source pool.
+        create_performance_alarms: true
+        duration_alarm_threshold: 3000
+        error_rate_alarm_threshold: 50
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+      dependencies:
+        components:
+          - component: cognito/main
+            stack: fnx-ew1-prod
+          - component: kms/main
+            stack: fnx-ew1-prod

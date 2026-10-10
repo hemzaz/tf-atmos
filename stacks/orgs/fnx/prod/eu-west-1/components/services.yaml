@@ -50,8 +50,8 @@ components:
         # non-GDPR stack that joins it.
         global_replication_group_id_suffix: "{{ .atmos_stack }}-cache"
 
-    # The EU pool: the api client only (no dr-migration client: nothing
-    # migrates users out of this pool yet).
+    # The EU pool, as fnx-ue1-prod's: the api client and the dr-migration
+    # client fnx-ec1-prod's user-migration trigger signs in with (EU to EU).
     cognito/main:
       metadata:
         component: cognito
@@ -63,6 +63,18 @@ components:
           api:
             generate_secret: true
             access_token_validity_minutes: 30
+          # DR (as fnx-ue1-prod's): fnx-ec1-prod's
+          # lambda/cognito-user-migration checks a user's password against this
+          # pool with AdminInitiateAuth, which needs a client allowing the
+          # admin password flow and, without a secret, no SECRET_HASH. Admin
+          # flows are IAM-signed calls, so no browser can use this client. The
+          # tokens it issues are discarded: the shortest lifetimes.
+          dr-migration:
+            generate_secret: false
+            explicit_auth_flows: ["ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+            access_token_validity_minutes: 5
+            id_token_validity_minutes: 5
+            refresh_token_validity_days: 1
 
     # api.<EU apex> as a plain alias record in network/main's zone.
     apigateway/main:
