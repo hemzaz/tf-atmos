@@ -58,6 +58,13 @@ components:
         kms_key_id: !terraform.state kms/main .key_arn
         backup_window: "03:00-04:00"
         maintenance_window: "Sun:04:30-Sun:05:30"
+        # Alarm target: the stack's monitoring/main topic, <Environment>-main-alarms,
+        # by name (as github-runners does). A !terraform.state read would be a
+        # cycle: monitoring/main reads this instance (rds_instances) and deploys
+        # in a later layer. The component's own alarms (create_performance_alarms)
+        # stay off: monitoring/main's enable_rds_monitoring alarms cover CPU,
+        # storage and connections on that topic; turned on, they notify it too.
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
         performance_insights_retention_period: 7
         performance_insights_kms_key_id: !terraform.state kms/main .key_arn
         # RDS-managed master user secret (manage_master_user_password is
