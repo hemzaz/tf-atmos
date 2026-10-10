@@ -5,9 +5,9 @@
 # fnx-ue1-prod's main cluster and what runs around it, from the shared prod
 # catalogs (catalog/<component>/prod): eks/main (ew1-main, the name vpc/main's
 # load balancer subnet tags expect), the bastion, the in-VPC runner pool, and
-# the in-cluster external-secrets/main and eks-addons/main. Not yet here:
-# eks-backend-services/main, which comes with rds/main and elasticache/main
-# (the services PR, B5-8), as does monitoring/main. No eks/data: the EU data plane (data VPC, eks/data,
+# the in-cluster external-secrets/main, eks-addons/main and
+# eks-backend-services/main (on services.yaml's rds/main and
+# elasticache/main). No eks/data: the EU data plane (data VPC, eks/data,
 # rds/data) is not in this stack.
 #
 # The endpoint is private, so CI runs the in-cluster instances on this
@@ -29,6 +29,7 @@ import:
   - catalog/ec2/prod
   - catalog/external-secrets/prod
   - catalog/eks-addons/prod
+  - catalog/eks-backend-services/prod
 
 components:
   terraform:
@@ -58,9 +59,9 @@ components:
             cidr_blocks: ["{{ .settings.network.vpc_cidrs.main }}"]
             description: "SSH to VPC resources"
 
-    # rds_managed_secret_access (catalog/external-secrets/prod) already grants
-    # read on rds!* secrets, for eks-backend-services/main; rds/main comes with
-    # it in the services PR (B5-8), so until then it matches no secret.
+    # rds_managed_secret_access (catalog/external-secrets/prod) grants read on
+    # rds!* secrets: rds/main's RDS-managed master user secret, which
+    # eks-backend-services/main reads through this store.
     external-secrets/main:
       metadata:
         component: external-secrets
@@ -74,10 +75,17 @@ components:
         inherits:
           - eks-addons/prod
 
+    # The backend microservices on eks/main, as fnx-ue1-prod's: rds/main and
+    # elasticache/main (services.yaml) through external-secrets/main's store.
+    eks-backend-services/main:
+      metadata:
+        component: eks-backend-services
+        inherits:
+          - eks-backend-services/prod
+
     # Its alarms name the <Environment>-main-alarms topic (ew1-main-alarms,
-    # catalog/github-runners/prod), which only monitoring/main creates; that
-    # comes in the services PR (B5-8), so until then the alarms have no
-    # target. Nothing is applied yet, and B5-8 lands before any deploy.
+    # catalog/github-runners/prod), which monitoring/main (services.yaml)
+    # creates.
     github-runners/main:
       metadata:
         component: github-runners

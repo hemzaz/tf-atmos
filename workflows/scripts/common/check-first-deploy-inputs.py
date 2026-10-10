@@ -243,6 +243,8 @@ def notices() -> list:
         Finding("notice", "repository", "", "the Environment cost-allocation tag activated in the payer "
                 "(management) account's Billing console, or every budget filter matches nothing",
                 "Cost-allocation tags"),
+        Finding("notice", "repository", "", "settings.environment.backend_service_images hold the release "
+                "pipeline's placeholder tags until it publishes the real images", "Backend service images"),
     ]
 
 

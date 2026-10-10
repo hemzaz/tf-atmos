@@ -18,7 +18,14 @@ deployable instance:
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
     each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions.
-EXEMPTIONS lists the (instance pattern, field) pairs that may name one non-EU region.
+And no deployable instance of a stack that is not GDPR-scoped lists a GDPR-scoped stack in
+dependencies.components or names an ARN in an eu- region in its vars: a US read replica
+(replicate_source_db), Global Datastore secondary (global_replication_group_id) or state read
+of an EU instance would copy EU data out (check-dependencies.py makes every cross-stack read a
+listed dependency; a literal ARN needs none). Its *_region vars are not checked: US data
+copied into the EU is fine.
+EXEMPTIONS lists the (instance pattern, field) pairs that may name one region the rules
+above forbid there.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
 
@@ -55,11 +62,13 @@ class Exemption(NamedTuple):
     reason: str
 
 
-# Empty: no EU stack exists yet. The EU DR PR adds
+# Empty: no EU DR stack yet. The EU DR PR (fnx-ec1-prod) adds
 # Exemption("apigateway/*", "vars.health_check_alarm_actions", "us-east-1", ...):
 # Route 53 publishes health-check metrics only in us-east-1, so the health-check
 # alarm (apigateway main.tf) and its SNS topic live there (metadata only, no
-# personal data).
+# personal data). The EU stack's own component creates that topic with a per-resource
+# region = "us-east-1" (like the alarm at apigateway main.tf), never a non-EU stack
+# that reads EU state: the outside-reader rule fails that.
 EXEMPTIONS: tuple = ()
 
 
@@ -88,17 +97,18 @@ def gdpr_scoped(stack: dict) -> bool:
     return any(tagged_gdpr(i) or in_eu(i) for i in instances(stack).values())
 
 
-def region_fields(value: Any, path: str, region_key: bool = False) -> Iterator[tuple[str, str]]:
+def region_fields(value: Any, path: str, region_key: bool = False, keys: bool = True) -> Iterator[tuple[str, str]]:
     """(path, region) for every region under a *_region(s) key and every regional ARN in value.
 
-    A list item reports at its list's path, so an exemption names the var.
+    keys=False reports ARN regions only. A list item reports at its list's path, so an
+    exemption names the var.
     """
     if isinstance(value, dict):
         for key, item in value.items():
-            yield from region_fields(item, f"{path}.{key}", bool(REGION_KEY.search(str(key))))
+            yield from region_fields(item, f"{path}.{key}", keys and bool(REGION_KEY.search(str(key))), keys)
     elif isinstance(value, list):
         for item in value:
-            yield from region_fields(item, path, region_key)
+            yield from region_fields(item, path, region_key, keys)
     elif isinstance(value, str):
         for arn in ARN_REGION.finditer(value):
             yield path, arn.group(1)
@@ -184,7 +194,26 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
     for stack_name in sorted(scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             errors += check_instance(stack_name, name, instance, scoped, exemptions)
+    for stack_name in sorted(set(stacks) - scoped):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            errors += outside_reader_errors(stack_name, name, instance, scoped, exemptions)
     return list(dict.fromkeys(errors))
+
+
+def outside_reader_errors(stack_name: str, name: str, instance: dict, scoped: set, exemptions: tuple) -> list[str]:
+    """A non-GDPR stack's reads of EU data: dependencies on GDPR-scoped stacks and literal eu- ARNs
+    (replicas, Global Datastore secondaries, state reads)."""
+    where = f"{stack_name}: {name}"
+    errors = [
+        f"{where} depends on {dep.get('component')} in {dep['stack']}, which is GDPR-scoped: "
+        "EU data may not be read outside the EU"
+        for dep in (instance.get("dependencies") or {}).get("components") or []
+        if isinstance(dep, dict) and dep.get("stack") in scoped
+    ]
+    for field, region in region_fields(instance.get("vars") or {}, "vars", keys=False):
+        if region.startswith(EU_PREFIX) and not exempt(name, field, region, exemptions):
+            errors.append(f"{where} {field} names an ARN in {region!r}: EU data may not be read outside the EU")
+    return errors
 
 
 def main() -> int:
@@ -197,7 +226,7 @@ def main() -> int:
     print(
         "every GDPR-scoped (gdpr-tagged or eu-) stack is tagged gdpr, names only eu- regions "
         "(vars and their ARNs, settings.tfstate, backends, providers) outside its exemptions "
-        "and depends only on GDPR-scoped stacks"
+        "and depends only on GDPR-scoped stacks, and no other stack depends on one or names an eu- ARN"
     )
     return 0
 

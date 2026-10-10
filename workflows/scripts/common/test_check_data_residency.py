@@ -196,6 +196,52 @@ class DataResidencyTest(unittest.TestCase):
         us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
         self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"security-monitoring/main": us})}), [])
 
+    def test_us_stack_depending_on_an_eu_stack_fails(self):
+        # A US read replica, Global Datastore secondary or state read of an EU
+        # instance copies EU data out: the US stack lists the EU one.
+        replica = instance(region="us-east-1", compliance=US,
+                           deps=[{"component": "rds/main", "stack": "fnx-ew1-prod"}])
+        stacks = {
+            "fnx-ew1-prod": eu_stack(**{"rds/main": instance()}),
+            "fnx-ue1-prod": stack(**{"rds/main": replica}),
+        }
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ue1-prod: rds/main depends on rds/main in fnx-ew1-prod, which is GDPR-scoped: "
+            "EU data may not be read outside the EU",
+        ])
+        replica["dependencies"]["components"] = [{"component": "rds/main", "stack": "fnx-ue1-prod"}]
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_us_stack_depending_on_itself_or_a_us_stack_passes(self):
+        own = instance(region="us-east-1", compliance=US, deps=[{"component": "vpc"}])
+        stacks = {"fnx-ue1-prod": stack(vpc=instance(region="us-east-1", compliance=US), **{"eks/main": own}),
+                  "fnx-ew1-prod": eu_stack()}
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_us_stack_naming_an_eu_arn_fails(self):
+        # A literal EU ARN needs no dependency: the US replica still copies EU data out.
+        replica = instance(region="us-east-1", compliance=US,
+                           replicate_source_db="arn:aws:rds:eu-west-1:123456789012:db:prod-main-db")
+        stacks = {"fnx-ew1-prod": eu_stack(), "fnx-ue1-prod": stack(**{"rds/replica": replica})}
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ue1-prod: rds/replica vars.replicate_source_db names an ARN in 'eu-west-1': "
+            "EU data may not be read outside the EU",
+        ])
+        exemptions = (residency.Exemption("rds/*", "vars.replicate_source_db", "eu-west-1", "test"),)
+        self.assertEqual(residency.check(stacks, exemptions), [])
+
+    def test_us_stack_with_us_arns_and_eu_region_vars_passes(self):
+        # US data copied into the EU is fine: only eu- ARNs count, not *_region vars.
+        us = instance(region="us-east-1", compliance=US, replica_region="eu-west-1",
+                      replicate_source_db="arn:aws:rds:us-east-1:123456789012:db:prod-main-db")
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(), "fnx-ue1-prod": stack(**{"rds/main": us})}), [])
+
+    def test_eu_stack_with_a_us_arn_is_only_flagged_as_outside_the_eu(self):
+        eu = instance(replicate_source_db="arn:aws:rds:us-east-1:123456789012:db:prod-main-db")
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"rds/main": eu}), "fnx-ue1-prod": us_stack()}), [
+            f"fnx-ew1-prod: rds/main vars.replicate_source_db is 'us-east-1', {OUTSIDE}",
+        ])
+
     def test_backup_copy_outside_the_eu_fails(self):
         def backup(region, key_region):
             return instance(enable_cross_region_backup=True, replica_region=region,

@@ -53,7 +53,18 @@ settings:
       budget_monthly_limit: "10000"
     eks_kubernetes_version: "1.36"
     eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
     use_external_secrets: true
+    # eks-backend-services/main's images (compute.yaml), the release
+    # pipeline's, as in fnx-ue1-prod: the same release in both regions.
+    # Placeholders until it publishes them (docs/OPERATIONS.md,
+    # "First-deploy inputs", Backend service images).
+    backend_service_images:
+      api_gateway: "ghcr.io/fnx-platform/api-gateway:1.4.2"
+      platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
+      auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
+      job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
 
 components:
   terraform:

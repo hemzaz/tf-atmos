@@ -11,6 +11,7 @@ its `schemas`/`number_schemas` are not ported).
 - Instance: `cognito/main` in the AWS stacks and `fnx-ue1-local-sandbox` (applied for real by
   `atmos workflow sandbox`). Dev disables deletion protection; both prod pools inherit
   `cognito/prod` (`mfa_configuration: ON`, deletion protection) and set 30-minute access tokens.
+  `fnx-ew1-prod`'s is the EU pool: its own users, no migration from or to a US pool.
 - DR: `fnx-ue2-prod`'s pool has `lambda/cognito-user-migration` as its `user_migration` trigger,
   which checks users against `fnx-ue1-prod`'s pool through that pool's `dr-migration` client
   (`.user_pool_id`, `.user_pool_arn`, `.client_ids["dr-migration"]`); docs/OPERATIONS.md, "Auth

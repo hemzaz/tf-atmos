@@ -20,9 +20,7 @@
 #     reads a US stack;
 #   - state: the EU backend's prod roles (settings.tfstate, fnx-ew1-root),
 #     which trust these CI roles (stacks/orgs/fnx/root/eu-west-1.yaml);
-#   - no lambda uploader yet: the PR adding the Lambda bucket adds it;
-#   - not yet here (the services PR, B5-8): monitoring/main, which owns the
-#     <Environment>-main-alarms topic the runner pool's alarms name.
+#   - no lambda uploader yet: the PR adding the Lambda bucket adds it.
 # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
 # Every finding stays in eu-west-1: no Security Hub cross-region aggregation,
 # no GuardDuty export, the alert topic on kms/main, and no enrichment Lambda

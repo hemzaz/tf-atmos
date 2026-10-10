@@ -13,6 +13,9 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   in the three AWS stacks, read `cognito/main .user_pool_arn` and `lambda/data-processor`
   (`.function_invoke_arn`, `.function_name`).
 - Both depend on `apigateway-account/main` (the account's CloudWatch Logs role; ordering only).
+- `fnx-ue1-prod`'s and `fnx-ew1-prod`'s `apigateway/main` inherit `apigateway/main-prod`
+  (`stacks/catalog/apigateway/prod.yaml`). Only a `route53_failover_type` instance gets a health
+  check, whose alarm is in us-east-1: `fnx-ew1-prod`'s sets none, so nothing of it leaves the EU.
 - Used by: `monitoring` (`.api_name`, `.rest_api_stage_name`).
 - In the `microservices-platform` template, `http_routes` send `ANY /{proxy+}` over the VPC link to
   `alb-controller-ingress-group`'s `https_listener_arn`, with `tls_server_name_to_verify` set.

@@ -13,7 +13,7 @@ import:
   - catalog/ec2/prod
   - catalog/external-secrets/prod
   - catalog/eks-addons/prod
-  - catalog/eks-backend-services/defaults
+  - catalog/eks-backend-services/prod
 
 components:
   terraform:
@@ -205,32 +205,7 @@ components:
       metadata:
         component: eks-backend-services
         inherits:
-          - eks-backend-services/defaults
-      vars:
-        environment: "{{ .settings.context.stage }}"
-        cluster_name: !terraform.state eks/main .eks_cluster_id
-        host: !terraform.state eks/main .eks_cluster_endpoint
-        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
-        cluster_secret_store_name: !terraform.state external-secrets/main .default_cluster_secret_store_name
-        database_secret_arn: !terraform.state rds/main .password_secret_arn
-        database_endpoint: !terraform.state rds/main .instance_endpoint
-        database_name: !terraform.state rds/main .instance_name
-        redis_enabled: true
-        redis_secret_arn: !terraform.state elasticache/main .auth_token_secret_arn
-        redis_host: !terraform.state elasticache/main .primary_endpoint_address
-        redis_port: !terraform.state elasticache/main .port
-        api_gateway_image: '{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}'
-        platform_api_image: '{{ required "settings.environment.backend_service_images.platform_api must be set" .settings.environment.backend_service_images.platform_api }}'
-        auth_service_image: '{{ required "settings.environment.backend_service_images.auth_service must be set" .settings.environment.backend_service_images.auth_service }}'
-        job_processor_image: '{{ required "settings.environment.backend_service_images.job_processor must be set" .settings.environment.backend_service_images.job_processor }}'
-      dependencies:
-        components:
-          - component: eks/main
-          - component: eks-addons/main
-          - component: external-secrets/main
-          - component: rds/main
-          - component: elasticache/main
-
+          - eks-backend-services/prod
 
     # Self-hosted GitHub Actions runners in vpc/main, labelled with this
     # stack's full id, each registered just in time with the owner's GitHub App

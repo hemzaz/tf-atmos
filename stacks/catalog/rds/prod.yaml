@@ -26,3 +26,66 @@ components:
         monitoring_interval: 60
         create_monitoring_role: true
         iam_database_authentication_enabled: true
+
+    # The production main database, shared by fnx-ue1-prod's and
+    # fnx-ew1-prod's rds/main: Multi-AZ (rds/prod) in vpc/main's database
+    # subnets, every key on the stack's kms/main, reachable from eks/main.
+    # monitoring_role_arn pointed at an iam/rds-monitoring instance that has
+    # never existed; the component creates the role itself.
+    rds/main-prod:
+      metadata:
+        component: rds
+        type: abstract
+        inherits:
+          - rds/prod
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "{{ .settings.context.stage }}-main-db"
+        db_name: "productionapp"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.xlarge"
+        allocated_storage: 100
+        max_allocated_storage: 500
+        kms_key_id: !terraform.state kms/main .key_arn
+        backup_window: "03:00-04:00"
+        maintenance_window: "Sun:04:30-Sun:05:30"
+        performance_insights_retention_period: 7
+        performance_insights_kms_key_id: !terraform.state kms/main .key_arn
+        # RDS-managed master user secret (manage_master_user_password is
+        # always true in this component). Without this, the secret sits on
+        # the AWS-managed aws/secretsmanager key -- functionally fine (ESO
+        # needs no grant on an AWS-managed key), but inconsistent with the
+        # CMK posture the rest of this stack's RDS encryption uses.
+        # external-secrets/main's IAM policy already grants kms:Decrypt on
+        # this same key (gated by kms:ViaService=secretsmanager), so no new
+        # grant is needed for eks-backend-services/main's ExternalSecret to
+        # keep reading it.
+        master_user_secret_kms_key_id: !terraform.state kms/main .key_arn
+        enabled_cloudwatch_logs_exports:
+          - "postgresql"
+          - "upgrade"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        family: "postgres14"
+        # No parameters override: the rds defaults already set
+        # shared_preload_libraries, log_min_duration_statement = 1000,
+        # log_statement = ddl (this list used to force "all", which logs every
+        # statement, secrets included) and rds.force_ssl = 1.
+        # Without this, the RDS security group's only ingress rule has an
+        # empty security_groups list and nothing on eks/main can reach the
+        # database (eks-backend-services/main's pods run there).
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+          - component: eks/main
