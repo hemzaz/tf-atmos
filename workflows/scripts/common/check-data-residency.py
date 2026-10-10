@@ -62,8 +62,7 @@ class Exemption(NamedTuple):
     reason: str
 
 
-# Empty: the EU DR stack fnx-ec1-prod has no apigateway/main failover pair yet. The
-# PR adding it adds
+# Empty: fnx-ec1-prod has no apigateway/main failover pair yet; the PR adding it adds
 # Exemption("apigateway/*", "vars.health_check_alarm_actions", "us-east-1", ...):
 # Route 53 publishes health-check metrics only in us-east-1, so the health-check
 # alarm (apigateway main.tf) and its SNS topic live there (metadata only, no

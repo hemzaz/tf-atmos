@@ -8,7 +8,8 @@ names follow Cloud Posse's.
 ## Wiring
 
 - Instance: `cloudtrail/main` in one stack per account (dev, staging, `fnx-ue1-prod`,
-  `fnx-ew1-prod`; `fnx-ue2-prod` shares `fnx-ue1-prod`'s trail, `fnx-ec1-prod` `fnx-ew1-prod`'s); reads `kms/main .key_arn`.
+  `fnx-ew1-prod`; `fnx-ue2-prod` shares `fnx-ue1-prod`'s trail and `fnx-ec1-prod` shares
+  `fnx-ew1-prod`'s); reads `kms/main .key_arn`.
 - Used by: `security-monitoring` (`.cloudtrail_logs_log_group_name`, CIS metric filters and
   alarms).
 
