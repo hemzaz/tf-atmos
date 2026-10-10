@@ -10,7 +10,10 @@ components:
           description: "Manages ACM certificates"
           category: "security"
       vars:
-        # Required: Route53 zone used for DNS validation (set per instance)
+        # Required unless every DNS certificate sets
+        # process_domain_validation_options: false (a DR copy validated by
+        # another state's record): Route53 zone used for DNS validation (set
+        # per instance)
         zone_id: ''
 
         # Certificates; validation_method / wait_for_validation are set per domain

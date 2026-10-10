@@ -80,24 +80,29 @@ components:
             stack: fnx-ue1-prod
 
     # api.<domain>'s certificate in this region (ACM certificates are
-    # regional), validated in fnx-ue1-prod's main zone. Only api.<domain>: a
-    # wildcard here would write the same validation record fnx-ue1-prod's
-    # acm/main owns, and two states would own one record.
+    # regional). Its validation record is fnx-ue1-prod acm/main's: in one
+    # account ACM gives api.<domain> the same validation CNAME as that
+    # certificate's *.api.<domain> SAN. Writing it here too would make two
+    # states own one record, and destroying either would delete it and break
+    # the other's renewal. So this instance writes no record
+    # (process_domain_validation_options: false, no zone_id) and only waits
+    # for validation; fnx-ue1-prod deploys first (CD order), as the
+    # dependency records.
     acm/main:
       metadata:
         component: acm
         inherits:
           - acm/defaults
       vars:
-        zone_id: !terraform.state network/main fnx-ue1-prod .zone_ids.main
         dns_domains:
           api:
             domain_name: "api.{{ .settings.environment.domain_name }}"
             validation_method: "DNS"
             wait_for_validation: true
+            process_domain_validation_options: false
       dependencies:
         components:
-          - component: network/main
+          - component: acm/main
             stack: fnx-ue1-prod
 
     awsconfig/main:

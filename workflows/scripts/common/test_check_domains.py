@@ -323,6 +323,50 @@ class CheckDomainsTest(unittest.TestCase):
         }
         self.assert_result(stacks)
 
+    # A DR certificate with process_domain_validation_options false (the
+    # fnx-ue2-prod acm/main shape) waits on its primary's record.
+    @staticmethod
+    def dr_stacks(primary_sans=(DOMAIN, f"*.api.{DOMAIN}"), depends=True, dr_account="prod"):
+        primary = acm("!terraform.state network/main .zone_ids.main", (f"*.{DOMAIN}", list(primary_sans)))
+        primary["settings"] = {"environment": {"account": "prod"}}
+        dr = instance("acm", {"zone_id": "", "dns_domains": {
+            "api": {"domain_name": f"api.{DOMAIN}", "validation_method": "DNS", "process_domain_validation_options": False},
+        }})
+        dr["settings"] = {"environment": {"account": dr_account}}
+        if depends:
+            dr["dependencies"] = {"components": [{"component": "acm/main", "stack": "s1"}]}
+        stacks = stacks_with(**{"acm/main": primary})
+        stacks["s2"] = {"components": {"terraform": {"acm/main": dr}}}
+        return stacks
+
+    def test_unprocessed_certificate_covered_by_dependency_passes(self):
+        self.assert_result(self.dr_stacks())
+
+    def test_unprocessed_certificate_without_the_san_fails(self):
+        self.assert_result(
+            self.dr_stacks(primary_sans=(DOMAIN,)),
+            errors=["s2: acm/main: certificate api sets process_domain_validation_options: false, but no processed DNS certificate"],
+        )
+
+    def test_unprocessed_certificate_without_the_dependency_fails(self):
+        self.assert_result(
+            self.dr_stacks(depends=False),
+            errors=["certificate api sets process_domain_validation_options: false"],
+        )
+
+    def test_unprocessed_certificate_depending_on_another_account_fails(self):
+        self.assert_result(
+            self.dr_stacks(dr_account="prod-eu"),
+            errors=["depends on s1 acm/main, in account 'prod', not 'prod-eu'", "certificate api sets process_domain_validation_options: false"],
+        )
+
+    def test_unprocessed_certificates_do_not_cover_each_other(self):
+        stacks = self.dr_stacks()
+        primary = stacks["s1"]["components"]["terraform"]["acm/main"]
+        primary["vars"]["dns_domains"]["cert0"]["process_domain_validation_options"] = False
+        primary["dependencies"] = {"components": [{"component": "acm/main", "stack": "s2"}]}
+        self.assert_result(stacks, errors=["s1: acm/main: certificate cert0", "s1: acm/main: certificate cert0", "s1: acm/main: certificate cert0", "s2: acm/main: certificate api"])
+
 
 if __name__ == "__main__":
     unittest.main()

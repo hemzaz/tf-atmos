@@ -201,3 +201,112 @@ run "missing_record_fails_the_precondition" {
 
   expect_failures = [aws_acm_certificate_validation.main]
 }
+
+# A DR certificate validated by another state's record (process_domain_validation_options
+# = false) writes no record of its own, needs no zone_id, and is still waited on
+# without the per-certificate record precondition. A certificate beside it that
+# processes its options keeps its record.
+run "unprocessed_certificate_writes_no_record" {
+  command = plan
+
+  variables {
+    zone_id = ""
+    dns_domains = {
+      api = { domain_name = "api.example.com", process_domain_validation_options = false }
+    }
+  }
+
+  override_resource {
+    target          = aws_acm_certificate.main["api"]
+    override_during = plan
+    values = {
+      status = "ISSUED"
+      domain_validation_options = [
+        { domain_name = "api.example.com", resource_record_name = "_a1.api.example.com.", resource_record_type = "CNAME", resource_record_value = "_v1.acm-validations.aws." },
+      ]
+    }
+  }
+
+  assert {
+    condition     = length(aws_route53_record.validation) == 0
+    error_message = "An unprocessed certificate writes no validation record."
+  }
+
+  assert {
+    condition     = keys(aws_acm_certificate_validation.main) == ["api"]
+    error_message = "An unprocessed certificate is still waited on."
+  }
+
+  assert {
+    condition     = aws_acm_certificate_validation.main["api"].validation_record_fqdns == toset(["_a1.api.example.com."])
+    error_message = "The wait names the certificate's own validation record."
+  }
+}
+
+run "unprocessed_beside_processed" {
+  command = plan
+
+  variables {
+    dns_domains = {
+      api    = { domain_name = "api.example.com", process_domain_validation_options = false }
+      assets = { domain_name = "assets.example.com" }
+    }
+  }
+
+  override_resource {
+    target          = aws_acm_certificate.main["api"]
+    override_during = plan
+    values = {
+      status = "ISSUED"
+      domain_validation_options = [
+        { domain_name = "api.example.com", resource_record_name = "_a1.api.example.com.", resource_record_type = "CNAME", resource_record_value = "_v1.acm-validations.aws." },
+      ]
+    }
+  }
+
+  override_resource {
+    target          = aws_acm_certificate.main["assets"]
+    override_during = plan
+    values = {
+      status = "ISSUED"
+      domain_validation_options = [
+        { domain_name = "assets.example.com", resource_record_name = "_b2.assets.example.com.", resource_record_type = "CNAME", resource_record_value = "_v2.acm-validations.aws." },
+      ]
+    }
+  }
+
+  assert {
+    condition     = keys(aws_route53_record.validation) == ["assets.example.com"]
+    error_message = "Only the processed certificate gets a validation record."
+  }
+
+  assert {
+    condition     = toset(keys(aws_acm_certificate_validation.main)) == toset(["api", "assets"])
+    error_message = "Both certificates are waited on."
+  }
+}
+
+# zone_id may be empty only when no DNS certificate processes its options.
+run "processed_certificate_needs_zone_id" {
+  command = plan
+
+  variables {
+    zone_id = ""
+    dns_domains = {
+      api = { domain_name = "api.example.com" }
+    }
+  }
+
+  override_resource {
+    target          = aws_acm_certificate.main["api"]
+    override_during = plan
+    values = {
+      status = "ISSUED"
+      domain_validation_options = [
+        { domain_name = "api.example.com", resource_record_name = "_a1.api.example.com.", resource_record_type = "CNAME", resource_record_value = "_v1.acm-validations.aws." },
+      ]
+    }
+  }
+
+  expect_failures = [var.zone_id]
+}
