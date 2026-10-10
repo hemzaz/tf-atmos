@@ -33,6 +33,7 @@ import:
   - orgs/fnx/prod/eu-central-1/components/globals
   - orgs/fnx/prod/eu-central-1/components/networking
   - orgs/fnx/prod/eu-central-1/components/security
+  - orgs/fnx/prod/eu-central-1/components/compute
 
 vars:
   region: eu-central-1

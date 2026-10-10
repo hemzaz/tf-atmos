@@ -1,0 +1,240 @@
+---
+# =============================================================================
+# Compute for fnx-ec1-prod (EU DR warm standby)
+# =============================================================================
+# fnx-ue2-prod's compute (orgs/fnx/prod/us-east-2/components/compute.yaml),
+# which this mirrors for fnx-ew1-prod. Warm = the same cluster shape as
+# fnx-ew1-prod's eks/main at its floor: the
+# workers node group runs at 2 nodes, spread over vpc/main's three private
+# subnets (euc1-az1..az3) like every group here, the monitoring and
+# memory-optimized groups at 0, each keeping fnx-ew1-prod's max_group_size.
+# Failover scales them with aws eks update-nodegroup-config, and a PR setting
+# min_group_size/desired_group_size reconciles Terraform afterwards
+# (docs/OPERATIONS.md, "Disaster recovery"). Cloud Posse's eks/cluster node groups take the same
+# min/desired/max inputs. The operator path (bastion) and the in-VPC CI
+# runners are as in fnx-ew1-prod, so the in-cluster components can be applied
+# here on failover. Everything stays in eu-central-1 on fnx-ew1-prod
+# kms/main's replica (ec1-main); the only other stack read is fnx-ew1-prod
+# (EU to EU, check-data-residency.py).
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-central-1/components/globals
+  - catalog/eks/defaults
+  - catalog/github-runners/defaults
+  - catalog/ec2/defaults
+  - catalog/external-secrets/defaults
+  - catalog/eks-addons/defaults
+
+components:
+  terraform:
+    eks/main:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        # The cluster is "<Environment>-<name>": ec1-main.
+        name: main
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
+          - !terraform.state github-runners/main .security_group_id
+        tags:
+          Cluster: "{{ .settings.prefix }}-main"
+          Purpose: "application-workloads"
+          CriticalityLevel: "high"
+          SLA: "99.9"
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        node_group_ebs_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        cluster_log_retention_period: 90
+        node_groups:
+          workers:
+            instance_types: ["m5.xlarge"]
+            desired_group_size: 2
+            min_group_size: 2
+            max_group_size: 12
+            kubernetes_labels:
+              role: worker
+              environment: "{{ .settings.context.stage }}"
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+            subnet_ids: !terraform.state vpc/main .private_subnet_ids
+            tags:
+              NodeGroup: workers
+          monitoring:
+            instance_types: ["m5.large"]
+            desired_group_size: 0
+            min_group_size: 0
+            max_group_size: 4
+            kubernetes_labels:
+              role: monitoring
+            kubernetes_taints:
+              - key: dedicated
+                value: monitoring
+                effect: "NO_SCHEDULE"
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 200
+          memory-optimized:
+            instance_types: ["r5.xlarge"]
+            desired_group_size: 0
+            min_group_size: 0
+            max_group_size: 6
+            kubernetes_labels:
+              role: memory-optimized
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: iam/ci
+          - component: ec2/bastion
+          - component: github-runners/main
+
+    ec2/bastion:
+      metadata:
+        component: ec2
+        inherits:
+          - ec2
+      vars:
+        name: bastion
+        vpc_id: !terraform.state vpc/main .vpc_id
+        ssh_key_secret_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        disable_api_termination: true
+        tags:
+          Role: bastion
+          Access: restricted
+          CriticalityLevel: "high"
+        metadata_http_tokens_required: true
+        metadata_http_put_response_hop_limit: 1
+        instance_type: "t3.small"
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
+        ebs_optimized: true
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal VPN only"
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["{{ .settings.network.vpc_cidrs.main }}"]
+            description: "SSH to VPC resources"
+        monitoring: true
+        root_volume_type: "gp3"
+        root_volume_size: 20
+        root_block_device_encrypted: true
+        root_block_device_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        delete_on_termination: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+
+    external-secrets/main:
+      metadata:
+        component: external-secrets
+        inherits:
+          - external-secrets/defaults
+      vars:
+        enabled: true
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+        kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        namespace: "external-secrets"
+        service_account_name: "external-secrets"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
+        rds_managed_secret_access: true
+        allowed_namespaces: ["backend-services"]
+      dependencies:
+        components:
+          - component: eks/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+
+    eks-addons/main:
+      metadata:
+        component: eks-addons
+        inherits:
+          - eks-addons
+      vars:
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+        clusters:
+          main:
+            enable_aws_load_balancer_controller: true
+            # Scales the warm node groups up from their floor on failover load.
+            enable_cluster_autoscaler: true
+            enable_metrics_server: true
+            # No external-dns: the public name moves by the failover record
+            # (apigateway/main), not by this cluster's ingresses.
+            enable_external_dns: false
+            enable_cert_manager: true
+            # cert-manager's DNS01 zone: the EU apex zone, fnx-ew1-prod's
+            # network/main (Route 53 zones are global).
+            dns_zone_ids: !terraform.state network/main fnx-ew1-prod '.zone_ids.main | [.]'
+            enable_container_insights: true
+            container_insights_kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+            container_insights_log_retention_days: 90
+            vpc_id: !terraform.state vpc/main .vpc_id
+            cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+      dependencies:
+        components:
+          - component: eks/main
+          - component: vpc/main
+          - component: network/main
+            stack: fnx-ew1-prod
+          - component: kms/main
+            stack: fnx-ew1-prod
+
+    github-runners/main:
+      metadata:
+        component: github-runners
+        inherits:
+          - github-runners/defaults
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        alarm_sns_topic_arns:
+          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: vpc/main

@@ -34,6 +34,7 @@ import:
   - catalog/inspector2/defaults
   - catalog/apigateway-account/defaults
   - catalog/backup/prod
+  - catalog/acm/defaults
 
 components:
   terraform:
@@ -83,6 +84,33 @@ components:
             stack: "{{ .settings.tfstate.stack }}"
           # The OIDC provider this stack's roles trust.
           - component: iam/ci
+            stack: fnx-ew1-prod
+
+    # api.<EU apex>'s certificate in this region (ACM certificates are
+    # regional), as fnx-ue2-prod's acm/main. Its validation record is
+    # fnx-ew1-prod acm/main's: in one account (prod-eu) ACM gives
+    # api.<EU apex> the same validation CNAME as that certificate's
+    # *.api.<EU apex> SAN. Writing it here too would make two states own one
+    # record, and destroying either would delete it and break the other's
+    # renewal. So this instance writes no record
+    # (process_domain_validation_options: false, no zone_id) and only waits
+    # for validation; fnx-ew1-prod deploys first (CD order), as the
+    # dependency records (check-domains.py checks that it carries the name).
+    acm/main:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        dns_domains:
+          api:
+            domain_name: "api.{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+            process_domain_validation_options: false
+      dependencies:
+        components:
+          - component: acm/main
             stack: fnx-ew1-prod
 
     awsconfig/main:
