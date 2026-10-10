@@ -57,7 +57,7 @@ workflows:
       # stack about to be deployed (or the management account and the backend's
       # access_roles, for a root stack) still holds a placeholder account ID,
       # organization ID, example domain or alert address, an empty EKS admin
-      # role or an unset prod RDS alarm target, or breaks the account model
+      # role or a placeholder backend service image, or breaks the account model
       # (workload account = management account; two stages in one account).
       # docs/OPERATIONS.md#first-deploy-inputs. lint runs it warn-only.
       - &preflight-targets

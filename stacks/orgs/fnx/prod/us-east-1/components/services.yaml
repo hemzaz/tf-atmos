@@ -195,6 +195,9 @@ components:
         allocated_storage: 200
         max_allocated_storage: 1000
         kms_key_id: !terraform.state kms/main .key_arn
+        # monitoring/data's ue1-data-alarms, by name: it reads this instance
+        # and deploys later (catalog/rds/prod rds/main-prod).
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-data-alarms"
         create_read_replica: true
         read_replica_instance_class: "db.r5.xlarge"
         vpc_id: !terraform.state vpc/services .vpc_id

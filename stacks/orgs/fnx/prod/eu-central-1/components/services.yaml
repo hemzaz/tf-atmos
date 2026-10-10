@@ -66,6 +66,9 @@ components:
         kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
         backup_window: "03:00-04:00"
         maintenance_window: "Sun:04:30-Sun:05:30"
+        # monitoring/main's ec1-main-alarms, by name: it reads this instance
+        # and deploys later (catalog/rds/prod rds/main-prod).
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
         performance_insights_retention_period: 7
         performance_insights_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
         master_user_secret_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
