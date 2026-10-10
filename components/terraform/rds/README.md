@@ -9,8 +9,8 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
 - Instances: `rds/main` in the three AWS stacks and `fnx-ue1-local-localemu` (reads `vpc/main`
   subnets; in the AWS stacks it also admits `eks/main .eks_cluster_managed_security_group_id`);
   `rds/data` in the three AWS stacks (reads `vpc/services`). Only prod's instances read `kms/main .key_arn`;
-  dev and staging use AWS-managed keys. `rds/main` also in `fnx-ue2-prod` (a cross-region replica)
-  and `fnx-ew1-prod`; `fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `rds/main-prod`
+  dev and staging use AWS-managed keys. `rds/main` also in `fnx-ue2-prod` and `fnx-ec1-prod` (cross-region
+  replicas of `fnx-ue1-prod`'s and `fnx-ew1-prod`'s) and `fnx-ew1-prod`; `fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `rds/main-prod`
   (`stacks/catalog/rds/prod.yaml`). `check-data-residency.py` fails a stack outside the EU that
   depends on an EU one or names an `eu-` ARN in its vars (e.g. `replicate_source_db`), so no US
   replica can read an EU instance.

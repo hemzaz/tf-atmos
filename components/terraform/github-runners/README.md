@@ -53,7 +53,7 @@ is useless, and no reusable registration credential exists anywhere.
   (`github-runners/main`; `fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `github-runners/prod`,
   `stacks/catalog/github-runners/prod.yaml`). CI starts each pool in its own region, and the pool
   keeps its JIT configuration and GitHub App key in that region's SSM (`fnx-ew1-prod`'s in
-  eu-west-1).
+  eu-west-1, `fnx-ec1-prod`'s in eu-central-1).
   - `vpc_id` and `subnet_ids` come from the vpc instance's private subnets, which need a NAT path
     to GitHub. They replace Cloud Posse's remote-state read.
   - `runner_labels` is the stack's full id, its name `<tenant>-<environment>-<stage>[-<name>]`

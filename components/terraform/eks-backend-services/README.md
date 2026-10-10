@@ -7,8 +7,9 @@ Redis credentials, and optional Prometheus `ServiceMonitor`s.
 
 ## Wiring
 
-- Instance: `eks-backend-services/main` in the three AWS stacks, `fnx-ue2-prod` (`enabled: false`
-  until failover) and `fnx-ew1-prod`, on `eks/main`, in the `services` layer; `fnx-ue1-prod`'s and
+- Instance: `eks-backend-services/main` in the three AWS stacks, `fnx-ue2-prod` and
+  `fnx-ec1-prod` (`enabled: false` until failover) and `fnx-ew1-prod`, on `eks/main`, in the
+  `services` layer; `fnx-ue1-prod`'s and
   `fnx-ew1-prod`'s inherit `eks-backend-services/prod`
   (`stacks/catalog/eks-backend-services/prod.yaml`).
 - Reads: `eks/main` (cluster ID, endpoint, CA), `external-secrets/main

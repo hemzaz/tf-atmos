@@ -15,13 +15,13 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
 | Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex) |
-| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml` (`settings.environment.monitoring`, which `backup/main`'s `notification_emails` and `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach them only through `security-monitoring/main`'s topic, whose `security_email_subscriptions` is empty |
+| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml` (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails and `fnx-ew1-prod` `apigateway/main`'s `health_check_alarm_email_subscriptions` (its us-east-1 health check topic) read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach them only through `security-monitoring/main`'s topic, whose `security_email_subscriptions` is empty |
 | Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in `components/globals.yaml` (dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s) |
 | Cost-allocation tags | the `Environment` tag activated as a cost-allocation tag in the payer (management) account's Billing console; until then every budget's `Environment` filter matches nothing and the budget never alerts |
-| Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main` (`fnx-ue1-prod`, `fnx-ew1-prod`): unset, so its CloudWatch alarms have no action |
+| Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main` (`fnx-ue1-prod`, `fnx-ew1-prod` and their DR replicas `fnx-ue2-prod`, `fnx-ec1-prod`): unset, so its CloudWatch alarms have no action |
 | Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on each stack's `iam/ci` (`components/security.yaml`), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
-| GitHub App | the self-hosted CI runners' just-in-time registration: a GitHub App installed on this repository (Administration read/write); its IDs in `settings.github_app` (`app_id`, `installation_id`; `0` until set) in `stacks/orgs/fnx/_defaults.yaml`; and, after each runner pool's first apply, its private key in that account's SSM, in the pool's region (`fnx-ew1-prod`'s: `prod-eu`, eu-west-1), at the pool's `.app_private_key_parameter_name`, encrypted with the pool's own key (`.app_key_kms_key_alias`): see `components/terraform/github-runners/README.md`. The repository is public: turn on Settings → Actions → General → "Require approval for all outside collaborators" |
+| GitHub App | the self-hosted CI runners' just-in-time registration: a GitHub App installed on this repository (Administration read/write); its IDs in `settings.github_app` (`app_id`, `installation_id`; `0` until set) in `stacks/orgs/fnx/_defaults.yaml`; and, after each runner pool's first apply, its private key in that account's SSM, in the pool's region (`fnx-ew1-prod`'s: `prod-eu`, eu-west-1; `fnx-ec1-prod`'s: `prod-eu`, eu-central-1), at the pool's `.app_private_key_parameter_name`, encrypted with the pool's own key (`.app_key_kms_key_alias`): see `components/terraform/github-runners/README.md`. The repository is public: turn on Settings → Actions → General → "Require approval for all outside collaborators" |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
 | EKS cluster admins | `map_additional_iam_roles` in each stack's `components/globals.yaml`: see [In-cluster components](#in-cluster-components). While empty, nobody can apply the in-cluster components. `fnx-ew1-prod`'s and `fnx-ec1-prod`'s roles are in the `prod-eu` account and must also be in `backend/main`'s `access_roles.prod_write` `allowed_principal_arns` in `stacks/orgs/fnx/root/eu-west-1.yaml` (`fnx-ew1-root`) |
 | Backend service images | `settings.environment.backend_service_images` in each stack's `components/globals.yaml` (`eks-backend-services/main`): the release pipeline's `ghcr.io/fnx-platform/*:1.4.2` placeholders until it publishes real ones; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s |
@@ -519,12 +519,28 @@ The EU pair is built the same way: `fnx-ew1-prod` (eu-west-1) fails over to `fnx
 (eu-central-1), a warm standby in the same `prod-eu` account, so EU data never leaves the EU
 (`check-data-residency.py`). Its state is in the EU backend (`fnx-ew1-root`, eu-west-1) and its
 `settings.dr.standby_of: fnx-ew1-prod` has CD deploy it right after `fnx-ew1-prod`, whose state it
-reads (`kms/main`, `iam/ci`). Today it runs the foundation only, as `fnx-ue2-prod` does: `vpc/main`
-(10.32.0.0/16), `iam/ci`, Config without global resources, GuardDuty, Security Hub, Inspector,
-finding routing and `backup/main` (its own vault; the copy target of `fnx-ew1-prod`'s backups is
-`ew1-backup-replica`), all on `fnx-ew1-prod` `kms/main`'s replica, alias `ec1-main`. Its compute,
-services and failover steps are not in place yet: until they are, an eu-west-1 outage is recovered
-from those backup copies.
+reads (`kms/main`, `iam/ci`, `acm/main`, `network/main`, `rds/main`, `elasticache/main`,
+`cognito/main`). The table above holds for it with ec1 for ue2: the replica key is alias
+`ec1-main`, `rds/main` replicates `fnx-ew1-prod`'s, `elasticache/main` is the secondary of
+`fnx-ew1-prod`'s Global Datastore (`fnx-ew1-prod-cache`), `cognito/main` migrates users from
+`fnx-ew1-prod`'s pool (its `dr-migration` client), `acm/main` waits on `fnx-ew1-prod`'s
+`*.api.<EU apex>` validation record, and `apigateway/main` is the SECONDARY of `api.<EU apex>`.
+Neither EU stack has `rds/data`, `vpc/services` or `eks/data`; `fnx-ew1-prod`'s backups are copied
+to `ew1-backup-replica` in eu-central-1.
+
+The one part outside the EU is Route 53's health checking of `api.<EU apex>` (owner decision B5,
+metadata and probes only, listed in `check-data-residency.py` EXEMPTIONS). The checks call from
+eu-west-1, us-east-1 and ap-southeast-1: Route 53 needs three checker regions and eu-west-1 is the
+only EU one. Both `HealthCheckStatus` alarms are in us-east-1 on
+`ew1-prod-main-api-health-check-alarms`, a topic `fnx-ew1-prod`'s `apigateway/main` creates there
+on its own us-east-1 key (`create_health_check_alarm_topic`, subscribing the stack's critical
+alert addresses), never a US stack. As in the US, a us-east-1 outage silences those alarms, not
+the failover; `fnx-ec1-prod`'s API alarms on `ec1-main-alarms` (eu-central-1) are the in-region
+signal. The failover and failback steps below name the US pair: the EU pair runs the same
+commands with its names and regions (`ec1-prod-main-db`, `ec1-prod-cache`, `ec1-main`,
+`ec1-cognito-user-migration`, eu-central-1 for us-east-2, eu-west-1 for us-east-1). The
+`dr-failover` and `dr-failback` workflows print the US pair's steps, and `dr-status` takes any
+`STACK` but defaults `DR_REGION` to us-east-2 (set `DR_REGION=eu-central-1` for `fnx-ew1-prod`).
 
 **Failover** (`STACK=fnx-ue1-prod atmos workflow dr-failover -f disaster-recovery` prints these
 steps; operator only, never from CI). It is CLI-first: a us-east-1 outage takes the state bucket

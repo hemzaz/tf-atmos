@@ -13,7 +13,8 @@ its `schemas`/`number_schemas` are not ported).
   `cognito/prod` (`mfa_configuration: ON`, deletion protection) and set 30-minute access tokens.
   `fnx-ew1-prod`'s is the EU pool: its own users, no migration from or to a US pool.
 - DR: `fnx-ue2-prod`'s pool has `lambda/cognito-user-migration` as its `user_migration` trigger,
-  which checks users against `fnx-ue1-prod`'s pool through that pool's `dr-migration` client
+  which checks users against `fnx-ue1-prod`'s pool through that pool's `dr-migration` client;
+  `fnx-ec1-prod`'s does the same against `fnx-ew1-prod`'s (EU to EU)
   (`.user_pool_id`, `.user_pool_arn`, `.client_ids["dr-migration"]`); docs/OPERATIONS.md, "Auth
   during failover".
 - Used by: `apigateway/main` and `apigateway/data` (`.user_pool_arn`), each region's own pool.

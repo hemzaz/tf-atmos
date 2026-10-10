@@ -23,8 +23,9 @@
 # does apigateway-account (security: the account's CloudWatch role REST stage
 # logging needs; apigateway lists it in dependencies.components only), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
-# lambda/cognito-user-migration (connectivity: it reads only fnx-ue1-prod) precedes
-# fnx-ue2-prod cognito/main (security), whose lambda_config reads its ARN.
+# lambda/cognito-user-migration (connectivity: it reads only its primary, fnx-ue1-prod or
+# fnx-ew1-prod) precedes the DR stack's cognito/main (security: fnx-ue2-prod, fnx-ec1-prod),
+# whose lambda_config reads its ARN.
 # network/main writes the NS record delegating network/services' zone from
 # its own zone_name_servers, so network/services has a dns-zones layer before
 # dns. acm validates its certificates in the dns instances' zones (zone_ids), so it
