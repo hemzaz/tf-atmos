@@ -525,3 +525,64 @@ run "rejects_generate_and_static_together" {
 
   expect_failures = [var.secrets]
 }
+
+run "replica_regions_replicate_every_secret_on_its_region_key" {
+  command = plan
+
+  variables {
+    secrets = {
+      db  = { name = "db", generate_random_password = true }
+      tls = { name = "tls" }
+    }
+    replica_regions = [{
+      region     = "us-east-2"
+      kms_key_id = "arn:aws:kms:us-east-2:123456789012:key/mrk-00000000000000000000000000000000"
+    }]
+  }
+
+  assert {
+    condition     = alltrue([for s in aws_secretsmanager_secret.this : length(s.replica) == 1 && one(s.replica).region == "us-east-2" && one(s.replica).kms_key_id == "arn:aws:kms:us-east-2:123456789012:key/mrk-00000000000000000000000000000000"])
+    error_message = "Every secret gets one replica in us-east-2 on that region's key."
+  }
+}
+
+run "no_replica_regions_means_no_replicas" {
+  command = plan
+
+  variables {
+    secrets = { tls = { name = "tls" } }
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret.this["tls"].replica) == 0
+    error_message = "Without replica_regions a secret has no replica."
+  }
+}
+
+run "rejects_a_replica_key_from_another_region" {
+  command = plan
+
+  variables {
+    secrets = { tls = { name = "tls" } }
+    replica_regions = [{
+      region     = "us-east-2"
+      kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/mrk-00000000000000000000000000000000"
+    }]
+  }
+
+  expect_failures = [var.replica_regions]
+}
+
+run "rejects_the_primary_region_as_a_replica" {
+  command = plan
+
+  variables {
+    secrets = { tls = { name = "tls" } }
+    replica_regions = [{
+      region     = "us-east-1"
+      kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/mrk-00000000000000000000000000000000"
+    }]
+  }
+
+  expect_failures = [var.replica_regions]
+}

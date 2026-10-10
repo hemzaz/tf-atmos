@@ -510,6 +510,7 @@ What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
 | `elasticache/main` | Global Datastore secondary, 2 nodes | promote (CLI) |
 | `eks/main` | `workers` at 2 nodes, `monitoring`/`memory-optimized` at 0 | scale up (CLI) |
 | `eks-backend-services/main` | `metadata.enabled: false` | deploy |
+| `secretsmanager/app`, `/infra` | not run: `fnx-ue1-prod`'s replicate every secret to us-east-2 on `ue2-main` (`replica_regions`), read there by `external-secrets/main` under the same names | nothing; a replica is read-only until `aws secretsmanager stop-replication-to-replica` (secretsmanager README) |
 | `apigateway/main` | SECONDARY half of `api.<domain>`'s Route 53 failover pair | automatic |
 | `rds/data`, `vpc/services`, `eks/data` | not run | restore `rds/data` from backup copies |
 | `cognito/main` | its own pool, filled from `fnx-ue1-prod`'s by `lambda/cognito-user-migration` on each user's first sign-in or reset | nothing (see [Auth during failover](#auth-during-failover)) |
@@ -541,7 +542,8 @@ reads (`kms/main`, `iam/ci`, `acm/main`, `network/main`, `rds/main`, `elasticach
 `ec1-main`, `rds/main` replicates `fnx-ew1-prod`'s, `elasticache/main` is the secondary of
 `fnx-ew1-prod`'s Global Datastore (`fnx-ew1-prod-cache`), `cognito/main` migrates users from
 `fnx-ew1-prod`'s pool (its `dr-migration` client), `acm/main` waits on `fnx-ew1-prod`'s
-`*.api.<EU apex>` validation record, and `apigateway/main` is the SECONDARY of `api.<EU apex>`.
+`*.api.<EU apex>` validation record, `apigateway/main` is the SECONDARY of `api.<EU apex>`, and
+`fnx-ew1-prod`'s `secretsmanager/app` and `/infra` replicate to eu-central-1 on `ec1-main`.
 Neither EU stack has `rds/data`, `vpc/services` or `eks/data`; `fnx-ew1-prod`'s backups are copied
 to `ew1-backup-replica` in eu-central-1.
 

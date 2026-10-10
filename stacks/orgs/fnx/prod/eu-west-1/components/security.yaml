@@ -222,14 +222,25 @@ components:
           - component: network/main
 
     # The prod secret sets (catalog/secretsmanager/prod), in this region on
-    # kms/main. No replica regions: the values never leave eu-west-1.
+    # kms/main, replicated to the EU DR region only (fnx-ec1-prod,
+    # eu-central-1) on kms/main's replica key there: the values never leave
+    # the EU (check-data-residency.py checks replica_regions), and fnx-ec1-prod's
+    # external-secrets stores read the same names during an eu-west-1 outage.
     secretsmanager/app:
       metadata:
         component: secretsmanager
         inherits:
           - secretsmanager/app-prod
+      vars:
+        replica_regions:
+          - region: eu-central-1
+            kms_key_id: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'
     secretsmanager/infra:
       metadata:
         component: secretsmanager
         inherits:
           - secretsmanager/infra-prod
+      vars:
+        replica_regions:
+          - region: eu-central-1
+            kms_key_id: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'
