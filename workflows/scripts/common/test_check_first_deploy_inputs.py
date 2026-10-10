@@ -62,7 +62,7 @@ class CleanTest(unittest.TestCase):
 
     def test_repository_notices_are_always_printed(self):
         rows = {f.row for f in preflight.check(clean()) if f.level == "notice"}
-        self.assertEqual(rows, {"Lambda packages", "GitHub", "Deploy tags", "GitHub App", "Budgets", "Cost-allocation tags", "Backend service images"})
+        self.assertEqual(rows, {"Lambda packages", "GitHub", "Deploy tags", "GitHub App", "Cost-allocation tags"})
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -182,14 +182,19 @@ class PlaceholderTest(unittest.TestCase):
             "component": "github-runners", "github_app_id": "123456", "github_app_installation_id": "7654321"})
         self.assertEqual(errors(stacks), [])
 
-    def test_prod_rds_without_alarm_target(self):
+    def test_placeholder_backend_service_images(self):
         stacks = clean()
-        stacks["fnx-ue1-prod"] = stack("prod", "444444444444", rds_main={"component": "rds"})
-        self.assert_one(stacks, "fnx-ue1-prod", "rds_main vars.sns_topic_arn", "Prod RDS alarm target")
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", {"backend_service_images": {
+            "api_gateway": "ghcr.io/fnx-platform/api-gateway:1.4.2",
+            "platform_api": "123456789.dkr.ecr.us-east-1.amazonaws.com/platform-api:2.0.0"}})
+        self.assert_one(stacks, "fnx-ue1-dev", "settings.environment.backend_service_images.api_gateway",
+                        "Backend service images")
 
-    def test_non_prod_rds_without_alarm_target_passes(self):
+    def test_real_backend_service_images_pass(self):
         stacks = clean()
-        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", rds_main={"component": "rds"})
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", {"backend_service_images": {
+            "api_gateway": "ghcr.io/fnx-platform/api-gateway:1.5.0",
+            "platform_api": "ghcr.io/acme/platform-api:1.4.2"}})
         self.assertEqual(errors(stacks), [])
 
     def test_disabled_and_abstract_instances_are_skipped(self):
@@ -203,6 +208,37 @@ class PlaceholderTest(unittest.TestCase):
         stacks = clean()
         stacks["fnx-ue1-dev"] = stack("dev", "123456789012", a={}, b={}, c={})
         self.assertEqual(len(errors(stacks)), 1)
+
+
+class StackNoticeTest(unittest.TestCase):
+    @staticmethod
+    def notices(stacks, stack_name):
+        return [f for f in preflight.check(stacks) if f.level == "notice" and f.stack == stack_name]
+
+    def test_empty_security_email_subscriptions_is_a_notice(self):
+        stacks = clean()
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", security_monitoring_main={
+            "component": "security-monitoring", "security_email_subscriptions": []})
+        found = self.notices(stacks, "fnx-ue1-dev")
+        self.assertEqual([(f.key, f.row) for f in found],
+                         [("security_monitoring_main vars.security_email_subscriptions", "Alert recipients")])
+        self.assertEqual(errors(stacks), [])
+
+    def test_security_email_subscriptions_set_or_instance_disabled_has_no_notice(self):
+        stacks = clean()
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", sm_set={
+            "component": "security-monitoring", "security_email_subscriptions": ["sec@acme.io"]}, sm_off={
+            "component": "security-monitoring", "enabled": False, "security_email_subscriptions": []})
+        self.assertEqual(self.notices(stacks, "fnx-ue1-dev"), [])
+
+    def test_budget_notice_names_the_amount_and_the_tag_per_stack(self):
+        stacks = clean()
+        stacks["fnx-ew1-prod"] = stack("prod", "555555555555", cost_main={
+            "component": "cost-optimization", "monthly_budget_limit": "10000", "tags": {"Environment": "ew1"}})
+        found = self.notices(stacks, "fnx-ew1-prod")
+        self.assertEqual([(f.key, f.row) for f in found], [("cost_main vars.monthly_budget_limit", "Budgets")])
+        self.assertIn("10000 USD a month, counting only spend tagged Environment=ew1", found[0].detail)
+        self.assertEqual(self.notices(clean(), "fnx-ue1-prod"), [])
 
 
 class ExemptStagesTest(unittest.TestCase):
@@ -284,7 +320,7 @@ class AccountModelTest(unittest.TestCase):
 class OnlyStacksTest(unittest.TestCase):
     def test_only_limits_the_per_stack_checks(self):
         stacks = clean()
-        stacks["fnx-ue1-prod"] = stack("prod", "123456789012", rds_main={"component": "rds"})
+        stacks["fnx-ue1-prod"] = stack("prod", "123456789012", eks_main={"component": "eks"})
         self.assertEqual(errors(stacks, ["fnx-ue1-dev"]), [])
         self.assertEqual(len(errors(stacks, ["fnx-ue1-prod"])), 2)
 
@@ -330,7 +366,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(out.count("\nWARN ") + out.startswith("WARN "), preflight.WARN_LIMIT)
         self.assertNotIn("NOTICE repository", out)
-        self.assertIn("... 5 more WARN and 7 NOTICE line(s) not shown; see them all with --warn --all", out)
+        self.assertIn("... 5 more WARN and 5 NOTICE line(s) not shown; see them all with --warn --all", out)
         self.assertIn(f"By row: Alert recipients {preflight.WARN_LIMIT + 5}", out)
 
     def test_warn_all_and_fatal_mode_show_everything(self):
@@ -338,7 +374,7 @@ class MainTest(unittest.TestCase):
             with self.subTest(argv=argv):
                 _, out, _ = self.run_main(self.many_placeholder_stacks(), *argv)
                 self.assertEqual(out.count(f"{label} fnx-ue1-dev"), preflight.WARN_LIMIT + 5)
-                self.assertEqual(out.count("NOTICE repository"), 7)
+                self.assertEqual(out.count("NOTICE repository"), 5)
                 self.assertNotIn("not shown", out)
 
     def test_clean_passes(self):
