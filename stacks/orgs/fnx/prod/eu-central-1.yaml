@@ -1,0 +1,61 @@
+---
+# =============================================================================
+# fnx-ec1-prod: the prod-eu account's eu-central-1 stack, the EU DR warm standby
+# =============================================================================
+# fnx-ew1-prod's DR stack, as fnx-ue2-prod is fnx-ue1-prod's
+# (stacks/orgs/fnx/prod/us-east-2.yaml): a warm standby in eu-central-1, the
+# EU DR region, so EU personal data never leaves the EU (GDPR, owner decision
+# B5). Same account as fnx-ew1-prod (prod-eu), so its names carry the ec1
+# prefix (settings.prefix) and the account's singletons stay in fnx-ew1-prod:
+# the GitHub OIDC provider, the Auto Scaling service-linked role, the
+# multi-region CloudTrail trail, AWS Config's global-resource recording and
+# the account budget. Tagged Compliance "pci-sox-gdpr" (components/globals.yaml);
+# check-data-residency.py fails it if it names a non-EU region or depends on a
+# US stack.
+#
+# Its state is in the EU backend, fnx-ew1-root's backend/main (bucket
+# fnx-ew1-terraform-state in eu-west-1), through that backend's prod roles
+# (stacks/orgs/fnx/root/eu-west-1.yaml), as fnx-ue2-prod's is in us-east-1.
+#
+# Today the foundation: CI roles (iam/ci), networking (vpc/main), the
+# regional security services (GuardDuty, Security Hub, Config, Inspector,
+# finding routing, API Gateway account settings) and this region's backup
+# vault, all on fnx-ew1-prod kms/main's multi-region replica (alias ec1-main).
+# Compute and services (eks/main, rds/main, elasticache/main, cognito/main,
+# apigateway/main) and the failover runbook follow.
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  # Region mixin: region eu-central-1, environment (region code) ec1
+  - mixins/region/eu-central-1
+  - orgs/fnx/prod/_defaults
+  - orgs/fnx/prod/eu-central-1/components/globals
+  - orgs/fnx/prod/eu-central-1/components/networking
+  - orgs/fnx/prod/eu-central-1/components/security
+
+vars:
+  region: eu-central-1
+
+settings:
+  # DR standby of fnx-ew1-prod, whose state it reads: CD deploys it right after
+  # that stack, whatever the names (workflows/scripts/common/ci-stacks.py).
+  dr:
+    standby_of: fnx-ew1-prod
+  environment:
+    # The EU prod account, fnx-ew1-prod's (stacks/orgs/fnx/_defaults.yaml
+    # account map): prod/_defaults derives account_id from this key.
+    account: prod-eu
+  context:
+    tenant: fnx
+    stage: prod
+  # The EU backend, as in fnx-ew1-prod (overriding every settings.tfstate key,
+  # literal .settings.context.* references only, see
+  # stacks/orgs/fnx/_defaults.yaml): the state stays in eu-west-1 whatever
+  # this stack's region, replicated to eu-central-1.
+  tfstate:
+    region: eu-west-1
+    replica_region: eu-central-1
+    bucket: '{{ .settings.context.tenant }}-ew1-terraform-state'
+    role_prefix: '{{ .settings.context.tenant }}-ew1-terraform-backend'
+    stack: '{{ .settings.context.tenant }}-ew1-root'

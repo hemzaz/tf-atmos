@@ -8,8 +8,8 @@ in, since every stack is its own account.
 ## Wiring
 
 - Instance: `awsconfig/main` in every AWS stack; reads `kms/main .key_arn`. Global types are
-  recorded by one stack per account (`fnx-ue2-prod` sets `include_global_resource_types: false`;
-  `fnx-ew1-prod` records them for `prod-eu`).
+  recorded by one stack per account (`fnx-ue2-prod` and `fnx-ec1-prod` set
+  `include_global_resource_types: false`; `fnx-ew1-prod` records them for `prod-eu`).
 - Used by: `securityhub` (dependency, ordering only). `harden.sh` deploys it.
 
 ## Notes

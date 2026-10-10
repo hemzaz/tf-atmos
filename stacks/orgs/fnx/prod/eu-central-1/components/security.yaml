@@ -1,0 +1,201 @@
+---
+# =============================================================================
+# Security for fnx-ec1-prod (EU DR warm standby)
+# =============================================================================
+# As fnx-ue2-prod is to fnx-ue1-prod (orgs/fnx/prod/us-east-2/components/
+# security.yaml, which this mirrors): regional services run here as in
+# fnx-ew1-prod (GuardDuty, Security Hub, AWS Config, Inspector, finding
+# routing, backups); account-wide ones do not:
+#   - KMS: no kms/main here. This region's key is fnx-ew1-prod kms/main's
+#     multi-region replica (replica_keys["eu-central-1"], alias ec1-main),
+#     read cross-stack wherever fnx-ew1-prod reads kms/main.
+#   - no iam/main: the account's cross-account role and the Auto Scaling
+#     service-linked role are fnx-ew1-prod's iam/main.
+#   - iam/ci trusts the account's GitHub OIDC provider, created by
+#     fnx-ew1-prod's iam/ci.
+#   - no cloudtrail/main: fnx-ew1-prod's trail is multi-region and records
+#     this region too, into eu-west-1; its CIS metric filters run there.
+#   - awsconfig/main records this region's resources only
+#     (include_global_resource_types: false; fnx-ew1-prod records IAM).
+# Every finding stays in eu-central-1: no Security Hub cross-region
+# aggregation, no GuardDuty export, the alert topic on this region's key, and
+# no enrichment Lambda (check-data-residency.py).
+# Every read of fnx-ew1-prod is EU to EU; nothing outside the EU reads this stack.
+# =============================================================================
+
+# catalog/iam/defaults comes through globals, as in fnx-ew1-prod: importing it
+# again here, after globals, would let catalog/_base's tags (Project) override
+# the globals' ones. The catalogs below import no _base.
+import:
+  - orgs/fnx/prod/eu-central-1/components/globals
+  - catalog/awsconfig/defaults
+  - catalog/guardduty/prod
+  - catalog/securityhub/prod
+  - catalog/inspector2/defaults
+  - catalog/apigateway-account/defaults
+  - catalog/backup/prod
+
+components:
+  terraform:
+    # GitHub Actions OIDC roles of this stack: <full id>-ci-plan/-apply, as in
+    # fnx-ew1-prod (orgs/fnx/prod/us-east-1/components/security.yaml explains
+    # each input). Prod trust (owner decision D3): master only, for both roles.
+    iam/ci:
+      metadata:
+        component: iam
+        inherits:
+          - iam
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        # The prod-eu account's one provider, created by fnx-ew1-prod's iam/ci
+        # (IAM OIDC providers are per account; a second create fails).
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        # This stack's runner pool (github-runners' <Environment>-<name>, with
+        # compute): only the apply role may execute its +1 start policy
+        # (iam ci-runner-pools.tf; check-cluster-api-ci.py checks the list).
+        ci_runner_pool_names:
+          - "{{ .settings.prefix }}-github-runners"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        ci_plan_role_subjects:
+          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
+        # State access: the EU backend's PROD roles, as fnx-ew1-prod's (both
+        # EU prod stacks' state is under them; settings.tfstate.role_prefix is
+        # fnx-ew1-terraform-backend).
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
+        # eks/main's cluster encryption key, by alias (iam/ci applies before
+        # any key read): the replica's alias in this region.
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: "{{ .settings.tfstate.stack }}"
+          # The OIDC provider this stack's roles trust.
+          - component: iam/ci
+            stack: fnx-ew1-prod
+
+    awsconfig/main:
+      metadata:
+        component: awsconfig
+        inherits:
+          - awsconfig/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        include_global_resource_types: false
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ew1-prod
+
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/prod
+
+    securityhub/main:
+      metadata:
+        component: securityhub
+        inherits:
+          - securityhub/prod
+      vars:
+        # Controls fnx-ew1-prod evaluates, disabled here per standard, as in
+        # fnx-ue2-prod (whose comment cites the AWS Security Hub User Guide,
+        # "Controls that you might want to disable"): the IAM controls and
+        # KMS.1/KMS.2 because AWS Config records IAM in eu-west-1 only
+        # (awsconfig/main above), and CloudWatch.1-14 because the trail's log
+        # group, with the CIS metric filters, exists only in eu-west-1.
+        disabled_security_controls:
+          "aws-foundational-security-best-practices/v/1.0.0":
+            ["IAM.1", "IAM.2", "IAM.3", "IAM.4", "IAM.5", "IAM.6", "IAM.7", "IAM.8", "IAM.21",
+             "KMS.1", "KMS.2"]
+          "cis-aws-foundations-benchmark/v/1.2.0":
+            ["IAM.1", "IAM.2", "IAM.3", "IAM.4", "IAM.5", "IAM.6", "IAM.8", "IAM.9", "IAM.11", "IAM.12",
+             "IAM.13", "IAM.14", "IAM.15", "IAM.16", "IAM.17", "IAM.18", "IAM.20",
+             "CloudWatch.1", "CloudWatch.2", "CloudWatch.3", "CloudWatch.4", "CloudWatch.5",
+             "CloudWatch.6", "CloudWatch.7", "CloudWatch.8", "CloudWatch.9", "CloudWatch.10",
+             "CloudWatch.11", "CloudWatch.12", "CloudWatch.13", "CloudWatch.14"]
+          "pci-dss/v/3.2.1":
+            ["IAM.1", "IAM.2", "IAM.4", "IAM.6", "IAM.8", "IAM.9", "IAM.10", "IAM.19", "CloudWatch.1"]
+
+    # Off, as in fnx-ew1-prod: Inspector bills per resource scanned.
+    inspector2/main:
+      metadata:
+        component: inspector2
+        inherits:
+          - inspector2/defaults
+
+    # The region's API Gateway CloudWatch Logs role setting (apigateway/main,
+    # with services).
+    apigateway-account/main:
+      metadata:
+        component: apigateway-account
+        inherits:
+          - apigateway-account/defaults
+
+    # Finding routing for this region, as fnx-ue2-prod's. No CIS metric
+    # filters here: the account's trail delivers to fnx-ew1-prod's log group,
+    # where they run. It does not inherit security-monitoring/defaults, whose
+    # cloudtrail_log_group_name reads a cloudtrail/main this stack does not
+    # have (a null cannot unset an inherited value); the rest mirrors it.
+    # enable_alert_enrichment stays off (check-data-residency.py).
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+      vars:
+        guardduty_detector_id: !terraform.state guardduty/main .detector_id
+        securityhub_account_arn: !terraform.state securityhub/main .account_arn
+        require_guardduty_route: true
+        require_securityhub_route: true
+        require_cloudtrail_route: false
+        enable_security_group_change_events: true
+        inspector2_account_id: !terraform.state inspector2/main .account_id
+        enable_alert_enrichment: false
+        security_email_subscriptions: []
+        tags:
+          Component: "SecurityMonitoring"
+        security_group_change_excluded_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
+          - !terraform.state iam/ci .ci_apply_role_arn
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: guardduty/main
+          - component: securityhub/main
+          - component: inspector2/main
+          - component: iam/ci
+
+    # This region's own vault and plans, as fnx-ue2-prod's: the copy target
+    # of fnx-ew1-prod's backups is the vault ew1-backup-replica that
+    # fnx-ew1-prod's backup/main creates in eu-central-1 (as fnx-ue1-prod's
+    # creates ue1-backup-replica in us-east-2). While warm this selects
+    # nothing; once the services are promoted here they are backed up into it.
+    # Retention as in fnx-ew1-prod (catalog/backup/prod). No copies back to
+    # eu-west-1 until a failback is planned.
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/prod
+      vars:
+        kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ew1-prod

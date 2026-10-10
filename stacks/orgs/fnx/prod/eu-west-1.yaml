@@ -24,7 +24,8 @@
 # (eks/main ew1-main, the bastion, the in-VPC runner pool, external-secrets,
 # eks-addons, eks-backend-services) and services (rds/main,
 # elasticache/main, cognito/main, apigateway/main, monitoring/main): the EU
-# core subset of fnx-ue1-prod. The EU DR stack fnx-ec1-prod follows.
+# core subset of fnx-ue1-prod. Its DR warm standby is fnx-ec1-prod
+# (stacks/orgs/fnx/prod/eu-central-1.yaml), in the same account.
 #
 # First deploy: docs/OPERATIONS.md ("Deploying a stack"), with
 # administrator credentials in the prod-eu account:

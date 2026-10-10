@@ -6,7 +6,7 @@
 # which mirrors fnx-ue1-prod): vpc/main with three AZs, a NAT gateway per AZ and
 # flow logs. No vpc/services or peering: the EU data plane (data VPC, eks/data,
 # rds/data) is not in this stack; 10.31.0.0/16 is reserved for it, and
-# 10.32.0.0/16 for the EU DR stack fnx-ec1-prod.
+# 10.32.0.0/16 is the EU DR stack fnx-ec1-prod's vpc/main.
 #
 # Unlike fnx-ue2-prod it owns its DNS: network/main holds the EU apex
 # (settings.environment.domain_name, globals.yaml), delegated at the registrar,

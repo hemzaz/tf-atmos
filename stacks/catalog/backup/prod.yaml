@@ -3,7 +3,7 @@ import:
   - catalog/backup/defaults
 
 # Production retention, shared by the prod stacks' backup/main (fnx-ue1-prod,
-# fnx-ue2-prod, fnx-ew1-prod). It matches the prod accounts' pci-sox
+# fnx-ue2-prod, fnx-ew1-prod, fnx-ec1-prod). It matches the prod accounts' pci-sox
 # compliance tag: 7-year monthly retention for SOX. Only prod re-enables cold
 # storage: 2555 days of retention easily clears AWS Backup's delete_after >=
 # cold_storage_after + 90 requirement (backup/defaults sets it to null so dev's

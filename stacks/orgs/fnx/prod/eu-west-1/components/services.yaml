@@ -7,8 +7,9 @@
 # (catalog/<component>/prod): the main database and cache, the backend
 # services on eks/main, the user pool, the main API and monitoring, plus the
 # prod-eu account's budget. Without fnx-ue1-prod's DR or US-only parts:
-#   - no Global Datastore, read replica or Route 53 failover pair: the EU DR
-#     stack (fnx-ec1-prod) does not exist yet. Without failover, apigateway/main
+#   - no Global Datastore, read replica or Route 53 failover pair yet: the EU
+#     DR stack fnx-ec1-prod has only its foundation (network, CI roles,
+#     security services, backup vault). Without failover, apigateway/main
 #     has no Route 53 health check, so none of its alarms is in us-east-1;
 #   - its own user pool, never a migration from fnx-ue1-prod's (owner
 #     decision): EU users sign up here;

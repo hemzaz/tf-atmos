@@ -107,8 +107,9 @@ components:
         alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
         deletion_window_in_days: 30
         # Multi-region, replicated to the EU DR region only (never a US one):
-        # fnx-ec1-prod, the planned EU DR stack, reaches the replica by its own
-        # prefix's alias, as fnx-ue2-prod does ue1's (ue2-main).
+        # fnx-ec1-prod, the EU DR stack, reads the replica's ARN cross-stack
+        # and reaches it by its own prefix's alias, as fnx-ue2-prod does ue1's
+        # (ue2-main).
         is_multi_region: true
         replica_regions:
           - eu-central-1
@@ -180,7 +181,9 @@ components:
     # Retention and notifications as in fnx-ue1-prod (catalog/backup/prod).
     # Recovery points are copied to the EU DR region only, never a US one:
     # vault <Environment>-backup-replica in eu-central-1 on kms/main's replica
-    # there (ec1-main), created by this stack until fnx-ec1-prod exists.
+    # there (ec1-main), created by this stack as fnx-ue1-prod creates
+    # ue1-backup-replica in us-east-2; fnx-ec1-prod's backup/main is that
+    # region's own vault and plans.
     # check-data-residency.py fails a non-EU replica_region or key.
     backup/main:
       metadata:

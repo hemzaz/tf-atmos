@@ -10,8 +10,8 @@ component per service, the Cloud Posse model).
 
 ## Wiring
 
-- Instance: `security-monitoring/main` in the three AWS stacks, `fnx-ue2-prod` (no CIS filters:
-  no trail there) and `fnx-ew1-prod` (on its own trail's log group).
+- Instance: `security-monitoring/main` in the three AWS stacks, `fnx-ue2-prod` and `fnx-ec1-prod`
+  (no CIS filters: no trail there) and `fnx-ew1-prod` (on its own trail's log group).
 - Reads: `guardduty/main .detector_id`, `securityhub/main .account_arn`,
   `inspector2/main .account_id`, `cloudtrail/main .cloudtrail_logs_log_group_name`,
   `kms/main .key_arn`, `iam/ci .ci_apply_role_arn`.

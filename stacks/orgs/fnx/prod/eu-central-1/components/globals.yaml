@@ -1,0 +1,71 @@
+---
+# =============================================================================
+# Global settings for fnx-ec1-prod (EU DR warm standby of fnx-ew1-prod)
+# =============================================================================
+# Same tags, domain and contacts as fnx-ew1-prod (orgs/fnx/prod/eu-west-1/
+# components/globals.yaml): one EU production service, two regions. Compliance
+# "pci-sox-gdpr", which check-data-residency.py requires on every instance of a
+# GDPR-scoped stack. The catalogs are imported first, as in fnx-ew1-prod, so
+# these vars win over catalog/_base/defaults' tags (Project).
+# =============================================================================
+
+import:
+  - catalog/iam/defaults
+  - catalog/vpc/defaults
+  - catalog/eks/defaults
+
+vars:
+  tags:
+    Team: "Platform"
+    CostCenter: "Production"
+    Project: "Infrastructure"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Production"
+    Provisioner: "Atmos"
+    DataClassification: "confidential"
+    Compliance: "pci-sox-gdpr"
+    CriticalityLevel: "high"
+    SLA: "99.9"
+    BackupRequired: "true"
+    DisasterRecovery: "warm-standby"
+
+settings:
+  environment:
+    # The EU apex: api.<domain> will fail over to this stack. Its zone is
+    # fnx-ew1-prod's network/main (Route 53 has no region). fnx-ew1-prod's
+    # placeholder until the owner registers the real one (the preflight flags
+    # it, row "Domains").
+    domain_name: "fnx-eu.example.com"
+    # fnx-ew1-prod's contacts (backup/main's notification_emails read them):
+    # placeholders until the owner sets the EU ones (row "Alert recipients").
+    monitoring:
+      critical_alerts:
+        - "prod-critical@example.com"
+        - "oncall@example.com"
+      warning_alerts:
+        - "prod-alerts@example.com"
+    eks_kubernetes_version: "1.36"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
+    use_external_secrets: true
+    # The release pipeline's images, as in fnx-ew1-prod: a failover deploys
+    # the same release (row "Backend service images").
+    backend_service_images:
+      api_gateway: "ghcr.io/fnx-platform/api-gateway:1.4.2"
+      platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
+      auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
+      job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
+    enable_vpc_flow_logs: true
+
+components:
+  terraform:
+    # Human cluster admins of eks/main (with compute), as in fnx-ew1-prod's
+    # globals.yaml: the same operators fail the in-cluster services over. Each
+    # rolearn, an IAM role in the prod-eu account, must also be in the EU
+    # backend's access_roles.prod_write (stacks/orgs/fnx/root/eu-west-1.yaml).
+    # Empty until the owner supplies the ARN (row "EKS cluster admins").
+    eks/defaults:
+      vars:
+        map_additional_iam_roles: []

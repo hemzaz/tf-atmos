@@ -15,7 +15,7 @@ names follow Cloud Posse `aws-vpc` where an input maps one to one.
 ## Notes
 
 - Instances: `vpc/main` and `vpc/services` in the three AWS stacks, `vpc/main` also in
-  `fnx-ue2-prod`, `fnx-ew1-prod` and both local
+  `fnx-ue2-prod`, `fnx-ew1-prod`, `fnx-ec1-prod` and both local
   stacks. Stage mixins set defaults on abstract `vpc/defaults`, never on a bare `vpc` key (that
   would create a stray real instance).
 - `tags` must carry a non-empty `Environment`: it is used in resource names.

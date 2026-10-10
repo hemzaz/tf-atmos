@@ -3,12 +3,12 @@ import:
   - catalog/securityhub/defaults
 
 # Production hub settings, shared by the prod stacks' securityhub/main
-# (fnx-ue1-prod, fnx-ue2-prod, fnx-ew1-prod): PCI DSS on top of the default
-# standards. AWS auto-subscribes AWS-FSBP and CIS under
+# (fnx-ue1-prod, fnx-ue2-prod, fnx-ew1-prod, fnx-ec1-prod): PCI DSS on top of
+# the default standards. AWS auto-subscribes AWS-FSBP and CIS under
 # enable_default_standards (catalog default); listing them here as well
 # collides at apply, so `standards` carries only what AWS does not enable.
 # A stack outside the region that records global resources adds its
-# disabled_security_controls (fnx-ue2-prod).
+# disabled_security_controls (fnx-ue2-prod, fnx-ec1-prod).
 components:
   terraform:
     securityhub/prod:

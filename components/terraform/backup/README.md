@@ -7,8 +7,9 @@ failure alarms, a report plan, and an optional scheduled restore-test Lambda. Mi
 
 ## Wiring
 
-- Instance: `backup/main` in the three AWS stacks, `fnx-ue2-prod` and `fnx-ew1-prod`; reads
-  `kms/main .key_arn` (vault and topic).
+- Instance: `backup/main` in the three AWS stacks, `fnx-ue2-prod`, `fnx-ew1-prod` and
+  `fnx-ec1-prod`; reads `kms/main .key_arn` (vault and topic; DR stacks ue2/ec1: the primary's
+  `replica_keys[<region>]`).
 - Retention (daily/weekly/monthly days): dev 7/14/30, staging 14/30/90, prod 35/90/2555 with
   monthly cold storage after 90 days (`backup/prod`, `stacks/catalog/backup/prod.yaml`). Vault lock
   and restore testing are off everywhere.
