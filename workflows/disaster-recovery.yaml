@@ -33,25 +33,28 @@ workflows:
           AWS_SDK_LOAD_CONFIG: "1"
 
   dr-failover:
-    description: Execute failover to the disaster recovery region (guided runbook; fnx-ue1-prod only)
+    description: Execute failover to the disaster recovery region (guided runbook; a DR primary, fnx-ue1-prod or fnx-ew1-prod)
     steps:
       - name: stack
         type: input
         prompt: Stack
         default: '{{ env "STACK" }}'
-      # The runbooks below name the US pair only. EU failover steps
-      # (fnx-ew1-prod -> fnx-ec1-prod) land in B5-9c (docs/OPERATIONS.md,
-      # "Disaster recovery").
+      # The pair, its regions and resource names come from the stacks' config
+      # (workflows/scripts/common/dr-pair.py): the standby is the stack whose
+      # settings.dr.standby_of names this one (fnx-ue1-prod -> fnx-ue2-prod,
+      # fnx-ew1-prod -> fnx-ec1-prod). Any other stack is refused here, with
+      # the reason; the next step, silent, keeps the facts for the runbook.
       - name: supported-stack
         type: shell
-        command: >-
-          test "{{ .steps.stack.value }}" = "fnx-ue1-prod" || {
-          echo "{{ .steps.stack.value }}: this runbook covers fnx-ue1-prod -> fnx-ue2-prod only. EU failover steps land in B5-9c; see docs/OPERATIONS.md, Disaster recovery.";
-          exit 1; }
+        command: python3 workflows/scripts/common/dr-pair.py --check "{{ .steps.stack.value }}"
+      - name: pair
+        type: shell
+        command: python3 workflows/scripts/common/dr-pair.py "{{ .steps.stack.value }}"
+        output: none
       - name: target_region
         type: input
         prompt: DR target region
-        default: us-east-2
+        default: '{{ (.steps.pair.value | fromJson).standby_region }}'
       - name: warning
         type: toast
         level: warning
@@ -63,47 +66,53 @@ workflows:
       - name: guard
         type: shell
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Failover cancelled."; exit 1; }
+      # An EU pair (eu-*) adds its GDPR notes; the US text is unchanged.
       - name: runbook
         type: markdown
         content: |
+          {{- $p := .steps.pair.value | fromJson -}}
+          {{- $eu := hasPrefix "eu-" $p.primary_region -}}
           **Failover runbook ({{ .steps.stack.value }} -> {{ .steps.target_region.value }}), CLI-first**
-          Prod only: fnx-ue1-prod fails over to fnx-ue2-prod. The state bucket may be down with
-          us-east-1, so no step needs Terraform. Commands: docs/OPERATIONS.md, "Disaster recovery".
+          Prod only: {{ $p.primary }} fails over to {{ $p.standby }}. The state bucket may be down with
+          {{ $p.state.region }}, so no step needs Terraform. Commands: docs/OPERATIONS.md, "Disaster recovery".{{ if $eu }}
+          GDPR: every step stays in the EU ({{ $p.primary_region }}, {{ $p.standby_region }}); nothing copies data, state or
+          backups out of it. us-east-1 is Route 53's control plane and the health check alarms only (configuration).{{ end }}
           1. Freeze CD: `gh workflow disable terraform-cd.yml`; merge nothing until reconciled.
-          2. DNS moves by itself when the primary's Route 53 health check fails (alarm on ue1-main-alarms);
-             force it with `aws route53 update-health-check --health-check-id <ue1 id> --inverted`.
-          3. Database: `aws rds promote-read-replica --db-instance-identifier ue2-prod-main-db --region {{ .steps.target_region.value }}`,
-             then `aws rds modify-db-instance ... --manage-master-user-password --master-user-secret-kms-key-id alias/ue2-main`.
+          2. DNS moves by itself when the primary's Route 53 health check fails ({{ if $p.health_check_alarm.relayed }}its us-east-1 alarm relayed to {{ join " and " $p.health_check_alarm.topics }}{{ else }}alarm on {{ join ", " $p.health_check_alarm.topics }}{{ end }});
+             force it with `aws route53 update-health-check --health-check-id <{{ $p.primary_prefix }} id> --inverted`.{{ if $eu }} Route 53's API is
+             us-east-1 for every pair: configuration only, no EU data.{{ end }}
+          3. Database: `aws rds promote-read-replica --db-instance-identifier {{ $p.db_instance }} --region {{ .steps.target_region.value }}`,
+             then `aws rds modify-db-instance ... --manage-master-user-password --master-user-secret-kms-key-id {{ $p.kms_alias }}`.
           4. Cache: `aws elasticache failover-global-replication-group --region {{ .steps.target_region.value }}
-             --primary-region {{ .steps.target_region.value }} --primary-replication-group-id ue2-prod-cache --global-replication-group-id <id>`.
-          5. Node groups: `aws eks update-nodegroup-config --cluster-name ue2-main --nodegroup-name <ng>
-             --scaling-config minSize=..,desiredSize=..,maxSize=..` to fnx-ue1-prod's sizes.
+             --primary-region {{ .steps.target_region.value }} --primary-replication-group-id {{ $p.cache }} --global-replication-group-id <id>`.
+          5. Node groups: `aws eks update-nodegroup-config --cluster-name {{ $p.cluster }} --nodegroup-name <ng>
+             --scaling-config minSize=..,desiredSize=..,maxSize=..` to {{ $p.primary }}'s sizes.
           6. Deploy eks-backend-services/main in-VPC from a branch: enabled, database_secret_arn set to
-             MasterUserSecret.SecretArn of ue2-prod-main-db, database_name productionapp; with the bucket down,
-             TFSTATE_SOURCE=replica for its reads and local state for its own (migrate later).
-          7. Auth: nothing while us-east-1 Cognito answers (users sign in again; ue2-cognito-user-migration
-             copies them as RESET_REQUIRED: forgot-password, then MFA enrolment). If it does not, bulk-import the users not yet in fnx-ue2-prod's pool from the latest export.
-          8. Verify: `curl -sf https://api.<domain>/`, then dr-status for fnx-ue2-prod.
-          After recovery, reconcile Terraform: fnx-ue2-prod rds/main without replicate_source_db (plan must be
+             MasterUserSecret.SecretArn of {{ $p.db_instance }}, database_name {{ $p.db_name }}; with the bucket down,
+             {{ if $p.state.replicated }}TFSTATE_SOURCE=replica for its reads{{ else }}no replica to read ({{ $p.state.backend_stack }} does not replicate {{ $p.state.bucket }}): every input literal{{ end }} and local state for its own (migrate later).
+          7. Auth: nothing while {{ $p.primary_region }} Cognito answers (users sign in again; {{ $p.user_migration }}
+             copies them as RESET_REQUIRED: forgot-password, then MFA enrolment). If it does not, bulk-import the users not yet in {{ $p.standby }}'s pool from the latest export.{{ if $eu }}
+             The export and users.csv stay in {{ $p.standby_region }} (SSE-KMS), never outside the EU.{{ end }}
+          8. Verify: `curl -sf https://api.{{ if $eu }}<EU apex>{{ else }}<domain>{{ end }}/`, then dr-status for {{ $p.standby }}.
+          After recovery, reconcile Terraform: {{ $p.standby }} rds/main without replicate_source_db (plan must be
           update-in-place, never a replacement), eks/main sizes, eks-backend-services/main enabled; apply no
           elasticache/main until failback.
 
   dr-failback:
-    description: Execute failback to the primary region (guided runbook; fnx-ue1-prod only)
+    description: Execute failback to the primary region (guided runbook; a DR primary, fnx-ue1-prod or fnx-ew1-prod)
     steps:
       - name: stack
         type: input
         prompt: Stack
         default: '{{ env "STACK" }}'
-      # The runbooks below name the US pair only. EU failover steps
-      # (fnx-ew1-prod -> fnx-ec1-prod) land in B5-9c (docs/OPERATIONS.md,
-      # "Disaster recovery").
+      # As in dr-failover: the pair comes from the config, other stacks are refused.
       - name: supported-stack
         type: shell
-        command: >-
-          test "{{ .steps.stack.value }}" = "fnx-ue1-prod" || {
-          echo "{{ .steps.stack.value }}: this runbook covers fnx-ue1-prod -> fnx-ue2-prod only. EU failover steps land in B5-9c; see docs/OPERATIONS.md, Disaster recovery.";
-          exit 1; }
+        command: python3 workflows/scripts/common/dr-pair.py --check "{{ .steps.stack.value }}"
+      - name: pair
+        type: shell
+        command: python3 workflows/scripts/common/dr-pair.py "{{ .steps.stack.value }}"
+        output: none
       - name: checklist
         type: markdown
         content: |
@@ -122,23 +131,24 @@ workflows:
       - name: runbook
         type: markdown
         content: |
+          {{- $p := .steps.pair.value | fromJson -}}
           **Failback steps** (docs/OPERATIONS.md, "Disaster recovery"; replicate_source_db does not force a
           replacement, so each re-seed is an operator `-replace`, not a merge)
-          1. Re-seed fnx-ue1-prod rds/main from us-east-2: `aws rds modify-db-instance --db-instance-identifier
-             ue1-prod-main-db --no-deletion-protection --apply-immediately --region us-east-1`; set aside an existing
-             ue1-prod-main-db-final-snapshot (copy to a dated name, delete); on a branch set replicate_source_db to
-             ue2-prod-main-db's ARN (literal), then
-             `atmos terraform apply rds/main -s fnx-ue1-prod -- -replace=aws_db_instance.main`; merge after.
+          1. Re-seed {{ $p.primary }} rds/main from {{ $p.standby_region }}: `aws rds modify-db-instance --db-instance-identifier
+             {{ $p.primary_db_instance }} --no-deletion-protection --apply-immediately --region {{ $p.primary_region }}`; set aside an existing
+             {{ $p.primary_db_instance }}-final-snapshot (copy to a dated name, delete); on a branch set replicate_source_db to
+             {{ $p.db_instance }}'s ARN (literal), then
+             `atmos terraform apply rds/main -s {{ $p.primary }} -- -replace=aws_db_instance.main`; merge after.
           2. At ReplicaLag 0, with writes stopped: promote it by a PR removing replicate_source_db (plan check:
              update in place only).
-          3. Cache primary back: failover-global-replication-group --primary-region us-east-1
-             --primary-replication-group-id ue1-prod-cache.
-          4. Un-invert the primary's health check if it was forced; DNS returns to us-east-1.
-          5. Re-seed fnx-ue2-prod rds/main from us-east-1 the same way (deletion protection, final snapshot,
-             replicate_source_db restored, `-replace=aws_db_instance.main` on fnx-ue2-prod).
-          6. fnx-ue2-prod back to warm sizes (PR + desired sizes by CLI), eks-backend-services/main disabled.
-          7. Auth: users sign in to fnx-ue1-prod again; passwords changed in us-east-2 and users created there
-             do not flow back (reset in us-east-1, create again).
+          3. Cache primary back: failover-global-replication-group --primary-region {{ $p.primary_region }}
+             --primary-replication-group-id {{ $p.primary_cache }}.
+          4. Un-invert the primary's health check if it was forced; DNS returns to {{ $p.primary_region }}.
+          5. Re-seed {{ $p.standby }} rds/main from {{ $p.primary_region }} the same way (deletion protection, final snapshot,
+             replicate_source_db restored, `-replace=aws_db_instance.main` on {{ $p.standby }}).
+          6. {{ $p.standby }} back to warm sizes (PR + desired sizes by CLI), eks-backend-services/main disabled.
+          7. Auth: users sign in to {{ $p.primary }} again; passwords changed in {{ $p.standby_region }} and users created there
+             do not flow back (reset in {{ $p.primary_region }}, create again).
           8. `gh workflow enable terraform-cd.yml`.
 
   recover-state:

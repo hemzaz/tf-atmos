@@ -63,11 +63,20 @@ fail() {
 
 echo -e "\n${WHITE}=== Disaster Recovery Status Check ===${NC}\n"
 
-DR_REGION="${DR_REGION:-us-east-2}"
+# DR_REGION overrides; by default it comes from the config (dr-pair.py
+# --dr-region): backup/main's replica_region when it copies cross-region, else
+# the DR standby's region (settings.dr.standby_of), else, on a standby, its own.
+# fnx-ue1-prod/fnx-ue2-prod: us-east-2; fnx-ew1-prod/fnx-ec1-prod: eu-central-1.
+# A failed derivation (dr-pair.py prints why on stderr) reports "unknown" and
+# the status check goes on: the region is only reported, nothing below uses it.
+if [[ -z "${DR_REGION:-}" ]]; then
+  DR_REGION="$(python3 "$(dirname "$0")/../common/dr-pair.py" --dr-region "$STACK")" ||
+    DR_REGION="unknown (deriving it failed, see above; set DR_REGION to report it)"
+fi
 
 echo "Primary Stack: $STACK"
 echo "Primary Region: $REGION"
-echo "DR Region: $DR_REGION"
+echo "DR Region: ${DR_REGION:-none (no cross-region backup copy or DR standby)}"
 echo
 
 DR_SCORE=0
