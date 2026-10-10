@@ -40,7 +40,8 @@ each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/componen
 (`globals`, `networking`, `security`, `compute`, `services`). EU personal data lives only in EU
 stacks, tagged `Compliance: "pci-sox-gdpr"` (US prod is `"pci-sox"`): `check-data-residency.py`
 (lint) fails a gdpr-tagged or `eu-` stack that lacks the tag, names a non-`eu-` region, turns on
-Route 53 query logging (written only to us-east-1) or depends on a non-gdpr stack.
+Route 53 query logging (written only to us-east-1) or depends on a non-gdpr stack, and any other
+stack that depends on a GDPR-scoped one or names an `eu-` ARN in its vars.
 
 | Stack | Manifest (`stacks/orgs/fnx/...`) | Purpose |
 |-------|----------------------------------|---------|

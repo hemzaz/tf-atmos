@@ -12,7 +12,8 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
   dev and staging use AWS-managed keys. `rds/main` also in `fnx-ue2-prod` (a cross-region replica)
   and `fnx-ew1-prod`; `fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `rds/main-prod`
   (`stacks/catalog/rds/prod.yaml`). `check-data-residency.py` fails a stack outside the EU that
-  depends on an EU one, so no US replica can read an EU instance.
+  depends on an EU one or names an `eu-` ARN in its vars (e.g. `replicate_source_db`), so no US
+  replica can read an EU instance.
 - Used by: `eks-backend-services` (`.password_secret_arn`, `.instance_endpoint`, `.instance_name`),
   `dns` (`network/main`'s `db.internal` CNAME from `.instance_address`), `monitoring`
   (`.instance_identifier`).

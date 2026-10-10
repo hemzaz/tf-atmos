@@ -221,7 +221,9 @@ workflows:
           python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
       # EU personal data lives only in EU stacks: a gdpr-tagged or eu- stack is
       # tagged gdpr, names only eu- regions (vars and their ARNs, state, backends,
-      # providers) and depends only on GDPR-scoped stacks, outside EXEMPTIONS.
+      # providers) and depends only on GDPR-scoped stacks, and no other stack depends
+      # on or references a GDPR-scoped one (dependencies, eu- ARNs in vars), outside
+      # EXEMPTIONS.
       - name: check-data-residency
         type: shell
         command: |
