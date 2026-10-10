@@ -92,3 +92,83 @@ run "receiver_without_topic_is_rejected" {
 
   expect_failures = [var.receive_relayed_health_check_alarms]
 }
+
+run "rds_event_subscriptions_may_publish_to_the_topic" {
+  command = plan
+
+  variables {
+    allow_rds_event_publish = true
+  }
+
+  override_data {
+    target = data.aws_caller_identity.current
+    values = { account_id = "123456789012" }
+  }
+
+  override_data {
+    target = data.aws_partition.current
+    values = { partition = "aws" }
+  }
+
+  override_resource {
+    target          = aws_sns_topic.alarms
+    override_during = plan
+    values          = { arn = "arn:aws:sns:eu-central-1:123456789012:ec1-main-alarms" }
+  }
+
+  assert {
+    condition = (
+      length(jsondecode(aws_sns_topic_policy.alarms[0].policy).Statement) == 2
+      && jsondecode(aws_sns_topic_policy.alarms[0].policy).Statement[0].Principal.Service == "cloudwatch.amazonaws.com"
+      && jsondecode(aws_sns_topic_policy.alarms[0].policy).Statement[1] == {
+        Sid       = "AllowRdsEventSubscriptionsToPublish"
+        Effect    = "Allow"
+        Principal = { Service = "events.rds.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = "arn:aws:sns:eu-central-1:123456789012:ec1-main-alarms"
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = "123456789012" }
+          ArnLike      = { "aws:SourceArn" = "arn:aws:rds:eu-central-1:123456789012:es:*" }
+        }
+      }
+    )
+    error_message = "allow_rds_event_publish keeps the CloudWatch alarms statement and adds RDS event subscriptions of this account and region only (no relay rule statement)."
+  }
+}
+
+run "rds_publish_and_relay_together" {
+  command = plan
+
+  variables {
+    allow_rds_event_publish             = true
+    receive_relayed_health_check_alarms = true
+  }
+
+  override_resource {
+    target          = aws_sns_topic.alarms
+    override_during = plan
+    values          = { arn = "arn:aws:sns:eu-central-1:123456789012:ec1-main-alarms" }
+  }
+
+  override_resource {
+    target          = aws_cloudwatch_event_rule.relayed_health_check_alarms
+    override_during = plan
+    values          = { arn = "arn:aws:events:eu-central-1:123456789012:rule/ec1-main-health-check-alarms" }
+  }
+
+  assert {
+    condition     = [for s in jsondecode(aws_sns_topic_policy.alarms[0].policy).Statement : s.Sid] == ["AllowCloudWatchAlarmsToPublish", "AllowTheRelayRuleToPublish", "AllowRdsEventSubscriptionsToPublish"]
+    error_message = "One topic policy carries the alarms, relay and RDS statements."
+  }
+}
+
+run "rds_publish_without_topic_is_rejected" {
+  command = plan
+
+  variables {
+    allow_rds_event_publish = true
+    create_sns_topic        = false
+  }
+
+  expect_failures = [var.allow_rds_event_publish]
+}

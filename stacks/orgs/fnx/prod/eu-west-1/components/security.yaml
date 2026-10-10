@@ -106,6 +106,9 @@ components:
         description: EU production main encryption key
         alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
         deletion_window_in_days: 30
+        # The prod rds instances' event subscriptions publish to the
+        # monitoring topics on this key (and on its ec1 replica).
+        allow_rds_events: true
         # Multi-region, replicated to the EU DR region only (never a US one):
         # fnx-ec1-prod, the EU DR stack, reads the replica's ARN cross-stack
         # and reaches it by its own prefix's alias, as fnx-ue2-prod does ue1's

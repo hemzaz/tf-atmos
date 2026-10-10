@@ -142,6 +142,9 @@ components:
         description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
         alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
         deletion_window_in_days: 30  # prod keeps the full window
+        # The prod rds instances' event subscriptions publish to the
+        # monitoring topics on this key (and on its ue2 replica).
+        allow_rds_events: true
         # DR (owner decision Q5: warm standby in us-east-2). A multi-region key
         # with its replica in the DR region: ciphertext from either region
         # decrypts under the other's key, so backup copies (backup/main's

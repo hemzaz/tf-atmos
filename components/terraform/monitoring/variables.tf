@@ -237,12 +237,31 @@ variable "memory_alarms" {
 
 variable "db_connection_alarms" {
   type = map(object({
-    evaluation_periods = number
-    period             = number
-    threshold          = number
+    db_instance_identifier = string
+    evaluation_periods     = number
+    period                 = number
+    threshold              = number
   }))
-  description = "Map of database connection alarms to create"
+  description = "Database connection alarms. Keys are stable alarm ids; db_instance_identifier is the watched instance, the DBInstanceIdentifier dimension (rds .instance_identifier), never the key"
   default     = {}
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for k, v in var.db_connection_alarms : can(regex("^[a-zA-Z][a-zA-Z0-9-]{0,62}$", v.db_instance_identifier))])
+    error_message = "Each db_connection_alarms db_instance_identifier must be an RDS DB instance identifier (a letter, then letters, digits or hyphens, at most 63)."
+  }
+}
+
+variable "allow_rds_event_publish" {
+  type        = bool
+  description = "Let this account's RDS event subscriptions in this region (rds sns_topic_arn -> aws_db_event_subscription) publish to this component's topic: a topic policy statement for events.rds.amazonaws.com scoped by aws:SourceAccount and the event subscription ARN. Needs create_sns_topic and, with kms_key_id, a key allowing RDS events (kms allow_rds_events)"
+  default     = false
+  nullable    = false
+
+  validation {
+    condition     = !var.allow_rds_event_publish || var.create_sns_topic
+    error_message = "allow_rds_event_publish grants on this component's topic: set create_sns_topic."
+  }
 }
 
 variable "lambda_error_alarms" {

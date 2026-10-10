@@ -564,3 +564,23 @@ resource "aws_cloudwatch_metric_alarm" "backup_retention" {
     DBInstanceIdentifier = aws_db_instance.main.identifier
   }
 }
+
+# RDS event notifications to var.sns_topic_arn, as Cloud Posse's
+# rds-cloudwatch-sns-alarms does (aws_db_event_subscription on the instance):
+# availability, failover, failure, storage, maintenance, replica and recovery
+# events of this instance and its read replica. On by default whenever
+# sns_topic_arn is set. The topic must let events.rds.amazonaws.com publish
+# (monitoring's allow_rds_event_publish) and its KMS key must let that service
+# use it (kms's allow_rds_events).
+resource "aws_db_event_subscription" "main" {
+  count = var.event_subscription_enabled && var.sns_topic_arn != null ? 1 : 0
+
+  name      = "${local.name}-events"
+  sns_topic = var.sns_topic_arn
+
+  source_type      = "db-instance"
+  source_ids       = concat([aws_db_instance.main.identifier], aws_db_instance.read_replica[*].identifier)
+  event_categories = var.event_categories
+
+  tags = { Name = "${local.name}-events" }
+}

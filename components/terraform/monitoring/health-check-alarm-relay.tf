@@ -55,40 +55,59 @@ resource "aws_cloudwatch_event_target" "relayed_health_check_alarms" {
   arn            = aws_sns_topic.alarms[0].arn
 }
 
-# The topic's policy, set only with the relay (otherwise the topic keeps SNS's
-# default policy, as before). It keeps what this component's alarms need, the
-# same-account CloudWatch alarms of this region (as security-monitoring's
-# topic), and adds this one rule.
+# The topic's policy, set only with the relay or allow_rds_event_publish
+# (otherwise the topic keeps SNS's default policy, as before). It keeps what
+# this component's alarms need, the same-account CloudWatch alarms of this
+# region (as security-monitoring's topic), and adds the relay rule and/or this
+# account's and region's RDS event subscriptions (rds sns_topic_arn ->
+# aws_db_event_subscription).
+locals {
+  alarm_topic_policy_enabled = var.create_sns_topic && (local.receive_relayed_alarms || var.allow_rds_event_publish)
+
+  alarm_topic_statements = local.alarm_topic_policy_enabled ? concat(
+    [{
+      Sid       = "AllowCloudWatchAlarmsToPublish"
+      Effect    = "Allow"
+      Principal = { Service = "cloudwatch.amazonaws.com" }
+      Action    = "SNS:Publish"
+      Resource  = aws_sns_topic.alarms[0].arn
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+        ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:cloudwatch:${var.region}:${data.aws_caller_identity.current.account_id}:alarm:*" }
+      }
+    }],
+    local.receive_relayed_alarms ? [{
+      Sid       = "AllowTheRelayRuleToPublish"
+      Effect    = "Allow"
+      Principal = { Service = "events.amazonaws.com" }
+      Action    = "SNS:Publish"
+      Resource  = aws_sns_topic.alarms[0].arn
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+        ArnEquals    = { "aws:SourceArn" = aws_cloudwatch_event_rule.relayed_health_check_alarms[0].arn }
+      }
+    }] : [],
+    var.allow_rds_event_publish ? [{
+      Sid       = "AllowRdsEventSubscriptionsToPublish"
+      Effect    = "Allow"
+      Principal = { Service = "events.rds.amazonaws.com" }
+      Action    = "SNS:Publish"
+      Resource  = aws_sns_topic.alarms[0].arn
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+        ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:rds:${var.region}:${data.aws_caller_identity.current.account_id}:es:*" }
+      }
+    }] : [],
+  ) : []
+}
+
 resource "aws_sns_topic_policy" "alarms" {
-  count = local.receive_relayed_alarms ? 1 : 0
+  count = local.alarm_topic_policy_enabled ? 1 : 0
 
   arn = aws_sns_topic.alarms[0].arn
 
   policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowCloudWatchAlarmsToPublish"
-        Effect    = "Allow"
-        Principal = { Service = "cloudwatch.amazonaws.com" }
-        Action    = "SNS:Publish"
-        Resource  = aws_sns_topic.alarms[0].arn
-        Condition = {
-          StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
-          ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:cloudwatch:${var.region}:${data.aws_caller_identity.current.account_id}:alarm:*" }
-        }
-      },
-      {
-        Sid       = "AllowTheRelayRuleToPublish"
-        Effect    = "Allow"
-        Principal = { Service = "events.amazonaws.com" }
-        Action    = "SNS:Publish"
-        Resource  = aws_sns_topic.alarms[0].arn
-        Condition = {
-          StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
-          ArnEquals    = { "aws:SourceArn" = aws_cloudwatch_event_rule.relayed_health_check_alarms[0].arn }
-        }
-      },
-    ]
+    Version   = "2012-10-17"
+    Statement = local.alarm_topic_statements
   })
 }
