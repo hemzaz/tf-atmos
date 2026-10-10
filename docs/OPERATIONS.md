@@ -184,6 +184,23 @@ What is safe and what is not:
 
 `dr-status` reports whether the bucket replicates and to where.
 
+**EU: an eu-west-1 outage.** The EU stacks' state is in `fnx-ew1-root`'s bucket,
+`fnx-ew1-terraform-state` in eu-west-1, which `backend/main` there replicates
+(`s3_replication_enabled`) to `fnx-ew1-terraform-state-replica` in eu-central-1, the EU DR region.
+Everything above holds for it: `TFSTATE_SOURCE=replica` renders that replica for `fnx-ew1-prod`
+and `fnx-ec1-prod` (their `settings.tfstate.replica_region`), read-only for the
+`fnx-ew1-terraform-backend-*` roles, and `eks-backend-services/main` applies with local state:
+
+```bash
+export TFSTATE_SOURCE=replica
+atmos terraform init vpc/main -s fnx-ec1-prod -- -reconfigure       # fnx-ew1-terraform-state-replica, eu-central-1
+atmos terraform output rds/main -s fnx-ew1-prod
+```
+
+The EU state never touches a US bucket or region, replica included (`check-data-residency.py`), and
+a us-east-1 outage leaves the EU backend untouched. `dr-status` for `fnx-ew1-prod` reports the
+EU bucket's replication.
+
 ## Repository variables
 
 | Variable | Value |
@@ -543,12 +560,15 @@ us-east-1; its rule relays the alarm's state changes to the default event bus of
 outage, and a recipient subscribed to both topics gets each state change twice: intentional
 redundancy (`fnx-ec1-prod` can get its own recipients once the real addresses land). As in the US, a us-east-1 outage silences both alarms, not the failover;
 `fnx-ec1-prod`'s API alarms on `ec1-main-alarms` (eu-central-1) are the in-region signal.
-The failover and failback steps below are the US pair's only, and the `dr-failover` and
-`dr-failback` workflows refuse any stack but `fnx-ue1-prod`: the EU steps land in B5-9c. Route
-53's control plane and the health check alarms stay in us-east-1 for the EU pair too, so its
-step 2 is unchanged; only the database, cache, cluster and Cognito names and regions differ.
-`dr-status` takes any `STACK` but defaults `DR_REGION` to us-east-2 (set `DR_REGION=eu-central-1`
-for `fnx-ew1-prod`).
+
+The failover, reconciliation and failback steps below are written with the US pair's names; the
+EU pair runs the same steps with the names in [EU failover](#eu-failover). `dr-failover` and
+`dr-failback` print each pair's own steps: `workflows/scripts/common/dr-pair.py` derives the
+standby (the stack whose `settings.dr.standby_of` names `STACK`), its region and every resource
+name from the stacks' config, and refuses any other stack (a standby, dev, staging) with the
+reason. `dr-status` reports the DR region from the same config (`backup/main`'s
+`replica_region`, else the standby's region): us-east-2 for the US pair, eu-central-1 for the EU
+one; `DR_REGION` overrides it.
 
 **Failover** (`STACK=fnx-ue1-prod atmos workflow dr-failover -f disaster-recovery` prints these
 steps; operator only, never from CI). It is CLI-first: a us-east-1 outage takes the state bucket
@@ -632,9 +652,77 @@ with it, so nothing here needs Terraform. Terraform catches up after recovery (b
 9. Verify: `curl -sf https://api.<domain>/` and
    `STACK=fnx-ue2-prod atmos workflow dr-status -f disaster-recovery`.
 
+The standby runs below the primary's sizes (owner decision 2026-10-07). Step 5 restores the
+node groups; the database (`db.r5.large`, the primary's is `db.r5.xlarge`) and the cache (2
+nodes, the primary's 3) serve as they are, and are resized only if the load needs it (a
+modify, not a replacement), in the standby's region:
+`aws rds modify-db-instance --db-instance-identifier ue2-prod-main-db --db-instance-class db.r5.xlarge --apply-immediately --region us-east-2`,
+`aws elasticache increase-replica-count --replication-group-id ue2-prod-cache --new-replica-count 2 --apply-immediately --region us-east-2`.
+A resized database's `instance_class` joins reconciliation step 1 (failback step 6 sets it back);
+the cache's `num_cache_nodes` waits with the rest of `elasticache/main` (reconciliation step 4).
+
+#### EU failover
+
+`fnx-ew1-prod` (eu-west-1) fails over to `fnx-ec1-prod` (eu-central-1) with the steps above
+(`STACK=fnx-ew1-prod atmos workflow dr-failover -f disaster-recovery`, and `dr-failback` the same),
+reading each name in its EU form:
+
+| In the steps | US pair | EU pair |
+|--------------|---------|---------|
+| Primary, standby | `fnx-ue1-prod`, `fnx-ue2-prod` | `fnx-ew1-prod`, `fnx-ec1-prod` |
+| Regions | us-east-1, us-east-2 | eu-west-1, eu-central-1 |
+| Health check (step 2) | `<ue1 id>`, alarm on `ue1-main-alarms` | `<ew1 id>`, alarm relayed to `ew1-main-alarms` and `ec1-main-alarms` |
+| Database | `ue2-prod-main-db` (`ue1-prod-main-db`), key `alias/ue2-main` | `ec1-prod-main-db` (`ew1-prod-main-db`), key `alias/ec1-main` |
+| Cache | `ue2-prod-cache` (`ue1-prod-cache`), `redis-auth/ue2/prod-cache` | `ec1-prod-cache` (`ew1-prod-cache`), `redis-auth/ec1/prod-cache` |
+| Cluster | `ue2-main` | `ec1-main` |
+| Step 6 branch | `stacks/orgs/fnx/prod/us-east-2/components/compute.yaml` | `stacks/orgs/fnx/prod/eu-central-1/components/compute.yaml` |
+| State, its replica | `fnx-terraform-state` (us-east-1), `fnx-terraform-state-replica` (us-east-2) | `fnx-ew1-terraform-state` (eu-west-1), `fnx-ew1-terraform-state-replica` (eu-central-1) |
+| Backup copies | `ue1-backup-replica` (us-east-2) | `ew1-backup-replica` (eu-central-1) |
+| User migration, pools | `ue2-cognito-user-migration`; `<ue1 pool id>`, `<ue2 pool id>` | `ec1-cognito-user-migration`; `<ew1 pool id>`, `<ec1 pool id>` |
+| Domain | `api.<domain>` | `api.<EU apex>` |
+
+What differs beyond the names:
+
+- **GDPR.** No step copies EU data, state or backups out of the EU: every database, cache,
+  backup, state and Cognito command runs in eu-west-1 or eu-central-1. The one us-east-1
+  interaction is Route 53 (step 2): its API and the health check alarms are there for every
+  pair, and that is configuration and metadata only, no personal data. `dr-pair.py` refuses an
+  EU pair whose standby, backup copy or state replica is outside the EU.
+- **State (step 6).** An eu-west-1 outage takes `fnx-ew1-root`'s bucket with it;
+  `TFSTATE_SOURCE=replica` reads `fnx-ew1-terraform-state-replica` in eu-central-1 instead (see
+  [State during a us-east-1 outage](#state-during-a-us-east-1-outage), EU paragraph). The US
+  state bucket and replica are never involved.
+- **Step 6** for `fnx-ec1-prod`: `eks-backend-services/main` is `metadata.enabled: false` while
+  warm (its database is a read-only replica until promoted). After steps 3 and 4, on a branch,
+  set the table's inputs with the EU names (`database_secret_arn` from
+  `aws rds describe-db-instances --db-instance-identifier ec1-prod-main-db --region eu-central-1
+  --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text`, `database_name`
+  `productionapp`), then:
+
+  ```bash
+  export TFSTATE_SOURCE=replica          # !terraform.state reads go to the eu-central-1 replica
+  rm -f components/terraform/eks-backend-services/backend.tf.json
+  atmos terraform deploy eks-backend-services/main -s fnx-ec1-prod --auto-generate-backend-file=false
+  ```
+
+- **Step 7.** Neither EU stack has `rds/data`; any other recovery point is restored from
+  `ew1-backup-replica` in eu-central-1, never from a US vault.
+- **Warm sizes**, scaled as above with the EU names: `workers` 3/6/12, `monitoring` 2/3/4,
+  `memory-optimized` 2/3/6 on `ec1-main`; `ec1-prod-main-db` to `db.r5.xlarge` and
+  `ec1-prod-cache` to 3 nodes, in eu-central-1, if the load needs it.
+- **Auth.** `ec1-cognito-user-migration` copies users from `fnx-ew1-prod`'s pool while eu-west-1's
+  Cognito answers; during an eu-west-1 outage, bulk-import with `SRC=eu-west-1 DST=eu-central-1`
+  ([Auth during failover](#auth-during-failover)): the export, `users.csv` and their bucket and key
+  are in eu-central-1.
+- **Reconcile and failback** as above with the EU names: the failback's literal
+  `replicate_source_db` on `fnx-ew1-prod` is
+  `arn:aws:rds:eu-central-1:{{ .settings.environment.account_id }}:db:ec1-prod-main-db`, and
+  `fnx-ec1-prod`'s is restored to `!terraform.state rds/main fnx-ew1-prod .instance_arn`.
+
 #### Auth during failover
 
-AWS has no cross-region user pools, so `fnx-ue2-prod` runs its own `cognito/main` (settings shared
+Written for the US pair; the EU pair is the same with `fnx-ew1-prod`/`fnx-ec1-prod`, eu-west-1/
+eu-central-1 and `ec1-cognito-user-migration` ([EU failover](#eu-failover)). AWS has no cross-region user pools, so `fnx-ue2-prod` runs its own `cognito/main` (settings shared
 with `fnx-ue1-prod`'s through `catalog/cognito/prod`), and its `apigateway/main` authorizer uses
 that pool only (owner decision 2026-10-07). `/api`, the only authorized route, is disabled in both
 regions today; the authorizer is wired for when it returns. On failover nothing is switched:
@@ -668,7 +756,7 @@ regions today; the authorizer is wired for when it returns. On failover nothing 
   --user-pool-id <ue2 pool id> --username <email>`); the next sign-in migrates it again.
 
 - During failover, and after each monthly export, reconcile: compare the us-east-2 users with the
-  latest export (`ue1-users.json`: `Enabled`, `UserStatus`, absence) and run
+  latest export (`users-export-<date>.json`: `Enabled`, `UserStatus`, absence) and run
   `aws cognito-idp admin-disable-user --region us-east-2` (or `admin-delete-user`) on any user
   whose `fnx-ue1-prod` copy is disabled, not `CONFIRMED`/`RESET_REQUIRED`, or gone: a migrated user
   is a snapshot and would otherwise keep working there.
@@ -689,43 +777,46 @@ Passwords cannot be exported: imported users are `RESET_REQUIRED` and reset by e
 first sign-in, and an imported user no longer runs the trigger (it exists). So import during an
 outage only, or for users who accept a reset. The export needs us-east-1's Cognito, so take it
 monthly with the coverage check and keep it outside us-east-1 (it is personal data: encrypted
-storage in us-east-2, access as for the database):
+storage in us-east-2, access as for the database; the EU pair's in eu-central-1, never outside the EU):
 
 ```bash
 set -o pipefail
-UE1=<ue1 pool id>; UE2=<ue2 pool id>; OBJ=s3://<bucket>/<prefix>; KMS=<kms key id>
-EXPORT="$OBJ/ue1-users-$(date -u +%Y%m%d).json"
-# 1. Export (us-east-1 healthy), streamed to an SSE-KMS object in us-east-2, never to a local file,
+# US pair. EU pair: SRC=eu-west-1 DST=eu-central-1, the <ew1>/<ec1> pool ids, and a bucket and
+# key in eu-central-1: EU personal data never leaves the EU.
+SRC=us-east-1; DST=us-east-2; SRC_POOL=<ue1 pool id>; DST_POOL=<ue2 pool id>
+OBJ=s3://<bucket in DST>/<prefix>; KMS=<kms key id in DST>
+EXPORT="$OBJ/users-export-$(date -u +%Y%m%d).json"
+# 1. Export ($SRC healthy), streamed to an SSE-KMS object in $DST, never to a local file,
 #    then check it holds the pool's users (the pool count is an estimate: expect a close match).
-aws cognito-idp list-users --region us-east-1 --user-pool-id "$UE1" --output json |
-  aws s3 cp - "$EXPORT" --sse aws:kms --sse-kms-key-id "$KMS" --region us-east-2
-aws s3 cp "$EXPORT" - --region us-east-2 | jq '.Users | length'
-aws cognito-idp describe-user-pool --region us-east-1 --user-pool-id "$UE1" --query 'UserPool.EstimatedNumberOfUsers'
-# 2. users.csv from the export, with the header us-east-2 expects and only the users the Lambda would
+aws cognito-idp list-users --region "$SRC" --user-pool-id "$SRC_POOL" --output json |
+  aws s3 cp - "$EXPORT" --sse aws:kms --sse-kms-key-id "$KMS" --region "$DST"
+aws s3 cp "$EXPORT" - --region "$DST" | jq '.Users | length'
+aws cognito-idp describe-user-pool --region "$SRC" --user-pool-id "$SRC_POOL" --query 'UserPool.EstimatedNumberOfUsers'
+# 2. users.csv from the export, with the header $DST expects and only the users the Lambda would
 #    migrate (enabled, CONFIRMED or RESET_REQUIRED), again straight to SSE-KMS S3.
-HEADER=$(aws cognito-idp get-csv-header --region us-east-2 --user-pool-id "$UE2" --query CSVHeader --output text | tr '\t' ',')
-aws s3 cp "$EXPORT" - --region us-east-2 | jq -r --arg h "$HEADER" '
+HEADER=$(aws cognito-idp get-csv-header --region "$DST" --user-pool-id "$DST_POOL" --query CSVHeader --output text | tr '\t' ',')
+aws s3 cp "$EXPORT" - --region "$DST" | jq -r --arg h "$HEADER" '
   ($h | split(",")) as $cols | $h,
   (.Users[] | select(.Enabled == true and (.UserStatus == "CONFIRMED" or .UserStatus == "RESET_REQUIRED"))
    | (.Attributes | map({(.Name): .Value}) | add) as $a
    | ($a + {"cognito:username": $a.email, "cognito:mfa_enabled": "false"}) as $row
    | [$cols[] | $row[.] // ""] | @csv)' |
-  aws s3 cp - "$OBJ/users.csv" --sse aws:kms --sse-kms-key-id "$KMS" --region us-east-2
+  aws s3 cp - "$OBJ/users.csv" --sse aws:kms --sse-kms-key-id "$KMS" --region "$DST"
 # 3. Import with a role that lets Cognito write the job's CloudWatch logs
 #    (trust cognito-idp.amazonaws.com; logs:CreateLogGroup/CreateLogStream/DescribeLogStreams/PutLogEvents).
-aws cognito-idp create-user-import-job --region us-east-2 --user-pool-id "$UE2" \
+aws cognito-idp create-user-import-job --region "$DST" --user-pool-id "$DST_POOL" \
   --job-name "dr-$(date -u +%Y%m%d%H%M)" --cloud-watch-logs-role-arn <role arn>
 # A presigned PUT needs a Content-Length (no chunked upload) and the header Cognito's URL is signed with.
-aws s3 cp "$OBJ/users.csv" - --region us-east-2 |
+aws s3 cp "$OBJ/users.csv" - --region "$DST" |
   curl -sf -X PUT --data-binary @- -H 'Content-Type:' -H 'x-amz-server-side-encryption: aws:kms' "<PreSignedUrl from above>"
-aws cognito-idp start-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
-aws cognito-idp describe-user-import-job --region us-east-2 --user-pool-id "$UE2" --job-id <JobId>
+aws cognito-idp start-user-import-job --region "$DST" --user-pool-id "$DST_POOL" --job-id <JobId>
+aws cognito-idp describe-user-import-job --region "$DST" --user-pool-id "$DST_POOL" --job-id <JobId>
 ```
 
 The bucket holds personal data: it needs SSE-KMS by default and a lifecycle expiry (no stack here
 provides one yet, so create or pick it first).
 
-Leave out users already in us-east-2 (`list-users` there): an existing username fails its row.
+Leave out users already in the standby's pool (`list-users` there): an existing username fails its row.
 
 **Reconcile Terraform** once the state bucket answers again (us-east-2 still primary). Each PR's
 plan is read before merging; re-enable CD for these merges only (`gh workflow enable
