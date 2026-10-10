@@ -152,6 +152,65 @@ variable "health_check_alarm_actions" {
   }
 }
 
+# A stack whose own alarm topics are outside us-east-1 (an EU stack, GDPR:
+# owner decision B5) has no us-east-1 topic to name in health_check_alarm_actions.
+# This component then creates one itself, in us-east-1 through the resource's
+# region argument (as the alarm), on its own KMS key there: health-check
+# metadata only, never a non-EU stack reading EU state
+# (check-data-residency.py EXEMPTIONS).
+variable "create_health_check_alarm_topic" {
+  type        = bool
+  description = "Create an SNS topic in us-east-1 (\"<Environment>-<api_name>-health-check-alarms\", encrypted with its own us-east-1 KMS key) that the route53_failover_type health check's alarm notifies besides health_check_alarm_actions; another stack's alarm in this account may name it there too"
+  default     = false
+  nullable    = false
+
+  validation {
+    condition     = !var.create_health_check_alarm_topic || var.route53_failover_type != null
+    error_message = "create_health_check_alarm_topic needs route53_failover_type: only a failover health check has an alarm to notify it."
+  }
+}
+
+variable "health_check_alarm_email_subscriptions" {
+  type        = list(string)
+  description = "Email addresses subscribed to the create_health_check_alarm_topic topic; each must confirm its subscription"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for e in var.health_check_alarm_email_subscriptions : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
+    error_message = "health_check_alarm_email_subscriptions must be email addresses."
+  }
+
+  validation {
+    condition     = length(var.health_check_alarm_email_subscriptions) == 0 || var.create_health_check_alarm_topic
+    error_message = "health_check_alarm_email_subscriptions subscribe to the topic create_health_check_alarm_topic creates: set it to true."
+  }
+}
+
+# Route 53's checker regions (Route 53 API reference, HealthCheckConfig
+# Regions: at least 3). Null keeps every region, or the US ones with a WAF geo
+# rule. An EU stack names eu-west-1, the only EU checker region, plus two
+# others (owner decision B5: probes only, no personal data).
+variable "health_check_regions" {
+  type        = list(string)
+  description = "Route 53 checker regions the route53_failover_type health check calls from (at least 3 of us-east-1, us-west-1, us-west-2, eu-west-1, ap-southeast-1, ap-southeast-2, ap-northeast-1, sa-east-1). Null: every checker region, or the US ones with a WAF geo rule (allowed_countries)"
+  default     = null
+
+  validation {
+    condition = var.health_check_regions == null || (
+      length(distinct(coalesce(var.health_check_regions, []))) >= 3
+      && alltrue([for r in coalesce(var.health_check_regions, []) : contains(["us-east-1", "us-west-1", "us-west-2", "eu-west-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "sa-east-1"], r)])
+    )
+    error_message = "health_check_regions must list at least 3 distinct Route 53 checker regions: us-east-1, us-west-1, us-west-2, eu-west-1, ap-southeast-1, ap-southeast-2, ap-northeast-1, sa-east-1."
+  }
+
+  # A WAF geo rule pins the US checker regions (main.tf), which it admits.
+  validation {
+    condition     = var.health_check_regions == null || length(var.allowed_countries) == 0
+    error_message = "health_check_regions cannot be combined with allowed_countries: a WAF geo rule pins the US checker regions, the ones it admits."
+  }
+}
+
 variable "enable_logging" {
   type        = bool
   description = "Whether to enable CloudWatch logging for the API Gateway"

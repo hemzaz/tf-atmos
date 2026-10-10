@@ -668,8 +668,9 @@ resource "aws_route53_health_check" "api" {
   measure_latency   = true
 
   # With a WAF geo rule, check only from the US checker regions, which the
-  # rule admits (allowed_countries must hold US, variables.tf).
-  regions = length(var.allowed_countries) > 0 ? ["us-east-1", "us-west-1", "us-west-2"] : null
+  # rule admits (allowed_countries must hold US, variables.tf). Otherwise
+  # health_check_regions, or every checker region when it is null.
+  regions = length(var.allowed_countries) > 0 ? ["us-east-1", "us-west-1", "us-west-2"] : var.health_check_regions
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-${lower(var.route53_failover_type)}" })
 }
@@ -693,8 +694,8 @@ resource "aws_cloudwatch_metric_alarm" "health_check" {
   statistic           = "Minimum"
   threshold           = 1
   treat_missing_data  = "breaching"
-  alarm_actions       = var.health_check_alarm_actions
-  ok_actions          = var.health_check_alarm_actions
+  alarm_actions       = concat(var.health_check_alarm_actions, aws_sns_topic.health_check_alarms[*].arn)
+  ok_actions          = concat(var.health_check_alarm_actions, aws_sns_topic.health_check_alarms[*].arn)
 
   dimensions = {
     HealthCheckId = aws_route53_health_check.api[0].id

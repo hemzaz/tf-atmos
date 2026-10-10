@@ -6,11 +6,16 @@
 # which explains each input) from the shared prod catalogs
 # (catalog/<component>/prod): the main database and cache, the backend
 # services on eks/main, the user pool, the main API and monitoring, plus the
-# prod-eu account's budget. Without fnx-ue1-prod's DR or US-only parts:
-#   - no Global Datastore, read replica or Route 53 failover pair yet: the EU
-#     DR stack fnx-ec1-prod has only its foundation (network, CI roles,
-#     security services, backup vault). Without failover, apigateway/main
-#     has no Route 53 health check, so none of its alarms is in us-east-1;
+# prod-eu account's budget. Its DR warm standby is fnx-ec1-prod
+# (eu-central-1), as fnx-ue2-prod is fnx-ue1-prod's:
+#   - elasticache/main is a Global Datastore primary, rds/main the source of
+#     fnx-ec1-prod's read replica, cognito/main has the dr-migration client
+#     fnx-ec1-prod's user-migration trigger signs in with, and
+#     apigateway/main is the PRIMARY half of api.<EU apex>'s Route 53
+#     failover pair. All EU to EU, except the health check's alarm and its
+#     topic, in us-east-1 (Route 53's metrics exist only there), and two of
+#     its three checker regions (eu-west-1 is the only EU one): metadata and
+#     probes only, owner decision B5;
 #   - its own user pool, never a migration from fnx-ue1-prod's (owner
 #     decision): EU users sign up here;
 #   - no ECS cluster, analytics database, data API or Lambda functions.
@@ -76,12 +81,32 @@ components:
             id_token_validity_minutes: 5
             refresh_token_validity_days: 1
 
-    # api.<EU apex> as a plain alias record in network/main's zone.
+    # api.<EU apex>, as fnx-ue1-prod's: the PRIMARY half of its Route 53
+    # failover pair, health-checked on this region's stage root;
+    # fnx-ec1-prod's apigateway/main is the SECONDARY.
     apigateway/main:
       metadata:
         component: apigateway
         inherits:
           - apigateway/main-prod
+      vars:
+        route53_failover_type: PRIMARY
+        route53_set_identifier: "{{ .settings.prefix }}"
+        # The checkers: eu-west-1, the only EU checker region, plus two others
+        # (Route 53 needs three). Owner decision B5: probes only, no personal
+        # data; a residency exemption (check-data-residency.py EXEMPTIONS).
+        health_check_regions: ["eu-west-1", "us-east-1", "ap-southeast-1"]
+        # The health check's alarm lives in us-east-1 (Route 53's metrics are
+        # only there). fnx-ue1-prod's notifies its monitoring topic there; this
+        # stack has none outside the EU, so this component creates one in
+        # us-east-1 (ew1-prod-main-api-health-check-alarms, on its own us-east-1
+        # key), which fnx-ec1-prod's alarm names too. Metadata only (owner
+        # decision B5): created by this EU stack's own component, never by a
+        # non-EU stack reading EU state (check-data-residency.py EXEMPTIONS).
+        create_health_check_alarm_topic: true
+        health_check_alarm_email_subscriptions:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"
 
     # Owns <Environment>-main-alarms (ew1-main-alarms), the topic the runner
     # pool's alarms name (compute.yaml).

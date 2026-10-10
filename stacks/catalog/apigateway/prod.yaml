@@ -5,8 +5,8 @@ import:
 # The production main API, shared by fnx-ue1-prod's and fnx-ew1-prod's
 # apigateway/main: api.<domain> on acm/main's wildcard certificate in
 # network/main's zone, authorized by the stack's cognito/main pool, behind
-# WAF, with logging and tracing. fnx-ue1-prod adds the PRIMARY half of its
-# Route 53 failover pair (DR).
+# WAF, with logging and tracing. Each adds the PRIMARY half of its Route 53
+# failover pair (DR: fnx-ue2-prod, fnx-ec1-prod).
 components:
   terraform:
     apigateway/main-prod:

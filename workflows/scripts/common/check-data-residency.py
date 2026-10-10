@@ -33,8 +33,8 @@ Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on a
 violation.
 
 Out of scope: other us-east-1 regions hard-coded inside component code (the apigateway
-health-check alarm, cloudfront log delivery) are not stack config; they are reviewed
-per component.
+health-check alarm and its topic, cloudfront log delivery) are not stack config; they are
+reviewed per component.
 """
 import fnmatch
 import json
@@ -65,14 +65,21 @@ class Exemption(NamedTuple):
     reason: str
 
 
-# Empty: fnx-ec1-prod has no apigateway/main failover pair yet; the PR adding it adds
-# Exemption("apigateway/*", "vars.health_check_alarm_actions", "us-east-1", ...):
-# Route 53 publishes health-check metrics only in us-east-1, so the health-check
-# alarm (apigateway main.tf) and its SNS topic live there (metadata only, no
-# personal data). The EU stack's own component creates that topic with a per-resource
-# region = "us-east-1" (like the alarm at apigateway main.tf), never a non-EU stack
-# that reads EU state: the outside-reader rule fails that.
-EXEMPTIONS: tuple = ()
+# The api.<EU apex> failover pair (fnx-ew1-prod PRIMARY, fnx-ec1-prod SECONDARY), owner
+# decision B5. Route 53 publishes health-check metrics only in us-east-1, so the
+# health-check alarm (apigateway main.tf) and its SNS topic live there (metadata only, no
+# personal data). fnx-ew1-prod's apigateway/main creates that topic itself, with a
+# per-resource region = "us-east-1" (apigateway health-check-alarm-topic.tf), never a
+# non-EU stack that reads EU state: the outside-reader rule fails that. fnx-ec1-prod's
+# alarm names it. Route 53 checks from at least 3 checker regions and eu-west-1 is the
+# only EU one, so each check also calls from us-east-1 and ap-southeast-1 (probes only).
+_HEALTH_CHECK = "Route 53 health checks: metrics, alarm and topic only in us-east-1 (owner, B5)"
+_CHECKERS = "Route 53 health checks: 3 checker regions, eu-west-1 the only EU one; probes only (owner, B5)"
+EXEMPTIONS: tuple = (
+    Exemption("apigateway/main", "vars.health_check_alarm_actions", "us-east-1", _HEALTH_CHECK),
+    Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
+    Exemption("apigateway/main", "vars.health_check_regions", "ap-southeast-1", _CHECKERS),
+)
 
 
 def is_deployable(instance: dict) -> bool:

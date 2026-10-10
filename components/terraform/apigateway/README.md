@@ -14,8 +14,8 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   (`.function_invoke_arn`, `.function_name`).
 - Both depend on `apigateway-account/main` (the account's CloudWatch Logs role; ordering only).
 - `fnx-ue1-prod`'s and `fnx-ew1-prod`'s `apigateway/main` inherit `apigateway/main-prod`
-  (`stacks/catalog/apigateway/prod.yaml`). Only a `route53_failover_type` instance gets a health
-  check, whose alarm is in us-east-1: `fnx-ew1-prod`'s sets none, so nothing of it leaves the EU.
+  (`stacks/catalog/apigateway/prod.yaml`) and are the PRIMARY halves of `api.<d>`'s failover
+  pairs; `fnx-ue2-prod`'s and `fnx-ec1-prod`'s, configured inline, the SECONDARY ones.
 - Used by: `monitoring` (`.api_name`, `.rest_api_stage_name`).
 - In the `microservices-platform` template, `http_routes` send `ANY /{proxy+}` over the VPC link to
   `alb-controller-ingress-group`'s `https_listener_arn`, with `tls_server_name_to_verify` set.
@@ -39,8 +39,20 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   one added later must still admit the Route 53 health checkers.
 - The failover health check gets a `HealthCheckStatus` alarm, notifying `health_check_alarm_actions`
   on failure and recovery. Route 53 publishes the metric in us-east-1 only, so the alarm lives
-  there (the resource's `region` argument) and its topics must be us-east-1 topics: both prod stacks
-  point it at `fnx-ue1-prod` `monitoring/main`'s topic, by name (that component reads this one).
+  there (the resource's `region` argument) and its topics must be us-east-1 topics: both US prod
+  stacks point it at `fnx-ue1-prod` `monitoring/main`'s topic, by name (that component reads this
+  one).
+- An EU stack has no topic in us-east-1 and no non-EU stack may read its state (GDPR, owner
+  decision B5), so `create_health_check_alarm_topic` makes this component create one there,
+  `<Environment>-<api_name>-health-check-alarms`, on its own rotated us-east-1 KMS key (the EU
+  `kms/main` has no us-east-1 replica), subscribing `health_check_alarm_email_subscriptions`. Its
+  policy admits CloudWatch alarms of the account in us-east-1 only. `fnx-ew1-prod`'s creates it and
+  `fnx-ec1-prod`'s alarm names it, as `fnx-ue2-prod`'s names `ue1-main-alarms`. It carries alarm
+  state only (`check-data-residency.py` EXEMPTIONS lists these fields).
+- `health_check_regions` sets the checker regions (at least 3; null = every one). The EU pair uses
+  `eu-west-1`, the only EU checker region, plus `us-east-1` and `ap-southeast-1` (probes only). A
+  WAF geo rule (`allowed_countries`) pins the US checker regions instead, so the two cannot be
+  combined.
 - A `MOCK` integration answers 200: without `request_templates` it gets one selecting
   `statusCode: 200`, plus a 200 method and integration response (API Gateway answers 500 without
   them). `/`, the liveness method the health check probes, is such a MOCK.

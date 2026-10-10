@@ -70,7 +70,8 @@ class DataResidencyTest(unittest.TestCase):
         api = instance(health_check_alarm_actions=["arn:aws:sns:us-east-1:123456789012:ue1-main-alarms"],
                        policy={"roles": ["arn:aws:iam::123456789012:role/x", "arn:aws:s3:::bucket"]},
                        zone="arn:aws:route53:::hostedzone/Z1", topic="arn:aws:sns:eu-west-1:123456789012:t")
-        self.assertEqual(residency.check({"fnx-ew1-prod": stack(**{"apigateway/main": api})}), [
+        # No exemptions: the rule itself (EXEMPTIONS admits this pair, tested below).
+        self.assertEqual(residency.check({"fnx-ew1-prod": stack(**{"apigateway/main": api})}, ()), [
             f"fnx-ew1-prod: apigateway/main vars.health_check_alarm_actions is 'us-east-1', {OUTSIDE}",
         ])
 
@@ -129,9 +130,31 @@ class DataResidencyTest(unittest.TestCase):
         exemptions = (residency.Exemption("apigateway/*", "vars.health_check_alarm_actions", "us-east-1",
                                           "Route 53 health-check metrics exist only in us-east-1"),)
         self.assertEqual(residency.check(stacks, exemptions), [])
-        self.assertEqual(len(residency.check(stacks)), 1)
+        self.assertEqual(len(residency.check(stacks, ())), 1)
         api["vars"]["health_check_alarm_actions"] = ["arn:aws:sns:us-west-2:123456789012:t"]
         self.assertEqual(len(residency.check(stacks, exemptions)), 1)
+
+    def test_eu_failover_pair_passes_with_the_exemptions_and_only_them(self):
+        regions = ["eu-west-1", "us-east-1", "ap-southeast-1"]
+        primary = instance(health_check_regions=regions, create_health_check_alarm_topic=True)
+        secondary = instance(region="eu-central-1", health_check_regions=regions,
+                             health_check_alarm_actions=["arn:aws:sns:us-east-1:123456789012:ew1-prod-main-api-health-check-alarms"])
+        stacks = {"fnx-ew1-prod": eu_stack(**{"apigateway/main": primary}),
+                  "fnx-ec1-prod": eu_stack(**{"apigateway/main": secondary})}
+        self.assertEqual(residency.check(stacks), [])
+        self.assertEqual(len(residency.check(stacks, ())), 5)
+        # Deliberately bad: another checker region, another instance, another region field.
+        secondary["vars"]["health_check_regions"] = ["eu-west-1", "us-east-1", "us-west-2"]
+        self.assertEqual(residency.check(stacks), [
+            f"fnx-ec1-prod: apigateway/main vars.health_check_regions is 'us-west-2', {OUTSIDE}",
+        ])
+        stacks["fnx-ec1-prod"] = eu_stack(**{"apigateway/data": instance(health_check_regions=regions),
+                                             "monitoring/main": instance(sns_topic_arn="arn:aws:sns:us-east-1:123456789012:t")})
+        self.assertEqual(residency.check(stacks), [
+            f"fnx-ec1-prod: apigateway/data vars.health_check_regions is 'us-east-1', {OUTSIDE}",
+            f"fnx-ec1-prod: apigateway/data vars.health_check_regions is 'ap-southeast-1', {OUTSIDE}",
+            f"fnx-ec1-prod: monitoring/main vars.sns_topic_arn is 'us-east-1', {OUTSIDE}",
+        ])
 
     def test_disabled_instances_are_skipped(self):
         off = instance(region="us-east-1", compliance=US)

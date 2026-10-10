@@ -148,6 +148,141 @@ run "geo_blocking_pins_the_us_checker_regions" {
   }
 }
 
+run "eu_checker_regions_and_own_us_east_1_topic" {
+  # An EU stack's PRIMARY (owner decision B5): eu-west-1 plus two other
+  # checker regions, and its own alarm topic in us-east-1 on its own key.
+  command = plan
+
+  override_resource {
+    target          = aws_sns_topic.health_check_alarms
+    override_during = plan
+    values          = { arn = "arn:aws:sns:us-east-1:123456789012:ew1-prod-main-api-health-check-alarms" }
+  }
+
+  override_resource {
+    target          = aws_kms_key.health_check_alarms
+    override_during = plan
+    values = {
+      arn    = "arn:aws:kms:us-east-1:123456789012:key/11111111-1111-1111-1111-111111111111"
+      key_id = "11111111-1111-1111-1111-111111111111"
+    }
+  }
+
+  variables {
+    region                                 = "eu-west-1"
+    route53_failover_type                  = "PRIMARY"
+    route53_set_identifier                 = "ew1"
+    health_check_regions                   = ["eu-west-1", "us-east-1", "ap-southeast-1"]
+    create_health_check_alarm_topic        = true
+    health_check_alarm_email_subscriptions = ["oncall@example.com"]
+    tags = {
+      Environment = "ew1"
+      Tenant      = "fnx"
+      ManagedBy   = "Terraform"
+    }
+  }
+
+  assert {
+    condition     = aws_route53_health_check.api[0].regions == toset(["eu-west-1", "us-east-1", "ap-southeast-1"])
+    error_message = "health_check_regions must set the health check's checker regions."
+  }
+
+  assert {
+    condition = (
+      aws_sns_topic.health_check_alarms[0].region == "us-east-1"
+      && aws_sns_topic.health_check_alarms[0].name == "ew1-prod-main-api-health-check-alarms"
+      && aws_sns_topic.health_check_alarms[0].kms_master_key_id == aws_kms_key.health_check_alarms[0].arn
+      && aws_kms_key.health_check_alarms[0].region == "us-east-1"
+      && aws_kms_key.health_check_alarms[0].enable_key_rotation
+      && aws_sns_topic_policy.health_check_alarms[0].region == "us-east-1"
+      && aws_sns_topic_subscription.health_check_alarms_email["oncall@example.com"].region == "us-east-1"
+    )
+    error_message = "The topic, its key, policy and subscriptions must be in us-east-1, the topic on its own rotated key."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.health_check[0].alarm_actions == toset([aws_sns_topic.health_check_alarms[0].arn])
+      && aws_cloudwatch_metric_alarm.health_check[0].ok_actions == toset([aws_sns_topic.health_check_alarms[0].arn])
+      && output.health_check_alarm_topic_arn == aws_sns_topic.health_check_alarms[0].arn
+    )
+    error_message = "The alarm must notify the component's own topic, and the output must name it."
+  }
+}
+
+run "no_topic_by_default" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "SECONDARY"
+    route53_set_identifier = "ue2"
+  }
+
+  assert {
+    condition     = length(aws_sns_topic.health_check_alarms) == 0 && length(aws_kms_key.health_check_alarms) == 0 && output.health_check_alarm_topic_arn == null
+    error_message = "Without create_health_check_alarm_topic no topic or key."
+  }
+}
+
+run "topic_without_failover_is_rejected" {
+  command = plan
+
+  variables {
+    create_health_check_alarm_topic = true
+  }
+
+  expect_failures = [var.create_health_check_alarm_topic]
+}
+
+run "subscriptions_without_topic_are_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type                  = "PRIMARY"
+    route53_set_identifier                 = "ue1"
+    health_check_alarm_email_subscriptions = ["oncall@example.com"]
+  }
+
+  expect_failures = [var.health_check_alarm_email_subscriptions]
+}
+
+run "fewer_than_three_checker_regions_are_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "PRIMARY"
+    route53_set_identifier = "ew1"
+    health_check_regions   = ["eu-west-1", "us-east-1"]
+  }
+
+  expect_failures = [var.health_check_regions]
+}
+
+run "non_checker_region_is_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "PRIMARY"
+    route53_set_identifier = "ec1"
+    health_check_regions   = ["eu-west-1", "eu-central-1", "us-east-1"]
+  }
+
+  expect_failures = [var.health_check_regions]
+}
+
+run "checker_regions_with_geo_blocking_are_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "PRIMARY"
+    route53_set_identifier = "ue1"
+    allowed_countries      = ["US"]
+    health_check_regions   = ["eu-west-1", "us-east-1", "ap-southeast-1"]
+  }
+
+  expect_failures = [var.health_check_regions]
+}
+
 run "geo_blocking_without_us_is_rejected" {
   command = plan
 
