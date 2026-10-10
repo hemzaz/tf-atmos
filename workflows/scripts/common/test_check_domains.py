@@ -360,6 +360,54 @@ class CheckDomainsTest(unittest.TestCase):
             errors=["depends on s1 acm/main, in account 'prod', not 'prod-eu'", "certificate api sets process_domain_validation_options: false"],
         )
 
+    def test_unprocessed_certificate_without_an_account_fails(self):
+        stacks = self.dr_stacks()
+        del stacks["s2"]["components"]["terraform"]["acm/main"]["settings"]
+        self.assert_result(
+            stacks,
+            errors=["s2: acm/main: has no settings.environment.account", "certificate api sets process_domain_validation_options: false"],
+        )
+
+    def test_unprocessed_certificate_depending_on_an_instance_without_an_account_fails(self):
+        stacks = self.dr_stacks()
+        del stacks["s1"]["components"]["terraform"]["acm/main"]["settings"]
+        self.assert_result(
+            stacks,
+            errors=["depends on s1 acm/main, which has no settings.environment.account", "certificate api sets process_domain_validation_options: false"],
+        )
+
+    def test_both_instances_without_an_account_fail(self):
+        # None == None must not pass as "the same account".
+        stacks = self.dr_stacks()
+        for name in ("s1", "s2"):
+            del stacks[name]["components"]["terraform"]["acm/main"]["settings"]
+        self.assert_result(
+            stacks,
+            errors=[
+                "s2: acm/main: has no settings.environment.account",
+                "depends on s1 acm/main, which has no settings.environment.account",
+                "certificate api sets process_domain_validation_options: false",
+            ],
+        )
+
+    def test_unprocessed_certificate_outside_the_zone_is_not_placed_but_still_checked(self):
+        # One acm instance, a processed certificate in zone_id and an unprocessed one whose name is
+        # outside it: zoned_names skips the unprocessed one (it writes no record), so no placement
+        # error, while borrowed_validation_errors still requires a dependency that carries it.
+        mixed = acm("!terraform.state network/main .zone_ids.main", (f"*.{DOMAIN}", [DOMAIN]))
+        mixed["settings"] = {"environment": {"account": "prod"}}
+        mixed["vars"]["dns_domains"]["other"] = {
+            "domain_name": "api.other.example.org", "validation_method": "DNS", "process_domain_validation_options": False,
+        }
+        self.assert_result(
+            stacks_with(**{"acm/main": mixed}),
+            errors=["s1: acm/main: certificate other sets process_domain_validation_options: false"],
+        )
+        carrier = acm("", ("api.other.example.org", []))
+        carrier["settings"] = {"environment": {"account": "prod"}}
+        mixed["dependencies"] = {"components": [{"component": "acm/carrier"}]}
+        self.assert_result(stacks_with(**{"acm/main": mixed, "acm/carrier": carrier}))
+
     def test_unprocessed_certificates_do_not_cover_each_other(self):
         stacks = self.dr_stacks()
         primary = stacks["s1"]["components"]["terraform"]["acm/main"]
