@@ -27,7 +27,10 @@ then waited on by `aws_acm_certificate_validation` (45 minute timeout).
   `acm-request-certificate`'s flag): otherwise both states own one record (`allow_overwrite`
   lets both create it), and destroying either deletes it and breaks the other's renewal. Such a
   certificate writes no record, needs no `zone_id` (required only while a DNS certificate
-  processes its options), and, unlike upstream, is still waited on; the owner must deploy first.
+  processes its options), and, unlike upstream, is still waited on. The owning instance must
+  deploy first and outlive it, keeping the name. `check-domains.py` fails such a certificate
+  unless each of its names is carried by a processed DNS certificate of an acm instance in its
+  `dependencies.components`, in the same account.
 - `deploy-full-stack` applies acm in its own `certificates` layer, after `dns` and before
   `services`. Validation cannot finish until the top-level domain is delegated (see `dns`).
 - `certificate_keys` / `certificate_crts` are placeholder strings: ACM cannot export private keys.

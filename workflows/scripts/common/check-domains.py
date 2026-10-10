@@ -7,7 +7,11 @@ For each enabled, non-abstract instance, by root module:
     must be that zone's name or a name below it;
   - acm: the domain_name and every subject_alternative_names entry of each
     DNS-validated certificate (a leading `*.` removed) must be the zone's name
-    or below it: ACM's validation records for those names go into zone_id;
+    or below it: ACM's validation records for those names go into zone_id. A
+    certificate with process_domain_validation_options false writes no record:
+    each of its names (x and *.x share one) must instead be carried by a
+    processed DNS certificate of an acm instance in its dependencies.components,
+    in the same account (settings.environment.account), whose record it waits on;
   - apigateway: domain_name, when domain_name and zone_id are both set (the
     custom domain's alias record goes into zone_id); and when certificate_arn
     reads `!terraform.state <acm instance> .certificate_arns.<key>`, that
@@ -219,12 +223,77 @@ def delegation_errors(stacks: dict, stack_name: str, zones: list[Zone]) -> list[
     return errors
 
 
+def is_dns(cert: dict) -> bool:
+    return (cert.get("validation_method") or "DNS") == "DNS"
+
+
+def processes(cert: dict) -> bool:
+    """Whether an acm certificate writes its own validation records (the module's default: true)."""
+    return cert.get("process_domain_validation_options") is not False
+
+
+def cert_names(cert: dict) -> list[str]:
+    return [n for n in [cert.get("domain_name")] + list(cert.get("subject_alternative_names") or []) if isinstance(n, str)]
+
+
+def account_of(instance: dict):
+    return ((instance.get("settings") or {}).get("environment") or {}).get("account")
+
+
+def borrowed_validation_errors(stacks: dict, stack_name: str, instance: dict) -> list[str]:
+    """Why a DNS certificate with process_domain_validation_options false has no record to wait on.
+
+    Each of its names must be carried by a processed DNS certificate of an acm
+    instance listed in this instance's dependencies.components, in the same
+    account: ACM gives x and *.x the same validation CNAME, the same in every
+    certificate of one account, so that instance's record validates it.
+    Otherwise the apply waits 45 minutes for a record nobody writes.
+    """
+    unprocessed = [
+        (key, cert) for key, cert in sorted(dicts((instance.get("vars") or {}).get("dns_domains")).items())
+        if is_dns(cert) and not processes(cert)
+    ]
+    if not unprocessed:
+        return []
+    account = account_of(instance)
+    owners, errors = {}, []
+    for dep in (instance.get("dependencies") or {}).get("components") or []:
+        if not isinstance(dep, dict) or not isinstance(dep.get("component"), str):
+            continue
+        dep_stack = dep.get("stack") or stack_name
+        target = stacks.get(dep_stack, {}).get("components", {}).get("terraform", {}).get(dep["component"])
+        if target is None or not check_dependencies.is_deployable(target):
+            continue
+        if check_dependencies.module_name(dep["component"], target) != "acm":
+            continue
+        label = f"{dep_stack} {dep['component']}"
+        if account_of(target) != account:
+            errors.append(
+                f"depends on {label}, in account {account_of(target)!r}, not {account!r}: "
+                "ACM validation records are per account, so its records cannot validate these certificates"
+            )
+            continue
+        for cert in dicts((target.get("vars") or {}).get("dns_domains")).values():
+            if is_dns(cert) and processes(cert):
+                for n in cert_names(cert):
+                    owners.setdefault(normalize(n), label)
+    for key, cert in unprocessed:
+        for n in cert_names(cert):
+            if normalize(n) not in owners:
+                errors.append(
+                    f"certificate {key} sets process_domain_validation_options: false, but no processed DNS "
+                    f"certificate of an acm instance in its dependencies.components (same account) carries "
+                    f"{n} or its *./base twin, so nothing writes its validation record"
+                )
+    return errors
+
+
 def zoned_names(module: str, variables: dict) -> list[tuple[str, str]]:
     """(what, name) pairs this instance writes into its zone_id."""
     if module == "acm":
         names = []
         for key, cert in sorted(dicts(variables.get("dns_domains")).items()):
-            if (cert.get("validation_method") or "DNS") != "DNS":
+            if not is_dns(cert) or not processes(cert):
                 continue
             for name in [cert.get("domain_name")] + list(cert.get("subject_alternative_names") or []):
                 if isinstance(name, str):
@@ -285,6 +354,8 @@ def check(stacks: dict) -> tuple[list[str], list[str]]:
                     errors.append(f"{where}: {problem}")
                 if warning:
                     warnings.append(f"{where}: {warning}")
+            if module == "acm":
+                errors += [f"{where}: {e}" for e in borrowed_validation_errors(stacks, stack_name, instance)]
             names = zoned_names(module, variables)
             zone_id = variables.get("zone_id")
             if not names or zone_id in (None, ""):
@@ -314,7 +385,8 @@ def main() -> int:
         return 1
     print(
         "every dns record, acm domain/SAN and apigateway custom domain is inside the zone it is written to, "
-        "every public subzone is delegated from its parent zone, and every apigateway certificate covers its domain"
+        "every public subzone is delegated from its parent zone, every apigateway certificate covers its domain, "
+        "and every acm certificate that writes no validation record depends on a same-account one that does"
     )
     return 0
 

@@ -211,6 +211,10 @@ components:
             domain_name: "*.{{ .settings.environment.domain_name }}"
             subject_alternative_names:
               - "{{ .settings.environment.domain_name }}"
+              # This SAN's validation record also validates fnx-ue2-prod
+              # acm/main's api.<domain> (same CNAME in this account; that
+              # instance writes none). Keep the name, and this instance,
+              # while fnx-ue2-prod exists (check-domains.py checks it).
               - "*.api.{{ .settings.environment.domain_name }}"
             validation_method: "DNS"
             wait_for_validation: true

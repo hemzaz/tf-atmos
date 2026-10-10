@@ -15,7 +15,8 @@ variable "dns_domains" {
     wait_for_validation       = optional(bool, true)
     # Cloud Posse acm-request-certificate's flag: false writes no validation
     # records for this certificate (another state owns them, e.g. the primary
-    # region's in a DR region). Unlike upstream, it still waits for validation.
+    # region's in a DR region). Unlike upstream, it still waits for validation,
+    # and it is set per certificate here (module-wide upstream).
     process_domain_validation_options = optional(bool, true)
     tags                              = optional(map(string), {})
   }))
