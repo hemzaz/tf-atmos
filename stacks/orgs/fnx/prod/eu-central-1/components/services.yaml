@@ -1,0 +1,98 @@
+---
+# =============================================================================
+# Services for fnx-ec1-prod (EU DR warm standby)
+# =============================================================================
+# fnx-ue2-prod's services (orgs/fnx/prod/us-east-2/components/services.yaml),
+# which this mirrors for fnx-ew1-prod. The data tier the serving path fails
+# over to, kept in sync continuously, EU to EU only (eu-west-1 to
+# eu-central-1, check-data-residency.py):
+#   - rds/main: a cross-region read replica of fnx-ew1-prod's rds/main
+#     (Cloud Posse terraform-aws-rds replicate_source_db). Promote it by
+#     setting replicate_source_db to null.
+#   - elasticache/main: a Global Datastore secondary of fnx-ew1-prod's
+#     elasticache/main (Cloud Posse aws-elasticache-redis
+#     global_replication_group_id).
+# No rds/data: the EU data plane is not in fnx-ew1-prod either.
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-central-1/components/globals
+  - catalog/rds/prod
+  - catalog/elasticache/prod
+
+components:
+  terraform:
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/prod
+      vars:
+        environment: "{{ .settings.context.stage }}"
+        identifier: "{{ .settings.context.stage }}-main-db"
+        replicate_source_db: !terraform.state rds/main fnx-ew1-prod .instance_arn
+        # Used once promoted (a replica takes the source's); kept equal to
+        # fnx-ew1-prod's so the promoted instance matches it.
+        db_name: "productionapp"
+        # backup/main selects it once promoted (Role=primary).
+        tags:
+          Backup: "true"
+        # The parameter group family follows the source's engine.
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        family: "postgres14"
+        # Warm: one size below fnx-ew1-prod's db.r5.xlarge; resize on failover
+        # if the load needs it (a modify, not a replacement).
+        instance_class: "db.r5.large"
+        allocated_storage: 100
+        max_allocated_storage: 500
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        backup_window: "03:00-04:00"
+        maintenance_window: "Sun:04:30-Sun:05:30"
+        performance_insights_retention_period: 7
+        performance_insights_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        master_user_secret_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        enabled_cloudwatch_logs_exports:
+          - "postgresql"
+          - "upgrade"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+      dependencies:
+        components:
+          - component: rds/main
+            stack: fnx-ew1-prod
+          - component: vpc/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: eks/main
+
+    elasticache/main:
+      metadata:
+        component: elasticache
+        inherits:
+          - elasticache/prod
+      vars:
+        cluster_id: "{{ .settings.context.stage }}-cache"
+        global_replication_group_id: !terraform.state elasticache/main fnx-ew1-prod .global_replication_group_id
+        # Inherited from the global group, set for the component's own checks
+        # and kept equal to fnx-ew1-prod's.
+        engine_version: "7.0"
+        node_type: "cache.r5.large"
+        # Warm: a primary and one replica (the prod floor for failover across
+        # AZs, check-prod-protection); fnx-ew1-prod runs 3.
+        num_cache_nodes: 2
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        auth_token_secret_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_group_ids: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+        allowed_cidr_blocks: []
+      dependencies:
+        components:
+          - component: elasticache/main
+            stack: fnx-ew1-prod
+          - component: vpc/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: eks/main

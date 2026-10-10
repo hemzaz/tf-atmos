@@ -42,6 +42,13 @@ components:
         component: elasticache
         inherits:
           - elasticache/main-prod
+      vars:
+        # DR, as fnx-ue1-prod's: a Global Datastore with this cache as
+        # primary; fnx-ec1-prod's elasticache/main (eu-central-1) is its
+        # secondary. The suffix is global per account, so it carries the full
+        # id. Both members are EU stacks: check-data-residency.py fails a
+        # non-GDPR stack that joins it.
+        global_replication_group_id_suffix: "{{ .atmos_stack }}-cache"
 
     # The EU pool: the api client only (no dr-migration client: nothing
     # migrates users out of this pool yet).

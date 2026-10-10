@@ -23,7 +23,10 @@ dependencies.components or names an ARN in an eu- region in its vars: a US read 
 (replicate_source_db), Global Datastore secondary (global_replication_group_id) or state read
 of an EU instance would copy EU data out (check-dependencies.py makes every cross-stack read a
 listed dependency; a literal ARN needs none). Its *_region vars are not checked: US data
-copied into the EU is fine.
+copied into the EU is fine. A Global Datastore id is not an ARN, so a GDPR-scoped stack's
+elasticache primary (global_replication_group_id_suffix) is also matched by name: no instance
+of a stack that is not GDPR-scoped may join it (set global_replication_group_id to a read of
+the primary's, to a literal id ending in its suffix, or while depending on the primary).
 EXEMPTIONS lists the (instance pattern, field) pairs that may name one region the rules
 above forbid there.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
@@ -38,7 +41,7 @@ import json
 import os
 import re
 import sys
-from typing import Any, Iterator, NamedTuple
+from typing import Any, Iterator, NamedTuple, Optional
 
 # The sibling module, also when this file is loaded by path (tests).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -197,7 +200,67 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
     for stack_name in sorted(set(stacks) - scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             errors += outside_reader_errors(stack_name, name, instance, scoped, exemptions)
+    errors += global_datastore_errors(stacks, scoped)
     return list(dict.fromkeys(errors))
+
+
+def state_read(value: Any, reader_stack: str) -> Optional[tuple[str, str, str]]:
+    """(component, stack, expression) of an unprocessed !terraform.state/!terraform.output string, or None."""
+    if not isinstance(value, str):
+        return None
+    tokens = value.split(None, 3)
+    if len(tokens) < 3 or tokens[0] not in ("!terraform.state", "!terraform.output"):
+        return None
+    if len(tokens) == 3:
+        return tokens[1], reader_stack, tokens[2].strip("'\"")
+    return tokens[1], tokens[2], tokens[3].strip("'\"")
+
+
+def joins_group(stack_name: str, instance: dict, primary: tuple[str, str], suffix: str) -> bool:
+    """Whether instance (in stack_name) joins primary's Global Datastore as a secondary.
+
+    It sets vars.global_replication_group_id and either reads the primary's
+    global_replication_group_id, names the group literally (AWS forms the id as
+    "<prefix>-<suffix>"), or lists the primary in dependencies.components.
+    """
+    gid = (instance.get("vars") or {}).get("global_replication_group_id")
+    if gid in (None, ""):
+        return False
+    read = state_read(gid, stack_name)
+    if read is not None:
+        component, stack, expression = read
+        if (stack, component) == primary and "global_replication_group_id" in expression:
+            return True
+    elif isinstance(gid, str) and (gid == suffix or gid.endswith(f"-{suffix}")):
+        return True
+    return any(
+        isinstance(dep, dict) and (dep.get("stack") or stack_name, dep.get("component")) == primary
+        for dep in (instance.get("dependencies") or {}).get("components") or []
+    )
+
+
+def global_datastore_errors(stacks: dict, scoped: set) -> list[str]:
+    """A GDPR-scoped stack's Global Datastore primary joined by an instance of a stack that is not.
+
+    A literal global_replication_group_id is not an ARN, so the outside-reader rule cannot see it:
+    the group is matched by its suffix (global_replication_group_id_suffix) instead.
+    """
+    errors = []
+    for primary_stack in sorted(scoped):
+        for name, instance in sorted(instances(stacks[primary_stack]).items()):
+            if ((instance.get("metadata") or {}).get("component") or name) != "elasticache":
+                continue
+            suffix = (instance.get("vars") or {}).get("global_replication_group_id_suffix")
+            if not isinstance(suffix, str) or not suffix.strip():
+                continue
+            for stack_name in sorted(set(stacks) - scoped):
+                for joiner, spec in sorted(instances(stacks[stack_name]).items()):
+                    if joins_group(stack_name, spec, (primary_stack, name), suffix):
+                        errors.append(
+                            f"{stack_name}: {joiner} joins {primary_stack} {name}'s Global Datastore ({suffix}) "
+                            "outside the GDPR scope: EU cache data may not be replicated outside the EU"
+                        )
+    return errors
 
 
 def outside_reader_errors(stack_name: str, name: str, instance: dict, scoped: set, exemptions: tuple) -> list[str]:

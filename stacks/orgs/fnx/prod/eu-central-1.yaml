@@ -34,6 +34,7 @@ import:
   - orgs/fnx/prod/eu-central-1/components/networking
   - orgs/fnx/prod/eu-central-1/components/security
   - orgs/fnx/prod/eu-central-1/components/compute
+  - orgs/fnx/prod/eu-central-1/components/services
 
 vars:
   region: eu-central-1

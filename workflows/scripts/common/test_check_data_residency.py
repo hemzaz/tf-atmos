@@ -242,6 +242,69 @@ class DataResidencyTest(unittest.TestCase):
             f"fnx-ew1-prod: rds/main vars.replicate_source_db is 'us-east-1', {OUTSIDE}",
         ])
 
+    @staticmethod
+    def cache(region="eu-west-1", compliance=EU, deps=(), **extra):
+        spec = instance(region=region, compliance=compliance, deps=deps, **extra)
+        spec["metadata"] = {"component": "elasticache"}
+        return spec
+
+    def global_datastore(self, secondary_stack, secondary):
+        return {
+            "fnx-ew1-prod": eu_stack(**{"elasticache/main": self.cache(
+                global_replication_group_id_suffix="fnx-ew1-prod-cache")}),
+            secondary_stack: stack(**{"elasticache/main": secondary}),
+        }
+
+    def test_eu_global_datastore_with_an_eu_secondary_passes(self):
+        secondary = self.cache(
+            region="eu-central-1",
+            global_replication_group_id="!terraform.state elasticache/main fnx-ew1-prod .global_replication_group_id",
+            deps=[{"component": "elasticache/main", "stack": "fnx-ew1-prod"}])
+        self.assertEqual(residency.check(self.global_datastore("fnx-ec1-prod", secondary)), [])
+
+    def test_us_secondary_naming_an_eu_global_datastore_literally_fails(self):
+        # Deliberately bad: no dependency and no ARN, only the group's literal id, which the
+        # outside-reader rule cannot see.
+        joined = ("fnx-ue2-prod: elasticache/main joins fnx-ew1-prod elasticache/main's Global Datastore "
+                  "(fnx-ew1-prod-cache) outside the GDPR scope: EU cache data may not be replicated outside the EU")
+        for gid in ("ldgnf-fnx-ew1-prod-cache", "fnx-ew1-prod-cache"):
+            secondary = self.cache(region="us-east-2", compliance=US, global_replication_group_id=gid)
+            self.assertEqual(residency.check(self.global_datastore("fnx-ue2-prod", secondary)), [joined], gid)
+
+    def test_us_secondary_reading_an_eu_global_datastore_fails(self):
+        secondary = self.cache(
+            region="us-east-2", compliance=US,
+            global_replication_group_id="!terraform.state elasticache/main fnx-ew1-prod '.global_replication_group_id'",
+            deps=[{"component": "elasticache/main", "stack": "fnx-ew1-prod"}])
+        errors = residency.check(self.global_datastore("fnx-ue2-prod", secondary))
+        self.assertIn("fnx-ue2-prod: elasticache/main joins fnx-ew1-prod elasticache/main's Global Datastore "
+                      "(fnx-ew1-prod-cache) outside the GDPR scope: EU cache data may not be replicated outside the EU",
+                      errors)
+        self.assertIn("fnx-ue2-prod: elasticache/main depends on elasticache/main in fnx-ew1-prod, which is "
+                      "GDPR-scoped: EU data may not be read outside the EU", errors)
+
+    def test_us_global_datastore_and_unrelated_us_groups_pass(self):
+        # A US primary's group may be joined by US stacks; a US cache joining another group
+        # (a different suffix) is not this rule's business.
+        stacks = {
+            "fnx-ew1-prod": eu_stack(**{"elasticache/main": self.cache(
+                global_replication_group_id_suffix="fnx-ew1-prod-cache")}),
+            "fnx-ue1-prod": stack(**{"elasticache/main": self.cache(
+                region="us-east-1", compliance=US, global_replication_group_id_suffix="fnx-ue1-prod-cache")}),
+            "fnx-ue2-prod": stack(**{"elasticache/main": self.cache(
+                region="us-east-2", compliance=US,
+                global_replication_group_id="!terraform.state elasticache/main fnx-ue1-prod .global_replication_group_id",
+                deps=[{"component": "elasticache/main", "stack": "fnx-ue1-prod"}])}),
+            "fnx-ue1-staging": stack(**{"elasticache/main": self.cache(
+                region="us-east-1", compliance=US, global_replication_group_id="ldgnf-other-cache")}),
+        }
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_disabled_us_secondary_is_skipped(self):
+        secondary = self.cache(region="us-east-2", compliance=US, global_replication_group_id="ldgnf-fnx-ew1-prod-cache")
+        secondary["metadata"]["enabled"] = False
+        self.assertEqual(residency.check(self.global_datastore("fnx-ue2-prod", secondary)), [])
+
     def test_backup_copy_outside_the_eu_fails(self):
         def backup(region, key_region):
             return instance(enable_cross_region_backup=True, replica_region=region,
