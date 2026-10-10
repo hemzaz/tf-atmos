@@ -86,7 +86,7 @@ NOT_PRIMARY = {("alb-controller-ingress-group", "cluster_name"), ("lambda", "ali
 # (built from its bucket name) or apigateway-account (its role name carries the
 # region).
 ACCOUNT_WIDE_COMPONENTS = frozenset({
-    "alb", "awsconfig", "backup", "batch", "cloudtrail", "cost-optimization", "ec2", "ecs-service", "eks",
+    "alb", "apigateway", "awsconfig", "backup", "batch", "cloudtrail", "cost-optimization", "ec2", "ecs-service", "eks",
     "eks-addons", "external-secrets", "firehose", "github-runners", "glue", "lambda", "monitoring", "rds",
     "s3", "security-monitoring", "stepfunctions", "vpc",
 })

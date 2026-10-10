@@ -8,8 +8,8 @@ IRSA role. Cloud Posse's `eks/external-secrets-operator` uses the same two-relea
 ## Wiring
 
 - Instances: `external-secrets/main` and `external-secrets/data` in the three AWS stacks, paired
-  with `eks/main` and `eks/data`; `external-secrets/main` also in `fnx-ue2-prod` and
-  `fnx-ew1-prod` (`fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `external-secrets/prod`,
+  with `eks/main` and `eks/data`; `external-secrets/main` also in `fnx-ue2-prod`,
+  `fnx-ec1-prod` and `fnx-ew1-prod` (`fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `external-secrets/prod`,
   `stacks/catalog/external-secrets/prod.yaml`). The `data` instances create no stores: nothing on `eks/data`
   consumes one yet.
 - Reads: the eks instance's `.eks_cluster_id`, `.eks_cluster_endpoint`,

@@ -8,10 +8,11 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
 ## Wiring
 
 - Instances: `monitoring/main` (`name: main`) and `monitoring/data` (`name: data`) in the three
-  AWS stacks; `monitoring/main` also in `fnx-ue1-local-localemu`, `fnx-ue2-prod` and `fnx-ew1-prod`
+  AWS stacks; `monitoring/main` also in `fnx-ue1-local-localemu`, `fnx-ue2-prod`, `fnx-ew1-prod` and
+  `fnx-ec1-prod`
   (`fnx-ue1-prod`'s and `fnx-ew1-prod`'s inherit `monitoring/main-prod`,
   `stacks/catalog/monitoring/prod.yaml`). Both read `kms/main .key_arn`.
-- `monitoring/main` reads `acm/main`, `apigateway/main`, `eks/main`, `rds/main`, `ecs/main` (not in `fnx-ue2-prod` or `fnx-ew1-prod`) and, in
+- `monitoring/main` reads `acm/main`, `apigateway/main`, `eks/main`, `rds/main`, `ecs/main` (not in `fnx-ue2-prod`, `fnx-ew1-prod` or `fnx-ec1-prod`) and, in
   prod, `elasticache/main .member_clusters`.
 - `monitoring/data` reads `acm/services`, `apigateway/data`, `eks/data`, `rds/data` and the stack's
   `lambda/*` functions.
@@ -34,3 +35,9 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
 - `lambda_error_alarms` keys are stable alarm ids; the watched function is each entry's
   `function_name` (validated as a name, not an ARN), never the key.
 - `create_dashboard` is a legacy alias of `create_infrastructure_dashboard`, still set by the stacks.
+- `receive_relayed_health_check_alarms` (the EU prod stacks, owner decision B5) is the receiving end
+  of `apigateway`'s `health_check_alarm_relay_regions`: an EventBridge rule on this region's
+  default bus matching this account's us-east-1 alarms named `*-health-check` (only a relay brings
+  us-east-1 events here; the wildcard also matches the peer stack's alarm, whose state this stack
+  cannot read), targeting the own topic, plus a topic policy for that rule and this region's
+  CloudWatch alarms. The topic's key must allow EventBridge (`kms` `allow_eventbridge`, on in prod).

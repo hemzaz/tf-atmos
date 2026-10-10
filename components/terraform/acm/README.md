@@ -8,8 +8,9 @@ then waited on by `aws_acm_certificate_validation` (45 minute timeout).
 - `acm/main` (`*.<d>` + `<d>`; prod adds `*.api.<d>`) reads `network/main .zone_ids.main`;
   `fnx-ew1-prod`'s is the EU apex's, in its own zone.
 - `acm/services` (`*.services.<d>` + `api.services.<d>`) reads `network/services .zone_ids.services`.
-- `fnx-ue2-prod` `acm/main` (`api.<d>`, DR) sets `process_domain_validation_options: false` and
-  no `zone_id`: it waits on the record `fnx-ue1-prod` `acm/main` writes, and depends on it.
+- The DR stacks' `acm/main` (`api.<d>`: `fnx-ue2-prod`, `fnx-ec1-prod`) set
+  `process_domain_validation_options: false` and no `zone_id`: each waits on the record its
+  primary's `acm/main` (`fnx-ue1-prod`, `fnx-ew1-prod`) writes, and depends on it.
 - Used by: `apigateway` (`certificate_arns`), `monitoring` (`certificate_arns`,
   `certificate_domains`, expiry alarms).
 

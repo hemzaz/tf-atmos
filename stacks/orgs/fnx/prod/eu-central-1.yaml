@@ -17,12 +17,23 @@
 # fnx-ew1-terraform-state in eu-west-1), through that backend's prod roles
 # (stacks/orgs/fnx/root/eu-west-1.yaml), as fnx-ue2-prod's is in us-east-1.
 #
-# Today the foundation: CI roles (iam/ci), networking (vpc/main), the
-# regional security services (GuardDuty, Security Hub, Config, Inspector,
-# finding routing, API Gateway account settings) and this region's backup
-# vault, all on fnx-ew1-prod kms/main's multi-region replica (alias ec1-main).
-# Compute and services (eks/main, rds/main, elasticache/main, cognito/main,
-# apigateway/main) and the failover runbook follow.
+# What "warm" means per component is fnx-ue2-prod's (stacks/orgs/fnx/prod/
+# us-east-2.yaml, docs/OPERATIONS.md "Disaster recovery"), EU to EU, all on
+# fnx-ew1-prod kms/main's multi-region replica (alias ec1-main):
+#   - networking, CI roles, regional security services, this region's backup
+#     vault and acm/main (api.<EU apex>, on fnx-ew1-prod's validation record):
+#     full;
+#   - rds/main: a cross-region read replica of fnx-ew1-prod's, promoted on
+#     failover; elasticache/main: a Global Datastore secondary;
+#   - eks/main: the same node groups at their minimum; the in-cluster services
+#     are deployed on failover;
+#   - apigateway/main: the SECONDARY half of api.<EU apex>'s failover pair,
+#     authorized by this region's cognito/main; its health check, alarm and
+#     the EventBridge rule, targets and role relaying the alarm to both EU
+#     regions are in us-east-1 (Route 53's metrics exist only there):
+#     configuration only, nothing persisted, no personal data;
+#   - cognito/main: its own pool, filled from fnx-ew1-prod's by a
+#     user-migration trigger.
 # =============================================================================
 
 import:
@@ -33,6 +44,8 @@ import:
   - orgs/fnx/prod/eu-central-1/components/globals
   - orgs/fnx/prod/eu-central-1/components/networking
   - orgs/fnx/prod/eu-central-1/components/security
+  - orgs/fnx/prod/eu-central-1/components/compute
+  - orgs/fnx/prod/eu-central-1/components/services
 
 vars:
   region: eu-central-1

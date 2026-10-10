@@ -70,7 +70,8 @@ class DataResidencyTest(unittest.TestCase):
         api = instance(health_check_alarm_actions=["arn:aws:sns:us-east-1:123456789012:ue1-main-alarms"],
                        policy={"roles": ["arn:aws:iam::123456789012:role/x", "arn:aws:s3:::bucket"]},
                        zone="arn:aws:route53:::hostedzone/Z1", topic="arn:aws:sns:eu-west-1:123456789012:t")
-        self.assertEqual(residency.check({"fnx-ew1-prod": stack(**{"apigateway/main": api})}), [
+        # No exemptions: the rule itself (EXEMPTIONS admits this pair, tested below).
+        self.assertEqual(residency.check({"fnx-ew1-prod": stack(**{"apigateway/main": api})}, ()), [
             f"fnx-ew1-prod: apigateway/main vars.health_check_alarm_actions is 'us-east-1', {OUTSIDE}",
         ])
 
@@ -129,9 +130,39 @@ class DataResidencyTest(unittest.TestCase):
         exemptions = (residency.Exemption("apigateway/*", "vars.health_check_alarm_actions", "us-east-1",
                                           "Route 53 health-check metrics exist only in us-east-1"),)
         self.assertEqual(residency.check(stacks, exemptions), [])
-        self.assertEqual(len(residency.check(stacks)), 1)
+        self.assertEqual(len(residency.check(stacks, ())), 1)
         api["vars"]["health_check_alarm_actions"] = ["arn:aws:sns:us-west-2:123456789012:t"]
         self.assertEqual(len(residency.check(stacks, exemptions)), 1)
+
+    def test_eu_failover_pair_passes_with_the_exemptions_and_only_them(self):
+        regions = ["eu-west-1", "us-east-1", "ap-southeast-1"]
+        relay = ["eu-west-1", "eu-central-1"]
+        primary = instance(health_check_regions=regions, health_check_alarm_relay_regions=relay)
+        secondary = instance(region="eu-central-1", health_check_regions=regions,
+                             health_check_alarm_relay_regions=relay)
+        stacks = {"fnx-ew1-prod": eu_stack(**{"apigateway/main": primary}),
+                  "fnx-ec1-prod": eu_stack(**{"apigateway/main": secondary})}
+        self.assertEqual(residency.check(stacks), [])
+        self.assertEqual(len(residency.check(stacks, ())), 4)
+        # Deliberately bad: another checker region, another instance, a relay to us-east-1.
+        secondary["vars"]["health_check_regions"] = ["eu-west-1", "us-east-1", "us-west-2"]
+        secondary["vars"]["health_check_alarm_relay_regions"] = ["eu-central-1", "us-east-1"]
+        self.assertEqual(residency.check(stacks), [
+            f"fnx-ec1-prod: apigateway/main vars.health_check_regions is 'us-west-2', {OUTSIDE}",
+            f"fnx-ec1-prod: apigateway/main vars.health_check_alarm_relay_regions is 'us-east-1', {OUTSIDE}",
+        ])
+        stacks["fnx-ec1-prod"] = eu_stack(**{"apigateway/data": instance(health_check_regions=regions)})
+        self.assertEqual(residency.check(stacks), [
+            f"fnx-ec1-prod: apigateway/data vars.health_check_regions is 'us-east-1', {OUTSIDE}",
+            f"fnx-ec1-prod: apigateway/data vars.health_check_regions is 'ap-southeast-1', {OUTSIDE}",
+        ])
+
+    def test_eu_health_check_alarm_action_in_us_east_1_fails(self):
+        # The us-east-1 alarm topic is no longer exempt: an EU alarm is relayed instead.
+        api = instance(health_check_alarm_actions=["arn:aws:sns:us-east-1:123456789012:ew1-prod-main-api-health-check-alarms"])
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"apigateway/main": api})}), [
+            f"fnx-ew1-prod: apigateway/main vars.health_check_alarm_actions is 'us-east-1', {OUTSIDE}",
+        ])
 
     def test_disabled_instances_are_skipped(self):
         off = instance(region="us-east-1", compliance=US)
@@ -241,6 +272,69 @@ class DataResidencyTest(unittest.TestCase):
         self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"rds/main": eu}), "fnx-ue1-prod": us_stack()}), [
             f"fnx-ew1-prod: rds/main vars.replicate_source_db is 'us-east-1', {OUTSIDE}",
         ])
+
+    @staticmethod
+    def cache(region="eu-west-1", compliance=EU, deps=(), **extra):
+        spec = instance(region=region, compliance=compliance, deps=deps, **extra)
+        spec["metadata"] = {"component": "elasticache"}
+        return spec
+
+    def global_datastore(self, secondary_stack, secondary):
+        return {
+            "fnx-ew1-prod": eu_stack(**{"elasticache/main": self.cache(
+                global_replication_group_id_suffix="fnx-ew1-prod-cache")}),
+            secondary_stack: stack(**{"elasticache/main": secondary}),
+        }
+
+    def test_eu_global_datastore_with_an_eu_secondary_passes(self):
+        secondary = self.cache(
+            region="eu-central-1",
+            global_replication_group_id="!terraform.state elasticache/main fnx-ew1-prod .global_replication_group_id",
+            deps=[{"component": "elasticache/main", "stack": "fnx-ew1-prod"}])
+        self.assertEqual(residency.check(self.global_datastore("fnx-ec1-prod", secondary)), [])
+
+    def test_us_secondary_naming_an_eu_global_datastore_literally_fails(self):
+        # Deliberately bad: no dependency and no ARN, only the group's literal id, which the
+        # outside-reader rule cannot see.
+        joined = ("fnx-ue2-prod: elasticache/main joins fnx-ew1-prod elasticache/main's Global Datastore "
+                  "(fnx-ew1-prod-cache) outside the GDPR scope: EU cache data may not be replicated outside the EU")
+        for gid in ("ldgnf-fnx-ew1-prod-cache", "fnx-ew1-prod-cache"):
+            secondary = self.cache(region="us-east-2", compliance=US, global_replication_group_id=gid)
+            self.assertEqual(residency.check(self.global_datastore("fnx-ue2-prod", secondary)), [joined], gid)
+
+    def test_us_secondary_reading_an_eu_global_datastore_fails(self):
+        secondary = self.cache(
+            region="us-east-2", compliance=US,
+            global_replication_group_id="!terraform.state elasticache/main fnx-ew1-prod '.global_replication_group_id'",
+            deps=[{"component": "elasticache/main", "stack": "fnx-ew1-prod"}])
+        errors = residency.check(self.global_datastore("fnx-ue2-prod", secondary))
+        self.assertIn("fnx-ue2-prod: elasticache/main joins fnx-ew1-prod elasticache/main's Global Datastore "
+                      "(fnx-ew1-prod-cache) outside the GDPR scope: EU cache data may not be replicated outside the EU",
+                      errors)
+        self.assertIn("fnx-ue2-prod: elasticache/main depends on elasticache/main in fnx-ew1-prod, which is "
+                      "GDPR-scoped: EU data may not be read outside the EU", errors)
+
+    def test_us_global_datastore_and_unrelated_us_groups_pass(self):
+        # A US primary's group may be joined by US stacks; a US cache joining another group
+        # (a different suffix) is not this rule's business.
+        stacks = {
+            "fnx-ew1-prod": eu_stack(**{"elasticache/main": self.cache(
+                global_replication_group_id_suffix="fnx-ew1-prod-cache")}),
+            "fnx-ue1-prod": stack(**{"elasticache/main": self.cache(
+                region="us-east-1", compliance=US, global_replication_group_id_suffix="fnx-ue1-prod-cache")}),
+            "fnx-ue2-prod": stack(**{"elasticache/main": self.cache(
+                region="us-east-2", compliance=US,
+                global_replication_group_id="!terraform.state elasticache/main fnx-ue1-prod .global_replication_group_id",
+                deps=[{"component": "elasticache/main", "stack": "fnx-ue1-prod"}])}),
+            "fnx-ue1-staging": stack(**{"elasticache/main": self.cache(
+                region="us-east-1", compliance=US, global_replication_group_id="ldgnf-other-cache")}),
+        }
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_disabled_us_secondary_is_skipped(self):
+        secondary = self.cache(region="us-east-2", compliance=US, global_replication_group_id="ldgnf-fnx-ew1-prod-cache")
+        secondary["metadata"]["enabled"] = False
+        self.assertEqual(residency.check(self.global_datastore("fnx-ue2-prod", secondary)), [])
 
     def test_backup_copy_outside_the_eu_fails(self):
         def backup(region, key_region):

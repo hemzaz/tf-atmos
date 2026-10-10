@@ -22,8 +22,8 @@ components:
 
     # The production main cache, shared by fnx-ue1-prod's and fnx-ew1-prod's
     # elasticache/main: vpc/main's private subnets, every key on the stack's
-    # kms/main, reachable from eks/main. fnx-ue1-prod adds its Global
-    # Datastore (DR).
+    # kms/main, reachable from eks/main. Each adds its Global Datastore (DR:
+    # fnx-ue2-prod, fnx-ec1-prod).
     elasticache/main-prod:
       metadata:
         component: elasticache

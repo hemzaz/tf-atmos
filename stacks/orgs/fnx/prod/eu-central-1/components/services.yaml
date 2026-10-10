@@ -1,0 +1,320 @@
+---
+# =============================================================================
+# Services for fnx-ec1-prod (EU DR warm standby)
+# =============================================================================
+# fnx-ue2-prod's services (orgs/fnx/prod/us-east-2/components/services.yaml),
+# which this mirrors for fnx-ew1-prod. The data tier the serving path fails
+# over to, kept in sync continuously, EU to EU only (eu-west-1 to
+# eu-central-1, check-data-residency.py):
+#   - rds/main: a cross-region read replica of fnx-ew1-prod's rds/main
+#     (Cloud Posse terraform-aws-rds replicate_source_db). Promote it by
+#     setting replicate_source_db to null.
+#   - elasticache/main: a Global Datastore secondary of fnx-ew1-prod's
+#     elasticache/main (Cloud Posse aws-elasticache-redis
+#     global_replication_group_id).
+#   - cognito/main: this region's own user pool (owner decision B5, as
+#     fnx-ue2-prod's 2026-10-07: DR auth must not depend on eu-west-1). AWS
+#     does not replicate user pools, so lambda/cognito-user-migration copies
+#     each user from fnx-ew1-prod's pool on their first sign-in or password
+#     reset here.
+#   - apigateway/main: the SECONDARY half of api.<EU apex>'s Route 53
+#     failover pair; fnx-ew1-prod's apigateway/main is the PRIMARY. Each half
+#     has its own health check, so DNS moves without a change here. Its
+#     health check and alarm, like every Route 53 health check's, are in
+#     us-east-1, with the EventBridge rule, targets and role relaying the
+#     alarm to both EU regions (configuration only, nothing persisted, no
+#     personal data; owner decision B5).
+#   - monitoring/main: this region's ec1-main-alarms topic and alarms, and the
+#     relayed health check alarms of both halves.
+# No rds/data: the EU data plane is not in fnx-ew1-prod either.
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-central-1/components/globals
+  - catalog/apigateway/defaults
+  - catalog/cognito/prod
+  - catalog/monitoring/defaults
+  - catalog/rds/prod
+  - catalog/elasticache/prod
+
+components:
+  terraform:
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/prod
+      vars:
+        environment: "{{ .settings.context.stage }}"
+        identifier: "{{ .settings.context.stage }}-main-db"
+        replicate_source_db: !terraform.state rds/main fnx-ew1-prod .instance_arn
+        # Used once promoted (a replica takes the source's); kept equal to
+        # fnx-ew1-prod's so the promoted instance matches it.
+        db_name: "productionapp"
+        # backup/main selects it once promoted (Role=primary).
+        tags:
+          Backup: "true"
+        # The parameter group family follows the source's engine.
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        family: "postgres14"
+        # Warm: one size below fnx-ew1-prod's db.r5.xlarge; resize on failover
+        # if the load needs it (a modify, not a replacement).
+        instance_class: "db.r5.large"
+        allocated_storage: 100
+        max_allocated_storage: 500
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        backup_window: "03:00-04:00"
+        maintenance_window: "Sun:04:30-Sun:05:30"
+        performance_insights_retention_period: 7
+        performance_insights_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        master_user_secret_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        enabled_cloudwatch_logs_exports:
+          - "postgresql"
+          - "upgrade"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+      dependencies:
+        components:
+          - component: rds/main
+            stack: fnx-ew1-prod
+          - component: vpc/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: eks/main
+
+    elasticache/main:
+      metadata:
+        component: elasticache
+        inherits:
+          - elasticache/prod
+      vars:
+        cluster_id: "{{ .settings.context.stage }}-cache"
+        global_replication_group_id: !terraform.state elasticache/main fnx-ew1-prod .global_replication_group_id
+        # Inherited from the global group, set for the component's own checks
+        # and kept equal to fnx-ew1-prod's.
+        engine_version: "7.0"
+        node_type: "cache.r5.large"
+        # Warm: a primary and one replica (the prod floor for failover across
+        # AZs, check-prod-protection); fnx-ew1-prod runs 3.
+        num_cache_nodes: 2
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        auth_token_secret_kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_group_ids: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+        allowed_cidr_blocks: []
+      dependencies:
+        components:
+          - component: elasticache/main
+            stack: fnx-ew1-prod
+          - component: vpc/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: eks/main
+
+    # ==========================================================================
+    # Cognito - this region's pool, filled by user migration from fnx-ew1-prod
+    # ==========================================================================
+    # As fnx-ue2-prod's (owner decision B5: ec1 gets a migration trigger from
+    # ew1, as ue2 from ue1). cognito/prod keeps its settings equal to
+    # fnx-ew1-prod's pool. Cognito
+    # domains are global, but neither pool sets domain_prefix (no hosted UI),
+    # and every name carries the stack id (fnx-ec1-prod-users), so nothing
+    # collides with fnx-ew1-prod's.
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/prod
+      vars:
+        name_prefix: '{{ .atmos_stack }}'
+        clients:
+          # fnx-ew1-prod's api client plus ALLOW_ADMIN_USER_PASSWORD_AUTH:
+          # Cognito runs the migration trigger only for a password sign-in,
+          # never for SRP (the password does not reach it). The backend signs
+          # in a user this pool does not have yet with AdminInitiateAuth
+          # ADMIN_USER_PASSWORD_AUTH (an IAM-signed call); ALLOW_USER_PASSWORD_AUTH
+          # stays rejected by the component.
+          api:
+            generate_secret: true
+            explicit_auth_flows: ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH"]
+            access_token_validity_minutes: 30
+        lambda_config:
+          user_migration: !terraform.state lambda/cognito-user-migration .function_arn
+      dependencies:
+        components:
+          - component: lambda/cognito-user-migration
+
+    # The user-migration trigger of cognito/main (above). It checks a user
+    # against fnx-ew1-prod's pool in eu-west-1 (EU to EU) and returns their attributes
+    # (functions/cognito-user-migration). Its role may only call
+    # AdminInitiateAuth and AdminGetUser on that one pool. Not in the VPC: it
+    # reaches nothing but Cognito's public endpoint. Packaged from source_dir
+    # like the repo's other in-repo functions (no S3 release to upload).
+    lambda/cognito-user-migration:
+      metadata:
+        component: lambda
+      vars:
+        function_name: cognito-user-migration
+        description: "Cognito user migration from fnx-ew1-prod's user pool (DR)"
+        handler: "lambda_function.lambda_handler"
+        runtime: "python3.13"
+        source_dir: "functions/cognito-user-migration"
+        memory_size: 256
+        # Cognito waits about 5 seconds for a trigger; the handler's source
+        # calls time out first (2 s each).
+        timeout: 5
+        log_retention_days: 90
+        kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        environment_variables:
+          SOURCE_USER_POOL_ID: !terraform.state cognito/main fnx-ew1-prod .user_pool_id
+          SOURCE_CLIENT_ID: !terraform.state cognito/main fnx-ew1-prod '.client_ids["dr-migration"]'
+        iam_policies:
+          - sid: CheckUsersInTheSourcePool
+            actions:
+              - "cognito-idp:AdminInitiateAuth"
+              - "cognito-idp:AdminGetUser"
+            resources:
+              - !terraform.state cognito/main fnx-ew1-prod .user_pool_arn
+        # On monitoring/main's ec1 topic, by name (it is created later). A wrong
+        # password is a function error by design (the trigger rejects by
+        # raising), so the error alarm only fires on a burst; duration near the
+        # 5-second limit is the early sign of a failing source pool.
+        create_performance_alarms: true
+        duration_alarm_threshold: 3000
+        error_rate_alarm_threshold: 50
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+      dependencies:
+        components:
+          - component: cognito/main
+            stack: fnx-ew1-prod
+          - component: kms/main
+            stack: fnx-ew1-prod
+
+    # The SECONDARY half of api.<EU apex>: the same routes as fnx-ew1-prod's
+    # apigateway/main, authorized by this region's pool, never fnx-ew1-prod's
+    # (owner decision B5, as fnx-ue2-prod's 2026-10-07): a token from either
+    # pool is accepted only where it was issued, so a user signs in again
+    # after failover.
+    apigateway/main:
+      metadata:
+        component: apigateway
+      vars:
+        description: "Production Main API Gateway (DR)"
+        stage_name: "v1"
+        api_resources:
+          - path_part: "api"
+          - path_part: "auth"
+          - path_part: "health"
+          - path_part: "users"
+          - path_part: "products"
+        # "/api" (COGNITO_USER_POOLS) is disabled with lambda/data-processor,
+        # as in fnx-ew1-prod; it comes back here with it.
+        api_methods:
+          - resource_path: "/"
+            http_method: "GET"
+            authorization: "NONE"
+        api_integrations:
+          - resource_path: "/"
+            http_method: "GET"
+            integration_http_method: "GET"
+            type: "MOCK"
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+        domain_name: "api.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/main .certificate_arns.api
+        api_name: "{{ .settings.context.stage }}-main-api"
+        zone_id: !terraform.state network/main fnx-ew1-prod .zone_ids.main
+        route53_failover_type: SECONDARY
+        route53_set_identifier: "{{ .settings.prefix }}"
+        # The checkers: eu-west-1, the only EU checker region, plus two others
+        # (Route 53 needs three): probes of the API's stage root, a residency
+        # exemption (check-data-residency.py EXEMPTIONS).
+        health_check_regions: ["eu-west-1", "us-east-1", "ap-southeast-1"]
+        # The health check's alarm is in us-east-1 (Route 53's metrics are only
+        # there). Where fnx-ue2-prod's notifies ue1-main-alarms, this one
+        # notifies nothing in us-east-1: EventBridge relays its state changes to
+        # the default bus of both EU regions, where each monitoring/main
+        # delivers them to its topic (ew1-main-alarms, ec1-main-alarms).
+        # What sits in us-east-1 for it: the Route 53 health check, its alarm,
+        # and an EventBridge rule, its targets and their IAM role (configuration
+        # only: no topic, key, subscription, archive or queue, nothing
+        # persisted; no personal data). Owner decision B5.
+        health_check_alarm_relay_regions: ["eu-west-1", "eu-central-1"]
+        # The in-region signal: the alarm above is in us-east-1. These watch
+        # this region's own API (5xx, latency) and notify monitoring/main's
+        # ec1 topic, by name (monitoring/main reads this component).
+        create_performance_alarms: true
+        alarm_5xx_threshold: 10
+        alarm_latency_threshold: 5000
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+        throttling_burst_limit: 5000
+        throttling_rate_limit: 10000
+        enable_logging: true
+        log_retention_days: 90
+        create_dashboard: true
+        tracing_enabled: true
+        enable_caching: false
+        enable_waf: true
+        tags:
+          Service: api-gateway
+          Tier: edge
+          CriticalityLevel: "high"
+      dependencies:
+        components:
+          - component: apigateway-account/main
+          - component: network/main
+            stack: fnx-ew1-prod
+          - component: acm/main
+          - component: cognito/main
+
+    monitoring/main:
+      metadata:
+        component: monitoring
+        inherits:
+          - monitoring/defaults
+      vars:
+        name: main
+        kms_key_id: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
+        create_dashboard: true
+        enable_certificate_monitoring: true
+        certificate_arns: !terraform.state acm/main .certificate_arns // {} | [.[]]
+        certificate_expiry_threshold: 30
+        alarm_email_subscriptions:
+          - "prod-critical@example.com"
+          - "oncall@example.com"
+        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
+        # eks/main's warm floor: workers min_group_size 2 (compute.yaml).
+        eks_min_node_count: 2
+        rds_instances: !terraform.state rds/main .instance_identifier | [.]
+        elasticache_clusters: !terraform.state elasticache/main .member_clusters
+        api_gateway_name: !terraform.state apigateway/main .api_name
+        api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
+        create_sns_topic: true
+        # Delivers the relayed us-east-1 health check alarms of the EU failover
+        # pair (both apigateway/main halves) to ec1-main-alarms.
+        receive_relayed_health_check_alarms: true
+        enable_rds_monitoring: true
+        rds_cpu_threshold: 80
+        db_connection_alarms:
+          rds_connections_high:
+            evaluation_periods: 2
+            period: 300
+            threshold: 400
+        rds_storage_threshold: 10737418240
+        api_gateway_error_threshold: 10
+        api_gateway_latency_threshold: 5000
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/main
+          - component: kms/main
+            stack: fnx-ew1-prod
+          - component: eks/main
+          - component: rds/main
+          - component: elasticache/main
+          - component: apigateway/main

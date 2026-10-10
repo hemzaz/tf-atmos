@@ -210,10 +210,10 @@ components:
             domain_name: "*.{{ .settings.environment.domain_name }}"
             subject_alternative_names:
               - "{{ .settings.environment.domain_name }}"
-              # The EU DR stack fnx-ec1-prod's acm/main (B5-9b) will rely on
-              # this SAN's validation record for its api.<domain> (same CNAME
-              # in this account) and write none. Keep the name, and this
-              # instance, while fnx-ec1-prod exists.
+              # The EU DR stack fnx-ec1-prod's acm/main relies on this SAN's
+              # validation record for its api.<domain> (same CNAME in this
+              # account) and writes none. Keep the name, and this instance,
+              # while fnx-ec1-prod exists.
               - "*.api.{{ .settings.environment.domain_name }}"
             validation_method: "DNS"
             wait_for_validation: true

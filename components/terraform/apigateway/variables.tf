@@ -152,6 +152,54 @@ variable "health_check_alarm_actions" {
   }
 }
 
+# A stack that must keep nothing persistent in us-east-1 (an EU stack, GDPR:
+# owner decision B5) names no us-east-1 topic in health_check_alarm_actions.
+# Its alarm's state changes are relayed by EventBridge instead
+# (health-check-alarm-relay.tf) to the default bus of each region listed, where
+# the monitoring component delivers them to that region's alarm topic.
+variable "health_check_alarm_relay_regions" {
+  type        = list(string)
+  description = "Regions whose default event bus receives the route53_failover_type health check alarm's state changes, relayed by a us-east-1 EventBridge rule (rule, targets and role only: nothing persisted in us-east-1). List every region whose alarm topic must hear of a failover, the failed one's peer included. Empty: no relay"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = length(var.health_check_alarm_relay_regions) == 0 || var.route53_failover_type != null
+    error_message = "health_check_alarm_relay_regions needs route53_failover_type: only a failover health check has an alarm to relay."
+  }
+
+  validation {
+    condition = alltrue([
+      for r in var.health_check_alarm_relay_regions : can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", r)) && r != "us-east-1"
+    ]) && length(distinct(var.health_check_alarm_relay_regions)) == length(var.health_check_alarm_relay_regions)
+    error_message = "health_check_alarm_relay_regions must be distinct AWS regions other than us-east-1, where the alarm already is."
+  }
+}
+
+# Route 53's checker regions (Route 53 API reference, HealthCheckConfig
+# Regions: at least 3). Null keeps every region, or the US ones with a WAF geo
+# rule. An EU stack names eu-west-1, the only EU checker region, plus two
+# others (owner decision B5: probes only, no personal data).
+variable "health_check_regions" {
+  type        = list(string)
+  description = "Route 53 checker regions the route53_failover_type health check calls from (at least 3 of us-east-1, us-west-1, us-west-2, eu-west-1, ap-southeast-1, ap-southeast-2, ap-northeast-1, sa-east-1). Null: every checker region, or the US ones with a WAF geo rule (allowed_countries)"
+  default     = null
+
+  validation {
+    condition = var.health_check_regions == null || (
+      length(distinct(coalesce(var.health_check_regions, []))) >= 3
+      && alltrue([for r in coalesce(var.health_check_regions, []) : contains(["us-east-1", "us-west-1", "us-west-2", "eu-west-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "sa-east-1"], r)])
+    )
+    error_message = "health_check_regions must list at least 3 distinct Route 53 checker regions: us-east-1, us-west-1, us-west-2, eu-west-1, ap-southeast-1, ap-southeast-2, ap-northeast-1, sa-east-1."
+  }
+
+  # A WAF geo rule pins the US checker regions (main.tf), which it admits.
+  validation {
+    condition     = var.health_check_regions == null || length(var.allowed_countries) == 0
+    error_message = "health_check_regions cannot be combined with allowed_countries: a WAF geo rule pins the US checker regions, the ones it admits."
+  }
+}
+
 variable "enable_logging" {
   type        = bool
   description = "Whether to enable CloudWatch logging for the API Gateway"

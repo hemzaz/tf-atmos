@@ -9,8 +9,8 @@ state or outputs.
 
 ## Wiring
 
-- Instance: `elasticache/main` in `fnx-ue1-prod` (a Global Datastore primary), `fnx-ue2-prod` (its
-  secondary) and `fnx-ew1-prod` (no Global Datastore); `fnx-ue1-prod`'s and `fnx-ew1-prod`'s
+- Instance: `elasticache/main` in `fnx-ue1-prod` and `fnx-ew1-prod` (Global Datastore primaries)
+  and `fnx-ue2-prod` and `fnx-ec1-prod` (their secondaries); `fnx-ue1-prod`'s and `fnx-ew1-prod`'s
   inherit `elasticache/main-prod` (`stacks/catalog/elasticache/prod.yaml`). Reads `vpc/main .vpc_id` /
   `.private_subnet_ids` and `kms/main .key_arn`, admits `eks/main
   .eks_cluster_managed_security_group_id`.

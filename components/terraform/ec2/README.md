@@ -8,7 +8,7 @@ generated key pair whose private key is stored in Secrets Manager. IMDSv2 is req
 
 ## Wiring
 
-- Instances: `ec2/bastion` in the three AWS stacks, `fnx-ue2-prod` and `fnx-ew1-prod` (reads
+- Instances: `ec2/bastion` in the three AWS stacks, `fnx-ue2-prod`, `fnx-ew1-prod` and `fnx-ec1-prod` (reads
   `vpc/main` subnets and `kms/main .key_arn`; the prod ones inherit `ec2/bastion-prod`,
   `stacks/catalog/ec2/prod.yaml`); `ec2/app-server` in dev and staging (reads `vpc/main` and `ec2/bastion
   .ssh_key_pair`; staging also `ec2/bastion .security_group_id`).
