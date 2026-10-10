@@ -15,7 +15,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
 | Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex) |
-| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml` (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails and `fnx-ew1-prod` `apigateway/main`'s `health_check_alarm_email_subscriptions` (its us-east-1 health check topic) read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach them only through `security-monitoring/main`'s topic, whose `security_email_subscriptions` is empty |
+| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml` (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach them only through `security-monitoring/main`'s topic, whose `security_email_subscriptions` is empty |
 | Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in `components/globals.yaml` (dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s) |
 | Cost-allocation tags | the `Environment` tag activated as a cost-allocation tag in the payer (management) account's Billing console; until then every budget's `Environment` filter matches nothing and the budget never alerts |
 | Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main` (`fnx-ue1-prod`, `fnx-ew1-prod` and their DR replicas `fnx-ue2-prod`, `fnx-ec1-prod`): unset, so its CloudWatch alarms have no action |
@@ -528,19 +528,25 @@ reads (`kms/main`, `iam/ci`, `acm/main`, `network/main`, `rds/main`, `elasticach
 Neither EU stack has `rds/data`, `vpc/services` or `eks/data`; `fnx-ew1-prod`'s backups are copied
 to `ew1-backup-replica` in eu-central-1.
 
-The one part outside the EU is Route 53's health checking of `api.<EU apex>` (owner decision B5,
-metadata and probes only, listed in `check-data-residency.py` EXEMPTIONS). The checks call from
-eu-west-1, us-east-1 and ap-southeast-1: Route 53 needs three checker regions and eu-west-1 is the
-only EU one. Both `HealthCheckStatus` alarms are in us-east-1 on
-`ew1-prod-main-api-health-check-alarms`, a topic `fnx-ew1-prod`'s `apigateway/main` creates there
-on its own us-east-1 key (`create_health_check_alarm_topic`, subscribing the stack's critical
-alert addresses), never a US stack. As in the US, a us-east-1 outage silences those alarms, not
-the failover; `fnx-ec1-prod`'s API alarms on `ec1-main-alarms` (eu-central-1) are the in-region
-signal. The failover and failback steps below name the US pair: the EU pair runs the same
-commands with its names and regions (`ec1-prod-main-db`, `ec1-prod-cache`, `ec1-main`,
-`ec1-cognito-user-migration`, eu-central-1 for us-east-2, eu-west-1 for us-east-1). The
-`dr-failover` and `dr-failback` workflows print the US pair's steps, and `dr-status` takes any
-`STACK` but defaults `DR_REGION` to us-east-2 (set `DR_REGION=eu-central-1` for `fnx-ew1-prod`).
+The one part outside the EU is Route 53's health checking of `api.<EU apex>` (owner decision B5).
+What sits in us-east-1 is configuration only, with no personal data and nothing persisted: the two
+health checks, their `HealthCheckStatus` alarms (Route 53 publishes the metric only there) and,
+per alarm, an EventBridge rule, its targets and their IAM role. No topic, key, email address,
+archive or queue is there (`check-data-residency.py` fails a GDPR-scoped stack that sets one).
+The checks call from eu-west-1, us-east-1 and ap-southeast-1: Route 53 needs three checker
+regions and eu-west-1 is the only EU one (the EXEMPTIONS entries). Each alarm notifies nothing in
+us-east-1; its rule relays the alarm's state changes to the default event bus of both EU regions
+(`apigateway/main` `health_check_alarm_relay_regions`), where each stack's `monitoring/main`
+(`receive_relayed_health_check_alarms`) delivers them to its topic, `ew1-main-alarms` and
+`ec1-main-alarms`. So the PRIMARY's alarm still reaches `ec1-main-alarms` during an eu-west-1
+outage. As in the US, a us-east-1 outage silences both alarms, not the failover;
+`fnx-ec1-prod`'s API alarms on `ec1-main-alarms` (eu-central-1) are the in-region signal.
+The failover and failback steps below are the US pair's only, and the `dr-failover` and
+`dr-failback` workflows refuse any stack but `fnx-ue1-prod`: the EU steps land in B5-9c. Route
+53's control plane and the health check alarms stay in us-east-1 for the EU pair too, so its
+step 2 is unchanged; only the database, cache, cluster and Cognito names and regions differ.
+`dr-status` takes any `STACK` but defaults `DR_REGION` to us-east-2 (set `DR_REGION=eu-central-1`
+for `fnx-ew1-prod`).
 
 **Failover** (`STACK=fnx-ue1-prod atmos workflow dr-failover -f disaster-recovery` prints these
 steps; operator only, never from CI). It is CLI-first: a us-east-1 outage takes the state bucket

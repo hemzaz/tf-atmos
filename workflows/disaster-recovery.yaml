@@ -33,12 +33,21 @@ workflows:
           AWS_SDK_LOAD_CONFIG: "1"
 
   dr-failover:
-    description: Execute failover to the disaster recovery region (guided runbook)
+    description: Execute failover to the disaster recovery region (guided runbook; fnx-ue1-prod only)
     steps:
       - name: stack
         type: input
         prompt: Stack
         default: '{{ env "STACK" }}'
+      # The runbooks below name the US pair only. EU failover steps
+      # (fnx-ew1-prod -> fnx-ec1-prod) land in B5-9c (docs/OPERATIONS.md,
+      # "Disaster recovery").
+      - name: supported-stack
+        type: shell
+        command: >-
+          test "{{ .steps.stack.value }}" = "fnx-ue1-prod" || {
+          echo "{{ .steps.stack.value }}: this runbook covers fnx-ue1-prod -> fnx-ue2-prod only. EU failover steps land in B5-9c; see docs/OPERATIONS.md, Disaster recovery.";
+          exit 1; }
       - name: target_region
         type: input
         prompt: DR target region
@@ -80,8 +89,21 @@ workflows:
           elasticache/main until failback.
 
   dr-failback:
-    description: Execute failback to the primary region (guided runbook)
+    description: Execute failback to the primary region (guided runbook; fnx-ue1-prod only)
     steps:
+      - name: stack
+        type: input
+        prompt: Stack
+        default: '{{ env "STACK" }}'
+      # The runbooks below name the US pair only. EU failover steps
+      # (fnx-ew1-prod -> fnx-ec1-prod) land in B5-9c (docs/OPERATIONS.md,
+      # "Disaster recovery").
+      - name: supported-stack
+        type: shell
+        command: >-
+          test "{{ .steps.stack.value }}" = "fnx-ue1-prod" || {
+          echo "{{ .steps.stack.value }}: this runbook covers fnx-ue1-prod -> fnx-ue2-prod only. EU failover steps land in B5-9c; see docs/OPERATIONS.md, Disaster recovery.";
+          exit 1; }
       - name: checklist
         type: markdown
         content: |
