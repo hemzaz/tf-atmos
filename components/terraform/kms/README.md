@@ -30,7 +30,8 @@ use through their own IAM policies.
   `cloudfront` instance over an SSE-KMS origin bucket sets on its `kms/main`, and
   `allow_log_delivery_s3` (data keys for vended log delivery into a bucket on this key), which a
   stack whose `cloudfront` instance logs to an s3 bucket sets (the `web-application` template's
-  requirement). Prefer them over `key_service_users`, which has no conditions.
+  requirement), and `allow_rds_events` (RDS event subscriptions publishing to topics on the key),
+  which the prod keys set for their `rds` event subscriptions. Prefer them over `key_service_users`, which has no conditions.
 - The CI apply role gets key use via `iam`'s `ci_apply_kms_key_aliases` (by alias, because
   `iam/ci` applies in the layer before `kms/main`).
 - Replicas get their own region-scoped policy; the `key_policy` output is the primary's.

@@ -4,8 +4,9 @@ import:
 
 # Production secret sets, shared by the prod stacks with their own key
 # (fnx-ue1-prod and fnx-ew1-prod: secretsmanager/app and secretsmanager/infra).
-# Secrets are regional and each stack reads its own kms/main, so the copies
-# never leave their region. No rotation Lambdas are deployed: rotation
+# Secrets are regional and each stack reads its own kms/main; each stack
+# replicates them to its own DR region only (replica_regions: us-east-2 for
+# fnx-ue1-prod, eu-central-1 for fnx-ew1-prod). No rotation Lambdas are deployed: rotation
 # settings were removed, and the RDS master password is rotated by RDS itself.
 components:
   terraform:

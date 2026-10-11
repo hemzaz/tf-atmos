@@ -283,6 +283,40 @@ run "cloudwatch_alarms_flag_is_independent" {
   }
 }
 
+run "rds_events_publish_only_to_this_accounts_topics_in_this_region" {
+  command = plan
+
+  variables {
+    allow_rds_events = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowRdsEventsSNSTopics"]).Principal.Service == "events.rds.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowRdsEventsSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowRdsEventsSNSTopics"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:us-east-1:123456789012:*" }
+      }
+    )
+    error_message = "RDS events may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region, and only for this account (aws:SourceAccount)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowCloudWatchAlarmsSNSTopics", "AllowEventBridgeSNSTopics"], try(s.Sid, ""))]) == 0
+    error_message = "allow_rds_events must not grant CloudWatch alarms or EventBridge anything."
+  }
+}
+
+run "rds_events_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowRdsEventsSNSTopics"]) == 0
+    error_message = "Without allow_rds_events the key grants RDS events nothing."
+  }
+}
+
 run "sns_delivers_to_queues_only_for_this_accounts_topics" {
   command = plan
 

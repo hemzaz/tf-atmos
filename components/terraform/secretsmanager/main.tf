@@ -107,6 +107,15 @@ resource "aws_secretsmanager_secret" "this" {
   kms_key_id              = each.value.kms_key_id
   recovery_window_in_days = each.value.recovery_window_in_days
 
+  # Cross-region copies for DR (var.replica_regions), each on its region's key.
+  dynamic "replica" {
+    for_each = var.replica_regions
+    content {
+      region     = replica.value.region
+      kms_key_id = replica.value.kms_key_id
+    }
+  }
+
   lifecycle {
     # Validate encryption key is specified
     precondition {

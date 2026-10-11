@@ -12,6 +12,7 @@ For each enabled, non-abstract instance, by root module:
     each of its names (x and *.x share one) must instead be carried by a
     processed DNS certificate of an acm instance in its dependencies.components,
     in the same account (settings.environment.account), whose record it waits on;
+    an instance on either side with no account is an error (fail closed);
   - apigateway: domain_name, when domain_name and zone_id are both set (the
     custom domain's alias record goes into zone_id); and when certificate_arn
     reads `!terraform.state <acm instance> .certificate_arns.<key>`, that
@@ -257,6 +258,13 @@ def borrowed_validation_errors(stacks: dict, stack_name: str, instance: dict) ->
         return []
     account = account_of(instance)
     owners, errors = {}, []
+    # Fail closed: without both accounts the same-account rule cannot be shown to hold
+    # (None == None would pass two instances that name no account).
+    if not account:
+        errors.append(
+            "has no settings.environment.account: an unprocessed certificate's records come from a same-account "
+            "acm instance, which cannot be checked without it"
+        )
     for dep in (instance.get("dependencies") or {}).get("components") or []:
         if not isinstance(dep, dict) or not isinstance(dep.get("component"), str):
             continue
@@ -267,6 +275,14 @@ def borrowed_validation_errors(stacks: dict, stack_name: str, instance: dict) ->
         if check_dependencies.module_name(dep["component"], target) != "acm":
             continue
         label = f"{dep_stack} {dep['component']}"
+        if not account_of(target):
+            errors.append(
+                f"depends on {label}, which has no settings.environment.account: ACM validation records are per "
+                "account, so its records cannot be shown to validate these certificates"
+            )
+            continue
+        if not account:
+            continue  # reported above; carries nothing
         if account_of(target) != account:
             errors.append(
                 f"depends on {label}, in account {account_of(target)!r}, not {account!r}: "

@@ -132,6 +132,9 @@ components:
           - cost-optimization/defaults
       vars:
         monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
+        # The prod-eu account's budget also counts its DR standby fnx-ec1-prod
+        # (Environment ec1, same account, no budget of its own; owner decision).
+        budget_additional_environment_tags: ["ec1"]
         budget_notification_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
           - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"

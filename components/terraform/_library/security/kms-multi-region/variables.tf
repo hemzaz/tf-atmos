@@ -187,6 +187,12 @@ variable "allow_cloudwatch_alarms" {
   default     = false
 }
 
+variable "allow_rds_events" {
+  type        = bool
+  description = "Let RDS event subscriptions (events.rds.amazonaws.com) publish to this account's SNS topics encrypted with the key (kms:GenerateDataKey*, kms:Decrypt), scoped by aws:SourceAccount and kms:EncryptionContext:aws:sns:topicArn"
+  default     = false
+}
+
 variable "allow_cloudtrail" {
   type        = bool
   description = "Let CloudTrail (cloudtrail.amazonaws.com) encrypt this account's trail log files with the key (kms:GenerateDataKey*, scoped by kms:EncryptionContext:aws:cloudtrail:arn), decrypt (needed when the trail bucket uses an S3 Bucket Key) and describe it, all limited to this account's trails in this region by aws:SourceArn"

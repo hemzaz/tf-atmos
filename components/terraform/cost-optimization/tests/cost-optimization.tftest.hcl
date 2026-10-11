@@ -296,3 +296,41 @@ run "rejects_tags_without_environment" {
 
   expect_failures = [var.tags]
 }
+
+run "budget_counts_only_the_stacks_environment_by_default" {
+  command = plan
+
+  assert {
+    condition     = one(aws_budgets_budget.monthly.cost_filter).name == "TagKeyValue" && tolist(one(aws_budgets_budget.monthly.cost_filter).values) == tolist(["user:Environment$test"])
+    error_message = "By default the budget filters on this stack's Environment only."
+  }
+}
+
+run "budget_counts_additional_environments" {
+  command = plan
+
+  variables {
+    tags                               = { Environment = "ue1", Tenant = "fnx", ManagedBy = "Terraform" }
+    budget_additional_environment_tags = ["ue2", "ue1"]
+  }
+
+  assert {
+    condition     = tolist(one(aws_budgets_budget.monthly.cost_filter).values) == tolist(["user:Environment$ue1", "user:Environment$ue2"])
+    error_message = "The TagKeyValue filter lists this stack's Environment and each additional one, once."
+  }
+
+  assert {
+    condition     = aws_budgets_budget.monthly.limit_amount == "1000"
+    error_message = "The amount is unchanged by the extra environments."
+  }
+}
+
+run "rejects_a_bad_additional_environment_tag" {
+  command = plan
+
+  variables {
+    budget_additional_environment_tags = ["UE2 standby"]
+  }
+
+  expect_failures = [var.budget_additional_environment_tags]
+}
