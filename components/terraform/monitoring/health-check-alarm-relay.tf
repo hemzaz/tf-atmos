@@ -55,15 +55,14 @@ resource "aws_cloudwatch_event_target" "relayed_health_check_alarms" {
   arn            = aws_sns_topic.alarms[0].arn
 }
 
-# The topic's policy, set only with the relay or allow_rds_event_publish
+# The topic's policy, set only with the relay or rds_event_subscription_enabled
 # (otherwise the topic keeps SNS's default policy). It keeps what
 # this component's alarms need, the same-account CloudWatch alarms of this
-# region (as security-monitoring's topic), and adds the relay rule and/or this
-# account's and region's RDS event subscriptions (rds sns_topic_arn ->
-# aws_db_event_subscription; SourceArn is the source DB instance, as in the
-# RDS User Guide USER_Events.GrantingPermissions, not the subscription).
+# region (as security-monitoring's topic), and adds the relay rule and/or the
+# RDS event subscription of alarms.tf (SourceArn is each source DB instance, as
+# in the RDS User Guide USER_Events.GrantingPermissions, not the subscription).
 locals {
-  alarm_topic_policy_enabled = var.create_sns_topic && (local.receive_relayed_alarms || var.allow_rds_event_publish)
+  alarm_topic_policy_enabled = var.create_sns_topic && (local.receive_relayed_alarms || var.rds_event_subscription_enabled)
 
   alarm_topic_statements = local.alarm_topic_policy_enabled ? concat(
     [{
@@ -88,7 +87,7 @@ locals {
         ArnEquals    = { "aws:SourceArn" = aws_cloudwatch_event_rule.relayed_health_check_alarms[0].arn }
       }
     }] : [],
-    var.allow_rds_event_publish ? [{
+    var.rds_event_subscription_enabled ? [{
       Sid       = "AllowRdsEventSubscriptionsToPublish"
       Effect    = "Allow"
       Principal = { Service = "events.rds.amazonaws.com" }
@@ -96,10 +95,10 @@ locals {
       Resource  = aws_sns_topic.alarms[0].arn
       Condition = {
         StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
-        ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:*" }
+        ArnLike      = { "aws:SourceArn" = [for id in var.rds_instances : "arn:${data.aws_partition.current.partition}:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:${id}"] }
       }
     }] : [],
-  ) : []
+  ) : null
 }
 
 resource "aws_sns_topic_policy" "alarms" {

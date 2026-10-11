@@ -36,10 +36,14 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
   `function_name` (validated as a name, not an ARN), never the key. Likewise
   `db_connection_alarms`: the watched instance is `db_instance_identifier`
   (`rds/* .instance_identifier`).
-- `allow_rds_event_publish` (prod `monitoring/main` and `fnx-ue1-prod`'s `monitoring/data`) adds a
-  topic policy statement letting this account's RDS event subscriptions in this region
-  (`events.rds.amazonaws.com`, `aws:SourceArn` `rds:<region>:<account>:db:*`, the source instances as in the RDS User Guide) publish: the
-  receiving end of `rds` `sns_topic_arn`. The key must allow RDS events (`kms` `allow_rds_events`).
+- `rds_event_subscription_enabled` (prod `monitoring/main` and `fnx-ue1-prod`'s `monitoring/data`)
+  subscribes the topic to the `rds_instances`' RDS events, `rds_event_categories` (Cloud Posse's
+  rds-cloudwatch-sns-alarms `aws_db_event_subscription`). It lives here, not in `rds`, because RDS
+  rejects a subscription to a topic that does not exist yet and this deploys after rds. A topic
+  policy statement lets `events.rds.amazonaws.com` publish for exactly those instances
+  (`aws:SourceArn` `rds:<region>:<account>:db:<id>`, as in the RDS User Guide); the key must allow
+  RDS events (`kms` `allow_rds_events`). The prod instances read `rds/* .instance_identifiers`, so a
+  read replica (`rds/data`) and a DR replica (`fnx-ue2-prod`, `fnx-ec1-prod`) are sources too.
   With it or the relay below the topic gets a policy; otherwise SNS's default one.
 - `create_dashboard` is a legacy alias of `create_infrastructure_dashboard`, still set by the stacks.
 - `receive_relayed_health_check_alarms` (the EU prod stacks, owner decision B5) is the receiving end

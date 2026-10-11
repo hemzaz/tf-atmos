@@ -8,6 +8,11 @@ output "instance_identifier" {
   description = "DB instance identifier (<Environment>-<identifier>) — the DBInstanceIdentifier CloudWatch dimension. Since AWS provider v5, instance_id is the DBI resource ID (db-XXXX...), not this identifier; use this output wherever the CloudWatch dimension is needed"
 }
 
+output "instance_identifiers" {
+  value       = concat([aws_db_instance.main.identifier], aws_db_instance.read_replica[*].identifier)
+  description = "Identifiers of the instance and, with create_read_replica, its read replica (monitoring's rds_instances: their alarms and RDS event subscription)"
+}
+
 output "instance_address" {
   value       = aws_db_instance.main.address
   description = "Address of the RDS instance"
