@@ -72,6 +72,8 @@ class Exemption(NamedTuple):
 # each alarm to both EU regions sit in us-east-1 too, but no stack var names that region:
 # the component fixes it (apigateway main.tf, health-check-alarm-relay.tf), so no exemption
 # covers them, and an EU alarm action (health_check_alarm_actions, a us-east-1 topic) fails.
+# The relay targets' retry policy (maximum_event_age_in_seconds = 3600) keeps alarm metadata in
+# flight in us-east-1 for at most 1h, nothing persisted: within the owner's exemption.
 _CHECKERS = "Route 53 health checks: 3 checker regions, eu-west-1 the only EU one; probes only (owner, B5)"
 EXEMPTIONS: tuple = (
     Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
