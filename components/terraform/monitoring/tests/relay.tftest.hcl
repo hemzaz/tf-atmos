@@ -128,7 +128,7 @@ run "rds_event_subscriptions_may_publish_to_the_topic" {
         Resource  = "arn:aws:sns:eu-central-1:123456789012:ec1-main-alarms"
         Condition = {
           StringEquals = { "aws:SourceAccount" = "123456789012" }
-          ArnLike      = { "aws:SourceArn" = "arn:aws:rds:eu-central-1:123456789012:es:*" }
+          ArnLike      = { "aws:SourceArn" = "arn:aws:rds:eu-central-1:123456789012:db:*" }
         }
       }
     )

@@ -38,7 +38,7 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
   (`rds/* .instance_identifier`).
 - `allow_rds_event_publish` (prod `monitoring/main` and `fnx-ue1-prod`'s `monitoring/data`) adds a
   topic policy statement letting this account's RDS event subscriptions in this region
-  (`events.rds.amazonaws.com`, `aws:SourceArn` `rds:<region>:<account>:es:*`) publish: the
+  (`events.rds.amazonaws.com`, `aws:SourceArn` `rds:<region>:<account>:db:*`, the source instances as in the RDS User Guide) publish: the
   receiving end of `rds` `sns_topic_arn`. The key must allow RDS events (`kms` `allow_rds_events`).
   With it or the relay below the topic gets a policy; otherwise SNS's default one.
 - `create_dashboard` is a legacy alias of `create_infrastructure_dashboard`, still set by the stacks.

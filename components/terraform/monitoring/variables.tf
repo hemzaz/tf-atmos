@@ -254,7 +254,7 @@ variable "db_connection_alarms" {
 
 variable "allow_rds_event_publish" {
   type        = bool
-  description = "Let this account's RDS event subscriptions in this region (rds sns_topic_arn -> aws_db_event_subscription) publish to this component's topic: a topic policy statement for events.rds.amazonaws.com scoped by aws:SourceAccount and the event subscription ARN. Needs create_sns_topic and, with kms_key_id, a key allowing RDS events (kms allow_rds_events)"
+  description = "Let this account's RDS event subscriptions in this region (rds sns_topic_arn -> aws_db_event_subscription) publish to this component's topic: a topic policy statement for events.rds.amazonaws.com scoped by aws:SourceAccount and aws:SourceArn to this account's DB instances in this region (rds:<region>:<account>:db:*, the event source, per the RDS User Guide). Needs create_sns_topic and, with kms_key_id, a key allowing RDS events (kms allow_rds_events)"
   default     = false
   nullable    = false
 

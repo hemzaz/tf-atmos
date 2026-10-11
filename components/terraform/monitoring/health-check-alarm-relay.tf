@@ -60,7 +60,8 @@ resource "aws_cloudwatch_event_target" "relayed_health_check_alarms" {
 # this component's alarms need, the same-account CloudWatch alarms of this
 # region (as security-monitoring's topic), and adds the relay rule and/or this
 # account's and region's RDS event subscriptions (rds sns_topic_arn ->
-# aws_db_event_subscription).
+# aws_db_event_subscription; SourceArn is the source DB instance, as in the
+# RDS User Guide USER_Events.GrantingPermissions, not the subscription).
 locals {
   alarm_topic_policy_enabled = var.create_sns_topic && (local.receive_relayed_alarms || var.allow_rds_event_publish)
 
@@ -95,7 +96,7 @@ locals {
       Resource  = aws_sns_topic.alarms[0].arn
       Condition = {
         StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
-        ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:rds:${var.region}:${data.aws_caller_identity.current.account_id}:es:*" }
+        ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:*" }
       }
     }] : [],
   ) : []
