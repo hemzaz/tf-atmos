@@ -39,7 +39,8 @@ def prod_pair(primary_env, primary_region, standby_env, standby_region, tfstate,
         "kms/main": instance(primary_env, primary_region, p_settings,
                              replica_alias_names={standby_region: f"{standby_env}-main"}),
         "rds/main": instance(primary_env, primary_region, p_settings, identifier="prod-main-db", db_name="productionapp"),
-        "elasticache/main": instance(primary_env, primary_region, p_settings, cluster_id="prod-cache"),
+        "elasticache/main": instance(primary_env, primary_region, p_settings, cluster_id="prod-cache",
+                                     global_replication_group_id_suffix=f"fnx-{primary_env}-prod-cache"),
         "eks/main": instance(primary_env, primary_region, p_settings, name="main", node_groups=node_groups(PRIMARY_SIZES)),
         "apigateway/main": instance(primary_env, primary_region, p_settings, **api),
         "monitoring/main": instance(primary_env, primary_region, p_settings, name="main"),
@@ -93,6 +94,7 @@ class UsPairTest(unittest.TestCase):
         self.assertEqual(facts["db_name"], "productionapp")
         self.assertEqual(facts["cache"], "ue2-prod-cache")
         self.assertEqual(facts["primary_cache"], "ue1-prod-cache")
+        self.assertEqual(facts["global_datastore_suffix"], "fnx-ue1-prod-cache")
         self.assertEqual(facts["cluster"], "ue2-main")
         self.assertEqual(facts["kms_alias"], "alias/ue2-main")
         self.assertEqual(facts["user_migration"], "ue2-cognito-user-migration")
@@ -110,6 +112,7 @@ class EuPairTest(unittest.TestCase):
         self.assertEqual(facts["db_instance"], "ec1-prod-main-db")
         self.assertEqual(facts["cache"], "ec1-prod-cache")
         self.assertEqual(facts["primary_cache"], "ew1-prod-cache")
+        self.assertEqual(facts["global_datastore_suffix"], "fnx-ew1-prod-cache")
         self.assertEqual(facts["cluster"], "ec1-main")
         self.assertEqual(facts["kms_alias"], "alias/ec1-main")
         self.assertEqual(facts["user_migration"], "ec1-cognito-user-migration")
@@ -179,6 +182,12 @@ class UnsupportedStackTest(unittest.TestCase):
         del stacks["fnx-ec1-prod"]["components"]["terraform"]["eks/main"]["vars"]["tags"]
         with self.assertRaisesRegex(ValueError, "fnx-ec1-prod eks/main: vars.tags.Environment is not set"):
             dr_pair.pair_facts(stacks, "fnx-ew1-prod")
+
+    def test_a_primary_cache_without_global_datastore_is_refused(self):
+        stacks = today()
+        del stacks["fnx-ue1-prod"]["components"]["terraform"]["elasticache/main"]["vars"]["global_replication_group_id_suffix"]
+        with self.assertRaisesRegex(ValueError, "fnx-ue1-prod elasticache/main: vars.global_replication_group_id_suffix is not set"):
+            dr_pair.pair_facts(stacks, "fnx-ue1-prod")
 
     def test_a_backend_replicating_elsewhere_than_settings_tfstate_is_refused(self):
         stacks = today()

@@ -15,7 +15,9 @@ A DR primary is a stack that another stack names in settings.dr.standby_of
 the components' "<tags.Environment>-<name>" convention (rds identifier,
 elasticache cluster_id, eks name, lambda function_name, monitoring name), and
 the standby's KMS alias is the primary kms/main's replica_alias_names entry for
-the standby's region.
+the standby's region. The Global Datastore is named by the primary elasticache's
+global_replication_group_id_suffix only: AWS prefixes it with an
+account-specific string, so the runbook looks the full id up by that suffix.
 
 An EU (eu-*) primary's standby, backup copies and state replica must be in an
 eu-* region too (GDPR: EU data, state and backups never leave the EU; the lint
@@ -101,6 +103,14 @@ def name(spec: dict, key: str, where: str) -> str:
     if not value:
         raise ValueError(f"{where}: vars.{key} is not set in the stack; set it explicitly (the runbook names the resource from it)")
     return f"{environment(spec, where)}-{value}"
+
+
+def global_datastore_suffix(spec: dict, where: str) -> str:
+    """The primary cache's Global Datastore id suffix; ValueError when it creates none."""
+    value = (spec.get("vars") or {}).get("global_replication_group_id_suffix")
+    if not value:
+        raise ValueError(f"{where}: vars.global_replication_group_id_suffix is not set, so there is no Global Datastore to fail over")
+    return value
 
 
 def backup_replica(spec, where: str) -> tuple:
@@ -208,6 +218,7 @@ def pair_facts(stacks: dict, primary_name: str) -> dict:
         "db_name": (primary["rds/main"].get("vars") or {}).get("db_name"),
         "primary_cache": name(primary["elasticache/main"], "cluster_id", f"{primary_name} elasticache/main"),
         "cache": name(standby["elasticache/main"], "cluster_id", f"{standby_name} elasticache/main"),
+        "global_datastore_suffix": global_datastore_suffix(primary["elasticache/main"], f"{primary_name} elasticache/main"),
         "cluster": name(standby["eks/main"], "name", f"{standby_name} eks/main"),
         "kms_alias": f"alias/{alias}",
         "user_migration": name(standby["lambda/cognito-user-migration"], "function_name", f"{standby_name} lambda/cognito-user-migration"),
