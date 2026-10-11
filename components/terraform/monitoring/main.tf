@@ -87,8 +87,8 @@ resource "aws_cloudwatch_metric_alarm" "db_connections_high" {
   alarm_description   = "High database connections for ${each.value.db_instance_identifier}"
   alarm_actions       = local.alarm_actions
 
-  # The watched instance, not the map key (an alarm id): the key used to be
-  # the dimension, so the alarm watched no real instance.
+  # The watched instance, not the map key (an alarm id, which names no real
+  # instance).
   dimensions = {
     DBInstanceIdentifier = each.value.db_instance_identifier
   }

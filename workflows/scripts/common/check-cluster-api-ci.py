@@ -98,11 +98,6 @@ def cluster_components(components_dir: pathlib.Path) -> set[str]:
     }
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
-
-
 def is_public(value) -> bool:
     # A Go template (dev's "{{ .settings.environment.eks_public_access }}")
     # renders to a string.
@@ -113,7 +108,7 @@ def deployable_instances(stack: dict) -> dict:
     return {
         name: instance
         for name, instance in ((stack.get("components") or {}).get("terraform") or {}).items()
-        if is_deployable(instance or {})
+        if backends.is_deployable(instance or {})
     }
 
 

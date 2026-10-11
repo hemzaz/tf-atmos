@@ -56,7 +56,7 @@ resource "aws_cloudwatch_event_target" "relayed_health_check_alarms" {
 }
 
 # The topic's policy, set only with the relay or allow_rds_event_publish
-# (otherwise the topic keeps SNS's default policy, as before). It keeps what
+# (otherwise the topic keeps SNS's default policy). It keeps what
 # this component's alarms need, the same-account CloudWatch alarms of this
 # region (as security-monitoring's topic), and adds the relay rule and/or this
 # account's and region's RDS event subscriptions (rds sns_topic_arn ->

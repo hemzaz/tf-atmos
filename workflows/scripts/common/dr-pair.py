@@ -202,7 +202,6 @@ def pair_facts(stacks: dict, primary_name: str) -> dict:
         "primary_prefix": environment(primary["eks/main"], f"{primary_name} eks/main"),
         "standby": standby_name,
         "standby_region": standby_region,
-        "standby_prefix": environment(standby["eks/main"], f"{standby_name} eks/main"),
         "primary_db_instance": name(primary["rds/main"], "identifier", f"{primary_name} rds/main"),
         "db_instance": name(standby["rds/main"], "identifier", f"{standby_name} rds/main"),
         # The promoted instance keeps the source's database.

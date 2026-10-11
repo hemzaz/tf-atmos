@@ -170,7 +170,7 @@ class DataResidencyTest(unittest.TestCase):
         ])
 
     def test_eu_health_check_alarm_action_in_us_east_1_fails(self):
-        # The us-east-1 alarm topic is no longer exempt: an EU alarm is relayed instead.
+        # No us-east-1 alarm topic is exempt: an EU alarm is relayed instead.
         api = instance(health_check_alarm_actions=["arn:aws:sns:us-east-1:123456789012:ew1-prod-main-api-health-check-alarms"])
         self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"apigateway/main": api})}), [
             f"fnx-ew1-prod: apigateway/main vars.health_check_alarm_actions is 'us-east-1', {OUTSIDE}",
