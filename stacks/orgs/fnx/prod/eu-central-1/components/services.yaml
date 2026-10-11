@@ -288,8 +288,8 @@ components:
         certificate_arns: !terraform.state acm/main .certificate_arns // {} | [.[]]
         certificate_expiry_threshold: 30
         alarm_email_subscriptions:
-          - "prod-critical@example.com"
-          - "oncall@example.com"
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"
         eks_cluster_name: !terraform.state eks/main .eks_cluster_id
         # eks/main's warm floor: workers min_group_size 2 (compute.yaml).
         eks_min_node_count: 2
