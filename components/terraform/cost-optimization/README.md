@@ -21,7 +21,7 @@ Cloud Posse equivalent; the Lambdas are packaged like Cloud Posse `aws-lambda` (
   not a YAML boolean.
 - The budget filters on the user-defined `Environment` cost allocation tag: the stack's own value
   plus `budget_additional_environment_tags` (the prod primaries add their DR standby, `ue2`/`ec1`,
-  which has no budget of its own). Activate the tag in the payer account's Billing console, or the
+  which has no budget of its own; lint `check-dr-pairs` fails a standby missing there). Activate the tag in the payer account's Billing console, or the
   budget stays at about $0 and never alerts.
 - `environment` is the lifecycle tier (`dev`/`staging`/`prod`), not `tags.Environment`.
 - In an EU stack, the savings analyzer's Cost Explorer calls and the dashboard's `AWS/Billing`

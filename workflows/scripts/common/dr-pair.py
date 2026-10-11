@@ -9,6 +9,9 @@ runbooks from these, so no stack, region or resource name is hard-coded there:
                      not a DR primary
   --check STACK      the same check, printing nothing on success
   --dr-region STACK  the DR region dr-status reports for STACK (below)
+  --lint             read `atmos describe stacks --process-functions=false
+                     --format json` on stdin and fail (exit 1) when a DR
+                     primary's budget misses a standby (below); lint runs it
 
 A DR primary is a stack that another stack names in settings.dr.standby_of
 (fnx-ue2-prod for fnx-ue1-prod, fnx-ec1-prod for fnx-ew1-prod). Names follow
@@ -23,6 +26,11 @@ An EU (eu-*) primary's standby, backup copies and state replica must be in an
 eu-* region too (GDPR: EU data, state and backups never leave the EU; the lint
 check-data-residency.py enforces the same on the stacks): a runbook that would
 move them elsewhere is refused here.
+
+A standby shares its primary's account and has no budget of its own (owner
+decision), so every enabled, non-abstract cost-optimization instance of a DR
+primary lists each standby's settings.prefix (its Environment tag) in
+budget_additional_environment_tags (--lint).
 
 The DR region (--dr-region) is the stack's backup/main replica_region when it
 copies cross-region (enable_cross_region_backup), else its standby's region
@@ -247,6 +255,31 @@ def dr_region(stacks: dict, stack_name: str) -> str:
     return ""
 
 
+def budget_findings(stacks: dict) -> list:
+    """One line per DR standby missing from its primary's budget_additional_environment_tags (--lint)."""
+    findings = []
+    for primary_name in primaries(stacks):
+        standbys = sorted(n for n, config in stacks.items() if setting(config, "dr", "standby_of") == primary_name)
+        if primary_name not in stacks:
+            findings.append(f"{', '.join(standbys)}: settings.dr.standby_of names {primary_name!r}, which is not a stack")
+            continue
+        for instance_name, spec in sorted(instances(stacks[primary_name]).items()):
+            metadata = (spec or {}).get("metadata") or {}
+            component = metadata.get("component") or instance_name
+            if component != "cost-optimization" or metadata.get("type") == "abstract" or not enabled(spec):
+                continue
+            tags = (spec.get("vars") or {}).get("budget_additional_environment_tags") or []
+            for standby in standbys:
+                prefix = setting(stacks[standby], "prefix")
+                if prefix not in tags:
+                    findings.append(
+                        f"{primary_name} {instance_name}: budget_additional_environment_tags {tags} lacks {prefix!r}, "
+                        f"the settings.prefix of its DR standby {standby} (settings.dr.standby_of): the standby shares "
+                        "the account and has no budget of its own"
+                    )
+    return findings
+
+
 def describe_stacks() -> dict:
     """The stacks' resolved config; ValueError, one line, when atmos fails or returns no JSON."""
     command = ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json",
@@ -263,8 +296,14 @@ def main() -> int:
     mode.add_argument("stack", nargs="?")
     mode.add_argument("--check", metavar="STACK")
     mode.add_argument("--dr-region", metavar="STACK")
+    mode.add_argument("--lint", action="store_true")
     args = parser.parse_args()
 
+    if args.lint:
+        findings = budget_findings(json.load(sys.stdin))
+        for finding in findings:
+            print(f"dr-pair: {finding}", file=sys.stderr)
+        return 1 if findings else 0
     try:
         stacks = describe_stacks()
         if args.dr_region is not None:

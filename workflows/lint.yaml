@@ -233,6 +233,18 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-data-residency.py < "$stacks_json"
+      # A DR standby shares its primary's account and has no budget: the
+      # primary's cost-optimization budget_additional_environment_tags lists
+      # each standby's settings.prefix (dr-pair.py --lint).
+      - name: check-dr-pairs
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_dr_pair.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/dr-pair.py --lint < "$stacks_json"
       # The templates/stacks samples, copied in as the lanes their headers name,
       # resolve and pass the stack checks beside the real stacks (plan-sweep
       # covers them in validate-enhanced's plan-sweep workflow).

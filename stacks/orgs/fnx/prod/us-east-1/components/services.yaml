@@ -448,7 +448,8 @@ components:
       vars:
         monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
         # The account's budget also counts its DR standby fnx-ue2-prod
-        # (Environment ue2, same account, no budget of its own; owner decision).
+        # (Environment ue2, same account, no budget of its own, owner decision);
+        # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
         budget_additional_environment_tags: ["ue2"]
         budget_notification_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
