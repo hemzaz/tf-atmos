@@ -237,8 +237,16 @@ class StackNoticeTest(unittest.TestCase):
             "component": "cost-optimization", "monthly_budget_limit": "10000", "tags": {"Environment": "ew1"}})
         found = self.notices(stacks, "fnx-ew1-prod")
         self.assertEqual([(f.key, f.row) for f in found], [("cost_main vars.monthly_budget_limit", "Budgets")])
-        self.assertIn("10000 USD a month, counting only spend tagged Environment=ew1", found[0].detail)
+        self.assertIn("10000 USD a month, counting only spend tagged Environment=ew1;", found[0].detail)
         self.assertEqual(self.notices(clean(), "fnx-ue1-prod"), [])
+
+    def test_budget_notice_names_every_counted_tag(self):
+        stacks = clean()
+        stacks["fnx-ew1-prod"] = stack("prod", "555555555555", cost_main={
+            "component": "cost-optimization", "monthly_budget_limit": "10000", "tags": {"Environment": "ew1"},
+            "budget_additional_environment_tags": ["ec1", "ew1"]})
+        found = self.notices(stacks, "fnx-ew1-prod")
+        self.assertIn("counting only spend tagged Environment=ew1 or ec1;", found[0].detail)
 
 
 class ExemptStagesTest(unittest.TestCase):

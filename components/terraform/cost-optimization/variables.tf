@@ -82,6 +82,18 @@ variable "monthly_budget_limit" {
   }
 }
 
+variable "budget_additional_environment_tags" {
+  type        = list(string)
+  description = "Environment tag values the monthly budget counts besides this stack's own tags.Environment: its TagKeyValue filter lists user:Environment$<value> for each (e.g. a primary's budget also covering its DR standby's spend in the same account)"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for v in var.budget_additional_environment_tags : can(regex("^[a-z0-9][a-z0-9-]*$", v))])
+    error_message = "budget_additional_environment_tags entries must be Environment tag values (lowercase letters, digits, hyphens)."
+  }
+}
+
 variable "budget_notification_emails" {
   type        = list(string)
   description = "Email addresses for budget notifications"

@@ -138,8 +138,13 @@ resource "aws_budgets_budget" "monthly" {
       # AWS Budgets matches user-defined cost-allocation tags as
       # "user:<Key>$<Value>" (AWS-owned tags use "aws:..."); the Environment
       # tag must also be activated as a cost allocation tag in the payer
-      # account, or no spend will be attributed to it - see README.
-      "user:Environment$${local.environment_tag}"
+      # account, or no spend will be attributed to it - see README. One value
+      # per Environment counted: this stack's, plus
+      # budget_additional_environment_tags (a DR standby in the same account).
+      # format(), not "...$${env}": "$${" is HCL's escape for a literal "${",
+      # which is what the old "user:Environment$${local.environment_tag}"
+      # sent AWS, a filter matching no tag value at all.
+      for env in distinct(concat([local.environment_tag], var.budget_additional_environment_tags)) : format("user:Environment$%s", env)
     ]
   }
 

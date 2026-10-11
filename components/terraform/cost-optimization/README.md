@@ -19,8 +19,10 @@ Cloud Posse equivalent; the Lambdas are packaged like Cloud Posse `aws-lambda` (
   `CostOptimization=scheduled` (scheduler) or `CostOptimization=cleanup-eligible` (cleanup).
 - Cleanup runs in dry-run mode by default: `cleanup_dry_run` is a quoted string `"true"`/`"false"`,
   not a YAML boolean.
-- The budget filters on the user-defined `Environment` cost allocation tag. Activate it in the payer
-  account's Billing console, or the budget stays at about $0 and never alerts.
+- The budget filters on the user-defined `Environment` cost allocation tag: the stack's own value
+  plus `budget_additional_environment_tags` (the prod primaries add their DR standby, `ue2`/`ec1`,
+  which has no budget of its own). Activate the tag in the payer account's Billing console, or the
+  budget stays at about $0 and never alerts.
 - `environment` is the lifecycle tier (`dev`/`staging`/`prod`), not `tags.Environment`.
 - In an EU stack, the savings analyzer's Cost Explorer calls and the dashboard's `AWS/Billing`
   widget are served from us-east-1: account billing metadata only, no personal data, and in

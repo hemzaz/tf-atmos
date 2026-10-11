@@ -169,10 +169,11 @@ def stack_findings(name: str, config: dict) -> list:
                         "empty: GuardDuty, Security Hub and Inspector findings on its topic reach nobody until "
                         "an address is subscribed (and confirms)", "Alert recipients"))
         if component == "cost-optimization":
-            tag = (variables.get("tags") or {}).get("Environment", "<Environment>")
+            own = (variables.get("tags") or {}).get("Environment", "<Environment>")
+            tags = list(dict.fromkeys([own, *(variables.get("budget_additional_environment_tags") or [])]))
             add(Finding("notice", name, f"{instance_name} vars.monthly_budget_limit",
                         f"{variables.get('monthly_budget_limit')} USD a month, counting only spend tagged "
-                        f"Environment={tag} (not the account's other stacks); confirm the amount "
+                        f"Environment={' or '.join(tags)}; confirm the amount "
                         "(settings.environment.monitoring.budget_monthly_limit)", "Budgets"))
         if component == "github-runners":
             for key in ("github_app_id", "github_app_installation_id"):
