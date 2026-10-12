@@ -51,7 +51,7 @@ variable "environment" {
 
 variable "kms_key_arn" {
   type        = string
-  description = "Customer managed KMS key ARN that encrypts the Lambda functions' CloudWatch log groups and the cost-alerts SNS topic. Its policy must allow logs.<region>.amazonaws.com (kms allow_cloudwatch_logs) for the log groups, and cloudwatch.amazonaws.com (kms allow_cloudwatch_alarms) so the *_errors alarms can publish to the encrypted SNS topic"
+  description = "Customer managed KMS key ARN that encrypts the Lambda functions' CloudWatch log groups and the cost-alerts SNS topic. Its policy must allow logs.<region>.amazonaws.com (kms allow_cloudwatch_logs) for the log groups, cloudwatch.amazonaws.com (kms allow_cloudwatch_alarms) so the *_errors alarms can publish to the encrypted SNS topic, and with billing_notifications_sns_enabled budgets.amazonaws.com and costalerts.amazonaws.com (kms allow_billing_notifications)"
 
   validation {
     condition     = can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.kms_key_arn))
@@ -111,11 +111,24 @@ variable "budget_notification_emails" {
 # Cost Anomaly Configuration
 variable "cost_anomaly_notification_email" {
   type        = string
-  description = "Email address for cost anomaly notifications"
+  description = "Email address for cost anomaly notifications; required unless billing_notifications_sns_enabled, which needs it null"
+  default     = null
 
   validation {
-    condition     = can(regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.cost_anomaly_notification_email))
+    condition     = var.cost_anomaly_notification_email == null || can(regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", var.cost_anomaly_notification_email))
     error_message = "Must be a valid email address."
+  }
+}
+
+variable "billing_notifications_sns_enabled" {
+  type        = bool
+  description = "Send the budget and cost anomaly notifications to the cost-alerts topic, delivered by its cost_alert_emails subscriptions, instead of emailing budget_notification_emails and cost_anomaly_notification_email: Budgets and Cost Explorer (global, hosted in us-east-1) then store only the topic ARN, no email address (a GDPR-scoped stack, owner decision B5; check-data-residency.py). Needs a non-empty cost_alert_emails, an empty budget_notification_emails, a null cost_anomaly_notification_email and a key allowing the billing services (kms allow_billing_notifications)"
+  default     = false
+  nullable    = false
+
+  validation {
+    condition     = var.billing_notifications_sns_enabled ? (length(var.cost_alert_emails) > 0 && length(var.budget_notification_emails) == 0 && var.cost_anomaly_notification_email == null) : var.cost_anomaly_notification_email != null
+    error_message = "billing_notifications_sns_enabled delivers through the topic's cost_alert_emails: set cost_alert_emails, and leave budget_notification_emails empty and cost_anomaly_notification_email null. Without it, set cost_anomaly_notification_email."
   }
 }
 
