@@ -239,6 +239,33 @@ class DataResidencyTest(unittest.TestCase):
         us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
         self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"security-monitoring/main": us})}), [])
 
+    def test_global_service_email_subscribers_fail_in_eu_only(self):
+        def budget(**variables):
+            spec = instance(**variables)
+            spec["metadata"] = {"component": "cost-optimization", "inherits": ["cost-optimization/defaults"]}
+            return spec
+
+        def errors(spec):
+            return residency.check({"fnx-ew1-prod": eu_stack(**{"cost-optimization/main": spec})})
+
+        prefix = "fnx-ew1-prod: cost-optimization/main sets vars."
+        suffix = (": a global service in us-east-1 would store those email addresses; "
+                  "notify an in-region SNS topic instead")
+        self.assertEqual(errors(budget(budget_notification_emails=["a@example.com"])),
+                         [f"{prefix}budget_notification_emails{suffix}"])
+        self.assertEqual(errors(budget(cost_anomaly_notification_email="a@example.com")),
+                         [f"{prefix}cost_anomaly_notification_email{suffix}"])
+        self.assertEqual(errors(budget(billing_notifications_sns_enabled=True, budget_notification_emails=[],
+                                       cost_anomaly_notification_email=None, cost_alert_emails=["a@example.com"])), [])
+        disabled = budget(budget_notification_emails=["a@example.com"])
+        disabled["metadata"]["enabled"] = False
+        self.assertEqual(errors(disabled), [])
+        us = budget(budget_notification_emails=["a@example.com"], cost_anomaly_notification_email="a@example.com")
+        us["vars"].update(region="us-east-1", tags={"Compliance": US})
+        us["settings"]["tfstate"] = {"region": "us-east-1"}
+        us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
+        self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"cost-optimization/main": us})}), [])
+
     def test_us_stack_depending_on_an_eu_stack_fails(self):
         # A US read replica, Global Datastore secondary or state read of an EU
         # instance copies EU data out: the US stack lists the EU one.
