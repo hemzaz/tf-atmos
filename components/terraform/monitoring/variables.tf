@@ -149,7 +149,6 @@ variable "rds_instances" {
   type        = list(string)
   description = "List of RDS instances to monitor"
   default     = []
-  nullable    = false
 }
 
 variable "ecs_clusters" {
