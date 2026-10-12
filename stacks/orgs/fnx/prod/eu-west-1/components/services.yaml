@@ -124,7 +124,12 @@ components:
     # As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/services.yaml):
     # Savings Plan/RI analyzer, resource cleanup, cost anomaly detection and
     # the monthly budget (on this stack's Environment tag, ew1). Cost data is
-    # account metadata, not personal data.
+    # account metadata, not personal data, but staff email addresses are: the
+    # budget and the anomaly subscription notify the eu-west-1 cost-alerts
+    # topic, which holds the email subscriptions (cost_alert_emails), so the
+    # global Budgets and Cost Explorer services (us-east-1) store only its ARN
+    # (owner decision 2026-10-12; check-data-residency.py fails a GDPR stack
+    # that sets budget_notification_emails or cost_anomaly_notification_email).
     cost-optimization/main:
       metadata:
         component: cost-optimization
@@ -136,10 +141,7 @@ components:
         # (Environment ec1, same account, no budget of its own, owner decision);
         # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
         budget_additional_environment_tags: ["ec1"]
-        budget_notification_emails:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
-        cost_anomaly_notification_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        billing_notifications_sns_enabled: true
         cost_alert_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
           - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
