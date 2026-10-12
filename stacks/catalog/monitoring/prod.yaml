@@ -45,7 +45,7 @@ components:
         # = 7 guaranteed nodes. The eks_node_count_low alarm (monitoring's
         # alarms.tf) only fires below this floor.
         eks_min_node_count: 7
-        rds_instances: !terraform.state rds/main .instance_identifier | [.]
+        rds_instances: !terraform.state rds/main .instance_identifiers
         elasticache_clusters: !terraform.state elasticache/main .member_clusters
         api_gateway_name: !terraform.state apigateway/main .api_name
         api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
@@ -53,9 +53,11 @@ components:
         # PagerDuty integration
         # Secret: export from SSM /production/pagerduty/endpoint before plan/apply
         create_sns_topic: true
-        # rds/main's event subscription (its sns_topic_arn names this topic)
-        # may publish; kms/main allows RDS events on the key (allow_rds_events).
-        allow_rds_event_publish: true
+        # RDS events of rds_instances (failover, failure, low storage, ...) to
+        # this topic: the subscription is here, not in rds, since RDS rejects a
+        # topic that does not exist yet and this deploys after rds. kms/main
+        # allows RDS events on the key (allow_rds_events).
+        rds_event_subscription_enabled: true
         cpu_alarms:
           high_cpu_warning:
             namespace: "AWS/EC2"

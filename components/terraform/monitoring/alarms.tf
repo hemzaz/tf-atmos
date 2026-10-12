@@ -41,6 +41,28 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
   }
 }
 
+# RDS event notifications to the topic, as Cloud Posse's rds-cloudwatch-sns-alarms
+# does (aws_db_event_subscription): availability, failover, failure, storage,
+# maintenance, replica and recovery events of the rds_instances. Here, not in
+# rds, because RDS rejects a subscription to a topic that does not exist yet and
+# this component, which owns the topic, deploys after rds. The topic policy
+# (health-check-alarm-relay.tf) lets RDS publish first; the key must allow RDS
+# events (kms allow_rds_events).
+resource "aws_db_event_subscription" "rds" {
+  count = var.create_sns_topic && var.rds_event_subscription_enabled ? 1 : 0
+
+  name      = "${local.name_prefix}-rds-events"
+  sns_topic = aws_sns_topic.alarms[0].arn
+
+  source_type      = "db-instance"
+  source_ids       = var.rds_instances
+  event_categories = var.rds_event_categories
+
+  tags = { Name = "${local.name_prefix}-rds-events" }
+
+  depends_on = [aws_sns_topic_policy.alarms]
+}
+
 # Lambda Throttles Alarm
 resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   for_each = var.lambda_throttle_monitoring ? toset(var.lambda_functions) : []

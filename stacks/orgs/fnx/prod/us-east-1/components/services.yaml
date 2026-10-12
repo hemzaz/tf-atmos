@@ -195,9 +195,6 @@ components:
         allocated_storage: 200
         max_allocated_storage: 1000
         kms_key_id: !terraform.state kms/main .key_arn
-        # monitoring/data's ue1-data-alarms, by name: it reads this instance
-        # and deploys later (catalog/rds/prod rds/main-prod).
-        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-data-alarms"
         create_read_replica: true
         read_replica_instance_class: "db.r5.xlarge"
         vpc_id: !terraform.state vpc/services .vpc_id
@@ -389,7 +386,8 @@ components:
         # guaranteed nodes. The eks_node_count_low alarm (monitoring's
         # alarms.tf) only fires below this floor.
         eks_min_node_count: 3
-        rds_instances: !terraform.state rds/data .instance_identifier | [.]
+        # rds/data and its read replica.
+        rds_instances: !terraform.state rds/data .instance_identifiers
         # The lambdas are disabled (no package yet), and apigateway/data with
         # them: no API or Lambda dimensions until they are enabled. Then add
         # back, each read also in dependencies (lambda_functions: the enabled
@@ -413,9 +411,9 @@ components:
           - "data-team@example.com"
 
         create_sns_topic: true
-        # rds/data's event subscription publishes here (its sns_topic_arn names
-        # ue1-data-alarms); kms/main allows RDS events (allow_rds_events).
-        allow_rds_event_publish: true
+        # rds/data's and its replica's RDS events, to ue1-data-alarms;
+        # kms/main allows RDS events (allow_rds_events).
+        rds_event_subscription_enabled: true
         lambda_duration_threshold: 500000
         # rds/data's alarms, as monitoring/main's on rds/main
         # (catalog/monitoring/prod): CPU and storage on rds_instances, and
@@ -450,7 +448,8 @@ components:
       vars:
         monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
         # The account's budget also counts its DR standby fnx-ue2-prod
-        # (Environment ue2, same account, no budget of its own; owner decision).
+        # (Environment ue2, same account, no budget of its own, owner decision);
+        # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
         budget_additional_environment_tags: ["ue2"]
         budget_notification_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"

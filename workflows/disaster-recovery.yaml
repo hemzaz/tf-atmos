@@ -84,7 +84,7 @@ workflows:
           3. Database: `aws rds promote-read-replica --db-instance-identifier {{ $p.db_instance }} --region {{ .steps.target_region.value }}`,
              then `aws rds modify-db-instance ... --manage-master-user-password --master-user-secret-kms-key-id {{ $p.kms_alias }}`.
           4. Cache: `aws elasticache failover-global-replication-group --region {{ .steps.target_region.value }}
-             --primary-region {{ .steps.target_region.value }} --primary-replication-group-id {{ $p.cache }} --global-replication-group-id <id>`.
+             --primary-region {{ .steps.target_region.value }} --primary-replication-group-id {{ $p.cache }} --global-replication-group-id <id>`, <id> from `aws elasticache describe-global-replication-groups --region {{ .steps.target_region.value }} --query "GlobalReplicationGroups[?ends_with(GlobalReplicationGroupId, '-{{ $p.global_datastore_suffix }}')].GlobalReplicationGroupId" --output text` (stop if more than one id comes back).
           5. Node groups: `aws eks update-nodegroup-config --cluster-name {{ $p.cluster }} --nodegroup-name <ng>
              --scaling-config minSize=..,desiredSize=..,maxSize=..` to {{ $p.primary }}'s sizes.
           6. Deploy eks-backend-services/main in-VPC from a branch: enabled, database_secret_arn set to

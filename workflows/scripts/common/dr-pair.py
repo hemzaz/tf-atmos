@@ -9,18 +9,28 @@ runbooks from these, so no stack, region or resource name is hard-coded there:
                      not a DR primary
   --check STACK      the same check, printing nothing on success
   --dr-region STACK  the DR region dr-status reports for STACK (below)
+  --lint             read `atmos describe stacks --process-functions=false
+                     --format json` on stdin and fail (exit 1) when a DR
+                     primary's budget misses a standby (below); lint runs it
 
 A DR primary is a stack that another stack names in settings.dr.standby_of
 (fnx-ue2-prod for fnx-ue1-prod, fnx-ec1-prod for fnx-ew1-prod). Names follow
 the components' "<tags.Environment>-<name>" convention (rds identifier,
 elasticache cluster_id, eks name, lambda function_name, monitoring name), and
 the standby's KMS alias is the primary kms/main's replica_alias_names entry for
-the standby's region.
+the standby's region. The Global Datastore is named by the primary elasticache's
+global_replication_group_id_suffix only: AWS prefixes it with an
+account-specific string, so the runbook looks the full id up by that suffix.
 
 An EU (eu-*) primary's standby, backup copies and state replica must be in an
 eu-* region too (GDPR: EU data, state and backups never leave the EU; the lint
 check-data-residency.py enforces the same on the stacks): a runbook that would
 move them elsewhere is refused here.
+
+A standby shares its primary's account and has no budget of its own (owner
+decision), so a DR primary has an enabled, non-abstract cost-optimization
+instance and every such instance lists each standby's settings.prefix (its
+Environment tag) in budget_additional_environment_tags (--lint).
 
 The DR region (--dr-region) is the stack's backup/main replica_region when it
 copies cross-region (enable_cross_region_backup), else its standby's region
@@ -101,6 +111,14 @@ def name(spec: dict, key: str, where: str) -> str:
     if not value:
         raise ValueError(f"{where}: vars.{key} is not set in the stack; set it explicitly (the runbook names the resource from it)")
     return f"{environment(spec, where)}-{value}"
+
+
+def global_datastore_suffix(spec: dict, where: str) -> str:
+    """The primary cache's Global Datastore id suffix; ValueError when it creates none."""
+    value = (spec.get("vars") or {}).get("global_replication_group_id_suffix")
+    if not value:
+        raise ValueError(f"{where}: vars.global_replication_group_id_suffix is not set, so there is no Global Datastore to fail over")
+    return value
 
 
 def backup_replica(spec, where: str) -> tuple:
@@ -202,13 +220,13 @@ def pair_facts(stacks: dict, primary_name: str) -> dict:
         "primary_prefix": environment(primary["eks/main"], f"{primary_name} eks/main"),
         "standby": standby_name,
         "standby_region": standby_region,
-        "standby_prefix": environment(standby["eks/main"], f"{standby_name} eks/main"),
         "primary_db_instance": name(primary["rds/main"], "identifier", f"{primary_name} rds/main"),
         "db_instance": name(standby["rds/main"], "identifier", f"{standby_name} rds/main"),
         # The promoted instance keeps the source's database.
         "db_name": (primary["rds/main"].get("vars") or {}).get("db_name"),
         "primary_cache": name(primary["elasticache/main"], "cluster_id", f"{primary_name} elasticache/main"),
         "cache": name(standby["elasticache/main"], "cluster_id", f"{standby_name} elasticache/main"),
+        "global_datastore_suffix": global_datastore_suffix(primary["elasticache/main"], f"{primary_name} elasticache/main"),
         "cluster": name(standby["eks/main"], "name", f"{standby_name} eks/main"),
         "kms_alias": f"alias/{alias}",
         "user_migration": name(standby["lambda/cognito-user-migration"], "function_name", f"{standby_name} lambda/cognito-user-migration"),
@@ -237,6 +255,38 @@ def dr_region(stacks: dict, stack_name: str) -> str:
     return ""
 
 
+def budget_findings(stacks: dict) -> list:
+    """One line per DR standby missing from its primary's budget_additional_environment_tags (--lint)."""
+    findings = []
+    for primary_name in primaries(stacks):
+        standbys = sorted(n for n, config in stacks.items() if setting(config, "dr", "standby_of") == primary_name)
+        if primary_name not in stacks:
+            findings.append(f"{', '.join(standbys)}: settings.dr.standby_of names {primary_name!r}, which is not a stack")
+            continue
+        budgets = []
+        for instance_name, spec in sorted(instances(stacks[primary_name]).items()):
+            metadata = (spec or {}).get("metadata") or {}
+            component = metadata.get("component") or instance_name
+            if component == "cost-optimization" and metadata.get("type") != "abstract" and enabled(spec):
+                budgets.append((instance_name, spec))
+        if not budgets:
+            findings.append(
+                f"{primary_name}: a DR primary (of {', '.join(standbys)}) with no enabled cost-optimization instance, "
+                "so no budget counts the standby"
+            )
+        for instance_name, spec in budgets:
+            tags = (spec.get("vars") or {}).get("budget_additional_environment_tags") or []
+            for standby in standbys:
+                prefix = setting(stacks[standby], "prefix")
+                if prefix not in tags:
+                    findings.append(
+                        f"{primary_name} {instance_name}: budget_additional_environment_tags {tags} lacks {prefix!r}, "
+                        f"the settings.prefix of its DR standby {standby} (settings.dr.standby_of): the standby shares "
+                        "the account and has no budget of its own"
+                    )
+    return findings
+
+
 def describe_stacks() -> dict:
     """The stacks' resolved config; ValueError, one line, when atmos fails or returns no JSON."""
     command = ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json",
@@ -253,8 +303,14 @@ def main() -> int:
     mode.add_argument("stack", nargs="?")
     mode.add_argument("--check", metavar="STACK")
     mode.add_argument("--dr-region", metavar="STACK")
+    mode.add_argument("--lint", action="store_true")
     args = parser.parse_args()
 
+    if args.lint:
+        findings = budget_findings(json.load(sys.stdin))
+        for finding in findings:
+            print(f"dr-pair: {finding}", file=sys.stderr)
+        return 1 if findings else 0
     try:
         stacks = describe_stacks()
         if args.dr_region is not None:

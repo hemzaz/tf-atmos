@@ -28,8 +28,8 @@ def node_groups(groups):
 
 def prod_pair(primary_env, primary_region, standby_env, standby_region, tfstate, relay=None):
     """A primary and its standby as describe stacks returns them (--sections settings,vars,metadata)."""
-    p_settings = {"context": {"stage": "prod"}, "tfstate": tfstate}
-    s_settings = {**p_settings, "dr": {"standby_of": f"fnx-{primary_env}-prod"}}
+    p_settings = {"context": {"stage": "prod"}, "tfstate": tfstate, "prefix": primary_env}
+    s_settings = {**p_settings, "prefix": standby_env, "dr": {"standby_of": f"fnx-{primary_env}-prod"}}
     api = {"health_check_alarm_relay_regions": relay} if relay else {
         "health_check_alarm_actions": [f"arn:aws:sns:us-east-1:123456789012:{primary_env}-main-alarms"]}
     primary = {
@@ -39,10 +39,14 @@ def prod_pair(primary_env, primary_region, standby_env, standby_region, tfstate,
         "kms/main": instance(primary_env, primary_region, p_settings,
                              replica_alias_names={standby_region: f"{standby_env}-main"}),
         "rds/main": instance(primary_env, primary_region, p_settings, identifier="prod-main-db", db_name="productionapp"),
-        "elasticache/main": instance(primary_env, primary_region, p_settings, cluster_id="prod-cache"),
+        "elasticache/main": instance(primary_env, primary_region, p_settings, cluster_id="prod-cache",
+                                     global_replication_group_id_suffix=f"fnx-{primary_env}-prod-cache"),
         "eks/main": instance(primary_env, primary_region, p_settings, name="main", node_groups=node_groups(PRIMARY_SIZES)),
         "apigateway/main": instance(primary_env, primary_region, p_settings, **api),
         "monitoring/main": instance(primary_env, primary_region, p_settings, name="main"),
+        "cost-optimization/main": {**instance(primary_env, primary_region, p_settings,
+                                              budget_additional_environment_tags=[standby_env]),
+                                   "metadata": {"component": "cost-optimization"}},
     }
     standby = {
         "vpc/main": instance(standby_env, standby_region, s_settings),
@@ -93,6 +97,7 @@ class UsPairTest(unittest.TestCase):
         self.assertEqual(facts["db_name"], "productionapp")
         self.assertEqual(facts["cache"], "ue2-prod-cache")
         self.assertEqual(facts["primary_cache"], "ue1-prod-cache")
+        self.assertEqual(facts["global_datastore_suffix"], "fnx-ue1-prod-cache")
         self.assertEqual(facts["cluster"], "ue2-main")
         self.assertEqual(facts["kms_alias"], "alias/ue2-main")
         self.assertEqual(facts["user_migration"], "ue2-cognito-user-migration")
@@ -110,6 +115,7 @@ class EuPairTest(unittest.TestCase):
         self.assertEqual(facts["db_instance"], "ec1-prod-main-db")
         self.assertEqual(facts["cache"], "ec1-prod-cache")
         self.assertEqual(facts["primary_cache"], "ew1-prod-cache")
+        self.assertEqual(facts["global_datastore_suffix"], "fnx-ew1-prod-cache")
         self.assertEqual(facts["cluster"], "ec1-main")
         self.assertEqual(facts["kms_alias"], "alias/ec1-main")
         self.assertEqual(facts["user_migration"], "ec1-cognito-user-migration")
@@ -180,6 +186,12 @@ class UnsupportedStackTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fnx-ec1-prod eks/main: vars.tags.Environment is not set"):
             dr_pair.pair_facts(stacks, "fnx-ew1-prod")
 
+    def test_a_primary_cache_without_global_datastore_is_refused(self):
+        stacks = today()
+        del stacks["fnx-ue1-prod"]["components"]["terraform"]["elasticache/main"]["vars"]["global_replication_group_id_suffix"]
+        with self.assertRaisesRegex(ValueError, "fnx-ue1-prod elasticache/main: vars.global_replication_group_id_suffix is not set"):
+            dr_pair.pair_facts(stacks, "fnx-ue1-prod")
+
     def test_a_backend_replicating_elsewhere_than_settings_tfstate_is_refused(self):
         stacks = today()
         stacks["fnx-ew1-root"]["components"]["terraform"]["backend/main"]["vars"]["replica_region"] = "eu-north-1"
@@ -215,6 +227,55 @@ class DrRegionTest(unittest.TestCase):
         self.assertEqual(dr_pair.dr_region(stacks, "fnx-ew1-prod"), "eu-central-1")
 
 
+class BudgetTest(unittest.TestCase):
+    def test_todays_primary_budgets_count_their_standbys(self):
+        self.assertEqual(dr_pair.budget_findings(today()), [])
+
+    def test_a_primary_budget_missing_its_standby_is_reported(self):
+        stacks = today()
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["cost-optimization/main"]["vars"]["budget_additional_environment_tags"] = ["ue9"]
+        findings = dr_pair.budget_findings(stacks)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("fnx-ue1-prod cost-optimization/main: budget_additional_environment_tags ['ue9'] lacks 'ue2'", findings[0])
+        self.assertIn("DR standby fnx-ue2-prod", findings[0])
+
+    def test_unset_tags_miss_the_standby(self):
+        stacks = today()
+        del stacks["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]["vars"]["budget_additional_environment_tags"]
+        self.assertEqual(len(dr_pair.budget_findings(stacks)), 1)
+
+    def test_disabled_and_abstract_budgets_are_not_checked(self):
+        stacks = today()
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["cost-optimization/defaults"] = {
+            **instance("ue1", "us-east-1", {}), "metadata": {"type": "abstract",
+                                                             "component": "cost-optimization"}}
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["cost-optimization/off"] = {
+            **instance("ue1", "us-east-1", {}), "metadata": {"enabled": False,
+                                                             "component": "cost-optimization"}}
+        self.assertEqual(dr_pair.budget_findings(stacks), [])
+
+    def test_a_primary_without_a_budget_is_reported(self):
+        for change in ("delete", "disable", "abstract"):
+            stacks = today()
+            spec = stacks["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]
+            if change == "delete":
+                del stacks["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]
+            elif change == "disable":
+                spec["metadata"]["enabled"] = False
+            else:
+                spec["metadata"]["type"] = "abstract"
+            self.assertEqual(dr_pair.budget_findings(stacks), [
+                "fnx-ew1-prod: a DR primary (of fnx-ec1-prod) with no enabled cost-optimization instance, "
+                "so no budget counts the standby"], change)
+
+    def test_a_standby_of_an_unknown_stack_is_reported(self):
+        stacks = today()
+        for spec in stacks["fnx-ue2-prod"]["components"]["terraform"].values():
+            spec["settings"] = {**spec["settings"], "dr": {"standby_of": "fnx-ue7-prod"}}
+        self.assertIn("fnx-ue2-prod: settings.dr.standby_of names 'fnx-ue7-prod', which is not a stack",
+                      dr_pair.budget_findings(stacks))
+
+
 class MainTest(unittest.TestCase):
     def run_main(self, *argv):
         out, err = io.StringIO(), io.StringIO()
@@ -237,6 +298,17 @@ class MainTest(unittest.TestCase):
 
     def test_dr_region(self):
         self.assertEqual(self.run_main("--dr-region", "fnx-ec1-prod"), (0, "eu-central-1\n", ""))
+
+    def test_lint_reads_stdin_and_fails_on_a_missing_standby(self):
+        good = today()
+        bad = copy.deepcopy(good)
+        bad["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]["vars"]["budget_additional_environment_tags"] = []
+        for stacks, expected in ((good, 0), (bad, 1)):
+            with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(stacks))):
+                code, out, err = self.run_main("--lint")
+            self.assertEqual((code, out), (expected, ""))
+            self.assertEqual(bool(err), bool(expected), err)
+        self.assertIn("lacks 'ec1'", err)
 
     def test_a_failing_atmos_is_one_line_and_exit_1(self):
         failure = subprocess.CalledProcessError(1, ["atmos"])

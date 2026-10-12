@@ -252,15 +252,31 @@ variable "db_connection_alarms" {
   }
 }
 
-variable "allow_rds_event_publish" {
+variable "rds_event_subscription_enabled" {
   type        = bool
-  description = "Let this account's RDS event subscriptions in this region (rds sns_topic_arn -> aws_db_event_subscription) publish to this component's topic: a topic policy statement for events.rds.amazonaws.com scoped by aws:SourceAccount and aws:SourceArn to this account's DB instances in this region (rds:<region>:<account>:db:*, the event source, per the RDS User Guide). Needs create_sns_topic and, with kms_key_id, a key allowing RDS events (kms allow_rds_events)"
+  description = "Subscribe this component's topic to the RDS events (rds_event_categories) of the rds_instances (aws_db_event_subscription, Cloud Posse's rds-cloudwatch-sns-alarms), with a topic policy statement letting events.rds.amazonaws.com publish for exactly those instances (aws:SourceArn rds:<region>:<account>:db:<id>, per the RDS User Guide). Needs create_sns_topic, a non-empty rds_instances (an empty source list would subscribe every instance of the account) and, with kms_key_id, a key allowing RDS events (kms allow_rds_events)"
   default     = false
   nullable    = false
 
   validation {
-    condition     = !var.allow_rds_event_publish || var.create_sns_topic
-    error_message = "allow_rds_event_publish grants on this component's topic: set create_sns_topic."
+    condition     = !var.rds_event_subscription_enabled || (var.create_sns_topic && length(var.rds_instances) > 0)
+    error_message = "rds_event_subscription_enabled subscribes this component's topic to the rds_instances: set create_sns_topic and a non-empty rds_instances."
+  }
+}
+
+variable "rds_event_categories" {
+  type        = list(string)
+  description = "RDS event categories (source type db-instance) the rds_event_subscription_enabled subscription sends to the topic"
+  default     = ["availability", "failover", "failure", "low storage", "maintenance", "notification", "read replica", "recovery"]
+  nullable    = false
+
+  validation {
+    condition = length(var.rds_event_categories) > 0 && alltrue([for c in var.rds_event_categories : contains([
+      "availability", "backup", "configuration change", "creation", "deletion", "failover", "failure",
+      "low storage", "maintenance", "notification", "read replica", "recovery", "restoration",
+      "security", "security patching",
+    ], c)])
+    error_message = "rds_event_categories must be non-empty db-instance RDS event categories (e.g. availability, failover, failure, low storage, maintenance, notification, read replica, recovery)."
   }
 }
 
