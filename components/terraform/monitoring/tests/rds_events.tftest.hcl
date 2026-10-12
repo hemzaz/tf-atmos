@@ -125,6 +125,19 @@ run "rejects_a_subscription_without_topic" {
   expect_failures = [var.rds_event_subscription_enabled]
 }
 
+# nullable = false: a null rds_instances (an unapplied rds) takes the default
+# [], so a subscription on it is rejected rather than planned on null.
+run "rejects_a_subscription_on_a_null_rds_instances" {
+  command = plan
+
+  variables {
+    rds_event_subscription_enabled = true
+    rds_instances                  = null
+  }
+
+  expect_failures = [var.rds_event_subscription_enabled]
+}
+
 run "rejects_a_subscription_without_instances" {
   command = plan
 
