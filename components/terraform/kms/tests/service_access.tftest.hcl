@@ -317,6 +317,46 @@ run "rds_events_off_by_default" {
   }
 }
 
+run "billing_notifications_reach_this_accounts_topics" {
+  command = plan
+
+  variables {
+    allow_billing_notifications = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBudgetsSNSTopics"]).Principal.Service == "budgets.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBudgetsSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBudgetsSNSTopics"]).Condition == {
+        ArnLike = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:us-east-1:123456789012:*" }
+      }
+    )
+    error_message = "Budgets may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region."
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCostAnomalyDetectionSNSTopics"]).Principal.Service == "costalerts.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCostAnomalyDetectionSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCostAnomalyDetectionSNSTopics"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:us-east-1:123456789012:*" }
+      }
+    )
+    error_message = "Cost Anomaly Detection may use the key only for this account's SNS topics in this region, and only for this account (aws:SourceAccount)."
+  }
+}
+
+run "billing_notifications_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowBudgetsSNSTopics", "AllowCostAnomalyDetectionSNSTopics"], try(s.Sid, ""))]) == 0
+    error_message = "Without allow_billing_notifications the key grants Budgets and Cost Anomaly Detection nothing."
+  }
+}
+
 run "sns_delivers_to_queues_only_for_this_accounts_topics" {
   command = plan
 

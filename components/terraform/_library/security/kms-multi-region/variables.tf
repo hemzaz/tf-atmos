@@ -193,6 +193,12 @@ variable "allow_rds_events" {
   default     = false
 }
 
+variable "allow_billing_notifications" {
+  type        = bool
+  description = "Let AWS Budgets (budgets.amazonaws.com) and Cost Anomaly Detection (costalerts.amazonaws.com) publish to this account's SNS topics encrypted with the key (kms:GenerateDataKey*, kms:Decrypt; cost-optimization billing_notifications_sns_enabled), scoped by kms:EncryptionContext:aws:sns:topicArn, and Cost Anomaly Detection also by aws:SourceAccount"
+  default     = false
+}
+
 variable "allow_cloudtrail" {
   type        = bool
   description = "Let CloudTrail (cloudtrail.amazonaws.com) encrypt this account's trail log files with the key (kms:GenerateDataKey*, scoped by kms:EncryptionContext:aws:cloudtrail:arn), decrypt (needed when the trail bucket uses an S3 Bucket Key) and describe it, all limited to this account's trails in this region by aws:SourceArn"
