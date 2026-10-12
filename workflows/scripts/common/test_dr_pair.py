@@ -244,13 +244,29 @@ class BudgetTest(unittest.TestCase):
         del stacks["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]["vars"]["budget_additional_environment_tags"]
         self.assertEqual(len(dr_pair.budget_findings(stacks)), 1)
 
-    def test_disabled_and_abstract_budgets_and_a_primary_without_one_are_not_checked(self):
+    def test_disabled_and_abstract_budgets_are_not_checked(self):
         stacks = today()
         stacks["fnx-ue1-prod"]["components"]["terraform"]["cost-optimization/defaults"] = {
-            **instance("ue1", "us-east-1", {}), "metadata": {"type": "abstract"}}
-        stacks["fnx-ue1-prod"]["components"]["terraform"]["cost-optimization/main"]["metadata"]["enabled"] = False
-        del stacks["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]
+            **instance("ue1", "us-east-1", {}), "metadata": {"type": "abstract",
+                                                             "component": "cost-optimization"}}
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["cost-optimization/off"] = {
+            **instance("ue1", "us-east-1", {}), "metadata": {"enabled": False,
+                                                             "component": "cost-optimization"}}
         self.assertEqual(dr_pair.budget_findings(stacks), [])
+
+    def test_a_primary_without_a_budget_is_reported(self):
+        for change in ("delete", "disable", "abstract"):
+            stacks = today()
+            spec = stacks["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]
+            if change == "delete":
+                del stacks["fnx-ew1-prod"]["components"]["terraform"]["cost-optimization/main"]
+            elif change == "disable":
+                spec["metadata"]["enabled"] = False
+            else:
+                spec["metadata"]["type"] = "abstract"
+            self.assertEqual(dr_pair.budget_findings(stacks), [
+                "fnx-ew1-prod: a DR primary (of fnx-ec1-prod) with no enabled cost-optimization instance, "
+                "so no budget counts the standby"], change)
 
     def test_a_standby_of_an_unknown_stack_is_reported(self):
         stacks = today()

@@ -28,9 +28,9 @@ check-data-residency.py enforces the same on the stacks): a runbook that would
 move them elsewhere is refused here.
 
 A standby shares its primary's account and has no budget of its own (owner
-decision), so every enabled, non-abstract cost-optimization instance of a DR
-primary lists each standby's settings.prefix (its Environment tag) in
-budget_additional_environment_tags (--lint).
+decision), so a DR primary has an enabled, non-abstract cost-optimization
+instance and every such instance lists each standby's settings.prefix (its
+Environment tag) in budget_additional_environment_tags (--lint).
 
 The DR region (--dr-region) is the stack's backup/main replica_region when it
 copies cross-region (enable_cross_region_backup), else its standby's region
@@ -263,11 +263,18 @@ def budget_findings(stacks: dict) -> list:
         if primary_name not in stacks:
             findings.append(f"{', '.join(standbys)}: settings.dr.standby_of names {primary_name!r}, which is not a stack")
             continue
+        budgets = []
         for instance_name, spec in sorted(instances(stacks[primary_name]).items()):
             metadata = (spec or {}).get("metadata") or {}
             component = metadata.get("component") or instance_name
-            if component != "cost-optimization" or metadata.get("type") == "abstract" or not enabled(spec):
-                continue
+            if component == "cost-optimization" and metadata.get("type") != "abstract" and enabled(spec):
+                budgets.append((instance_name, spec))
+        if not budgets:
+            findings.append(
+                f"{primary_name}: a DR primary (of {', '.join(standbys)}) with no enabled cost-optimization instance, "
+                "so no budget counts the standby"
+            )
+        for instance_name, spec in budgets:
             tags = (spec.get("vars") or {}).get("budget_additional_environment_tags") or []
             for standby in standbys:
                 prefix = setting(stacks[standby], "prefix")
