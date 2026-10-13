@@ -17,7 +17,11 @@ deployable instance:
   - if a dns instance, turns on enable_query_logging for no zone: Route 53 public
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
-    each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions.
+    each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions;
+  - sets none of GLOBAL_SERVICE_EMAIL_VARS: vars a global AWS service hosted in us-east-1
+    would store as email subscribers (cost-optimization's budget and anomaly addresses,
+    AWS Budgets and Cost Explorer). Notify an in-region SNS topic holding the subscriptions
+    instead (cost-optimization billing_notifications_sns_enabled; owner decision 2026-10-12).
 And no deployable instance of a stack that is not GDPR-scoped lists a GDPR-scoped stack in
 dependencies.components or names an ARN in an eu- region in its vars: a US read replica
 (replicate_source_db), Global Datastore secondary (global_replication_group_id) or state read
@@ -79,6 +83,12 @@ EXEMPTIONS: tuple = (
     Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
     Exemption("apigateway/main", "vars.health_check_regions", "ap-southeast-1", _CHECKERS),
 )
+
+
+# component -> vars a global service (hosted in us-east-1) stores as email subscribers.
+GLOBAL_SERVICE_EMAIL_VARS: dict = {
+    "cost-optimization": ("budget_notification_emails", "cost_anomaly_notification_email"),
+}
 
 
 def is_deployable(instance: dict) -> bool:
@@ -187,6 +197,12 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
             f"{where} sets enable_alert_enrichment: its Lambda sends findings to Slack/PagerDuty, "
             "outside the EU"
         )
+    for var in GLOBAL_SERVICE_EMAIL_VARS.get(component, ()):
+        if (instance.get("vars") or {}).get(var):
+            errors.append(
+                f"{where} sets vars.{var}: a global service in us-east-1 would store those email "
+                "addresses; notify an in-region SNS topic instead"
+            )
     for dep in (instance.get("dependencies") or {}).get("components") or []:
         if not isinstance(dep, dict):
             errors.append(f"{where} dependencies.components entry {dep!r} is not a {{component, stack}} map")

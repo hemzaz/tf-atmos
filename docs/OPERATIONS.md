@@ -566,6 +566,35 @@ outage, and a recipient subscribed to both topics gets each state change twice: 
 redundancy (`fnx-ec1-prod` can get its own recipients once the real addresses land). As in the US, a us-east-1 outage silences both alarms, not the failover;
 `fnx-ec1-prod`'s API alarms on `ec1-main-alarms` (eu-central-1) are the in-region signal.
 
+AWS Budgets and Cost Explorer are global services hosted in us-east-1, so they keep no staff email
+address for an EU stack (owner decision 2026-10-12, the relay's principle): `fnx-ew1-prod`'s
+`cost-optimization/main` (`billing_notifications_sns_enabled`) has its budget and its anomaly
+subscription notify its eu-west-1 `ew1-main-cost-alerts` topic, which holds the email
+subscriptions (`cost_alert_emails`), so those services store only the topic ARN. Its key allows
+them (`kms/main` `allow_billing_notifications`). `check-data-residency.py` fails a GDPR-scoped
+`cost-optimization` instance that sets `budget_notification_emails` or
+`cost_anomaly_notification_email`.
+
+**EU first-apply checks.** None of these can be verified offline; run them once after the first
+apply of `fnx-ew1-prod` and `fnx-ec1-prod`:
+
+1. RDS events reach the KMS-encrypted alarm topic. The key's `AllowRdsEventsSNSTopics` statement
+   keeps `aws:SourceAccount`, and whether `events.rds.amazonaws.com` sends it to KMS is
+   unconfirmed. Reboot a DB instance (`aws rds reboot-db-instance --db-instance-identifier
+   ew1-prod-main-db --region eu-west-1`) and confirm the notification reaches `ew1-main-alarms`'s
+   subscribers. If it does not, drop `aws:SourceAccount` from that statement and keep the
+   `kms:EncryptionContext:aws:sns:topicArn` scope.
+2. The us-east-1 health check alarm reaches both EU topics through the relay:
+   `aws cloudwatch set-alarm-state --region us-east-1 --alarm-name <ew1 health check alarm>
+   --state-value ALARM --state-reason "relay test"`, then confirm delivery on `ew1-main-alarms`
+   and `ec1-main-alarms`.
+3. The billing SNS path delivers: `aws sns publish --region eu-west-1 --topic-arn <ew1-main-cost-alerts
+   ARN> --message test` for the topic, and a test budget threshold (temporarily lower
+   `monthly_budget_limit`) for Budgets' own publish through the key. Cost Anomaly Detection can't
+   be triggered on demand: if CloudTrail shows a KMS `AccessDenied` for `costalerts.amazonaws.com`,
+   or no anomaly alert ever arrives, drop `aws:SourceAccount` from `AllowCostAnomalyDetectionSNSTopics`
+   and keep the `kms:EncryptionContext:aws:sns:topicArn` scope, as in check 1.
+
 The failover, reconciliation and failback steps below are written with the US pair's names; the
 EU pair runs the same steps with the names in [EU failover](#eu-failover). `dr-failover` and
 `dr-failback` print each pair's own steps: `workflows/scripts/common/dr-pair.py` derives the

@@ -334,3 +334,125 @@ run "rejects_a_bad_additional_environment_tag" {
 
   expect_failures = [var.budget_additional_environment_tags]
 }
+
+run "email_path_is_unchanged_by_default" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for n in aws_budgets_budget.monthly.notification :
+      toset(n.subscriber_email_addresses) == toset(["budget@example.com"]) && length(coalesce(n.subscriber_sns_topic_arns, [])) == 0
+    ])
+    error_message = "By default both budget notifications email budget_notification_emails and name no topic."
+  }
+
+  assert {
+    condition     = aws_ce_anomaly_subscription.main.frequency == "DAILY" && one(aws_ce_anomaly_subscription.main.subscriber).type == "EMAIL" && one(aws_ce_anomaly_subscription.main.subscriber).address == "anomaly@example.com"
+    error_message = "By default the anomaly subscription emails cost_anomaly_notification_email daily."
+  }
+
+  assert {
+    condition     = length(aws_sns_topic_policy.cost_alerts) == 0
+    error_message = "By default the cost-alerts topic keeps SNS's default policy."
+  }
+}
+
+run "sns_path_keeps_email_addresses_off_the_global_services" {
+  command = plan
+
+  variables {
+    region                            = "eu-west-1"
+    billing_notifications_sns_enabled = true
+    budget_notification_emails        = []
+    cost_anomaly_notification_email   = null
+  }
+
+  assert {
+    condition = alltrue([
+      for n in aws_budgets_budget.monthly.notification :
+      length(coalesce(n.subscriber_email_addresses, [])) == 0 && toset(n.subscriber_sns_topic_arns) == toset(["arn:aws:sns:eu-west-1:123456789012:test-main-cost-alerts"])
+    ]) && length(aws_budgets_budget.monthly.notification) == 2
+    error_message = "Both budget notifications name only the in-region cost-alerts topic, no email address."
+  }
+
+  assert {
+    condition     = aws_ce_anomaly_subscription.main.frequency == "IMMEDIATE" && one(aws_ce_anomaly_subscription.main.subscriber).type == "SNS" && one(aws_ce_anomaly_subscription.main.subscriber).address == "arn:aws:sns:eu-west-1:123456789012:test-main-cost-alerts"
+    error_message = "The anomaly subscription notifies the cost-alerts topic, IMMEDIATE (AWS requires it for SNS)."
+  }
+
+  assert {
+    condition     = [for s in aws_sns_topic_subscription.cost_alerts_email : s.endpoint] == ["alerts@example.com"]
+    error_message = "The email addresses are subscriptions on the eu-west-1 topic."
+  }
+
+  assert {
+    condition = jsondecode(aws_sns_topic_policy.cost_alerts[0].policy).Statement == [
+      {
+        Sid       = "AllowCloudWatchAlarmsToPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = "arn:aws:sns:eu-west-1:123456789012:test-main-cost-alerts"
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = "123456789012" }
+          ArnLike      = { "aws:SourceArn" = "arn:aws:cloudwatch:eu-west-1:123456789012:alarm:*" }
+        }
+      },
+      {
+        Sid       = "AllowBudgetsToPublish"
+        Effect    = "Allow"
+        Principal = { Service = "budgets.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = "arn:aws:sns:eu-west-1:123456789012:test-main-cost-alerts"
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = "123456789012" }
+          ArnLike      = { "aws:SourceArn" = "arn:aws:budgets::123456789012:*" }
+        }
+      },
+      {
+        Sid       = "AllowCostAnomalyDetectionToPublish"
+        Effect    = "Allow"
+        Principal = { Service = "costalerts.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = "arn:aws:sns:eu-west-1:123456789012:test-main-cost-alerts"
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = "123456789012" }
+        }
+      },
+    ]
+    error_message = "The topic policy keeps the alarms' access and lets Budgets and Cost Anomaly Detection publish for this account only."
+  }
+}
+
+run "sns_path_rejects_direct_email_subscribers" {
+  command = plan
+
+  variables {
+    billing_notifications_sns_enabled = true
+  }
+
+  expect_failures = [var.billing_notifications_sns_enabled]
+}
+
+run "sns_path_needs_topic_subscribers" {
+  command = plan
+
+  variables {
+    billing_notifications_sns_enabled = true
+    budget_notification_emails        = []
+    cost_anomaly_notification_email   = null
+    cost_alert_emails                 = []
+  }
+
+  expect_failures = [var.billing_notifications_sns_enabled]
+}
+
+run "email_path_needs_the_anomaly_email" {
+  command = plan
+
+  variables {
+    cost_anomaly_notification_email = null
+  }
+
+  expect_failures = [var.billing_notifications_sns_enabled]
+}

@@ -446,6 +446,60 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # AWS Budgets and Cost Anomaly Detection notifications to an SNS topic
+  # encrypted with this key (cost-optimization billing_notifications_sns_enabled):
+  # this account's topics in this document's region, by encryption context.
+  # Cost Anomaly Detection documents aws:SourceAccount for its key statement
+  # (cost-management ad-SNS); the Budgets guide (budgets-sns-policy) documents
+  # none, so its statement has only the topic scope.
+  dynamic "statement" {
+    for_each = var.allow_billing_notifications ? [1] : []
+
+    content {
+      sid       = "AllowBudgetsSNSTopics"
+      actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["budgets.amazonaws.com"]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = ["arn:${data.aws_partition.current.partition}:sns:${each.key}:${data.aws_caller_identity.current.account_id}:*"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.allow_billing_notifications ? [1] : []
+
+    content {
+      sid       = "AllowCostAnomalyDetectionSNSTopics"
+      actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["costalerts.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = ["arn:${data.aws_partition.current.partition}:sns:${each.key}:${data.aws_caller_identity.current.account_id}:*"]
+      }
+    }
+  }
+
   # CloudTrail trails of this account (the cloudtrail component) encrypting
   # their log files with this key. GenerateDataKey* is bound to the trail by
   # the encryption context aws:cloudtrail:arn (region wildcarded, as trail

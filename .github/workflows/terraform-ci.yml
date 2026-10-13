@@ -207,16 +207,17 @@ jobs:
     # with nothing having objected on the way. A pair that objects earlier is
     # a real finding; scripts/plan-sweep.sh exits 1 on it.
     #
-    # Deliberately not in the lint job: this plans ~90 pairs and is the slowest
+    # Deliberately not in the lint job: this plans 330+ pairs and is the slowest
     # gate in the file, and a lint failure should not hide a sweep failure or
     # the other way round.
     name: Plan sweep
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
-    # ~9 minutes on a clean run. A hung plan otherwise holds a runner for the
-    # 6-hour default before anyone hears about it.
-    timeout-minutes: 30
+    # A full sweep (a change to a component every stack uses, e.g. kms) plans
+    # 330+ pairs plus the template stacks: ~30 minutes. A hung plan otherwise
+    # holds a runner for the 6-hour default before anyone hears about it.
+    timeout-minutes: 60
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:

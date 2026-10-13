@@ -97,17 +97,24 @@ resource "aws_ce_anomaly_monitor" "main" {
   tags = { Name = "${local.name}-cost-monitor" }
 }
 
+# With billing_notifications_sns_enabled the budget and the anomaly
+# subscription notify the cost-alerts topic (sns.tf), whose email
+# subscriptions deliver them, instead of email addresses: Budgets and Cost
+# Explorer are global services hosted in us-east-1, so they then store only the
+# topic's ARN (owner decision B5, the EU stack). AWS takes an SNS subscriber
+# only with IMMEDIATE frequency. Both wait for the topic policy, which AWS
+# checks when the subscriber is set.
 resource "aws_ce_anomaly_subscription" "main" {
   name      = "${local.name}-cost-anomaly-subscription"
-  frequency = "DAILY"
+  frequency = var.billing_notifications_sns_enabled ? "IMMEDIATE" : "DAILY"
 
   monitor_arn_list = [
     aws_ce_anomaly_monitor.main.arn
   ]
 
   subscriber {
-    type    = "EMAIL"
-    address = var.cost_anomaly_notification_email
+    type    = var.billing_notifications_sns_enabled ? "SNS" : "EMAIL"
+    address = var.billing_notifications_sns_enabled ? local.cost_alerts_topic_arn : var.cost_anomaly_notification_email
   }
 
   threshold_expression {
@@ -119,6 +126,8 @@ resource "aws_ce_anomaly_subscription" "main" {
   }
 
   tags = { Name = "${local.name}-cost-anomaly-subscription" }
+
+  depends_on = [aws_sns_topic_policy.cost_alerts]
 }
 
 # ========================================
@@ -153,7 +162,8 @@ resource "aws_budgets_budget" "monthly" {
     threshold                  = 80
     threshold_type             = "PERCENTAGE"
     notification_type          = "ACTUAL"
-    subscriber_email_addresses = var.budget_notification_emails
+    subscriber_email_addresses = var.billing_notifications_sns_enabled ? null : var.budget_notification_emails
+    subscriber_sns_topic_arns  = var.billing_notifications_sns_enabled ? [local.cost_alerts_topic_arn] : null
   }
 
   notification {
@@ -161,8 +171,11 @@ resource "aws_budgets_budget" "monthly" {
     threshold                  = 100
     threshold_type             = "PERCENTAGE"
     notification_type          = "FORECASTED"
-    subscriber_email_addresses = var.budget_notification_emails
+    subscriber_email_addresses = var.billing_notifications_sns_enabled ? null : var.budget_notification_emails
+    subscriber_sns_topic_arns  = var.billing_notifications_sns_enabled ? [local.cost_alerts_topic_arn] : null
   }
+
+  depends_on = [aws_sns_topic_policy.cost_alerts]
 }
 
 # ========================================

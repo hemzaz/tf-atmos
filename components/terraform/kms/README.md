@@ -31,7 +31,10 @@ use through their own IAM policies.
   `allow_log_delivery_s3` (data keys for vended log delivery into a bucket on this key), which a
   stack whose `cloudfront` instance logs to an s3 bucket sets (the `web-application` template's
   requirement), and `allow_rds_events` (RDS event subscriptions publishing to topics on the key),
-  which the prod keys set for `monitoring`'s RDS event subscriptions (`rds_event_subscription_enabled`). Prefer them over `key_service_users`, which has no conditions.
+  which the prod keys set for `monitoring`'s RDS event subscriptions (`rds_event_subscription_enabled`),
+  and `allow_billing_notifications` (AWS Budgets and Cost Anomaly Detection publishing to topics on
+  the key), which `fnx-ew1-prod`'s key sets for `cost-optimization`'s `billing_notifications_sns_enabled`.
+  Prefer them over `key_service_users`, which has no conditions.
 - The CI apply role gets key use via `iam`'s `ci_apply_kms_key_aliases` (by alias, because
   `iam/ci` applies in the layer before `kms/main`).
 - Replicas get their own region-scoped policy; the `key_policy` output is the primary's.
