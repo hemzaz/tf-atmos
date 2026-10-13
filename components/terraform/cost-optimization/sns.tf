@@ -29,11 +29,10 @@ resource "aws_sns_topic_subscription" "cost_alerts_email" {
 # The topic's policy, set only with billing_notifications_sns_enabled
 # (otherwise the topic keeps SNS's default policy). It keeps the *_errors
 # alarms' access (this account's CloudWatch alarms in this region, as
-# monitoring's topic) and lets the budget and the anomaly subscription publish,
-# with the conditions AWS documents: Budgets aws:SourceAccount and an
-# aws:SourceArn of this account's budgets (budgets-sns-policy), Cost Anomaly
-# Detection aws:SourceAccount (ad-SNS). The Lambda roles publish through their
-# own IAM grants (iam.tf), which suffice within the account.
+# monitoring's topic) and lets the budget and the anomaly subscription publish.
+# Conditions as AWS documents them (budgets-sns-policy, ad-SNS). The Lambda
+# roles publish through their own IAM grants (iam.tf), which suffice within the
+# account.
 resource "aws_sns_topic_policy" "cost_alerts" {
   count = var.billing_notifications_sns_enabled ? 1 : 0
 
