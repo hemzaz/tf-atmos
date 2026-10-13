@@ -97,13 +97,8 @@ resource "aws_ce_anomaly_monitor" "main" {
   tags = { Name = "${local.name}-cost-monitor" }
 }
 
-# With billing_notifications_sns_enabled the budget and the anomaly
-# subscription notify the cost-alerts topic (sns.tf), whose email
-# subscriptions deliver them, instead of email addresses: Budgets and Cost
-# Explorer are global services hosted in us-east-1, so they then store only the
-# topic's ARN (owner decision B5, the EU stack). AWS takes an SNS subscriber
-# only with IMMEDIATE frequency. Both wait for the topic policy, which AWS
-# checks when the subscriber is set.
+# AWS takes an SNS subscriber only with IMMEDIATE frequency. Both this and the
+# budget depend on the topic policy: AWS checks it when the subscriber is set.
 resource "aws_ce_anomaly_subscription" "main" {
   name      = "${local.name}-cost-anomaly-subscription"
   frequency = var.billing_notifications_sns_enabled ? "IMMEDIATE" : "DAILY"

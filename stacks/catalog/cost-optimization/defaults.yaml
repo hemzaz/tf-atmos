@@ -6,7 +6,8 @@
 # resource cleanup Lambdas, cost anomaly detection, a monthly budget).
 # Instances inherit this base and set `monthly_budget_limit`,
 # `budget_notification_emails`, `cost_anomaly_notification_email` and
-# `cost_alert_emails` from settings.environment.monitoring.
+# `cost_alert_emails` from settings.environment.monitoring (GDPR stacks set
+# billing_notifications_sns_enabled instead of the two email inputs).
 
 components:
   terraform:

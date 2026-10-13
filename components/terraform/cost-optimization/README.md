@@ -12,13 +12,9 @@ Cloud Posse equivalent; the Lambdas are packaged like Cloud Posse `aws-lambda` (
 - Instance: `cost-optimization/main` in one stack per account (dev, staging, `fnx-ue1-prod`,
   `fnx-ew1-prod`); reads `kms/main .key_arn` (log groups and SNS topic). Deploys in the
   `monitoring` layer.
-- `billing_notifications_sns_enabled` (`fnx-ew1-prod`, a GDPR stack): the budget and the anomaly
-  subscription notify the in-region cost-alerts topic, whose `cost_alert_emails` subscriptions
-  deliver them, instead of `budget_notification_emails` and `cost_anomaly_notification_email`
-  (which must then be unset). The global Budgets and Cost Explorer services (us-east-1) store only
-  the topic ARN. The topic gets a policy for `budgets.amazonaws.com`, `costalerts.amazonaws.com`
-  and this region's CloudWatch alarms; its key needs `kms` `allow_billing_notifications`.
-  `check-data-residency.py` fails a GDPR stack that sets the two email inputs.
+- `billing_notifications_sns_enabled` (`fnx-ew1-prod`): the cost-alerts topic gets a policy for
+  `budgets.amazonaws.com`, `costalerts.amazonaws.com` and this region's CloudWatch alarms; its key
+  needs `kms` `allow_billing_notifications`.
 
 ## Notes
 

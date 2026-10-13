@@ -127,9 +127,7 @@ components:
     # account metadata, not personal data, but staff email addresses are: the
     # budget and the anomaly subscription notify the eu-west-1 cost-alerts
     # topic, which holds the email subscriptions (cost_alert_emails), so the
-    # global Budgets and Cost Explorer services (us-east-1) store only its ARN
-    # (owner decision 2026-10-12; check-data-residency.py fails a GDPR stack
-    # that sets budget_notification_emails or cost_anomaly_notification_email).
+    # global Budgets and Cost Explorer services (us-east-1) store only its ARN.
     cost-optimization/main:
       metadata:
         component: cost-optimization
