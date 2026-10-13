@@ -590,7 +590,10 @@ apply of `fnx-ew1-prod` and `fnx-ec1-prod`:
    and `ec1-main-alarms`.
 3. The billing SNS path delivers: `aws sns publish --region eu-west-1 --topic-arn <ew1-main-cost-alerts
    ARN> --message test` for the topic, and a test budget threshold (temporarily lower
-   `monthly_budget_limit`) for Budgets' own publish through the key.
+   `monthly_budget_limit`) for Budgets' own publish through the key. Cost Anomaly Detection can't
+   be triggered on demand: if CloudTrail shows a KMS `AccessDenied` for `costalerts.amazonaws.com`,
+   or no anomaly alert ever arrives, drop `aws:SourceAccount` from `AllowCostAnomalyDetectionSNSTopics`
+   and keep the `kms:EncryptionContext:aws:sns:topicArn` scope, as in check 1.
 
 The failover, reconciliation and failback steps below are written with the US pair's names; the
 EU pair runs the same steps with the names in [EU failover](#eu-failover). `dr-failover` and
