@@ -42,6 +42,7 @@ components:
           - "controllerManager"
           - "scheduler"
         cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
         cluster_log_retention_period: 90
         node_groups:
           # General purpose workers

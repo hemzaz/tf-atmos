@@ -20,9 +20,6 @@ components:
       metadata:
         component: github-runners
         type: abstract
-      dependencies:
-        components:
-          - component: kms/main
       vars:
         enabled: true
         github_scope: hemzaz/tf-atmos
@@ -31,7 +28,12 @@ components:
         # Bump both together, from the release notes' linux-x64 SHA.
         runner_version: "2.337.0"
         runner_sha256: "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
-        kms_key_arn: !terraform.state kms/main .key_arn
+        # kms_key_arn is NOT set here (as in catalog/vpc/defaults): Atmos
+        # resolves a `!terraform.state` inherited from an abstract component
+        # even when the instance overrides the var, and the DR standbys
+        # (fnx-ue2-prod, fnx-ec1-prod) have no kms/main. Each instance sets it
+        # (its stack's kms/main, or the primary's replica key in a DR stack)
+        # and lists kms/main in dependencies.components.
         # The owner's GitHub App (settings.github_app, stacks/orgs/fnx/_defaults.yaml).
         github_app_id: "{{ .settings.github_app.app_id }}"
         github_app_installation_id: "{{ .settings.github_app.installation_id }}"

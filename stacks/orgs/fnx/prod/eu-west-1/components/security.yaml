@@ -144,6 +144,11 @@ components:
         component: awsconfig
         inherits:
           - awsconfig/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main
 
     guardduty/main:
       metadata:
@@ -197,9 +202,13 @@ components:
         inherits:
           - backup/prod
       vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
         enable_cross_region_backup: true
         replica_region: eu-central-1
         replica_kms_key_arn: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'
+      dependencies:
+        components:
+          - component: kms/main
 
     # The EU apex's certificate, as fnx-ue1-prod's acm/main: validated in
     # network/main's zone (networking.yaml), which holds every name below

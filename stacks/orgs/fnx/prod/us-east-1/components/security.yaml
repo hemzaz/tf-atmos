@@ -293,6 +293,11 @@ components:
         component: awsconfig
         inherits:
           - awsconfig/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main
 
     # ==========================================================================
     # GuardDuty - owns the detector (security-monitoring only consumes it).
@@ -363,6 +368,10 @@ components:
         inherits:
           - backup/prod
       vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
         enable_cross_region_backup: true
         replica_region: us-east-2
         replica_kms_key_arn: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'
+      dependencies:
+        components:
+          - component: kms/main

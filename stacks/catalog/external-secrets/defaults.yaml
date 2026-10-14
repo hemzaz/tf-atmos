@@ -16,12 +16,7 @@ components:
       settings:
         github:
           runner: in-vpc
-      # kms_key_arn below reads kms/main, so the key must be applied first.
-      # workflows/scripts/common/check-dependencies.py enforces that every
-      # component read via !terraform.state is declared here.
       dependencies:
-        components:
-          - component: kms/main
         # The helm provider's exec plugin runs `aws eks get-token`; the atmos
         # image has no aws CLI (check-cluster-api-ci.py checks the tools).
         tools:
@@ -43,10 +38,13 @@ components:
         # eks-addons' Istio gateway certificate ExternalSecret.
         certificate_allowed_namespaces: ["istio-ingress"]
 
-        # The same per-stack customer-managed key secretsmanager/defaults uses
-        # as default_kms_key_id: every environment runs a kms/main instance
-        # (catalog/kms/defaults), so this resolves in all stacks.
-        kms_key_arn: !terraform.state kms/main .key_arn
+        # kms_key_arn is NOT set here (as in catalog/vpc/defaults): Atmos
+        # resolves a `!terraform.state` inherited from an abstract component
+        # even when the instance overrides the var, and the DR standbys
+        # (fnx-ue2-prod, fnx-ec1-prod) have no kms/main. Each instance sets it
+        # (its stack's `!terraform.state kms/main .key_arn`, the key
+        # secretsmanager uses, or the primary's replica key in a DR stack) and
+        # lists kms/main in dependencies.components.
 
         tags:
           Component: "external-secrets"

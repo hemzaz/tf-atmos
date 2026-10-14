@@ -222,6 +222,7 @@ components:
         name: microservices-runners
         vpc_id: !terraform.state microservices/vpc .vpc_id
         subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
+        kms_key_arn: !terraform.state kms/main .key_arn
         # Alarms to microservices/monitoring's topic, <Environment>-monitoring-alarms,
         # named rather than read: monitoring deploys in the last layer. monitoring
         # names it from tags.Environment, this ARN from settings.prefix: it relies
@@ -263,6 +264,7 @@ components:
 
         # Secrets encryption with the stack's customer managed key.
         cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
 
         # Cluster endpoint access. A public endpoint must name its CIDRs in
         # public_access_cidrs; 0.0.0.0/0 is rejected.

@@ -12,17 +12,24 @@ components:
           namespace: "k8s"
       vars:
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version | default \"1.36\" }}"
-        subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
         # One cluster per instance, as in cloudposse-terraform-components/aws-eks-cluster.
         # Each instance sets `name` and its `node_groups` map. The cluster is
         # "<Environment>-<name>", so `name` must not repeat the Environment
         # (`main`, not `ue1-main`).
 
-        # Every managed node group's EBS volumes; kms/main's allow_autoscaling_ebs
-        # grants the AWS Auto Scaling service-linked role what it needs to launch
-        # them. Every instance also lists kms/main in dependencies.components.
-        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
+        # subnet_ids and node_group_ebs_kms_key_id are NOT set here (as in
+        # catalog/vpc/defaults): Atmos resolves a `!terraform.state` inherited
+        # from an abstract component even when the instance overrides the var,
+        # so a read here fails every stack without its target. The DR standbys
+        # (fnx-ue2-prod, fnx-ec1-prod) have no kms/main and read the primary's
+        # replica key; the msplatform fixture has no vpc/main. Each instance
+        # sets `subnet_ids` (its vpc instance's .private_subnet_ids) and
+        # `node_group_ebs_kms_key_id` (every managed node group's EBS volumes:
+        # its stack's `!terraform.state kms/main .key_arn`, whose
+        # allow_autoscaling_ebs grants the AWS Auto Scaling service-linked role
+        # what it needs to launch them), and lists both targets in
+        # dependencies.components.
 
         # Kubernetes API access: API authentication mode, no hidden
         # cluster-creator admin (the component defaults, Cloud Posse's
@@ -56,6 +63,4 @@ components:
           Component: "EKS"
       dependencies:
         components:
-          - component: vpc/main
-          - component: kms/main
           - component: iam/ci
