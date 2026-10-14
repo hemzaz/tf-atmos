@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# vpc/services in the nonprod stacks (fnx-ue1-dev, fnx-ue1-staging)
+# =============================================================================
+# The backend services VPC (eks/data), peered with vpc/main by
+# network/vpc-peering. Each stack keeps its own AZs, subnets and flow-log
+# switch (orgs/fnx/<stage>/<region>/components/networking.yaml).
+# =============================================================================
+
+import:
+  - catalog/vpc/defaults
+
+components:
+  terraform:
+    vpc/services:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
+        # The private NACL admits vpc/main (the bastion), peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.main }}"
+        # A single NAT gateway (cost optimization).
+        nat_gateway_enabled: true
+        nat_gateway_strategy: "single"
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/data, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-data": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-data": "shared"
+      dependencies:
+        components:
+          - component: kms/main
