@@ -83,6 +83,15 @@ workflows:
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_old_stack_names.py
               python3 scripts/check-old-stack-names.py
+          # A !terraform.state/!terraform.output read in a catalog instance file
+          # (stacks/catalog/<c>/<i>[-flavor].yaml, Wave C1) that a stack file
+          # replaces: set the value in the catalog file, never over the read.
+          - name: catalog-read-overrides
+            type: shell
+            command: |
+              set -eu
+              python3 -m unittest workflows/scripts/common/test_check_catalog_read_overrides.py
+              python3 scripts/check-catalog-read-overrides.py
           # atmos.yaml validates stacks against the pinned
           # schemas/atmos/atmos-manifest.json, not a URL (cached in $TMPDIR and
           # corrupted there by concurrent runs). The pin must be the embedded
