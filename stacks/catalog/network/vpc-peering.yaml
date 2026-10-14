@@ -1,8 +1,8 @@
 ---
 # =============================================================================
-# network/vpc-peering in the nonprod stacks (fnx-ue1-dev, fnx-ue1-staging)
+# network/vpc-peering in every stack with vpc/main and vpc/services
 # =============================================================================
-# VPC peering between vpc/main and vpc/services, as in prod. Also the
+# VPC peering between vpc/main and vpc/services. Also the
 # operator's path from ec2/bastion (vpc/main) to eks/data's private endpoint
 # (docs/OPERATIONS.md, "In-cluster components").
 # =============================================================================
@@ -20,8 +20,10 @@ components:
 
         auto_accept: true
 
-        # Private route tables only, as in prod: the application tier and the
-        # bastion (a private subnet) are the callers.
+        # Private route tables only: the application tier and the bastion (a
+        # private subnet) are the callers, and adding the peer CIDR to the
+        # public tables would route peer traffic through internet-facing
+        # subnets for no gain.
         requester_routes:
           - destination_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
             route_table_ids: !terraform.state vpc/main .private_route_table_ids

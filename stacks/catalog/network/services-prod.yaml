@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# network/services in the prod primary stacks
+# =============================================================================
+# The services.<domain> zone (delegated from network/main) and its data
+# subzone, protected from destroy, with query logging on the public services
+# zone and prod's 90-day query-log retention.
+# =============================================================================
+
+import:
+  - catalog/network/defaults
+
+components:
+  terraform:
+    network/services:
+      metadata:
+        component: dns
+        inherits:
+          - dns
+      vars:
+        root_domain: "{{ .settings.environment.domain_name }}"
+        create_root_zone: false
+        query_log_retention_in_days: 90
+        zones:
+          services:
+            name: "services.{{ .settings.environment.domain_name }}"
+            comment: "Production services zone"
+            force_destroy: false
+            enable_query_logging: true
+          data:
+            name: "data.services.{{ .settings.environment.domain_name }}"
+            # NS record in the services zone (record delegation_data)
+            parent_zone: services
+            comment: "Data services DNS"
+            force_destroy: false
+        records:
+          api_services:
+            zone_name: "services"
+            name: "api.services.{{ .settings.environment.domain_name }}"
+            type: "CNAME"
+            ttl: 300
+            records: ["api-internal.services.{{ .settings.environment.domain_name }}"]
+          # data_db (CNAME to the disabled infrastructure/data RDS) removed in the dns remap

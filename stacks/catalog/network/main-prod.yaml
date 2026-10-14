@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# network/main in the prod primary stacks without a data plane
+# =============================================================================
+# The stack's public zone, and the private internal zone on vpc/main, both
+# protected from destroy. No records: their targets (network/services, rds/main)
+# are data-plane instances; a stack with them uses main-prod-data-plane.yaml.
+# Each stack keeps its zone comments and its public zone's query-logging switch.
+# =============================================================================
+
+import:
+  - catalog/network/defaults
+
+components:
+  terraform:
+    network/main:
+      metadata:
+        component: dns
+        inherits:
+          - dns
+      vars:
+        root_domain: "{{ .settings.environment.domain_name }}"
+        create_root_zone: false
+        multi_account_dns_delegation: false
+        zones:
+          main:
+            name: "{{ .settings.environment.domain_name }}"
+            force_destroy: false # Protected in production
+          internal:
+            name: "internal.{{ .settings.environment.domain_name }}"
+            force_destroy: false
+            # Private zone: Route53 query logging only supports public zones (use Resolver query logging)
+            enable_query_logging: false
+            vpc_associations:
+              - !terraform.state vpc/main .vpc_id
+        records: {}
+      dependencies:
+        components:
+          - component: vpc/main

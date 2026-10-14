@@ -243,8 +243,10 @@ zone, so its domain must resolve, or validation times out after 45 minutes. Prod
 `fnx.example.com` is delegated at the registrar to prod's `zone_name_servers.main`
 (`atmos terraform output network/main -s fnx-ue1-prod`). Dev's and staging's parent is
 that Terraform-managed zone: add an NS record for `dev.`/`staging.fnx.example.com` to prod's
-`network/main` `records` (`stacks/orgs/fnx/prod/us-east-1/components/networking.yaml`)
-with the child stack's `zone_name_servers.main`, and deploy prod's `network/main`. EU prod
+`network/main` `records` with the child stack's `zone_name_servers.main`, and deploy prod's
+`network/main`. Its existing records are in `stacks/catalog/network/main-prod-data-plane.yaml`;
+put this one under `network/main` `vars.records` in
+`stacks/orgs/fnx/prod/us-east-1/components/networking.yaml` (records merge per key). EU prod
 (`fnx-ew1-prod`) has its own apex, never under the US domain: delegate it at its registrar to
 `fnx-ew1-prod`'s `network/main` `zone_name_servers.main`.
 `services.<d>` delegation is wired by the stacks themselves.

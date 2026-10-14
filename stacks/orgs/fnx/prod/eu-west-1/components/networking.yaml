@@ -17,10 +17,17 @@
 #     and the logs hold client IPs. check-data-residency.py fails a GDPR-scoped
 #     dns zone with enable_query_logging. The dns component has no Resolver
 #     (in-VPC) query logging yet.
+#
+# The instances' wiring is catalog/vpc/main-prod (shared with fnx-ue1-prod;
+# its flow logs use this stack's eu-west-1 kms/main) and
+# catalog/network/main-prod (no records: db.internal.<domain> comes with
+# rds/main). This file keeps the CIDR, AZs, subnets and the EU DNS values.
 # =============================================================================
 
 import:
   - orgs/fnx/prod/eu-west-1/components/globals
+  - catalog/vpc/main-prod
+  - catalog/network/main-prod
 
 settings:
   network:
@@ -30,12 +37,7 @@ settings:
 components:
   terraform:
     vpc/main:
-      metadata:
-        component: vpc
-        inherits:
-          - vpc/defaults
       vars:
-        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
         # AZ IDs, not names: see components/terraform/vpc/README.md.
         availability_zone_ids:
           - euw1-az1
@@ -53,56 +55,13 @@ components:
           - "10.30.201.0/24"
           - "10.30.202.0/24"
           - "10.30.203.0/24"
-        nat_gateway_enabled: true
-        nat_gateway_strategy: "one_per_az"
-        default_sg_ingress_self_only: true
-        default_sg_egress_self_only: false
-        default_sg_allow_all_outbound: true
-        # Load balancer subnet discovery for eks/main's AWS Load Balancer
-        # Controller, as in fnx-ue1-prod (cluster "<Environment>-main": ew1-main).
-        public_subnets_additional_tags:
-          "kubernetes.io/role/elb": "1"
-          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
-        private_subnets_additional_tags:
-          "kubernetes.io/role/internal-elb": "1"
-          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
-        vpc_flow_logs_enabled: true
-        # The stack's key (eu-west-1), as in fnx-ue1-prod: kms/main's
-        # allow_cloudwatch_logs covers the flow-log group.
-        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
-        tags:
-          NetworkTier: "primary"
-          HighAvailability: "true"
-          CriticalityLevel: "high"
-      dependencies:
-        components:
-          - component: kms/main
 
     network/main:
-      metadata:
-        component: dns
-        inherits:
-          - dns
       vars:
-        root_domain: "{{ .settings.environment.domain_name }}"
-        create_root_zone: false
-        multi_account_dns_delegation: false
         zones:
           main:
-            name: "{{ .settings.environment.domain_name }}"
             comment: "EU production main zone"
-            force_destroy: false # Protected in production
             # Off for every EU zone: Route 53 writes query logs only to us-east-1.
             enable_query_logging: false
           internal:
-            name: "internal.{{ .settings.environment.domain_name }}"
             comment: "EU production internal DNS"
-            force_destroy: false
-            enable_query_logging: false
-            vpc_associations:
-              - !terraform.state vpc/main .vpc_id
-        # db.internal.<domain> (rds/main) comes with rds/main.
-        records: {}
-      dependencies:
-        components:
-          - component: vpc/main
