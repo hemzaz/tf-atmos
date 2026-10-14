@@ -3,8 +3,8 @@
 # network/services in the prod primary stacks
 # =============================================================================
 # The services.<domain> zone (delegated from network/main) and its data
-# subzone, protected from destroy, with query logging on the public services
-# zone and prod's 90-day query-log retention.
+# subzone, protected from destroy. Each stack keeps its zone comments, its
+# query-logging switch and its query-log retention.
 # =============================================================================
 
 import:
@@ -20,18 +20,14 @@ components:
       vars:
         root_domain: "{{ .settings.environment.domain_name }}"
         create_root_zone: false
-        query_log_retention_in_days: 90
         zones:
           services:
             name: "services.{{ .settings.environment.domain_name }}"
-            comment: "Production services zone"
             force_destroy: false
-            enable_query_logging: true
           data:
             name: "data.services.{{ .settings.environment.domain_name }}"
             # NS record in the services zone (record delegation_data)
             parent_zone: services
-            comment: "Data services DNS"
             force_destroy: false
         records:
           api_services:

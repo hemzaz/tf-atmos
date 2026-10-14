@@ -6,9 +6,10 @@
 # Multi-AZ deployment, redundant NAT Gateways, comprehensive flow logging
 # The instances' wiring is catalog/vpc/<i>-prod (vpc/main shared with
 # fnx-ew1-prod), catalog/network/vpc-peering (the default, as in nonprod) and
-# catalog/network/<i>-prod; network/main is main-prod-data-plane, as only this
-# prod stack has the data plane its records read. This file keeps the CIDRs,
-# AZs, subnets and this stack's DNS values.
+# catalog/network/<i>-prod; network/main is main-prod-data-plane, the shape of
+# a prod primary with the data plane its records read. This file keeps the
+# CIDRs, AZs, subnets and this stack's DNS values (zone comments, query
+# logging, query-log retention).
 # =============================================================================
 
 import:
@@ -104,3 +105,16 @@ components:
             enable_query_logging: true
           internal:
             comment: "Production internal DNS"
+
+    # ==========================================================================
+    # Network Resources - DNS for Services VPC
+    # ==========================================================================
+    network/services:
+      vars:
+        query_log_retention_in_days: 90
+        zones:
+          services:
+            comment: "Production services zone"
+            enable_query_logging: true
+          data:
+            comment: "Data services DNS"
