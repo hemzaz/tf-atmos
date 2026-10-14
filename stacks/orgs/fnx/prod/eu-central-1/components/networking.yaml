@@ -9,10 +9,13 @@
 # without renumbering. No vpc/services: the EU data plane is not in fnx-ew1-prod
 # either. No dns instance: the public zone is fnx-ew1-prod's network/main.
 # Flow logs stay in eu-central-1, on this region's key.
+# vpc/main's wiring, shared with fnx-ue2-prod, is catalog/vpc/main-standby;
+# this file keeps its CIDR, AZs and subnets.
 # =============================================================================
 
 import:
   - orgs/fnx/prod/eu-central-1/components/globals
+  - catalog/vpc/main-standby
 
 settings:
   network:
@@ -22,12 +25,7 @@ settings:
 components:
   terraform:
     vpc/main:
-      metadata:
-        component: vpc
-        inherits:
-          - vpc/defaults
       vars:
-        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
         # AZ IDs, not names: see components/terraform/vpc/README.md.
         availability_zone_ids:
           - euc1-az1
@@ -45,27 +43,3 @@ components:
           - "10.32.201.0/24"
           - "10.32.202.0/24"
           - "10.32.203.0/24"
-        nat_gateway_enabled: true
-        nat_gateway_strategy: "one_per_az"
-        default_sg_ingress_self_only: true
-        default_sg_egress_self_only: false
-        default_sg_allow_all_outbound: true
-        # Load balancer subnet discovery for eks/main's AWS Load Balancer
-        # Controller, as in fnx-ew1-prod (cluster "<Environment>-main": ec1-main).
-        public_subnets_additional_tags:
-          "kubernetes.io/role/elb": "1"
-          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
-        private_subnets_additional_tags:
-          "kubernetes.io/role/internal-elb": "1"
-          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
-        vpc_flow_logs_enabled: true
-        # This region's key: fnx-ew1-prod kms/main's multi-region replica.
-        flow_logs_kms_key_arn: !terraform.state kms/main fnx-ew1-prod '.replica_keys["eu-central-1"].key_arn'
-        tags:
-          NetworkTier: "primary"
-          HighAvailability: "true"
-          CriticalityLevel: "high"
-      dependencies:
-        components:
-          - component: kms/main
-            stack: fnx-ew1-prod

@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# vpc/main in the DR warm standby stacks (fnx-ue2-prod, fnx-ec1-prod)
+# =============================================================================
+# Warm = full: vpc/main as in the primary stack it stands by for
+# (settings.dr.standby_of: three AZs, a NAT gateway per AZ, flow logs), on its
+# own CIDR so the two regions can be peered later without renumbering. Each
+# stack keeps its own settings.network.vpc_cidrs.main, availability_zone_ids
+# and subnets (orgs/fnx/prod/<region>/components/networking.yaml).
+# =============================================================================
+
+import:
+  - catalog/vpc/defaults
+
+components:
+  terraform:
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+        nat_gateway_enabled: true
+        nat_gateway_strategy: "one_per_az"
+        default_sg_ingress_self_only: true
+        default_sg_egress_self_only: false
+        default_sg_allow_all_outbound: true
+        # Load balancer subnet discovery for eks/main's AWS Load Balancer
+        # Controller, as in the primary stack (cluster "<Environment>-main").
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
+        vpc_flow_logs_enabled: true
+        # This region's key: the primary stack's kms/main multi-region replica.
+        flow_logs_kms_key_arn: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        tags:
+          NetworkTier: "primary"
+          HighAvailability: "true"
+          CriticalityLevel: "high"
+      dependencies:
+        components:
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
