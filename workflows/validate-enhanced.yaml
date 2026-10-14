@@ -11,6 +11,9 @@ workflows:
       tools:
         terraform: "1.16.3"
         wasilibs/go-yamllint: "1.38.0"
+        # test_check_catalog_read_overrides.py (unittest discover below) parses
+        # the stack YAML with it; the atmos image ships no yq.
+        mikefarah/yq: "v4.53.6"
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
