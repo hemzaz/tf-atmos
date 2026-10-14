@@ -11,6 +11,7 @@ atmos describe component <component> -s <stack> --process-functions=false   # re
 atmos workflow lint -f lint && atmos workflow validate-all -f validate-enhanced  # the gate before committing
 bash scripts/plan-sweep.sh [<stack>...]    # proves variable validations without AWS
 atmos workflow security-scan -f lint       # local Trivy + Checkov gate (new HIGH/CRITICAL only)
+bash scripts/stack-snapshot.sh compare "$(git merge-base origin/master HEAD)"   # C1 proof: resolved stacks byte-identical
 ```
 
 Nothing has been applied to AWS yet, so refactors need no state migration.
