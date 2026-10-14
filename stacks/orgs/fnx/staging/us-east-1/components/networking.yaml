@@ -4,7 +4,7 @@
 # =============================================================================
 # VPC and network resources - mirrors production architecture
 # The instances' wiring, shared with fnx-ue1-dev, is catalog/vpc/<i> and
-# catalog/network/<i>; this file keeps the CIDRs, subnets and per-stage values.
+# catalog/network/<i>; this file keeps the CIDRs, AZs, subnets and per-stage values.
 # =============================================================================
 
 import:
@@ -33,6 +33,11 @@ components:
     # ==========================================================================
     vpc/main:
       vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
         private_subnets:
           - "10.10.1.0/24"
           - "10.10.2.0/24"
@@ -54,6 +59,11 @@ components:
     # ==========================================================================
     vpc/services:
       vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
         private_subnets:
           - "10.11.1.0/24"
           - "10.11.2.0/24"

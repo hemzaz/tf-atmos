@@ -2,7 +2,7 @@
 # Networking component configurations for fnx-ue1-dev
 # Defines VPC and network resources
 # The instances' wiring, shared with fnx-ue1-staging, is catalog/vpc/<i> and
-# catalog/network/<i>; this file keeps the CIDRs, subnets and per-stage values.
+# catalog/network/<i>; this file keeps the CIDRs, AZs, subnets and per-stage values.
 
 import:
   # Import hierarchy - no .yaml extensions
@@ -29,6 +29,11 @@ components:
     # VPC instances
     vpc/main:
       vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
         private_subnets:
           - "10.0.1.0/24"
           - "10.0.2.0/24"
@@ -41,6 +46,11 @@ components:
         vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
     vpc/services:
       vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
         private_subnets:
           - "10.1.1.0/24"
           - "10.1.2.0/24"

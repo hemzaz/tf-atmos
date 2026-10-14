@@ -3,7 +3,7 @@
 # vpc/main in the nonprod stacks (fnx-ue1-dev, fnx-ue1-staging)
 # =============================================================================
 # The application VPC, peered with vpc/services by network/vpc-peering. Each
-# stack keeps its own settings.network.vpc_cidrs, subnets and flow-log
+# stack keeps its own settings.network.vpc_cidrs, AZs, subnets and flow-log
 # switch (orgs/fnx/<stage>/<region>/components/networking.yaml).
 # =============================================================================
 
@@ -22,11 +22,6 @@ components:
         # The private NACL admits vpc/services, peered by network/vpc-peering.
         private_network_acl_peer_cidr_blocks:
           - "{{ .settings.network.vpc_cidrs.services }}"
-        # AZ IDs, not names: see components/terraform/vpc/README.md.
-        availability_zone_ids:
-          - use1-az1
-          - use1-az2
-          - use1-az4
         # A single NAT gateway (cost optimization).
         nat_gateway_enabled: true
         nat_gateway_strategy: "single"
