@@ -1,0 +1,34 @@
+---
+# =============================================================================
+# network/vpc-peering in the nonprod stacks (fnx-ue1-dev, fnx-ue1-staging)
+# =============================================================================
+# VPC peering between vpc/main and vpc/services, as in prod. Also the
+# operator's path from ec2/bastion (vpc/main) to eks/data's private endpoint
+# (docs/OPERATIONS.md, "In-cluster components").
+# =============================================================================
+
+components:
+  terraform:
+    network/vpc-peering:
+      metadata:
+        component: network
+      vars:
+        name_prefix: '{{ .atmos_stack }}'
+        create_vpc_peering: true
+        requester_vpc_id: !terraform.state vpc/main .vpc_id
+        accepter_vpc_id: !terraform.state vpc/services .vpc_id
+
+        auto_accept: true
+
+        # Private route tables only, as in prod: the application tier and the
+        # bastion (a private subnet) are the callers.
+        requester_routes:
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
+            route_table_ids: !terraform.state vpc/main .private_route_table_ids
+        accepter_routes:
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+            route_table_ids: !terraform.state vpc/services .private_route_table_ids
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: vpc/services
