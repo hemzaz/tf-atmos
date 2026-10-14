@@ -18,18 +18,9 @@ components:
         # "<Environment>-<name>", so `name` must not repeat the Environment
         # (`main`, not `ue1-main`).
 
-        # subnet_ids and node_group_ebs_kms_key_id are NOT set here (as in
-        # catalog/vpc/defaults): Atmos resolves a `!terraform.state` inherited
-        # from an abstract component even when the instance overrides the var,
-        # so a read here fails every stack without its target. The DR standbys
-        # (fnx-ue2-prod, fnx-ec1-prod) have no kms/main and read the primary's
-        # replica key; the msplatform fixture has no vpc/main. Each instance
-        # sets `subnet_ids` (its vpc instance's .private_subnet_ids) and
-        # `node_group_ebs_kms_key_id` (every managed node group's EBS volumes:
-        # its stack's `!terraform.state kms/main .key_arn`, whose
-        # allow_autoscaling_ebs grants the AWS Auto Scaling service-linked role
-        # what it needs to launch them), and lists both targets in
-        # dependencies.components.
+        # Each instance sets subnet_ids and node_group_ebs_kms_key_id (no local
+        # reads in an abstract: CLAUDE.md). kms/main's allow_autoscaling_ebs lets
+        # the Auto Scaling service-linked role launch the node groups' volumes.
 
         # Kubernetes API access: API authentication mode, no hidden
         # cluster-creator admin (the component defaults, Cloud Posse's

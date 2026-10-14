@@ -254,6 +254,19 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/dr-pair.py --lint < "$stacks_json"
+      # Atmos resolves a read in an abstract for every inheriting instance, even
+      # one the instance overrides: every local read an instance resolves, its
+      # own or inherited, names a real instance of its stack (the DR standbys
+      # have no kms/main).
+      - name: check-inherited-state-reads
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_inherited_state_reads.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --include-empty-stacks --format json > "$stacks_json"
+          python3 scripts/check-inherited-state-reads.py < "$stacks_json"
       # The templates/stacks samples, copied in as the lanes their headers name,
       # resolve and pass the stack checks beside the real stacks (plan-sweep
       # covers them in validate-enhanced's plan-sweep workflow).

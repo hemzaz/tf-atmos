@@ -38,13 +38,7 @@ components:
         # eks-addons' Istio gateway certificate ExternalSecret.
         certificate_allowed_namespaces: ["istio-ingress"]
 
-        # kms_key_arn is NOT set here (as in catalog/vpc/defaults): Atmos
-        # resolves a `!terraform.state` inherited from an abstract component
-        # even when the instance overrides the var, and the DR standbys
-        # (fnx-ue2-prod, fnx-ec1-prod) have no kms/main. Each instance sets it
-        # (its stack's `!terraform.state kms/main .key_arn`, the key
-        # secretsmanager uses, or the primary's replica key in a DR stack) and
-        # lists kms/main in dependencies.components.
+        # Each instance sets kms_key_arn (no local reads in an abstract: CLAUDE.md).
 
         tags:
           Component: "external-secrets"
