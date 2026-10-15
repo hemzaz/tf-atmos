@@ -3,7 +3,7 @@
 # Security Component Configurations for Production Environment
 # =============================================================================
 # PRODUCTION SECURITY - Maximum protection for business-critical data
-# IAM with least privilege, KMS encryption, secrets rotation enabled
+# IAM with least privilege, KMS encryption, secrets replicated to the DR region
 # The iam, kms, acm and secretsmanager instances' wiring is catalog/<c>/<i>
 # (the -prod files, shared with fnx-ew1-prod; acm/services is the default
 # one); this file keeps their per-stack values.

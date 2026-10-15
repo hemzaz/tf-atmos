@@ -10,15 +10,17 @@
 # Hub, Inspector and finding routing with the CIS metric filters on this
 # stack's trail (security-monitoring/main); the API Gateway account settings,
 # backups, the EU apex's certificate and the prod secret sets. As in fnx-ue1-prod
-# (orgs/fnx/prod/us-east-1/components/security.yaml, which explains each
-# input; the shared prod settings are catalog/<component>/prod), except:
+# (orgs/fnx/prod/us-east-1/components/security.yaml; the iam, kms, acm and
+# secretsmanager wiring is catalog/<c>/<i>-prod, which explains each input,
+# and the shared prod settings are catalog/<component>/prod), except:
 #   - DR copies (kms/main's replica, backup/main's copies) go to
 #     eu-central-1, the EU DR region, never us-east-2;
 #   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
 #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
 #     role, the trail, global-resource recording, the budget); nothing here
 #     reads a US stack;
-#   - state: the EU backend's prod roles (settings.tfstate, fnx-ew1-root),
+#   - state: the EU backend's prod roles in the management account
+#     (settings.tfstate, role_prefix fnx-ew1-terraform-backend, fnx-ew1-root),
 #     which trust these CI roles (stacks/orgs/fnx/root/eu-west-1.yaml);
 #   - no lambda uploader yet: the PR adding the Lambda bucket adds it.
 # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
@@ -26,9 +28,11 @@
 # no GuardDuty export, the alert topic on kms/main, and no enrichment Lambda
 # (check-data-residency.py fails enable_alert_enrichment in a GDPR-scoped
 # stack: it posts findings, IPs included, to Slack/PagerDuty).
-# The iam, kms, acm and secretsmanager instances' wiring is catalog/<c>/<i>
-# (the -prod files, shared with fnx-ue1-prod; the secrets' EU replica is
-# -prod-eu); this file keeps their per-stack values.
+# The secrets' EU replica (eu-central-1 only) is catalog/secretsmanager/
+# {app,infra}-prod-eu. The apex's certificate is validated in network/main's
+# zone (networking.yaml), its *.api SAN's record also validates fnx-ec1-prod's
+# acm/main; there is no acm/services (no services zone here). This file keeps
+# the per-stack values.
 # =============================================================================
 
 import:
@@ -50,11 +54,6 @@ import:
 
 components:
   terraform:
-    # iam/main and iam/ci: the account's singletons (the Auto Scaling
-    # service-linked role, the GitHub OIDC provider), as in fnx-ue1-prod. The
-    # CI roles' state access is the EU backend's PROD roles, in the management
-    # account (settings.tfstate.role_prefix is fnx-ew1-terraform-backend).
-
     kms/main:
       vars:
         description: EU production main encryption key
@@ -151,9 +150,3 @@ components:
       dependencies:
         components:
           - component: kms/main
-
-    # The EU apex's certificate (catalog/acm/main-prod) is validated in
-    # network/main's zone (networking.yaml); its *.api SAN's record also
-    # validates fnx-ec1-prod's acm/main. No acm/services: there is no services
-    # zone here. The prod secret sets (catalog/secretsmanager/*-prod-eu)
-    # replicate to eu-central-1 only.

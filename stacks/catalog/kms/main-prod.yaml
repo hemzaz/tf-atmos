@@ -51,8 +51,9 @@ components:
         #   - EKS node groups' EBS volumes: already covered by
         #     allow_autoscaling_ebs (kms/defaults) naming the Auto Scaling
         #     service-linked role directly -- AWS's documented pattern, see
-        #     ../kms/README.md. No node-role grant needed; EBS encryption at
-        #     launch is performed by the ASG service, not the node's own role.
+        #     components/terraform/kms/README.md. No node-role grant needed;
+        #     EBS encryption at launch is performed by the ASG service, not the
+        #     node's own role.
         #   - EKS cluster secrets encryption (compute.yaml's
         #     cluster_encryption_config_kms_key_id): the principal that calls
         #     eks:CreateCluster/UpdateClusterConfig needs kms:DescribeKey,
