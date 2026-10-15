@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# awsconfig/main in the DR warm standby stacks
+# =============================================================================
+# Records this region's resources only (include_global_resource_types: false):
+# the primary stack it stands by for (settings.dr.standby_of) records the
+# account's global resources (IAM). Its key is this region's: the primary's
+# kms/main multi-region replica.
+# =============================================================================
+
+import:
+  - catalog/awsconfig/defaults
+
+components:
+  terraform:
+    awsconfig/main:
+      metadata:
+        component: awsconfig
+        inherits:
+          - awsconfig/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        include_global_resource_types: false
+      dependencies:
+        components:
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
