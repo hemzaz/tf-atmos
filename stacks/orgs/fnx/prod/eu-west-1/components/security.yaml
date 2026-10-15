@@ -29,7 +29,8 @@
 # (check-data-residency.py fails enable_alert_enrichment in a GDPR-scoped
 # stack: it posts findings, IPs included, to Slack/PagerDuty).
 # The secrets' EU replica (eu-central-1 only) is catalog/secretsmanager/
-# {app,infra}-prod-eu. The apex's certificate is validated in network/main's
+# {app,infra}-prod's, in settings.dr.region (stacks/orgs/fnx/prod/
+# eu-west-1.yaml). The apex's certificate is validated in network/main's
 # zone (networking.yaml), its *.api SAN's record also validates fnx-ec1-prod's
 # acm/main; there is no acm/services (no services zone here). This file keeps
 # the per-stack values.
@@ -49,8 +50,8 @@ import:
   - catalog/apigateway-account/defaults
   - catalog/backup/prod
   - catalog/acm/main-prod
-  - catalog/secretsmanager/app-prod-eu
-  - catalog/secretsmanager/infra-prod-eu
+  - catalog/secretsmanager/app-prod
+  - catalog/secretsmanager/infra-prod
 
 components:
   terraform:
@@ -60,11 +61,10 @@ components:
         # cost-optimization/main's budget and anomaly notifications publish to
         # its cost-alerts topic on this key (billing_notifications_sns_enabled).
         allow_billing_notifications: true
-        # Replicated to the EU DR region only (never a US one): fnx-ec1-prod,
-        # the EU DR stack, reads the replica's ARN cross-stack and reaches it
-        # by its own prefix's alias, as fnx-ue2-prod does ue1's (ue2-main).
-        replica_regions:
-          - eu-central-1
+        # Replicated to the EU DR region only (never a US one; replica_regions
+        # is catalog/kms/main-prod's settings.dr.region): fnx-ec1-prod, the EU
+        # DR stack, reads the replica's ARN cross-stack and reaches it by its
+        # own prefix's alias, as fnx-ue2-prod does ue1's (ue2-main).
         replica_alias_names:
           eu-central-1: ec1-main
 

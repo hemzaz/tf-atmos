@@ -1,12 +1,15 @@
 ---
 # =============================================================================
-# secretsmanager/infra in a US prod primary stack: the prod infrastructure secrets
+# secretsmanager/infra in a prod primary stack: the prod infrastructure secrets
 # =============================================================================
 # The secret set is catalog/secretsmanager/prod's (secretsmanager/infra-prod),
-# shared by the prod primary stacks. Replicated to the US DR region
-# (us-east-2, fnx-ue2-prod) on kms/main's replica key there, so the DR
-# standby's external-secrets stores read the same names during a us-east-1
-# outage (promote a replica to write it). An EU stack uses infra-prod-eu.yaml.
+# shared by the prod primary stacks. Replicated to the stack's DR region only
+# (settings.dr.region: us-east-2 for fnx-ue1-prod, eu-central-1 for
+# fnx-ew1-prod) on kms/main's replica key there, so the DR standby's
+# external-secrets stores read the same names during an outage of the primary
+# region (promote a replica to write it). An EU stack's DR region is an EU one:
+# the values never leave the EU (check-data-residency.py checks
+# replica_regions). A stack without settings.dr.region fails to render.
 # =============================================================================
 
 import:
@@ -21,5 +24,5 @@ components:
           - secretsmanager/infra-prod
       vars:
         replica_regions:
-          - region: us-east-2
-            kms_key_id: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'
+          - region: '{{ required "settings.dr.region (the DR region of a prod primary stack) is not set" .settings.dr.region }}'
+            kms_key_id: !terraform.state kms/main '.replica_keys["{{ required "settings.dr.region (the DR region of a prod primary stack) is not set" .settings.dr.region }}"].key_arn'

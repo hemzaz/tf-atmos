@@ -47,6 +47,12 @@ vars:
   region: eu-west-1
 
 settings:
+  # DR region of this primary (its warm standby fnx-ec1-prod), an EU one: the
+  # prod catalog files template their replica copies and reads from it
+  # (catalog/secretsmanager/{app,infra}-prod, catalog/kms/main-prod). Not
+  # settings.tfstate.replica_region below, the state bucket's replica.
+  dr:
+    region: eu-central-1
   environment:
     # The EU prod account (stacks/orgs/fnx/_defaults.yaml account map), not
     # prod's: prod/_defaults derives account_id from this key.
