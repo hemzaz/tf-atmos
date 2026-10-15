@@ -246,6 +246,11 @@ components:
         component: awsconfig
         inherits:
           - awsconfig/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main
 
     # ==========================================================================
     # GuardDuty - owns the detector (security-monitoring only consumes it).
@@ -311,8 +316,12 @@ components:
         inherits:
           - backup/defaults
       vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
         daily_retention_days: 14
         weekly_retention_days: 30
         monthly_retention_days: 90
         notification_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+      dependencies:
+        components:
+          - component: kms/main

@@ -19,11 +19,8 @@ components:
       metadata:
         component: awsconfig
         type: abstract
-      dependencies:
-        components:
-          - component: kms/main
+      # Each instance sets kms_key_arn (no local reads in an abstract: CLAUDE.md).
       vars:
-        kms_key_arn: !terraform.state kms/main .key_arn
         # Every stack is its own account in one region, so each recorder is
         # also the account's global-resource (IAM) collector.
         include_global_resource_types: true

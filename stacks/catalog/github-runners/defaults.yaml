@@ -20,9 +20,6 @@ components:
       metadata:
         component: github-runners
         type: abstract
-      dependencies:
-        components:
-          - component: kms/main
       vars:
         enabled: true
         github_scope: hemzaz/tf-atmos
@@ -31,7 +28,7 @@ components:
         # Bump both together, from the release notes' linux-x64 SHA.
         runner_version: "2.337.0"
         runner_sha256: "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
-        kms_key_arn: !terraform.state kms/main .key_arn
+        # Each instance sets kms_key_arn (no local reads in an abstract: CLAUDE.md).
         # The owner's GitHub App (settings.github_app, stacks/orgs/fnx/_defaults.yaml).
         github_app_id: "{{ .settings.github_app.app_id }}"
         github_app_installation_id: "{{ .settings.github_app.installation_id }}"

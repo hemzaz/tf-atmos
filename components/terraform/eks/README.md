@@ -11,8 +11,11 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   `vpc/services .private_subnet_ids`) in the three AWS stacks; `eks/main` also in `fnx-ue2-prod`,
   `fnx-ec1-prod` (`ec1-main`) and `fnx-ew1-prod` (`ew1-main`; it and `fnx-ue1-prod`'s inherit `eks/prod`,
   `stacks/catalog/eks/prod.yaml`). Both read `kms/main .key_arn`
-  (secrets, control-plane logs, node EBS), `iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` and
-  `ec2/bastion .security_group_id` (`allowed_security_group_ids`).
+  (secrets, control-plane logs, node EBS; the DR standbys read the primary's replica key),
+  `iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` and `ec2/bastion .security_group_id`
+  (`allowed_security_group_ids`). `eks/defaults` holds no `vpc/main` or `kms/main` read: Atmos
+  resolves a read inherited from an abstract even when the instance overrides it, so each instance
+  sets `subnet_ids` and `node_group_ebs_kms_key_id` itself.
 - Used by: `eks-addons`, `external-secrets`, `eks-backend-services` (cluster ID, endpoint, base64 CA,
   OIDC issuer with `https://` and its provider ARN), `rds/main` and `elasticache/main`
   (`.eks_cluster_managed_security_group_id`), `monitoring` (`.eks_cluster_id`).

@@ -57,6 +57,7 @@ components:
           - "api"
           - "audit"
         cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
         cluster_log_retention_period: 90
         node_groups:
           # Data processing workers
@@ -141,6 +142,7 @@ components:
         cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
         oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
         oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
+        kms_key_arn: !terraform.state kms/main .key_arn
 
         namespace: "external-secrets"
         service_account_name: "external-secrets"

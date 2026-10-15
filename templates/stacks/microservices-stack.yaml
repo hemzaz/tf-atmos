@@ -147,6 +147,7 @@ components:
       vars:
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        kms_key_arn: !terraform.state kms/main .key_arn
       dependencies:
         components:
           - component: kms/main
@@ -160,6 +161,8 @@ components:
           - eks/defaults
       vars:
         name: main
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: "{{ .settings.environment.eks_public_access }}"

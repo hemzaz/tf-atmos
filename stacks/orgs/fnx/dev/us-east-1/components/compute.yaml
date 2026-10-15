@@ -32,6 +32,7 @@ components:
         # Prod already used kms/main for secrets; dev now matches so the
         # component's own per-cluster key is never created here either.
         cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
         node_groups:
           workers:
             instance_types: ["t3.medium"]
@@ -79,6 +80,7 @@ components:
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: false
         cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
         node_groups:
           data-workers:
             instance_types: ["m5.large"]
@@ -172,6 +174,7 @@ components:
         cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
         oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
         oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+        kms_key_arn: !terraform.state kms/main .key_arn
 
         # Config options
         namespace: "external-secrets"
@@ -200,6 +203,7 @@ components:
         cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
         oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
         oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
+        kms_key_arn: !terraform.state kms/main .key_arn
 
         # Config options
         namespace: "external-secrets"
@@ -330,6 +334,7 @@ components:
       vars:
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        kms_key_arn: !terraform.state kms/main .key_arn
         # Alarms to the stack's monitoring/main topic, <Environment>-main-alarms,
         # named rather than read: monitoring deploys in the last layer, this
         # pool in connectivity (kms/main lets CloudWatch alarms publish to it).

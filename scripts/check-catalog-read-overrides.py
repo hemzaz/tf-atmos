@@ -21,7 +21,8 @@ it), through:
 Not checked: one catalog file overriding another's read, and a read in an
 abstract instance that an inheriting instance or stack overrides (`inherits`).
 Atmos still resolves an inherited read that is overridden; keep reads out of
-abstracts that a stack overrides.
+abstracts that a stack overrides (scripts/check-inherited-state-reads.py fails
+one whose target its stack lacks).
 
 yq (mikefarah v4, in lint.yaml's and validate-all's tools) parses the YAML: it
 keeps the custom tags the stdlib has no parser for, and expands `<<:` merge keys.
