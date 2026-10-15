@@ -44,10 +44,10 @@ components:
       vars:
         description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
         # The replica in the DR region (owner decision Q5: warm standby in
-        # us-east-2). The replica's alias is fnx-ue2-prod's settings.prefix +
-        # "-main", the name its iam/ci ci_apply_kms_key_aliases expects.
-        replica_regions:
-          - us-east-2
+        # us-east-2; replica_regions is catalog/kms/main-prod's
+        # settings.dr.region). The replica's alias is fnx-ue2-prod's
+        # settings.prefix + "-main", the name its iam/ci
+        # ci_apply_kms_key_aliases expects.
         replica_alias_names:
           us-east-2: ue2-main
 

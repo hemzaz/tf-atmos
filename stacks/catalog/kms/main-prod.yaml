@@ -3,10 +3,12 @@
 # kms/main in the prod primary stacks: the account's customer-managed key
 # =============================================================================
 # A multi-region key with the full deletion window; the prod rds instances'
-# event subscriptions publish to the monitoring topics on it. Each stack keeps
-# its key's description, its replica in its own DR region (replica_regions,
-# replica_alias_names: the DR standby stack reads the replica cross-stack and
-# reaches it by its own prefix's alias) and any extra grant
+# event subscriptions publish to the monitoring topics on it. Its one replica
+# is in the stack's DR region (settings.dr.region; a stack without it fails to
+# render). Each stack keeps its key's description, the replica's alias
+# (replica_alias_names, keyed by that region: the DR standby stack's prefix,
+# which settings.dr.region does not give; the DR standby reads the replica
+# cross-stack and reaches it by that alias) and any extra grant
 # (allow_billing_notifications). The key depends on iam/main, which
 # provisions the Auto Scaling service-linked role its key policy names.
 # =============================================================================
@@ -35,6 +37,8 @@ components:
         # no replicas (one key per region stack); this library's
         # aws_kms_replica_key is the deviation (components/terraform/kms/README.md).
         is_multi_region: true
+        replica_regions:
+          - '{{ required "settings.dr.region (the DR region of a prod primary stack) is not set" .settings.dr.region }}'
         # No named key_administrators/key_users: KMS validates every principal
         # named in a key policy at CreateKey/PutKeyPolicy time, and this repo's
         # IaC creates neither a "role/Admin" nor a "production-eks-node-role" /

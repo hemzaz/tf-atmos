@@ -520,6 +520,10 @@ What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
 | `rds/data`, `vpc/services`, `eks/data` | not run | restore `rds/data` from backup copies |
 | `cognito/main` | its own pool, filled from `fnx-ue1-prod`'s by `lambda/cognito-user-migration` on each user's first sign-in or reset | nothing (see [Auth during failover](#auth-during-failover)) |
 
+A primary names its DR region in `settings.dr.region` (`fnx-ue1-prod`: us-east-2, `fnx-ew1-prod`:
+eu-central-1); the prod catalog files replicate `kms/main` and the secrets there
+(`catalog/kms/main-prod`, `catalog/secretsmanager/{app,infra}-prod`), and a prod primary without it
+fails to render. It is not `settings.tfstate.replica_region`, the state bucket's replica.
 `backup/main` in `fnx-ue1-prod` copies every recovery point to `ue1-backup-replica` in us-east-2;
 the EU's, in `fnx-ew1-prod`, to `ew1-backup-replica` in eu-central-1 (never a US region).
 Readiness: `STACK=fnx-ue1-prod atmos workflow dr-status -f disaster-recovery` (it reports both

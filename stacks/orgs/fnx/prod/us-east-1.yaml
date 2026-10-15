@@ -28,6 +28,12 @@ vars:
   region: us-east-1
 
 settings:
+  # DR region of this primary (owner decision Q5: warm standby fnx-ue2-prod):
+  # the prod catalog files template their replica copies and reads from it
+  # (catalog/secretsmanager/{app,infra}-prod, catalog/kms/main-prod). Not
+  # settings.tfstate.replica_region, the state bucket's replica.
+  dr:
+    region: us-east-2
   environment:
     account: prod
   context:
