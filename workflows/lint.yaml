@@ -244,7 +244,10 @@ workflows:
           python3 workflows/scripts/common/check-data-residency.py < "$stacks_json"
       # A DR standby shares its primary's account and has no budget: the
       # primary's cost-optimization budget_additional_environment_tags lists
-      # each standby's settings.prefix (dr-pair.py --lint).
+      # each standby's settings.prefix. A primary's settings.dr.region is its
+      # standby's region, kms/main's only replica region (aliased to the
+      # standby's prefix + "-main") and backup/main's copy region
+      # (dr-pair.py --lint).
       - name: check-dr-pairs
         type: shell
         command: |

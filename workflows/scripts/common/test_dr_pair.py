@@ -28,7 +28,8 @@ def node_groups(groups):
 
 def prod_pair(primary_env, primary_region, standby_env, standby_region, tfstate, relay=None):
     """A primary and its standby as describe stacks returns them (--sections settings,vars,metadata)."""
-    p_settings = {"context": {"stage": "prod"}, "tfstate": tfstate, "prefix": primary_env}
+    p_settings = {"context": {"stage": "prod"}, "tfstate": tfstate, "prefix": primary_env,
+                  "dr": {"region": standby_region}}
     s_settings = {**p_settings, "prefix": standby_env, "dr": {"standby_of": f"fnx-{primary_env}-prod"}}
     api = {"health_check_alarm_relay_regions": relay} if relay else {
         "health_check_alarm_actions": [f"arn:aws:sns:us-east-1:123456789012:{primary_env}-main-alarms"]}
@@ -37,6 +38,7 @@ def prod_pair(primary_env, primary_region, standby_env, standby_region, tfstate,
         "backup/main": instance(primary_env, primary_region, p_settings,
                                 enable_cross_region_backup=True, replica_region=standby_region),
         "kms/main": instance(primary_env, primary_region, p_settings,
+                             replica_regions=[standby_region],
                              replica_alias_names={standby_region: f"{standby_env}-main"}),
         "rds/main": instance(primary_env, primary_region, p_settings, identifier="prod-main-db", db_name="productionapp"),
         "elasticache/main": instance(primary_env, primary_region, p_settings, cluster_id="prod-cache",
@@ -72,6 +74,13 @@ def root(env, region, replica_region, replicated=True):
 
 US_STATE = {"region": "us-east-1", "replica_region": "us-east-2", "bucket": "fnx-terraform-state", "stack": "fnx-ue1-root"}
 EU_STATE = {"region": "eu-west-1", "replica_region": "eu-central-1", "bucket": "fnx-ew1-terraform-state", "stack": "fnx-ew1-root"}
+
+
+def set_dr_region(stacks, stack, value):
+    """Set (or, with None, remove) settings.dr.region on every instance of `stack`."""
+    for spec in stacks[stack]["components"]["terraform"].values():
+        rest = {k: v for k, v in spec["settings"].items() if k != "dr"}
+        spec["settings"] = {**rest, "dr": {"region": value}} if value else rest
 
 
 def today():
@@ -219,8 +228,22 @@ class DrRegionTest(unittest.TestCase):
         for stack, region in expected.items():
             self.assertEqual(dr_pair.dr_region(stacks, stack), region, stack)
 
+    def test_settings_dr_region_comes_first(self):
+        stacks = today()
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["backup/main"]["vars"]["replica_region"] = "us-west-2"
+        self.assertEqual(dr_pair.dr_region(stacks, "fnx-ue1-prod"), "us-east-2")
+        set_dr_region(stacks, "fnx-ue1-prod", "us-west-1")
+        self.assertEqual(dr_pair.dr_region(stacks, "fnx-ue1-prod"), "us-west-1")
+
+    def test_without_settings_dr_region_backup_copies_come_next(self):
+        stacks = today()
+        set_dr_region(stacks, "fnx-ue1-prod", None)
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["backup/main"]["vars"]["replica_region"] = "us-west-2"
+        self.assertEqual(dr_pair.dr_region(stacks, "fnx-ue1-prod"), "us-west-2")
+
     def test_a_primary_without_backup_copies_falls_back_to_its_standby(self):
         stacks = today()
+        set_dr_region(stacks, "fnx-ew1-prod", None)
         stacks["fnx-ew1-prod"]["components"]["terraform"]["backup/main"]["vars"]["enable_cross_region_backup"] = False
         self.assertEqual(dr_pair.dr_region(stacks, "fnx-ew1-prod"), "eu-central-1")
         stacks["fnx-ew1-prod"]["components"]["terraform"]["backup/main"]["metadata"]["enabled"] = False
@@ -276,6 +299,82 @@ class BudgetTest(unittest.TestCase):
                       dr_pair.budget_findings(stacks))
 
 
+class DrRegionLintTest(unittest.TestCase):
+    def kms(self, stacks, stack):
+        return stacks[stack]["components"]["terraform"]["kms/main"]["vars"]
+
+    def test_todays_primaries_agree_with_their_standbys(self):
+        self.assertEqual(dr_pair.dr_region_findings(today()), [])
+
+    def test_a_dr_region_other_than_the_standbys_is_reported(self):
+        stacks = today()
+        set_dr_region(stacks, "fnx-ew1-prod", "eu-north-1")
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ew1-prod (DR primary of fnx-ec1-prod): settings.dr.region is 'eu-north-1', not 'eu-central-1', "
+            "the region of its DR standby"])
+
+    def test_a_primary_without_settings_dr_region_is_reported(self):
+        stacks = today()
+        set_dr_region(stacks, "fnx-ue1-prod", None)
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ue1-prod (DR primary of fnx-ue2-prod): settings.dr.region is None, not 'us-east-2', "
+            "the region of its DR standby"])
+
+    def test_kms_replica_regions_other_than_the_dr_region_are_reported(self):
+        for replicas in (["us-east-2", "us-west-2"], ["us-west-2"], None):
+            stacks = today()
+            self.kms(stacks, "fnx-ue1-prod")["replica_regions"] = replicas
+            self.assertEqual(dr_pair.dr_region_findings(stacks), [
+                f"fnx-ue1-prod (DR primary of fnx-ue2-prod) kms/main: replica_regions is {replicas}, "
+                "not ['us-east-2'] (settings.dr.region)"], replicas)
+
+    def test_a_missing_or_wrong_replica_alias_is_reported(self):
+        for aliases, found in (({"eu-central-1": "ec9-main"}, "'ec9-main'"),
+                               ({"eu-west-2": "ec1-main"}, "None"), ({}, "None")):
+            stacks = today()
+            self.kms(stacks, "fnx-ew1-prod")["replica_alias_names"] = aliases
+            self.assertEqual(dr_pair.dr_region_findings(stacks), [
+                f"fnx-ew1-prod (DR primary of fnx-ec1-prod) kms/main: replica_alias_names['eu-central-1'] is {found}, "
+                "not 'ec1-main' (fnx-ec1-prod's settings.prefix + \"-main\", the alias it reaches the replica by)"],
+                aliases)
+
+    def test_a_primary_without_kms_main_is_reported(self):
+        stacks = today()
+        del stacks["fnx-ue1-prod"]["components"]["terraform"]["kms/main"]
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ue1-prod (DR primary of fnx-ue2-prod): no enabled kms/main, so nothing replicates the key to us-east-2"])
+
+    def test_backup_copies_to_another_region_are_reported(self):
+        stacks = today()
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["backup/main"]["vars"]["replica_region"] = "us-west-2"
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ue1-prod (DR primary of fnx-ue2-prod) backup/main: replica_region is 'us-west-2', "
+            "not 'us-east-2' (settings.dr.region)"])
+
+    def test_backup_without_copies_is_not_checked(self):
+        stacks = today()
+        backup = stacks["fnx-ue1-prod"]["components"]["terraform"]["backup/main"]
+        backup["vars"].update(enable_cross_region_backup=False, replica_region="us-west-2")
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [])
+        backup["vars"]["enable_cross_region_backup"] = True
+        backup["metadata"]["enabled"] = False
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [])
+
+    def test_settings_dr_region_outside_a_dr_primary_is_reported(self):
+        stacks = today()
+        set_dr_region(stacks, "fnx-ue1-dev", "us-east-2")
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ue1-dev: settings.dr.region is 'us-east-2', but no stack names it in settings.dr.standby_of "
+            "(only a DR primary sets it)"])
+
+    def test_two_standbys_are_reported(self):
+        stacks = today()
+        stacks["fnx-ec2-prod"] = copy.deepcopy(stacks["fnx-ec1-prod"])
+        findings = dr_pair.dr_region_findings(stacks)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("more than one DR standby", findings[0])
+
+
 class MainTest(unittest.TestCase):
     def run_main(self, *argv):
         out, err = io.StringIO(), io.StringIO()
@@ -298,6 +397,14 @@ class MainTest(unittest.TestCase):
 
     def test_dr_region(self):
         self.assertEqual(self.run_main("--dr-region", "fnx-ec1-prod"), (0, "eu-central-1\n", ""))
+
+    def test_lint_fails_on_a_dr_region_mismatch(self):
+        bad = today()
+        bad["fnx-ue1-prod"]["components"]["terraform"]["kms/main"]["vars"]["replica_regions"] = ["us-west-2"]
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(bad))):
+            code, out, err = self.run_main("--lint")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("dr-pair: fnx-ue1-prod (DR primary of fnx-ue2-prod) kms/main: replica_regions", err)
 
     def test_lint_reads_stdin_and_fails_on_a_missing_standby(self):
         good = today()
