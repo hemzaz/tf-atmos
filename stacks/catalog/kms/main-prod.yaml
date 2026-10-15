@@ -1,0 +1,74 @@
+---
+# =============================================================================
+# kms/main in the prod primary stacks: the account's customer-managed key
+# =============================================================================
+# A multi-region key with the full deletion window; the prod rds instances'
+# event subscriptions publish to the monitoring topics on it. Each stack keeps
+# its key's description, its replica in its own DR region (replica_regions,
+# replica_alias_names: the DR standby stack reads the replica cross-stack and
+# reaches it by its own prefix's alias) and any extra grant
+# (allow_billing_notifications). The key depends on iam/main, which
+# provisions the Auto Scaling service-linked role its key policy names.
+# =============================================================================
+
+import:
+  - catalog/kms/defaults
+
+components:
+  terraform:
+    kms/main:
+      metadata:
+        component: kms
+        inherits:
+          - kms/defaults
+      vars:
+        alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
+        deletion_window_in_days: 30  # prod keeps the full window
+        # The prod rds instances' event subscriptions publish to the
+        # monitoring topics on this key (and on its DR replica).
+        allow_rds_events: true
+        # DR (owner decision Q5: warm standby). A multi-region key with its
+        # replica in the stack's DR region: ciphertext from either region
+        # decrypts under the other's key, so backup copies (backup/main's
+        # replica vault) and the DR standby's resources use the replica, which
+        # gets its own region-scoped policy (#186). Cloud Posse's aws-kms has
+        # no replicas (one key per region stack); this library's
+        # aws_kms_replica_key is the deviation (components/terraform/kms/README.md).
+        is_multi_region: true
+        # No named key_administrators/key_users: KMS validates every principal
+        # named in a key policy at CreateKey/PutKeyPolicy time, and this repo's
+        # IaC creates neither a "role/Admin" nor a "production-eks-node-role" /
+        # "production-ci-role" (iam/ci IS enabled in prod -- its real role
+        # names are "{ci_role_name_prefix}-plan"/"-apply", never
+        # "production-ci-role"); naming any of them would fail the first real
+        # apply with MalformedPolicyDocumentException. kms/defaults's
+        # enable_default_policy (root-account delegation, the Cloud Posse
+        # aws-kms default) is what makes the key usable by whichever IAM
+        # principal applies this stack, same as dev and staging.
+        #
+        # Real consumers get least-privilege key use through their OWN IAM
+        # policy scoped to this key, never through key_users:
+        #   - EKS node groups' EBS volumes: already covered by
+        #     allow_autoscaling_ebs (kms/defaults) naming the Auto Scaling
+        #     service-linked role directly -- AWS's documented pattern, see
+        #     components/terraform/kms/README.md. No node-role grant needed;
+        #     EBS encryption at launch is performed by the ASG service, not the
+        #     node's own role.
+        #   - EKS cluster secrets encryption (compute.yaml's
+        #     cluster_encryption_config_kms_key_id): the principal that calls
+        #     eks:CreateCluster/UpdateClusterConfig needs kms:DescribeKey,
+        #     kms:CreateGrant and kms:Encrypt on this key (AWS's
+        #     "Encrypting Kubernetes secrets" doc); iam/ci's ci_apply role is
+        #     that principal in this repo's CI-driven deploys, granted via
+        #     ci_apply_kms_key_aliases (catalog/iam/ci-prod.yaml; scoped by
+        #     alias, not this key's ARN, since iam/ci plans and applies in the
+        #     layer before this kms/main instance) -- the Cloud Posse pattern
+        #     of root-account delegation plus a consumer's own scoped IAM
+        #     policy (cloudposse/terraform-aws-kms-key's default key policy).
+      dependencies:
+        components:
+          # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
+          # service-linked role directly as a principal; iam/main provisions
+          # it (enable_autoscaling_service_linked_role) so KMS does not
+          # reject the key policy.
+          - component: iam/main

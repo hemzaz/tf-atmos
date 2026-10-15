@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# acm/main in the prod primary stacks: the apex's wildcard certificate
+# =============================================================================
+# DNS-validated in network/main's main zone. Its *.api.<domain> SAN's
+# validation record also validates the DR standby's acm/main (api.<domain>,
+# acm/main-standby.yaml): in one account ACM gives both the same CNAME, and
+# that instance writes none. Keep the name, and this instance, while the
+# standby exists (check-domains.py checks it).
+# =============================================================================
+
+import:
+  - catalog/acm/defaults
+
+components:
+  terraform:
+    acm/main:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        # Validation records go in the dns zone holding every name below
+        # (workflows/scripts/common/check-domains.py enforces it).
+        zone_id: !terraform.state network/main .zone_ids.main
+        dns_domains:
+          main_wildcard:
+            domain_name: "*.{{ .settings.environment.domain_name }}"
+            subject_alternative_names:
+              - "{{ .settings.environment.domain_name }}"
+              # The DR standby's api.<domain> validation record (see above).
+              - "*.api.{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/main

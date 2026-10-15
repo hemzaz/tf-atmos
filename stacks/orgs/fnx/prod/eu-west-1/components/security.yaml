@@ -10,15 +10,17 @@
 # Hub, Inspector and finding routing with the CIS metric filters on this
 # stack's trail (security-monitoring/main); the API Gateway account settings,
 # backups, the EU apex's certificate and the prod secret sets. As in fnx-ue1-prod
-# (orgs/fnx/prod/us-east-1/components/security.yaml, which explains each
-# input; the shared prod settings are catalog/<component>/prod), except:
+# (orgs/fnx/prod/us-east-1/components/security.yaml; the iam, kms, acm and
+# secretsmanager wiring is catalog/<c>/<i>-prod, which explains each input,
+# and the shared prod settings are catalog/<component>/prod), except:
 #   - DR copies (kms/main's replica, backup/main's copies) go to
 #     eu-central-1, the EU DR region, never us-east-2;
 #   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
 #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
 #     role, the trail, global-resource recording, the budget); nothing here
 #     reads a US stack;
-#   - state: the EU backend's prod roles (settings.tfstate, fnx-ew1-root),
+#   - state: the EU backend's prod roles in the management account
+#     (settings.tfstate, role_prefix fnx-ew1-terraform-backend, fnx-ew1-root),
 #     which trust these CI roles (stacks/orgs/fnx/root/eu-west-1.yaml);
 #   - no lambda uploader yet: the PR adding the Lambda bucket adds it.
 # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
@@ -26,15 +28,18 @@
 # no GuardDuty export, the alert topic on kms/main, and no enrichment Lambda
 # (check-data-residency.py fails enable_alert_enrichment in a GDPR-scoped
 # stack: it posts findings, IPs included, to Slack/PagerDuty).
+# The secrets' EU replica (eu-central-1 only) is catalog/secretsmanager/
+# {app,infra}-prod-eu. The apex's certificate is validated in network/main's
+# zone (networking.yaml), its *.api SAN's record also validates fnx-ec1-prod's
+# acm/main; there is no acm/services (no services zone here). This file keeps
+# the per-stack values.
 # =============================================================================
 
-# catalog/iam/defaults comes through globals, which imports it before its own
-# vars; importing it again here, after globals, would let catalog/_base's
-# tags (Project) override the globals' ones. The catalogs below import no
-# _base.
 import:
   - orgs/fnx/prod/eu-west-1/components/globals
-  - catalog/kms/defaults
+  - catalog/iam/main-prod
+  - catalog/iam/ci-prod
+  - catalog/kms/main-prod
   - catalog/cloudtrail/defaults
   - catalog/awsconfig/defaults
   - catalog/guardduty/prod
@@ -43,89 +48,25 @@ import:
   - catalog/security-monitoring/defaults
   - catalog/apigateway-account/defaults
   - catalog/backup/prod
-  - catalog/acm/defaults
-  - catalog/secretsmanager/prod
+  - catalog/acm/main-prod
+  - catalog/secretsmanager/app-prod-eu
+  - catalog/secretsmanager/infra-prod-eu
 
 components:
   terraform:
-    iam/main:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-      vars:
-        trusted_account_ids:
-          - "{{ .settings.environment.management_account_id }}"
-        require_mfa: true
-        # The account's one Auto Scaling service-linked role, which kms/main's
-        # allow_autoscaling_ebs grant names (catalog/kms/defaults.yaml).
-        enable_autoscaling_service_linked_role: true
-
-    # GitHub Actions OIDC roles of this stack: <full id>-ci-plan/-apply.
-    # Prod trust (owner decision D3): master only, for both roles.
-    iam/ci:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-      vars:
-        create_cross_account_role: false
-        github_oidc_enabled: true
-        github_oidc_repository: "hemzaz/tf-atmos"
-        github_oidc_default_branch: "master"
-        # The prod-eu account's one provider (IAM OIDC providers are per account).
-        github_oidc_create_provider: true
-        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
-        # This stack's runner pool (github-runners/main, compute.yaml): only
-        # the apply role may execute its +1 start policy.
-        ci_runner_pool_names:
-          - "{{ .settings.prefix }}-github-runners"
-        ci_apply_role_enabled: true
-        ci_apply_role_trusted_github_repos:
-          - "hemzaz/tf-atmos:master"
-        ci_apply_policy_arns:
-          - "arn:aws:iam::aws:policy/AdministratorAccess"
-        ci_plan_role_subjects:
-          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
-        # State access: the EU backend's PROD roles only, in the management
-        # account (settings.tfstate.role_prefix is fnx-ew1-terraform-backend).
-        ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
-        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
-        # kms/main's key, by alias (iam/ci applies before the kms layer):
-        # must match kms/main's alias_name below.
-        ci_apply_kms_key_aliases:
-          - "alias/{{ .settings.prefix }}-main"
-
     kms/main:
-      metadata:
-        component: kms
-        inherits:
-          - kms/defaults
       vars:
         description: EU production main encryption key
-        alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
-        deletion_window_in_days: 30
-        # The prod rds instances' event subscriptions publish to the
-        # monitoring topics on this key (and on its ec1 replica).
-        allow_rds_events: true
         # cost-optimization/main's budget and anomaly notifications publish to
         # its cost-alerts topic on this key (billing_notifications_sns_enabled).
         allow_billing_notifications: true
-        # Multi-region, replicated to the EU DR region only (never a US one):
-        # fnx-ec1-prod, the EU DR stack, reads the replica's ARN cross-stack
-        # and reaches it by its own prefix's alias, as fnx-ue2-prod does ue1's
-        # (ue2-main).
-        is_multi_region: true
+        # Replicated to the EU DR region only (never a US one): fnx-ec1-prod,
+        # the EU DR stack, reads the replica's ARN cross-stack and reaches it
+        # by its own prefix's alias, as fnx-ue2-prod does ue1's (ue2-main).
         replica_regions:
           - eu-central-1
         replica_alias_names:
           eu-central-1: ec1-main
-      dependencies:
-        components:
-          # The Auto Scaling service-linked role that
-          # allow_autoscaling_ebs (kms/defaults) names.
-          - component: iam/main
 
     # The prod-eu account's multi-region trail: it records every region's API
     # events into this region's bucket and log group (both on kms/main), so
@@ -209,53 +150,3 @@ components:
       dependencies:
         components:
           - component: kms/main
-
-    # The EU apex's certificate, as fnx-ue1-prod's acm/main: validated in
-    # network/main's zone (networking.yaml), which holds every name below
-    # (check-domains.py). No acm/services: there is no services zone here.
-    acm/main:
-      metadata:
-        component: acm
-        inherits:
-          - acm/defaults
-      vars:
-        zone_id: !terraform.state network/main .zone_ids.main
-        dns_domains:
-          main_wildcard:
-            domain_name: "*.{{ .settings.environment.domain_name }}"
-            subject_alternative_names:
-              - "{{ .settings.environment.domain_name }}"
-              # The EU DR stack fnx-ec1-prod's acm/main relies on this SAN's
-              # validation record for its api.<domain> (same CNAME in this
-              # account) and writes none. Keep the name, and this instance,
-              # while fnx-ec1-prod exists.
-              - "*.api.{{ .settings.environment.domain_name }}"
-            validation_method: "DNS"
-            wait_for_validation: true
-      dependencies:
-        components:
-          - component: network/main
-
-    # The prod secret sets (catalog/secretsmanager/prod), in this region on
-    # kms/main, replicated to the EU DR region only (fnx-ec1-prod,
-    # eu-central-1) on kms/main's replica key there: the values never leave
-    # the EU (check-data-residency.py checks replica_regions), and fnx-ec1-prod's
-    # external-secrets stores read the same names during an eu-west-1 outage.
-    secretsmanager/app:
-      metadata:
-        component: secretsmanager
-        inherits:
-          - secretsmanager/app-prod
-      vars:
-        replica_regions:
-          - region: eu-central-1
-            kms_key_id: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'
-    secretsmanager/infra:
-      metadata:
-        component: secretsmanager
-        inherits:
-          - secretsmanager/infra-prod
-      vars:
-        replica_regions:
-          - region: eu-central-1
-            kms_key_id: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'

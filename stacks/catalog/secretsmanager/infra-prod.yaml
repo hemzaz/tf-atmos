@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# secretsmanager/infra in a US prod primary stack: the prod infrastructure secrets
+# =============================================================================
+# The secret set is catalog/secretsmanager/prod's (secretsmanager/infra-prod),
+# shared by the prod primary stacks. Replicated to the US DR region
+# (us-east-2, fnx-ue2-prod) on kms/main's replica key there, so the DR
+# standby's external-secrets stores read the same names during a us-east-1
+# outage (promote a replica to write it). An EU stack uses infra-prod-eu.yaml.
+# =============================================================================
+
+import:
+  - catalog/secretsmanager/prod
+
+components:
+  terraform:
+    secretsmanager/infra:
+      metadata:
+        component: secretsmanager
+        inherits:
+          - secretsmanager/infra-prod
+      vars:
+        replica_regions:
+          - region: us-east-2
+            kms_key_id: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'

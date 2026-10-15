@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# acm/services in the nonprod stacks: the services subdomain's wildcard
+# acm/services: the services subdomain's wildcard certificate
 # =============================================================================
 # DNS-validated in network/services' services zone. A stack that needs more
 # names on it sets the whole subject_alternative_names list.
