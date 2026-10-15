@@ -1,0 +1,29 @@
+---
+# =============================================================================
+# iam/main in the nonprod stacks: the account IAM instance
+# =============================================================================
+# Cross-account trust and the Auto Scaling service-linked role that kms/main's
+# key policy names (catalog/kms/main.yaml depends on this instance).
+# =============================================================================
+
+import:
+  - catalog/iam/defaults
+
+components:
+  terraform:
+    iam/main:
+      metadata:
+        component: iam
+        inherits:
+          - iam
+      vars:
+
+        # Cross-account access configuration
+        trusted_account_ids:
+          - "{{ .settings.environment.management_account_id }}"
+
+        # kms/main's allow_autoscaling_ebs grant (catalog/kms/defaults.yaml)
+        # names the Auto Scaling service-linked role directly as a
+        # key-policy principal; this is the one iam instance per account
+        # that provisions it.
+        enable_autoscaling_service_linked_role: true
