@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# guardduty/main in the nonprod stacks: the region's detector
+# =============================================================================
+# The catalog defaults (guardduty/defaults), not the production plans
+# (guardduty/prod).
+# =============================================================================
+
+import:
+  - catalog/guardduty/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # GuardDuty - owns the detector (security-monitoring only consumes it).
+    # Catalog defaults: S3 protection on; EKS audit logs and EBS malware
+    # scanning stay off in non-prod to avoid per-event/per-GB charges.
+    # ==========================================================================
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/defaults

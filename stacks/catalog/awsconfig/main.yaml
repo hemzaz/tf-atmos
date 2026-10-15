@@ -1,0 +1,26 @@
+---
+# =============================================================================
+# awsconfig/main in the nonprod stacks: the account's Config recorder
+# =============================================================================
+# Records this region's resources and the account's global ones (IAM), with
+# the stack's own kms/main key.
+# =============================================================================
+
+import:
+  - catalog/awsconfig/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # AWS Config - the recorder Security Hub's FSBP/CIS controls evaluate on.
+    # ==========================================================================
+    awsconfig/main:
+      metadata:
+        component: awsconfig
+        inherits:
+          - awsconfig/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main

@@ -1,0 +1,32 @@
+---
+# =============================================================================
+# backup/main in the nonprod stacks: the region's vault and plans
+# =============================================================================
+# The vault is on the stack's own kms/main key; failure notifications go to the
+# first critical contact of the stack's settings.environment.monitoring. No
+# vault lock or cross-region replication in nonprod. Each stack keeps its
+# retention days.
+# =============================================================================
+
+import:
+  - catalog/backup/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # AWS Backup - vault, plans and tag-based selection for rds/main,
+    # rds/data (Backup=true in their own services.yaml vars.tags) and any
+    # EC2/EBS resource tagged the same way.
+    # ==========================================================================
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+        notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+      dependencies:
+        components:
+          - component: kms/main
