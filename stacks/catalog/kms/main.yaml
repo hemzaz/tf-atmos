@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# kms/main in the nonprod stacks: the account's customer-managed key
+# =============================================================================
+# The key depends on iam/main, which provisions the Auto Scaling
+# service-linked role its key policy names; main-dev.yaml is the same key for
+# a stack whose account IAM instance is iam/dev. Each stack keeps its key's
+# description.
+# =============================================================================
+
+import:
+  - catalog/kms/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # KMS - customer-managed key for Secrets Manager and other encrypted services
+    # ==========================================================================
+    kms/main:
+      metadata:
+        component: kms
+        inherits:
+          - kms/defaults
+      vars:
+        alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
+        deletion_window_in_days: 7   # non-prod: shorter window, faster teardown
+      dependencies:
+        components:
+          # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
+          # service-linked role directly as a principal; iam/main provisions
+          # it (enable_autoscaling_service_linked_role) so KMS does not
+          # reject the key policy.
+          - component: iam/main

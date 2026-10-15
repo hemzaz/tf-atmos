@@ -1,0 +1,19 @@
+---
+# =============================================================================
+# secretsmanager/app in the nonprod stacks: application secrets
+# =============================================================================
+# Each stack keeps its secrets map and its recovery window.
+# =============================================================================
+
+import:
+  - catalog/secretsmanager/defaults
+
+components:
+  terraform:
+    secretsmanager/app:
+      metadata:
+        component: secretsmanager
+        inherits:
+          - secretsmanager/defaults
+      vars:
+        context_name: "app"

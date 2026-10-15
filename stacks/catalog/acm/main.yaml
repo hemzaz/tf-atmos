@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# acm/main in the nonprod stacks: the stage domain's wildcard certificate
+# =============================================================================
+# DNS-validated in network/main's main zone.
+# =============================================================================
+
+import:
+  - catalog/acm/defaults
+
+components:
+  terraform:
+    acm/main:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        # Validation records go in the dns zone holding every name below
+        # (workflows/scripts/common/check-domains.py enforces it).
+        zone_id: !terraform.state network/main .zone_ids.main
+        dns_domains:
+          main_wildcard:
+            domain_name: "*.{{ .settings.environment.domain_name }}"
+            subject_alternative_names:
+              - "{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/main

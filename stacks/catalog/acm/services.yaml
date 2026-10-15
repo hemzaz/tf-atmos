@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# acm/services in the nonprod stacks: the services subdomain's wildcard
+# =============================================================================
+# DNS-validated in network/services' services zone. A stack that needs more
+# names on it sets the whole subject_alternative_names list.
+# =============================================================================
+
+import:
+  - catalog/acm/defaults
+
+components:
+  terraform:
+    acm/services:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        # Validation records go in the dns zone holding every name below
+        # (workflows/scripts/common/check-domains.py enforces it).
+        zone_id: !terraform.state network/services .zone_ids.services
+        dns_domains:
+          services_wildcard:
+            domain_name: "*.services.{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/services
