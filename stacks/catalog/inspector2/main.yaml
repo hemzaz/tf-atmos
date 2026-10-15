@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# inspector2/main in the nonprod stacks: the region's Inspector enabler
+# =============================================================================
+# The catalog defaults as they are (inspector2/defaults).
+# =============================================================================
+
+import:
+  - catalog/inspector2/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # Amazon Inspector - owns the enabler (security-monitoring only routes its
+    # findings). Off, as in the catalog: Inspector bills per resource scanned.
+    # ==========================================================================
+    inspector2/main:
+      metadata:
+        component: inspector2
+        inherits:
+          - inspector2/defaults

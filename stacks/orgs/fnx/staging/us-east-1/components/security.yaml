@@ -3,8 +3,8 @@
 # Security Component Configurations for Staging-01 Environment
 # =============================================================================
 # IAM, secrets, certificates, and security configurations
-# The iam, kms, acm and secretsmanager instances' wiring, shared with
-# fnx-ue1-dev, is catalog/<c>/<i>; this file keeps their per-stage values.
+# Every security instance's wiring, shared with fnx-ue1-dev, is
+# catalog/<c>/<i>; this file keeps their per-stage values.
 # =============================================================================
 
 import:
@@ -16,14 +16,14 @@ import:
   - catalog/secretsmanager/infra
   - catalog/acm/main
   - catalog/acm/services
-  - catalog/cloudtrail/defaults
-  - catalog/awsconfig/defaults
-  - catalog/guardduty/defaults
-  - catalog/securityhub/defaults
-  - catalog/inspector2/defaults
-  - catalog/apigateway-account/defaults
-  - catalog/security-monitoring/defaults
-  - catalog/backup/defaults
+  - catalog/cloudtrail/main
+  - catalog/awsconfig/main
+  - catalog/guardduty/main
+  - catalog/securityhub/main
+  - catalog/inspector2/main
+  - catalog/apigateway-account/main
+  - catalog/security-monitoring/main
+  - catalog/backup/main
 
 components:
   terraform:
@@ -80,100 +80,10 @@ components:
         default_recovery_window_in_days: 7
 
     # ==========================================================================
-    # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,
-    # both encrypted with kms/main). security-monitoring's CIS metric filters
-    # read its log group.
-    # ==========================================================================
-    cloudtrail/main:
-      metadata:
-        component: cloudtrail
-        inherits:
-          - cloudtrail/defaults
-
-    # ==========================================================================
-    # AWS Config - the recorder Security Hub's FSBP/CIS controls evaluate on.
-    # ==========================================================================
-    awsconfig/main:
-      metadata:
-        component: awsconfig
-        inherits:
-          - awsconfig/defaults
-      vars:
-        kms_key_arn: !terraform.state kms/main .key_arn
-      dependencies:
-        components:
-          - component: kms/main
-
-    # ==========================================================================
-    # GuardDuty - owns the detector (security-monitoring only consumes it).
-    # Catalog defaults: S3 protection on; EKS audit logs and EBS malware
-    # scanning stay off in non-prod to avoid per-event/per-GB charges.
-    # ==========================================================================
-    guardduty/main:
-      metadata:
-        component: guardduty
-        inherits:
-          - guardduty/defaults
-
-    # ==========================================================================
-    # Security Hub - owns the hub (security-monitoring only consumes it).
-    # Default standards (AWS FSBP + CIS 1.2.0) only; no PCI DSS in non-prod.
-    # ==========================================================================
-    securityhub/main:
-      metadata:
-        component: securityhub
-        inherits:
-          - securityhub/defaults
-
-    # ==========================================================================
-    # Amazon Inspector - owns the enabler (security-monitoring only routes its
-    # findings). Off, as in the catalog: Inspector bills per resource scanned.
-    # ==========================================================================
-    inspector2/main:
-      metadata:
-        component: inspector2
-        inherits:
-          - inspector2/defaults
-
-    # ==========================================================================
-    # API Gateway account settings - the per-region CloudWatch Logs role that
-    # REST execution/access logging needs (apigateway/main and apigateway/data
-    # depend on it). One instance per account and region: a second one would
-    # overwrite this one's setting.
-    # ==========================================================================
-    apigateway-account/main:
-      metadata:
-        component: apigateway-account
-        inherits:
-          - apigateway-account/defaults
-
-    # ==========================================================================
-    # Security finding routing (GuardDuty + Security Hub + Inspector -> SNS)
-    # ==========================================================================
-    security-monitoring/main:
-      metadata:
-        component: security-monitoring
-        inherits:
-          - security-monitoring/defaults
-
-    # ==========================================================================
-    # AWS Backup - vault, plans and tag-based selection for rds/main,
-    # rds/data (Backup=true in their own services.yaml vars.tags) and any
-    # EC2/EBS resource tagged the same way. Medium retention, no vault lock or
-    # cross-region replication in staging.
+    # AWS Backup - medium retention in staging.
     # ==========================================================================
     backup/main:
-      metadata:
-        component: backup
-        inherits:
-          - backup/defaults
       vars:
-        kms_key_arn: !terraform.state kms/main .key_arn
         daily_retention_days: 14
         weekly_retention_days: 30
         monthly_retention_days: 90
-        notification_emails:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-      dependencies:
-        components:
-          - component: kms/main

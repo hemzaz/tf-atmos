@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# cloudtrail/main in the nonprod stacks: the account's multi-region trail
+# =============================================================================
+# The catalog defaults as they are (cloudtrail/defaults).
+# =============================================================================
+
+import:
+  - catalog/cloudtrail/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,
+    # both encrypted with kms/main). security-monitoring's CIS metric filters
+    # read its log group.
+    # ==========================================================================
+    cloudtrail/main:
+      metadata:
+        component: cloudtrail
+        inherits:
+          - cloudtrail/defaults

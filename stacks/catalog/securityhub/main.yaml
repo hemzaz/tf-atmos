@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# securityhub/main in the nonprod stacks: the region's hub
+# =============================================================================
+# The catalog defaults (securityhub/defaults), not the production standards
+# (securityhub/prod).
+# =============================================================================
+
+import:
+  - catalog/securityhub/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # Security Hub - owns the hub (security-monitoring only consumes it).
+    # Default standards (AWS FSBP + CIS 1.2.0) only; no PCI DSS in non-prod.
+    # ==========================================================================
+    securityhub/main:
+      metadata:
+        component: securityhub
+        inherits:
+          - securityhub/defaults

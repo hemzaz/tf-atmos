@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# security-monitoring/main in the nonprod stacks: finding routing
+# =============================================================================
+# The catalog defaults as they are (security-monitoring/defaults), CIS metric
+# filters on this stack's cloudtrail/main log group included.
+# =============================================================================
+
+import:
+  - catalog/security-monitoring/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # Security finding routing (GuardDuty + Security Hub + Inspector -> SNS)
+    # ==========================================================================
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+        inherits:
+          - security-monitoring/defaults
