@@ -4,9 +4,11 @@
 # =============================================================================
 # PRODUCTION SECURITY - Maximum protection for business-critical data
 # IAM with least privilege, KMS encryption, secrets replicated to the DR region
-# The iam, kms, acm and secretsmanager instances' wiring is catalog/<c>/<i>
-# (the -prod files, shared with fnx-ew1-prod; acm/services is the default
-# one); this file keeps their per-stack values.
+# Every security instance's wiring, shared with fnx-ew1-prod, is
+# catalog/<c>/<i>: the -prod files where a prod primary differs, else the
+# default one (acm/services, cloudtrail, awsconfig, inspector2,
+# apigateway-account, security-monitoring); this file keeps their per-stack
+# values.
 # =============================================================================
 
 import:
@@ -18,14 +20,14 @@ import:
   - catalog/secretsmanager/infra-prod
   - catalog/acm/main-prod
   - catalog/acm/services
-  - catalog/cloudtrail/defaults
-  - catalog/awsconfig/defaults
-  - catalog/guardduty/prod
-  - catalog/securityhub/prod
-  - catalog/inspector2/defaults
-  - catalog/apigateway-account/defaults
-  - catalog/security-monitoring/defaults
-  - catalog/backup/prod
+  - catalog/cloudtrail/main
+  - catalog/awsconfig/main
+  - catalog/guardduty/main-prod
+  - catalog/securityhub/main-prod
+  - catalog/inspector2/main
+  - catalog/apigateway-account/main
+  - catalog/security-monitoring/main
+  - catalog/backup/main-prod
 
 components:
   terraform:
@@ -63,105 +65,3 @@ components:
             # No data.services SAN: *.services covers it, and its validation
             # record would sit in the services zone while the name belongs to
             # network/services' own data zone.
-
-    # ==========================================================================
-    # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,
-    # both encrypted with kms/main). security-monitoring's CIS metric filters
-    # read its log group.
-    # ==========================================================================
-    cloudtrail/main:
-      metadata:
-        component: cloudtrail
-        inherits:
-          - cloudtrail/defaults
-
-    # ==========================================================================
-    # AWS Config - the recorder Security Hub's FSBP/CIS controls evaluate on.
-    # ==========================================================================
-    awsconfig/main:
-      metadata:
-        component: awsconfig
-        inherits:
-          - awsconfig/defaults
-      vars:
-        kms_key_arn: !terraform.state kms/main .key_arn
-      dependencies:
-        components:
-          - component: kms/main
-
-    # ==========================================================================
-    # GuardDuty - owns the detector (security-monitoring only consumes it).
-    # catalog/guardduty/prod: EKS and malware protection on, port scans
-    # auto-archived.
-    # ==========================================================================
-    guardduty/main:
-      metadata:
-        component: guardduty
-        inherits:
-          - guardduty/prod
-
-    # ==========================================================================
-    # Security Hub - owns the hub (security-monitoring only consumes it).
-    # catalog/securityhub/prod: PCI DSS on top of the default standards.
-    # ==========================================================================
-    securityhub/main:
-      metadata:
-        component: securityhub
-        inherits:
-          - securityhub/prod
-
-    # ==========================================================================
-    # Amazon Inspector - owns the enabler (security-monitoring only routes its
-    # findings). Off, as in the catalog: Inspector bills per resource scanned.
-    # ==========================================================================
-    inspector2/main:
-      metadata:
-        component: inspector2
-        inherits:
-          - inspector2/defaults
-
-    # ==========================================================================
-    # API Gateway account settings - the per-region CloudWatch Logs role that
-    # REST execution/access logging needs (apigateway/main and apigateway/data
-    # depend on it). One instance per account and region: a second one would
-    # overwrite this one's setting.
-    # ==========================================================================
-    apigateway-account/main:
-      metadata:
-        component: apigateway-account
-        inherits:
-          - apigateway-account/defaults
-
-    # ==========================================================================
-    # Security finding routing (GuardDuty + Security Hub + Inspector -> SNS)
-    # ==========================================================================
-    security-monitoring/main:
-      metadata:
-        component: security-monitoring
-        inherits:
-          - security-monitoring/defaults
-
-    # ==========================================================================
-    # AWS Backup - vault, plans and tag-based selection for rds/main,
-    # rds/data (Backup=true in their own services.yaml vars.tags) and any
-    # EC2/EBS resource tagged the same way. Retention and notifications are
-    # catalog/backup/prod's (7-year monthly retention for SOX, the account's
-    # pci-sox compliance tag). Every recovery point is also copied to the DR
-    # region (owner decision Q5): vault <Environment>-backup-replica in
-    # us-east-2, on kms/main's replica key, kept as long as the source point
-    # (Cloud Posse aws-backup's copy_action destination_vault_arn). Vault lock
-    # stays off.
-    # ==========================================================================
-    backup/main:
-      metadata:
-        component: backup
-        inherits:
-          - backup/prod
-      vars:
-        kms_key_arn: !terraform.state kms/main .key_arn
-        enable_cross_region_backup: true
-        replica_region: us-east-2
-        replica_kms_key_arn: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'
-      dependencies:
-        components:
-          - component: kms/main

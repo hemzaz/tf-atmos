@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# guardduty/main in the prod primary stacks: the region's detector
+# =============================================================================
+# The production settings (catalog/guardduty/prod): EKS and malware protection
+# on, port scans auto-archived. The same shell as main-standby.yaml, kept as
+# its own flavor (one file per group).
+# =============================================================================
+
+import:
+  - catalog/guardduty/prod
+
+components:
+  terraform:
+    # ==========================================================================
+    # GuardDuty - owns the detector (security-monitoring only consumes it).
+    # ==========================================================================
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/prod

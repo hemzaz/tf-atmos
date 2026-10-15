@@ -9,8 +9,8 @@ import:
 # cold_storage_after + 90 requirement (backup/defaults sets it to null so dev's
 # and staging's shorter monthly retention don't inherit a cold-storage floor
 # they can't satisfy). Failure notifications go to both critical contacts of
-# the stack's settings.environment.monitoring. The cross-region copy is per
-# stack: each names its own DR region and replica key.
+# the stack's settings.environment.monitoring. The cross-region copy is a
+# prod primary's (catalog/backup/main-prod, to its settings.dr.region).
 components:
   terraform:
     backup/prod:

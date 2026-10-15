@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# cloudtrail/main in the nonprod stacks: the account's multi-region trail
+# cloudtrail/main in the nonprod and prod primary stacks: the account's trail
 # =============================================================================
 # The catalog defaults as they are (cloudtrail/defaults).
 # =============================================================================

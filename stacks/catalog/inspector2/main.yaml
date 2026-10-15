@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# inspector2/main in the nonprod stacks: the region's Inspector enabler
+# inspector2/main in the nonprod and prod primary stacks: Inspector
 # =============================================================================
 # The catalog defaults as they are (inspector2/defaults).
 # =============================================================================

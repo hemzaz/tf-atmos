@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# securityhub/main in the prod primary stacks: the region's hub
+# =============================================================================
+# The production standards (catalog/securityhub/prod): PCI DSS on top of the
+# default ones. A primary's region records the account's global resources
+# (awsconfig/main) and holds the trail's log group (cloudtrail/main), so,
+# unlike main-standby.yaml, no IAM, KMS or CloudWatch control is disabled.
+# =============================================================================
+
+import:
+  - catalog/securityhub/prod
+
+components:
+  terraform:
+    # ==========================================================================
+    # Security Hub - owns the hub (security-monitoring only consumes it).
+    # ==========================================================================
+    securityhub/main:
+      metadata:
+        component: securityhub
+        inherits:
+          - securityhub/prod
