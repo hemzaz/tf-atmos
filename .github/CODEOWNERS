@@ -17,3 +17,19 @@
 
 # Per-stack security domain files (guardduty, securityhub, kms, ...).
 /stacks/**/security.yaml          @hemzaz
+
+# The stacks themselves: which instances each stack deploys, and with what.
+/stacks/orgs/**                   @hemzaz
+
+# The security components' catalog: abstract defaults and instance wiring.
+/stacks/catalog/kms/              @hemzaz
+/stacks/catalog/acm/              @hemzaz
+/stacks/catalog/secretsmanager/   @hemzaz
+/stacks/catalog/cloudtrail/       @hemzaz
+/stacks/catalog/awsconfig/        @hemzaz
+/stacks/catalog/guardduty/        @hemzaz
+/stacks/catalog/securityhub/      @hemzaz
+/stacks/catalog/inspector2/       @hemzaz
+/stacks/catalog/security-monitoring/ @hemzaz
+/stacks/catalog/apigateway-account/ @hemzaz
+/stacks/catalog/backup/           @hemzaz

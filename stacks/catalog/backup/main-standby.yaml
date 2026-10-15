@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# backup/main in the DR warm standby stacks
+# =============================================================================
+# This region's own vault and plans, with the retention of the primary stack
+# it stands by for (catalog/backup/prod). While warm they select nothing; once
+# the services are promoted here they are backed up into it. No copies back to
+# the primary's region until a failback is planned (docs/OPERATIONS.md). The
+# vault's key is this region's: the primary's kms/main multi-region replica.
+# =============================================================================
+
+import:
+  - catalog/backup/prod
+
+components:
+  terraform:
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/prod
+      vars:
+        kms_key_arn: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+      dependencies:
+        components:
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"

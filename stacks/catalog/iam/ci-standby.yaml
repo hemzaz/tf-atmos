@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# iam/ci in the DR warm standby stacks
+# =============================================================================
+# The stack's GitHub Actions OIDC roles, <full id>-ci-plan/-apply, as in the
+# primary stack it stands by for (settings.dr.standby_of), whose iam/ci
+# explains each input. Prod trust: master only, for both roles. The roles
+# trust the account's one GitHub OIDC provider, created by the primary's
+# iam/ci (IAM OIDC providers are per account; a second create fails).
+# =============================================================================
+
+import:
+  - catalog/iam/defaults
+
+components:
+  terraform:
+    iam/ci:
+      metadata:
+        component: iam
+        inherits:
+          - iam
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        # This stack's runner pools (github-runners' <Environment>-<name>):
+        # only the apply role may execute their +1 start policies, nothing else
+        # (iam ci-runner-pools.tf; check-cluster-api-ci.py checks the list).
+        ci_runner_pool_names:
+          - "{{ .settings.prefix }}-github-runners"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        ci_plan_role_subjects:
+          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
+        # State access: the stage's prod read/write backend roles, as the
+        # primary's (both stacks' state is under them).
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
+        # eks/main's cluster encryption key, by alias (iam/ci applies before
+        # any key read): the replica's alias in this region.
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: "{{ .settings.tfstate.stack }}"
+          # The OIDC provider this stack's roles trust.
+          - component: iam/ci
+            stack: "{{ .settings.dr.standby_of }}"

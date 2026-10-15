@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# security-monitoring/main in the DR warm standby stacks
+# =============================================================================
+# Finding routing for this region. No CIS metric filters here: the account's
+# trail delivers to the log group of the primary stack it stands by for
+# (settings.dr.standby_of), where they run. It does not inherit
+# security-monitoring/defaults, whose cloudtrail_log_group_name reads a
+# cloudtrail/main a standby does not have (a null cannot unset an inherited
+# value); the rest mirrors it. The alert topic is on this region's key, the
+# primary's kms/main multi-region replica. Each stack keeps its
+# security_email_subscriptions and enable_alert_enrichment.
+# =============================================================================
+
+components:
+  terraform:
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+      vars:
+        guardduty_detector_id: !terraform.state guardduty/main .detector_id
+        securityhub_account_arn: !terraform.state securityhub/main .account_arn
+        require_guardduty_route: true
+        require_securityhub_route: true
+        require_cloudtrail_route: false
+        enable_security_group_change_events: true
+        inspector2_account_id: !terraform.state inspector2/main .account_id
+        tags:
+          Component: "SecurityMonitoring"
+        security_group_change_excluded_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
+          - !terraform.state iam/ci .ci_apply_role_arn
+        kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+      dependencies:
+        components:
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: guardduty/main
+          - component: securityhub/main
+          - component: inspector2/main
+          - component: iam/ci

@@ -1,0 +1,36 @@
+---
+# =============================================================================
+# acm/main in the DR warm standby stacks
+# =============================================================================
+# api.<domain>'s certificate in this region (ACM certificates are regional).
+# Its validation record is the primary stack's acm/main's
+# (settings.dr.standby_of): in one account ACM gives api.<domain> the same
+# validation CNAME as that certificate's *.api.<domain> SAN. Writing it here
+# too would make two states own one record, and destroying either would delete
+# it and break the other's renewal. So this instance writes no record
+# (process_domain_validation_options: false, no zone_id) and only waits for
+# validation; the primary deploys first (CD order), as the dependency records
+# (check-domains.py checks that it carries the name).
+# =============================================================================
+
+import:
+  - catalog/acm/defaults
+
+components:
+  terraform:
+    acm/main:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        dns_domains:
+          api:
+            domain_name: "api.{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+            process_domain_validation_options: false
+      dependencies:
+        components:
+          - component: acm/main
+            stack: "{{ .settings.dr.standby_of }}"

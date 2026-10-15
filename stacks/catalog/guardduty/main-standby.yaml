@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# guardduty/main in the DR warm standby stacks
+# =============================================================================
+# This region's detector, with the production settings (catalog/guardduty/prod)
+# of the primary stack it stands by for.
+# =============================================================================
+
+import:
+  - catalog/guardduty/prod
+
+components:
+  terraform:
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/prod
