@@ -10,11 +10,12 @@
 # Hub, Inspector and finding routing with the CIS metric filters on this
 # stack's trail (security-monitoring/main); the API Gateway account settings,
 # backups, the EU apex's certificate and the prod secret sets. As in fnx-ue1-prod
-# (orgs/fnx/prod/us-east-1/components/security.yaml; the iam, kms, acm and
-# secretsmanager wiring is catalog/<c>/<i>-prod, which explains each input,
-# and the shared prod settings are catalog/<component>/prod), except:
+# (orgs/fnx/prod/us-east-1/components/security.yaml; every instance's wiring
+# is the same catalog/<c>/<i> file, -prod where a prod primary differs, which
+# explains each input, and the shared prod settings are
+# catalog/<component>/prod), except:
 #   - DR copies (kms/main's replica, backup/main's copies) go to
-#     eu-central-1, the EU DR region, never us-east-2;
+#     eu-central-1, the EU DR region (settings.dr.region), never us-east-2;
 #   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
 #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
 #     role, the trail, global-resource recording, the budget); nothing here
@@ -41,14 +42,14 @@ import:
   - catalog/iam/main-prod
   - catalog/iam/ci-prod
   - catalog/kms/main-prod
-  - catalog/cloudtrail/defaults
-  - catalog/awsconfig/defaults
-  - catalog/guardduty/prod
-  - catalog/securityhub/prod
-  - catalog/inspector2/defaults
-  - catalog/security-monitoring/defaults
-  - catalog/apigateway-account/defaults
-  - catalog/backup/prod
+  - catalog/cloudtrail/main
+  - catalog/awsconfig/main
+  - catalog/guardduty/main-prod
+  - catalog/securityhub/main-prod
+  - catalog/inspector2/main
+  - catalog/security-monitoring/main
+  - catalog/apigateway-account/main
+  - catalog/backup/main-prod
   - catalog/acm/main-prod
   - catalog/secretsmanager/app-prod
   - catalog/secretsmanager/infra-prod
@@ -67,86 +68,3 @@ components:
         # own prefix's alias, as fnx-ue2-prod does ue1's (ue2-main).
         replica_alias_names:
           eu-central-1: ec1-main
-
-    # The prod-eu account's multi-region trail: it records every region's API
-    # events into this region's bucket and log group (both on kms/main), so
-    # the logs stay in the EU. fnx-ec1-prod adds no trail.
-    cloudtrail/main:
-      metadata:
-        component: cloudtrail
-        inherits:
-          - cloudtrail/defaults
-
-    # The prod-eu account's global-resource (IAM) recorder:
-    # include_global_resource_types stays true (catalog default) here and
-    # only here; fnx-ec1-prod's awsconfig sets it false, as fnx-ue2-prod does.
-    awsconfig/main:
-      metadata:
-        component: awsconfig
-        inherits:
-          - awsconfig/defaults
-      vars:
-        kms_key_arn: !terraform.state kms/main .key_arn
-      dependencies:
-        components:
-          - component: kms/main
-
-    guardduty/main:
-      metadata:
-        component: guardduty
-        inherits:
-          - guardduty/prod
-
-    # This region records the account's global resources (awsconfig/main) and
-    # holds the trail's log group, so unlike fnx-ue2-prod no IAM, KMS or
-    # CloudWatch control is disabled.
-    securityhub/main:
-      metadata:
-        component: securityhub
-        inherits:
-          - securityhub/prod
-
-    # Off, as in fnx-ue1-prod: Inspector bills per resource scanned.
-    inspector2/main:
-      metadata:
-        component: inspector2
-        inherits:
-          - inspector2/defaults
-
-    # Finding routing (GuardDuty, Security Hub, Inspector, security group
-    # changes) to an SNS topic on kms/main, and the CIS metric filters on
-    # cloudtrail/main's log group: all in this stack and region.
-    security-monitoring/main:
-      metadata:
-        component: security-monitoring
-        inherits:
-          - security-monitoring/defaults
-
-    # The region's API Gateway CloudWatch Logs role setting, for the EU REST
-    # APIs to come (a per-account, per-region singleton).
-    apigateway-account/main:
-      metadata:
-        component: apigateway-account
-        inherits:
-          - apigateway-account/defaults
-
-    # Retention and notifications as in fnx-ue1-prod (catalog/backup/prod).
-    # Recovery points are copied to the EU DR region only, never a US one:
-    # vault <Environment>-backup-replica in eu-central-1 on kms/main's replica
-    # there (ec1-main), created by this stack as fnx-ue1-prod creates
-    # ue1-backup-replica in us-east-2; fnx-ec1-prod's backup/main is that
-    # region's own vault and plans.
-    # check-data-residency.py fails a non-EU replica_region or key.
-    backup/main:
-      metadata:
-        component: backup
-        inherits:
-          - backup/prod
-      vars:
-        kms_key_arn: !terraform.state kms/main .key_arn
-        enable_cross_region_backup: true
-        replica_region: eu-central-1
-        replica_kms_key_arn: !terraform.state kms/main '.replica_keys["eu-central-1"].key_arn'
-      dependencies:
-        components:
-          - component: kms/main

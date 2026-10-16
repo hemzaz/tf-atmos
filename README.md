@@ -100,7 +100,9 @@ defaults for an existing component.
 `metadata.component` (and `inherits` for the catalog base), then list every instance it reads
 in `dependencies.components` and make sure a layer in `workflows/deploy-full-stack.yaml` deploys
 it after them. validate-all fails otherwise. A new stack also needs its CI roles in the state
-backend's trust: see [State backend](./docs/OPERATIONS.md#state-backend).
+backend's trust: see [State backend](./docs/OPERATIONS.md#state-backend). A prod primary also sets
+`settings.dr.region`, its DR standby's region: the prod catalog files fail to render without it
+(see [Disaster recovery](./docs/OPERATIONS.md#disaster-recovery)).
 
 ## Conventions
 

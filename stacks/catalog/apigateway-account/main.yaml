@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# apigateway-account/main in the nonprod stacks
+# apigateway-account/main in the nonprod and prod primary stacks
 # =============================================================================
 # The catalog defaults as they are (apigateway-account/defaults).
 # =============================================================================

@@ -520,12 +520,7 @@ What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
 | `rds/data`, `vpc/services`, `eks/data` | not run | restore `rds/data` from backup copies |
 | `cognito/main` | its own pool, filled from `fnx-ue1-prod`'s by `lambda/cognito-user-migration` on each user's first sign-in or reset | nothing (see [Auth during failover](#auth-during-failover)) |
 
-A primary names its DR region in `settings.dr.region` (`fnx-ue1-prod`: us-east-2, `fnx-ew1-prod`:
-eu-central-1); the prod catalog files replicate `kms/main` and the secrets there
-(`catalog/kms/main-prod`, `catalog/secretsmanager/{app,infra}-prod`), and a prod primary without it
-fails to render. It is not `settings.tfstate.replica_region`, the state bucket's replica.
-`backup/main` in `fnx-ue1-prod` copies every recovery point to `ue1-backup-replica` in us-east-2;
-the EU's, in `fnx-ew1-prod`, to `ew1-backup-replica` in eu-central-1 (never a US region).
+`backup/main` in `fnx-ue1-prod` copies every recovery point to `ue1-backup-replica` in us-east-2.
 Readiness: `STACK=fnx-ue1-prod atmos workflow dr-status -f disaster-recovery` (it reports both
 vaults and the state bucket's replication) and the same for `fnx-ue2-prod`. CD deploys
 `fnx-ue2-prod` right after `fnx-ue1-prod`, whose state it reads (`kms/main`, `rds/main`,
@@ -554,7 +549,13 @@ reads (`kms/main`, `iam/ci`, `acm/main`, `network/main`, `rds/main`, `elasticach
 `*.api.<EU apex>` validation record, `apigateway/main` is the SECONDARY of `api.<EU apex>`, and
 `fnx-ew1-prod`'s `secretsmanager/app` and `/infra` replicate to eu-central-1 on `ec1-main`.
 Neither EU stack has `rds/data`, `vpc/services` or `eks/data`; `fnx-ew1-prod`'s backups are copied
-to `ew1-backup-replica` in eu-central-1.
+to `ew1-backup-replica` in eu-central-1 (never a US region).
+
+Each primary names its DR region in `settings.dr.region` (`fnx-ue1-prod`: us-east-2,
+`fnx-ew1-prod`: eu-central-1). The prod catalog files replicate `kms/main` and the secrets there and
+copy `backup/main`'s recovery points there (`catalog/kms/main-prod`,
+`catalog/secretsmanager/{app,infra}-prod`, `catalog/backup/main-prod`); a prod primary without it
+fails to render. It is not `settings.tfstate.replica_region`, the state bucket's replica.
 
 The one part outside the EU is Route 53's health checking of `api.<EU apex>` (owner decision B5).
 What sits in us-east-1 is configuration only, with no personal data and nothing persisted: the two

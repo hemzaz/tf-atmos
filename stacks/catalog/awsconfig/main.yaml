@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# awsconfig/main in the nonprod stacks: the account's Config recorder
+# awsconfig/main in the nonprod and prod primary stacks: the Config recorder
 # =============================================================================
 # Records this region's resources and the account's global ones (IAM), with
 # the stack's own kms/main key.
