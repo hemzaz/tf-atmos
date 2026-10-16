@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# eks-addons/main in the DR warm standby stacks
+# =============================================================================
+# eks/main's add-ons, as in the primary stack it stands by for
+# (settings.dr.standby_of), with the cluster autoscaler on and no
+# external-dns. cert-manager validates in the primary's zone, and Container
+# Insights logs on this region's key, the primary's kms/main multi-region
+# replica.
+# =============================================================================
+
+import:
+  - catalog/eks-addons/defaults
+
+components:
+  terraform:
+    eks-addons/main:
+      metadata:
+        component: eks-addons
+        inherits:
+          - eks-addons
+      vars:
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+        clusters:
+          main:
+            enable_aws_load_balancer_controller: true
+            # Scales the warm node groups up from their floor on failover load.
+            enable_cluster_autoscaler: true
+            enable_metrics_server: true
+            # No external-dns: the public name moves by the failover record
+            # (apigateway/main), not by this cluster's ingresses.
+            enable_external_dns: false
+            enable_cert_manager: true
+            # cert-manager's DNS01 zone: the primary stack's (settings.dr.standby_of)
+            # network/main (Route 53 zones are global).
+            dns_zone_ids: !terraform.state network/main {{ .settings.dr.standby_of }} '.zone_ids.main | [.]'
+            enable_container_insights: true
+            container_insights_kms_key_arn: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+            container_insights_log_retention_days: 90
+            vpc_id: !terraform.state vpc/main .vpc_id
+            cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+      dependencies:
+        components:
+          - component: eks/main
+          - component: vpc/main
+          - component: network/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"

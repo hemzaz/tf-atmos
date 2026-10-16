@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# external-secrets/main in the DR warm standby stacks
+# =============================================================================
+# eks/main's External Secrets Operator, as in the primary stack it stands by
+# for (settings.dr.standby_of): applied while warm, so failover step 6 finds
+# its default ClusterSecretStore. This region's key: the primary stack's
+# kms/main multi-region replica.
+# =============================================================================
+
+import:
+  - catalog/external-secrets/defaults
+
+components:
+  terraform:
+    external-secrets/main:
+      metadata:
+        component: external-secrets
+        inherits:
+          - external-secrets/defaults
+      vars:
+        enabled: true
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+        kms_key_arn: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        namespace: "external-secrets"
+        service_account_name: "external-secrets"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
+        rds_managed_secret_access: true
+        allowed_namespaces: ["backend-services"]
+      dependencies:
+        components:
+          - component: eks/main
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"

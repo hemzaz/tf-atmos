@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# ec2/bastion in the DR warm standby stacks
+# =============================================================================
+# The operator path into the private eks/main, as in the primary stack it
+# stands by for (settings.dr.standby_of), so the in-cluster components can be
+# applied here on failover. This region's key: the primary stack's kms/main
+# multi-region replica.
+# =============================================================================
+
+import:
+  - catalog/ec2/defaults
+
+components:
+  terraform:
+    ec2/bastion:
+      metadata:
+        component: ec2
+        inherits:
+          - ec2
+      vars:
+        name: bastion
+        vpc_id: !terraform.state vpc/main .vpc_id
+        ssh_key_secret_kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        disable_api_termination: true
+        tags:
+          Role: bastion
+          Access: restricted
+          CriticalityLevel: "high"
+        metadata_http_tokens_required: true
+        metadata_http_put_response_hop_limit: 1
+        instance_type: "t3.small"
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
+        ebs_optimized: true
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal VPN only"
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["{{ .settings.network.vpc_cidrs.main }}"]
+            description: "SSH to VPC resources"
+        monitoring: true
+        root_volume_type: "gp3"
+        root_volume_size: 20
+        root_block_device_encrypted: true
+        root_block_device_kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        delete_on_termination: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
