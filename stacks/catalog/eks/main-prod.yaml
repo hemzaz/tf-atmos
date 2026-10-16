@@ -1,0 +1,20 @@
+---
+# =============================================================================
+# eks/main in the prod primary stacks: the application cluster
+# =============================================================================
+# The instance file, not the abstract: the shape, reads and dependencies are
+# the eks/prod abstract's (prod.yaml), "<Environment>-main" (ue1-main,
+# ew1-main), the name vpc/main's load balancer subnet tags expect. The DR
+# standbys' eks/main is main-standby.yaml, the nonprod stacks' main.yaml.
+# =============================================================================
+
+import:
+  - catalog/eks/prod
+
+components:
+  terraform:
+    eks/main:
+      metadata:
+        component: eks
+        inherits:
+          - eks/prod

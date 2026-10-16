@@ -4,60 +4,39 @@
 # =============================================================================
 # Production compute with high availability, auto-scaling, and full monitoring
 # Multi-AZ deployments, reserved capacity, enhanced security
+# The instances' wiring is catalog/<c>/<i>-prod (eks/main, the bastion, the
+# runner pool, external-secrets/main, eks-addons/main and
+# eks-backend-services/main, shared with fnx-ew1-prod) and the data plane's
+# un-suffixed catalog/<c>/data (shared with dev and staging). This file keeps
+# this stack's values: eks/data's tags, logs and node groups, the bastion's
+# egress rules, and the data plane's switches and log retention.
 # =============================================================================
 
 import:
   - orgs/fnx/prod/us-east-1/components/globals
-  - catalog/eks/prod
-  - catalog/github-runners/prod
-  - catalog/ec2/prod
-  - catalog/external-secrets/prod
-  - catalog/eks-addons/prod
-  - catalog/eks-backend-services/prod
+  - catalog/eks/main-prod
+  - catalog/eks/data
+  - catalog/github-runners/main-prod
+  - catalog/ec2/bastion-prod
+  - catalog/external-secrets/main-prod
+  - catalog/external-secrets/data
+  - catalog/eks-addons/main-prod
+  - catalog/eks-addons/data
+  - catalog/eks-backend-services/main-prod
 
 components:
   terraform:
     # ==========================================================================
-    # EKS Cluster - Main Application Workloads (Production HA)
-    # ==========================================================================
-    # catalog/eks/prod: the cluster is "<Environment>-<name>": ue1-main.
-    eks/main:
-      metadata:
-        component: eks
-        inherits:
-          - eks/prod
-
-    # ==========================================================================
     # EKS Cluster - Data Processing Workloads (Production HA)
     # ==========================================================================
     eks/data:
-      metadata:
-        component: eks
-        inherits:
-          - eks/defaults
       vars:
-        name: data
-        subnet_ids: !terraform.state vpc/services .private_subnet_ids
-        # The operator's path to the private endpoint (docs/OPERATIONS.md,
-        # "In-cluster components"): TCP 443 on the cluster security group from
-        # the bastion in vpc/main, over network/vpc-peering. A security group
-        # reference works across a same-account, same-region peering, so the
-        # rule names the bastion rather than vpc/main's whole CIDR.
-        allowed_security_group_ids:
-          - !terraform.state ec2/bastion .security_group_id
-          # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
-          - !terraform.state github-runners/main .security_group_id
         tags:
           Cluster: "{{ .settings.prefix }}-data"
           Purpose: "data-processing"
-        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
-        cluster_endpoint_private_access: true
-        cluster_endpoint_public_access: false
         enabled_cluster_log_types:
           - "api"
           - "audit"
-        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
-        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
         cluster_log_retention_period: 90
         node_groups:
           # Data processing workers
@@ -90,24 +69,12 @@ components:
               "/dev/xvda":
                 ebs:
                   volume_size: 100
-      dependencies:
-        components:
-          - component: vpc/services
-          - component: kms/main
-          - component: iam/ci
-          - component: ec2/bastion
-          - component: github-runners/main
-          - component: network/vpc-peering
 
     # ==========================================================================
     # EC2 Bastion Host (Production Hardened)
     # ==========================================================================
-    # catalog/ec2/prod; the SSH rule names vpc/main's and vpc/services' CIDRs.
+    # The SSH rule names vpc/main's and vpc/services' CIDRs.
     ec2/bastion:
-      metadata:
-        component: ec2
-        inherits:
-          - ec2/bastion-prod
       vars:
         allowed_egress_rules:
           - from_port: 443
@@ -122,102 +89,15 @@ components:
             description: "SSH to VPC resources"
 
     # ==========================================================================
-    # External Secrets Operator - Main Cluster
+    # External Secrets Operator - Data Cluster
     # ==========================================================================
-    # catalog/external-secrets/prod.
-    external-secrets/main:
-      metadata:
-        component: external-secrets
-        inherits:
-          - external-secrets/prod
     external-secrets/data:
-      metadata:
-        component: external-secrets
-        inherits:
-          - external-secrets/defaults
       vars:
         enabled: true
-        cluster_name: !terraform.state eks/data .eks_cluster_id
-        host: !terraform.state eks/data .eks_cluster_endpoint
-        cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
-        oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
-        oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
-        kms_key_arn: !terraform.state kms/main .key_arn
 
-        namespace: "external-secrets"
-        service_account_name: "external-secrets"
-        # Nothing on eks/data reads through a ClusterSecretStore yet, so it
-        # gets none (and no IRSA role). A consumer turns its store on with
-        # allowed_namespaces (or certificate_allowed_namespaces) naming it.
-        create_default_cluster_secret_store: false
-        create_certificate_secret_store: false
-      dependencies:
-        components:
-          - component: eks/data
-          - component: kms/main
-
-    # EKS add-ons, one instance per cluster: the load balancer controller,
-    # cluster-autoscaler, metrics-server, external-dns, cert-manager and
-    # Container Insights, each with its own IRSA role. external-dns and cert-manager may change records
-    # only in the dns instance's public zones. The cluster endpoints are private, so
-    # plan/apply these from inside the VPC (see the eks-addons README).
-    eks-addons/main:
-      metadata:
-        component: eks-addons
-        inherits:
-          - eks-addons/prod
+    # EKS add-ons on eks/data: Container Insights keeps 90 days in prod.
     eks-addons/data:
-      metadata:
-        component: eks-addons
-        inherits:
-          - eks-addons
       vars:
-        cluster_name: !terraform.state eks/data .eks_cluster_id
-        host: !terraform.state eks/data .eks_cluster_endpoint
-        cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
-        oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
-        oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
         clusters:
           data:
-            enable_aws_load_balancer_controller: true
-            enable_cluster_autoscaler: true
-            enable_metrics_server: true
-            enable_external_dns: true
-            enable_cert_manager: true
-            # CloudWatch agent + Fluent Bit; log groups on kms/main
-            enable_container_insights: true
-            container_insights_kms_key_arn: !terraform.state kms/main .key_arn
             container_insights_log_retention_days: 90
-            vpc_id: !terraform.state vpc/services .vpc_id
-            dns_zone_ids: !terraform.state network/services '.zone_ids | [.services, .data]'
-            cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-      dependencies:
-        components:
-          - component: eks/data
-          - component: vpc/services
-          - component: network/services
-          - component: kms/main
-
-    # Backend microservices on eks/main. Plans/applies in the "services" layer
-    # of workflows/deploy-full-stack.yaml (after compute, platform, data and
-    # addons), so it can read eks-addons/main, external-secrets/main,
-    # rds/main and elasticache/main state on a first deploy. Only prod runs
-    # elasticache/main today, so only prod turns redis_enabled on.
-    eks-backend-services/main:
-      metadata:
-        component: eks-backend-services
-        inherits:
-          - eks-backend-services/prod
-
-    # Self-hosted GitHub Actions runners in vpc/main, labelled with this
-    # stack's full id, each registered just in time with the owner's GitHub App
-    # (settings.github_app; docs/OPERATIONS.md, "First-deploy inputs", GitHub
-    # App): CI runs the in-cluster instances (settings.github.runner: in-vpc)
-    # on them. eks/main admits them directly, eks/data across
-    # network/vpc-peering (a security group reference works on a same-account,
-    # same-region peering), as for the bastion.
-    github-runners/main:
-      metadata:
-        component: github-runners
-        inherits:
-          - github-runners/prod

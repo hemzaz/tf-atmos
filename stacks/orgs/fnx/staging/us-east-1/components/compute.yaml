@@ -61,6 +61,10 @@ components:
           - "audit"
         node_groups:
           data-workers:
+            instance_types: ["m5.large"]
+            desired_group_size: 2
+            min_group_size: 2
+            max_group_size: 4
             kubernetes_labels:
               role: data-processing
             block_device_map:
@@ -109,3 +113,12 @@ components:
     external-secrets/data:
       vars:
         enabled: true
+
+    # ==========================================================================
+    # EKS add-ons
+    # ==========================================================================
+    eks-addons/data:
+      vars:
+        clusters:
+          data:
+            container_insights_log_retention_days: 7

@@ -1,0 +1,20 @@
+---
+# =============================================================================
+# external-secrets/main in the prod primary stacks: the operator on eks/main
+# =============================================================================
+# The instance file, not the abstract: the wiring is the external-secrets/prod
+# abstract's (prod.yaml). Its rds_managed_secret_access grants read on rds!*
+# secrets: rds/main's RDS-managed master user secret, which
+# eks-backend-services/main reads through this store.
+# =============================================================================
+
+import:
+  - catalog/external-secrets/prod
+
+components:
+  terraform:
+    external-secrets/main:
+      metadata:
+        component: external-secrets
+        inherits:
+          - external-secrets/prod
