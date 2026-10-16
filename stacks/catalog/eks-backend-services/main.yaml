@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# eks-backend-services/main in the nonprod stacks: the backend microservices
+# =============================================================================
+# On eks/main, reading rds/main's database through external-secrets/main's
+# default ClusterSecretStore (aws-secretsmanager; its name is read here, and
+# external-secrets/main creates it). No redis: elasticache/main runs only in
+# prod. Plans/applies in the "services" layer of workflows/deploy-full-stack.yaml
+# (after compute, platform, data and addons), so it can read eks-addons/main,
+# external-secrets/main and rds/main state on a first deploy.
+# =============================================================================
+
+import:
+  - catalog/eks-backend-services/defaults
+
+components:
+  terraform:
+    eks-backend-services/main:
+      metadata:
+        component: eks-backend-services
+        inherits:
+          - eks-backend-services/defaults
+      vars:
+        environment: "{{ .settings.context.stage }}"
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        cluster_secret_store_name: !terraform.state external-secrets/main .default_cluster_secret_store_name
+        database_secret_arn: !terraform.state rds/main .password_secret_arn
+        database_endpoint: !terraform.state rds/main .instance_endpoint
+        database_name: !terraform.state rds/main .instance_name
+        api_gateway_image: '{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}'
+        platform_api_image: '{{ required "settings.environment.backend_service_images.platform_api must be set" .settings.environment.backend_service_images.platform_api }}'
+        auth_service_image: '{{ required "settings.environment.backend_service_images.auth_service must be set" .settings.environment.backend_service_images.auth_service }}'
+        job_processor_image: '{{ required "settings.environment.backend_service_images.job_processor must be set" .settings.environment.backend_service_images.job_processor }}'
+      dependencies:
+        components:
+          - component: eks/main
+          - component: eks-addons/main
+          - component: external-secrets/main
+          - component: rds/main

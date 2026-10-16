@@ -1,0 +1,65 @@
+---
+# =============================================================================
+# ec2/app-server: an application host in vpc/main, launched with the bastion's key
+# =============================================================================
+# The default shape: SSH admitted only from ec2/bastion's security group (a
+# read inside the ingress rules list), PostgreSQL out to the database subnets.
+# app-server-dev.yaml is the single-stack dev shape, whose rules name only
+# CIDRs.
+# =============================================================================
+
+import:
+  - catalog/ec2/defaults
+
+components:
+  terraform:
+    ec2/app-server:
+      metadata:
+        component: ec2
+        inherits:
+          - ec2
+      vars:
+        name: app-server
+        vpc_id: !terraform.state vpc/main .vpc_id
+        tags:
+          Role: app-server
+          Tier: application
+        instance_type: "t3.medium"
+        ssh_key_pair: !terraform.state ec2/bastion .ssh_key_pair
+        # Launch with the bastion's key, never a key of its own: if the
+        # reference above resolved to null, the instance would be keyless
+        # (SSM only) instead of silently generating its own key under the
+        # aws/secretsmanager key rather than kms/main.
+        create_ssh_keys: false
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
+        root_volume_type: "gp3"
+        root_volume_size: 50
+        root_block_device_encrypted: true
+        allowed_ingress_rules:
+          - from_port: 8080
+            to_port: 8080
+            protocol: "tcp"
+            cidr_blocks: ["10.10.0.0/16"]
+            description: "Application port"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            description: "SSH from bastion"
+            security_groups:
+              - !terraform.state ec2/bastion .security_group_id
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 5432
+            to_port: 5432
+            protocol: "tcp"
+            cidr_blocks: ["10.10.201.0/24", "10.10.202.0/24", "10.10.203.0/24"]
+            description: "PostgreSQL to database subnets"
+        monitoring: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: ec2/bastion

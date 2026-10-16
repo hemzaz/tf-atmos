@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# eks/data in the nonprod stacks: the data-processing cluster
+# =============================================================================
+# The cluster's wiring: vpc/services' private subnets, the operator's and the
+# CI runners' paths to the private endpoint across network/vpc-peering, secrets
+# and node volumes on the stack's kms/main, and the data-workers group's
+# instance type and sizes. Each stack keeps its log types, tags and the group's
+# labels and volumes (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# =============================================================================
+
+import:
+  - catalog/eks/defaults
+
+components:
+  terraform:
+    eks/data:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        name: data
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+        # The operator's path to the private endpoint (docs/OPERATIONS.md,
+        # "In-cluster components"): TCP 443 on the cluster security group from
+        # the bastion in vpc/main, over network/vpc-peering. A security group
+        # reference works across a same-account, same-region peering, so the
+        # rule names the bastion rather than vpc/main's whole CIDR.
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
+          # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
+          - !terraform.state github-runners/main .security_group_id
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
+        node_groups:
+          data-workers:
+            instance_types: ["m5.large"]
+            desired_group_size: 2
+            min_group_size: 2
+            max_group_size: 4
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: kms/main
+          - component: iam/ci
+          - component: ec2/bastion
+          - component: github-runners/main
+          - component: network/vpc-peering

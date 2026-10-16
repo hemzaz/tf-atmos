@@ -34,8 +34,8 @@
 /stacks/catalog/apigateway-account/ @hemzaz
 /stacks/catalog/backup/           @hemzaz
 
-# The compute catalog: its instance wiring holds the prod DR standbys'
-# (-standby) and the eks-backend-services failover flavor.
+# The compute catalog: the stacks' instance wiring (nonprod defaults, the prod
+# DR standbys' -standby) and the eks-backend-services failover flavor.
 /stacks/catalog/eks/              @hemzaz
 /stacks/catalog/ec2/              @hemzaz
 /stacks/catalog/external-secrets/ @hemzaz

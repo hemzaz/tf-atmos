@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# external-secrets/data in the nonprod stacks: the operator on eks/data
+# =============================================================================
+# Wired to eks/data and the stack's kms/main, with no ClusterSecretStore yet.
+# Each stack keeps its enabled switch
+# (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# =============================================================================
+
+import:
+  - catalog/external-secrets/defaults
+
+components:
+  terraform:
+    external-secrets/data:
+      metadata:
+        component: external-secrets
+        inherits:
+          - external-secrets/defaults
+      vars:
+        cluster_name: !terraform.state eks/data .eks_cluster_id
+        host: !terraform.state eks/data .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
+        kms_key_arn: !terraform.state kms/main .key_arn
+
+        namespace: "external-secrets"
+        service_account_name: "external-secrets"
+        # Nothing on eks/data reads through a ClusterSecretStore yet, so it
+        # gets none (and no IRSA role). A consumer turns its store on with
+        # allowed_namespaces (or certificate_allowed_namespaces) naming it.
+        create_default_cluster_secret_store: false
+        create_certificate_secret_store: false
+      dependencies:
+        components:
+          - component: eks/data
+          - component: kms/main
