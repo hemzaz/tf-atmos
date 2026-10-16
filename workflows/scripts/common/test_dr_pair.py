@@ -551,7 +551,7 @@ class FailoverFlavorTest(unittest.TestCase):
         block_vars(failover)["cluster_secret_store_name"] = "wrong-store"
         self.assertEqual(dr_pair.failover_findings(today(), standby, failover), [
             f"{FAILOVER}: eks-backend-services/main vars.cluster_secret_store_name is 'wrong-store', not "
-            "'aws-secretsmanager', the only store external-secrets/main creates "
+            "'aws-secretsmanager', the default ClusterSecretStore external-secrets/main creates "
             "(components/terraform/external-secrets/outputs.tf)"])
 
     def test_enabled_is_pinned_on_both_flavors(self):

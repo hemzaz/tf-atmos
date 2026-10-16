@@ -56,11 +56,12 @@ loads both files (yq, the !terraform.* tags kept) and fails unless the
 failover file is main-standby.yaml with only metadata.enabled,
 vars.database_name and vars.cluster_secret_store_name changed and no
 vars.database_secret_arn (step 6 sets it in the stack file), in its imports
-and its eks-backend-services/main block; its vars.database_name is the db_name
+and its eks-backend-services/main block, with enabled true there and false in
+main-standby and cluster_secret_store_name aws-secretsmanager; its vars.database_name is the db_name
 of every DR primary's and every standby's rds/main (the promoted database
 keeps its primary's); and every standby's external-secrets/main sets
-create_default_cluster_secret_store: true (the literal aws-secretsmanager is
-the store that creates, components/terraform/external-secrets/outputs.tf).
+create_default_cluster_secret_store: true (aws-secretsmanager is the default
+store that creates, components/terraform/external-secrets/outputs.tf).
 
 The DR region (--dr-region) is the stack's settings.dr.region when it sets one
 (a DR primary), else its backup/main replica_region when it copies
@@ -91,7 +92,7 @@ FAILOVER_FILE = "stacks/catalog/eks-backend-services/main-standby-failover.yaml"
 FAILOVER_INSTANCE = "eks-backend-services/main"
 FAILOVER_CHANGES = (("metadata", "enabled"), ("vars", "database_name"),
                     ("vars", "cluster_secret_store_name"), ("vars", "database_secret_arn"))
-# The only ClusterSecretStore external-secrets/main creates (components/terraform/external-secrets/outputs.tf).
+# The default ClusterSecretStore external-secrets/main creates (components/terraform/external-secrets/outputs.tf).
 DEFAULT_STORE = "aws-secretsmanager"
 # yq drops a scalar's custom tag in JSON; keep !terraform.* reads as "<tag> <value>".
 TAGGED_READS = '(.. | select(tag | test("^!terraform"))) |= (tag + " " + .)'
@@ -491,7 +492,7 @@ def failover_findings(stacks: dict, standby_doc: dict, failover_doc: dict) -> li
     if store != DEFAULT_STORE:
         findings.append(
             f"{FAILOVER_FILE}: {FAILOVER_INSTANCE} vars.cluster_secret_store_name is {store!r}, not "
-            f"{DEFAULT_STORE!r}, the only store external-secrets/main creates (components/terraform/external-secrets/outputs.tf)"
+            f"{DEFAULT_STORE!r}, the default ClusterSecretStore external-secrets/main creates (components/terraform/external-secrets/outputs.tf)"
         )
     for stack_name in standbys:
         external_secrets = instances(stacks[stack_name]).get("external-secrets/main") or {}

@@ -562,7 +562,8 @@ there), and one whose enabled `backup/main` does not copy its recovery points th
 restores `rds/data` from those copies. It is not `settings.tfstate.replica_region`, the state bucket's
 replica. The same lint keeps failover step 6's `catalog/eks-backend-services/main-standby-failover`
 equal to `main-standby` (imports and instance) except `metadata.enabled`, `database_name` and
-`cluster_secret_store_name`, without `database_secret_arn`; fails it when its `database_name` is
+`cluster_secret_store_name`, without `database_secret_arn`, and pins those values (`enabled` true
+there and false in `main-standby`, the store `aws-secretsmanager`); fails it when its `database_name` is
 not every primary's and standby's `rds/main` `db_name`; and fails a standby whose
 `external-secrets/main` does not set `create_default_cluster_secret_store: true` (the store
 `aws-secretsmanager` names).

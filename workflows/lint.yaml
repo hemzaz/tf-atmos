@@ -249,8 +249,9 @@ workflows:
       # standby's prefix + "-main") and the region its enabled backup/main
       # copies recovery points to. The failover flavor
       # catalog/eks-backend-services/main-standby-failover is main-standby with
-      # only metadata.enabled, database_name and cluster_secret_store_name
-      # changed and no database_secret_arn; its database_name is every pair's
+      # only metadata.enabled (true; false in main-standby), database_name and
+      # cluster_secret_store_name (aws-secretsmanager) changed and no
+      # database_secret_arn; its database_name is every pair's
       # rds/main db_name, and each standby's external-secrets/main creates the
       # default store it names (dr-pair.py --lint).
       - name: check-dr-pairs
