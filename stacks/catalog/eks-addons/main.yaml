@@ -7,6 +7,8 @@
 # role. external-dns and cert-manager may change records only in network/main's
 # public zone; Container Insights logs on the stack's kms/main. A stack may set
 # clusters.main.cert_manager_acme_server (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# The cluster endpoints are private, so plan/apply this from inside the VPC
+# (see the eks-addons README).
 # =============================================================================
 
 import:

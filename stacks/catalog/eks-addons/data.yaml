@@ -5,7 +5,8 @@
 # eks-addons/main's set on eks/data, in vpc/services, with external-dns and
 # cert-manager limited to network/services' services and data zones. A stack
 # may set clusters.data.cert_manager_acme_server
-# (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# (orgs/fnx/<stage>/<region>/components/compute.yaml). The cluster endpoints are
+# private, so plan/apply this from inside the VPC (see the eks-addons README).
 # =============================================================================
 
 import:
