@@ -351,21 +351,65 @@ class DrRegionLintTest(unittest.TestCase):
             "fnx-ue1-prod (DR primary of fnx-ue2-prod) backup/main: replica_region is 'us-west-2', "
             "not 'us-east-2' (settings.dr.region)"])
 
-    def test_backup_without_copies_is_not_checked(self):
+    NO_BACKUP_COPY = ("fnx-ue1-prod (DR primary of fnx-ue2-prod): backup/main copies no recovery point to us-east-2, "
+                      "so the standby has no backup to restore rds/data from (docs/OPERATIONS.md, Disaster recovery)")
+
+    def test_backup_without_copies_is_reported(self):
+        for copies in (False, None):
+            stacks = today()
+            variables = stacks["fnx-ue1-prod"]["components"]["terraform"]["backup/main"]["vars"]
+            variables.update(enable_cross_region_backup=copies, replica_region="us-east-2")
+            self.assertEqual(dr_pair.dr_region_findings(stacks), [self.NO_BACKUP_COPY], copies)
+
+    def test_a_missing_disabled_or_abstract_backup_is_reported(self):
+        for change in ("delete", "disable", "abstract"):
+            stacks = today()
+            components = stacks["fnx-ue1-prod"]["components"]["terraform"]
+            if change == "delete":
+                del components["backup/main"]
+            elif change == "disable":
+                components["backup/main"]["metadata"]["enabled"] = False
+            else:
+                components["backup/main"]["metadata"]["type"] = "abstract"
+            self.assertEqual(dr_pair.dr_region_findings(stacks), [self.NO_BACKUP_COPY], change)
+
+    def test_the_runbook_tolerates_a_primary_without_backup_copies(self):
         stacks = today()
-        backup = stacks["fnx-ue1-prod"]["components"]["terraform"]["backup/main"]
-        backup["vars"].update(enable_cross_region_backup=False, replica_region="us-west-2")
-        self.assertEqual(dr_pair.dr_region_findings(stacks), [])
-        backup["vars"]["enable_cross_region_backup"] = True
-        backup["metadata"]["enabled"] = False
-        self.assertEqual(dr_pair.dr_region_findings(stacks), [])
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["backup/main"]["vars"]["enable_cross_region_backup"] = False
+        facts = dr_pair.pair_facts(stacks, "fnx-ue1-prod")
+        self.assertEqual((facts["backup_replica_vault"], facts["backup_replica_region"]), (None, None))
+        self.assertEqual(dr_pair.dr_region(stacks, "fnx-ue1-prod"), "us-east-2")
+
+    def test_a_disabled_kms_main_is_reported(self):
+        stacks = today()
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["kms/main"]["metadata"]["enabled"] = False
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ue1-prod (DR primary of fnx-ue2-prod): no enabled kms/main, so nothing replicates the key to us-east-2"])
+
+    def test_a_standby_without_a_prefix_is_reported(self):
+        stacks = today()
+        for spec in stacks["fnx-ec1-prod"]["components"]["terraform"].values():
+            spec["settings"] = {k: v for k, v in spec["settings"].items() if k != "prefix"}
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ew1-prod (DR primary of fnx-ec1-prod) kms/main: standby fnx-ec1-prod has no settings.prefix, so the "
+            "alias it reaches the replica by (replica_alias_names['eu-central-1'], <prefix>-main) cannot be checked"])
+
+    def test_a_standby_without_a_region_is_reported(self):
+        stacks = today()
+        set_dr_region(stacks, "fnx-ew1-prod", None)
+        for spec in stacks["fnx-ec1-prod"]["components"]["terraform"].values():
+            del spec["vars"]["region"]
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [
+            "fnx-ew1-prod (DR primary of fnx-ec1-prod): its DR standby fnx-ec1-prod has no vars.region, "
+            "so settings.dr.region cannot be checked"])
 
     def test_settings_dr_region_outside_a_dr_primary_is_reported(self):
         stacks = today()
         set_dr_region(stacks, "fnx-ue1-dev", "us-east-2")
         self.assertEqual(dr_pair.dr_region_findings(stacks), [
             "fnx-ue1-dev: settings.dr.region is 'us-east-2', but no stack names it in settings.dr.standby_of "
-            "(only a DR primary sets it)"])
+            "(only a DR primary sets it): add its DR standby (a stack with settings.dr.standby_of: fnx-ue1-dev) "
+            "or remove settings.dr.region"])
 
     def test_two_standbys_are_reported(self):
         stacks = today()

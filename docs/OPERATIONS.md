@@ -556,8 +556,10 @@ Each primary names its DR region in `settings.dr.region` (`fnx-ue1-prod`: us-eas
 copy `backup/main`'s recovery points there (`catalog/kms/main-prod`,
 `catalog/secretsmanager/{app,infra}-prod`, `catalog/backup/main-prod`); a prod primary without it
 fails to render, and lint (`dr-pair.py --lint`) fails one whose `settings.dr.region` is not its
-standby's region, `kms/main`'s only replica region (with the standby's `<prefix>-main` alias there)
-or `backup/main`'s copy region. It is not `settings.tfstate.replica_region`, the state bucket's
+standby's region or `kms/main`'s only replica region (with the standby's `<prefix>-main` alias
+there), and one whose enabled `backup/main` does not copy its recovery points there
+(`enable_cross_region_backup: true`, `replica_region` equal to `settings.dr.region`): the standby
+restores `rds/data` from those copies. It is not `settings.tfstate.replica_region`, the state bucket's
 replica.
 
 The one part outside the EU is Route 53's health checking of `api.<EU apex>` (owner decision B5).

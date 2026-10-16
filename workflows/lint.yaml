@@ -246,8 +246,8 @@ workflows:
       # primary's cost-optimization budget_additional_environment_tags lists
       # each standby's settings.prefix. A primary's settings.dr.region is its
       # standby's region, kms/main's only replica region (aliased to the
-      # standby's prefix + "-main") and backup/main's copy region
-      # (dr-pair.py --lint).
+      # standby's prefix + "-main") and the region its enabled backup/main
+      # copies recovery points to (dr-pair.py --lint).
       - name: check-dr-pairs
         type: shell
         command: |

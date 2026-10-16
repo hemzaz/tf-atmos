@@ -11,8 +11,9 @@ runbooks from these, so no stack, region or resource name is hard-coded there:
   --dr-region STACK  the DR region dr-status reports for STACK (below)
   --lint             read `atmos describe stacks --process-functions=false
                      --format json` on stdin and fail (exit 1) when a DR
-                     primary's budget misses a standby or its DR region
-                     disagrees with its standby, key or backups (below); lint
+                     primary's budget misses a standby, its DR region
+                     disagrees with its standby or key, or its backups are
+                     not copied to the DR region (below); lint
                      runs it
 
 A DR primary is a stack that another stack names in settings.dr.standby_of
@@ -41,8 +42,11 @@ fails a primary whose settings.dr.region is not its standby's region, whose
 kms/main replica_regions is not [settings.dr.region], whose
 replica_alias_names has no settings.dr.region entry equal to the standby's
 settings.prefix + "-main" (the alias the standby reaches the replica by), or
-whose backup/main copies cross-region to another replica_region; and a stack
-that sets settings.dr.region with no standby.
+that has no enabled, non-abstract backup/main with enable_cross_region_backup
+and replica_region == settings.dr.region (rds/data recovers from those copies:
+owner decision 2026-10-07); a standby with no vars.region or settings.prefix;
+and a stack that sets settings.dr.region with no standby. The runbook modes
+(STACK, --check, --dr-region) stay tolerant of a missing backup copy.
 
 The DR region (--dr-region) is the stack's settings.dr.region when it sets one
 (a DR primary), else its backup/main replica_region when it copies
@@ -308,6 +312,9 @@ def primary_dr_findings(stacks: dict, primary_name: str, standby_name: str) -> l
     declared = setting(stacks[primary_name], "dr", "region")
     standby_region = region(stacks[standby_name])
     where = f"{primary_name} (DR primary of {standby_name})"
+    if not standby_region:
+        return [f"{where}: its DR standby {standby_name} has no vars.region, so settings.dr.region cannot be checked"]
+    # The kms and backup checks below compare against settings.dr.region, so it must be right first.
     if declared != standby_region:
         return [f"{where}: settings.dr.region is {declared!r}, not {standby_region!r}, the region of its DR standby"]
     findings = []
@@ -321,16 +328,28 @@ def primary_dr_findings(stacks: dict, primary_name: str, standby_name: str) -> l
         if replicas != [declared]:
             findings.append(f"{where} kms/main: replica_regions is {replicas}, not [{declared!r}] (settings.dr.region)")
         alias = (variables.get("replica_alias_names") or {}).get(declared)
-        expected = f"{setting(stacks[standby_name], 'prefix')}-main"
-        if alias != expected:
+        prefix = setting(stacks[standby_name], "prefix")
+        expected = f"{prefix}-main"
+        if not prefix:
+            findings.append(
+                f"{where} kms/main: standby {standby_name} has no settings.prefix, so the alias it reaches the "
+                f"replica by (replica_alias_names[{declared!r}], <prefix>-main) cannot be checked"
+            )
+        elif alias != expected:
             findings.append(
                 f"{where} kms/main: replica_alias_names[{declared!r}] is {alias!r}, not {expected!r} "
                 f"({standby_name}'s settings.prefix + \"-main\", the alias it reaches the replica by)"
             )
+    # rds/data recovers from backup copies in the DR region (owner decision 2026-10-07).
     backup = primary.get("backup/main")
     variables = (backup or {}).get("vars") or {}
-    copies = backup and enabled(backup) and variables.get("enable_cross_region_backup") is True
-    if copies and variables.get("replica_region") != declared:
+    concrete = backup and enabled(backup) and (backup.get("metadata") or {}).get("type") != "abstract"
+    if not (concrete and variables.get("enable_cross_region_backup") is True):
+        findings.append(
+            f"{where}: backup/main copies no recovery point to {declared}, so the standby has no backup to "
+            "restore rds/data from (docs/OPERATIONS.md, Disaster recovery)"
+        )
+    elif variables.get("replica_region") != declared:
         findings.append(
             f"{where} backup/main: replica_region is {variables.get('replica_region')!r}, not {declared!r} "
             "(settings.dr.region)"
@@ -357,7 +376,8 @@ def dr_region_findings(stacks: dict) -> list:
         elif declared and stack_name not in named:
             findings.append(
                 f"{stack_name}: settings.dr.region is {declared!r}, but no stack names it in "
-                "settings.dr.standby_of (only a DR primary sets it)"
+                "settings.dr.standby_of (only a DR primary sets it): add its DR standby (a stack with "
+                f"settings.dr.standby_of: {stack_name}) or remove settings.dr.region"
             )
     return findings
 
