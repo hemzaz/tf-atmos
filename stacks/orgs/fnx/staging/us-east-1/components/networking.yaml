@@ -19,12 +19,18 @@ import:
 # ipv4_primary_cidr_block, the other one's private_network_acl_peer_cidr_blocks
 # and network/vpc-peering's routes all read them. Literals, not
 # !terraform.state <vpc> .vpc_cidr: vpc/main and vpc/services would then
-# read each other, a cycle.
+# read each other, a cycle. database_subnet_cidrs.main is vpc/main's
+# database_subnets, which ec2/app-server's PostgreSQL egress also reads.
 settings:
   network:
     vpc_cidrs:
       main: "10.10.0.0/16"
       services: "10.11.0.0/16"
+    database_subnet_cidrs:
+      main:
+        - "10.10.201.0/24"
+        - "10.10.202.0/24"
+        - "10.10.203.0/24"
 
 components:
   terraform:
@@ -46,10 +52,11 @@ components:
           - "10.10.101.0/24"
           - "10.10.102.0/24"
           - "10.10.103.0/24"
+        # One element per AZ, from settings.network.database_subnet_cidrs.main.
         database_subnets:
-          - "10.10.201.0/24"
-          - "10.10.202.0/24"
-          - "10.10.203.0/24"
+          - "{{ index .settings.network.database_subnet_cidrs.main 0 }}"
+          - "{{ index .settings.network.database_subnet_cidrs.main 1 }}"
+          - "{{ index .settings.network.database_subnet_cidrs.main 2 }}"
 
         tags:
           NetworkTier: "primary"

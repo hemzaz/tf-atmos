@@ -3,7 +3,8 @@
 # ec2/app-server in a single-stack dev shape
 # =============================================================================
 # app-server.yaml's host with dev's rules: the application port from vpc/main's
-# CIDR and no SSH rule from the bastion, so no read inside the ingress list.
+# CIDR (settings.network.vpc_cidrs.main) and no SSH rule from the bastion, so
+# no read inside the ingress list.
 # =============================================================================
 
 import:
@@ -32,7 +33,7 @@ components:
           - from_port: 8080
             to_port: 8080
             protocol: "tcp"
-            cidr_blocks: ["10.0.0.0/16"]
+            cidr_blocks: ["{{ .settings.network.vpc_cidrs.main }}"]
             description: "Application access"
       dependencies:
         components:
