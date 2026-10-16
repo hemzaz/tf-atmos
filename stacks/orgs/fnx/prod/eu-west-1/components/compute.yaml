@@ -3,17 +3,20 @@
 # Compute for fnx-ew1-prod (EU production, its own account)
 # =============================================================================
 # fnx-ue1-prod's main cluster and what runs around it, from the shared prod
-# catalogs (catalog/<component>/prod): eks/main (ew1-main, the name vpc/main's
-# load balancer subnet tags expect), the bastion, the in-VPC runner pool, and
-# the in-cluster external-secrets/main, eks-addons/main and
+# instance files (catalog/<component>/<i>-prod): eks/main (ew1-main, the name
+# vpc/main's load balancer subnet tags expect), the bastion, the in-VPC runner
+# pool, and the in-cluster external-secrets/main, eks-addons/main (external-dns
+# and cert-manager in the EU apex's zone, network/main) and
 # eks-backend-services/main (on services.yaml's rds/main and
 # elasticache/main). No eks/data: the EU data plane (data VPC, eks/data,
-# rds/data) is not in this stack.
+# rds/data) is not in this stack. This file keeps the bastion's egress rules.
 #
 # The endpoint is private, so CI runs the in-cluster instances on this
 # stack's own pool (settings.github.runner: in-vpc, owner decision Q8), which
 # CI starts in eu-west-1 (its vars.region, #350); iam/ci lets only this
-# stack's apply role start it (ci_runner_pool_names, security.yaml).
+# stack's apply role start it (ci_runner_pool_names, security.yaml). The
+# pool's alarms name the ew1-main-alarms topic, which monitoring/main
+# (services.yaml) creates.
 #
 # Everything stays in eu-west-1 (check-data-residency.py): control-plane logs
 # and Container Insights go to this region's CloudWatch on kms/main, the
@@ -24,28 +27,17 @@
 
 import:
   - orgs/fnx/prod/eu-west-1/components/globals
-  - catalog/eks/prod
-  - catalog/github-runners/prod
-  - catalog/ec2/prod
-  - catalog/external-secrets/prod
-  - catalog/eks-addons/prod
-  - catalog/eks-backend-services/prod
+  - catalog/eks/main-prod
+  - catalog/github-runners/main-prod
+  - catalog/ec2/bastion-prod
+  - catalog/external-secrets/main-prod
+  - catalog/eks-addons/main-prod
+  - catalog/eks-backend-services/main-prod
 
 components:
   terraform:
-    # The cluster is "<Environment>-<name>": ew1-main.
-    eks/main:
-      metadata:
-        component: eks
-        inherits:
-          - eks/prod
-
     # The SSH rule names this stack's one VPC.
     ec2/bastion:
-      metadata:
-        component: ec2
-        inherits:
-          - ec2/bastion-prod
       vars:
         allowed_egress_rules:
           - from_port: 443
@@ -58,36 +50,3 @@ components:
             protocol: "tcp"
             cidr_blocks: ["{{ .settings.network.vpc_cidrs.main }}"]
             description: "SSH to VPC resources"
-
-    # rds_managed_secret_access (catalog/external-secrets/prod) grants read on
-    # rds!* secrets: rds/main's RDS-managed master user secret, which
-    # eks-backend-services/main reads through this store.
-    external-secrets/main:
-      metadata:
-        component: external-secrets
-        inherits:
-          - external-secrets/prod
-
-    # external-dns and cert-manager in the EU apex's zone (network/main).
-    eks-addons/main:
-      metadata:
-        component: eks-addons
-        inherits:
-          - eks-addons/prod
-
-    # The backend microservices on eks/main, as fnx-ue1-prod's: rds/main and
-    # elasticache/main (services.yaml) through external-secrets/main's store.
-    eks-backend-services/main:
-      metadata:
-        component: eks-backend-services
-        inherits:
-          - eks-backend-services/prod
-
-    # Its alarms name the <Environment>-main-alarms topic (ew1-main-alarms,
-    # catalog/github-runners/prod), which monitoring/main (services.yaml)
-    # creates.
-    github-runners/main:
-      metadata:
-        component: github-runners
-        inherits:
-          - github-runners/prod

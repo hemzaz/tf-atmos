@@ -1,0 +1,20 @@
+---
+# =============================================================================
+# ec2/bastion in the prod primary stacks: the operator path into the private clusters
+# =============================================================================
+# The instance file, not the abstract: the bastion's wiring is the
+# ec2/bastion-prod abstract's (prod.yaml). Each stack keeps its
+# allowed_egress_rules, whose SSH rule names its own VPC CIDRs
+# (orgs/fnx/prod/<region>/components/compute.yaml).
+# =============================================================================
+
+import:
+  - catalog/ec2/prod
+
+components:
+  terraform:
+    ec2/bastion:
+      metadata:
+        component: ec2
+        inherits:
+          - ec2/bastion-prod

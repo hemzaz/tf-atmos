@@ -1,10 +1,12 @@
 ---
 # =============================================================================
-# eks-addons/data in the nonprod stacks: eks/data's add-ons
+# eks-addons/data in the stacks with the data plane: eks/data's add-ons
 # =============================================================================
-# eks-addons/main's set on eks/data, in vpc/services, with external-dns and
-# cert-manager limited to network/services' services and data zones. A stack
-# may set clusters.data.cert_manager_acme_server
+# Shared by dev, staging and the prod primary with the data plane
+# (fnx-ue1-prod). eks-addons/main's set on eks/data, in vpc/services, with
+# external-dns and cert-manager limited to network/services' services and data
+# zones. Each stack keeps clusters.data.container_insights_log_retention_days
+# and may set clusters.data.cert_manager_acme_server
 # (orgs/fnx/<stage>/<region>/components/compute.yaml). The cluster endpoints are
 # private, so plan/apply this from inside the VPC (see the eks-addons README).
 # =============================================================================
@@ -35,7 +37,6 @@ components:
             # CloudWatch agent + Fluent Bit; log groups on kms/main
             enable_container_insights: true
             container_insights_kms_key_arn: !terraform.state kms/main .key_arn
-            container_insights_log_retention_days: 7
             vpc_id: !terraform.state vpc/services .vpc_id
             dns_zone_ids: !terraform.state network/services '.zone_ids | [.services, .data]'
             cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"

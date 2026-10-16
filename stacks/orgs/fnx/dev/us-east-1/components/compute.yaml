@@ -30,6 +30,10 @@ components:
       vars:
         node_groups:
           data-workers:
+            instance_types: ["m5.large"]
+            desired_group_size: 2
+            min_group_size: 2
+            max_group_size: 4
             kubernetes_labels:
               role: data
 
@@ -67,4 +71,5 @@ components:
       vars:
         clusters:
           data:
+            container_insights_log_retention_days: 7
             cert_manager_acme_server: "https://acme-staging-v02.api.letsencrypt.org/directory"

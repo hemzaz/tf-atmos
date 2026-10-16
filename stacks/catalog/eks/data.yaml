@@ -1,12 +1,14 @@
 ---
 # =============================================================================
-# eks/data in the nonprod stacks: the data-processing cluster
+# eks/data in the stacks with the data plane: the data-processing cluster
 # =============================================================================
-# The cluster's wiring: vpc/services' private subnets, the operator's and the
-# CI runners' paths to the private endpoint across network/vpc-peering, secrets
-# and node volumes on the stack's kms/main, and the data-workers group's
-# instance type and sizes. Each stack keeps its log types, tags and the group's
-# labels and volumes (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# Shared by dev, staging and the prod primary with the data plane
+# (fnx-ue1-prod). The cluster's wiring: vpc/services' private subnets, the
+# operator's and the CI runners' paths to the private endpoint across
+# network/vpc-peering, and secrets and node volumes on the stack's kms/main.
+# Each stack keeps its log types, log retention, tags and node groups (their
+# instance types, sizes, labels, capacity and volumes)
+# (orgs/fnx/<stage>/<region>/components/compute.yaml).
 # =============================================================================
 
 import:
@@ -36,12 +38,6 @@ components:
         cluster_endpoint_public_access: false
         cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
         node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
-        node_groups:
-          data-workers:
-            instance_types: ["m5.large"]
-            desired_group_size: 2
-            min_group_size: 2
-            max_group_size: 4
       dependencies:
         components:
           - component: vpc/services

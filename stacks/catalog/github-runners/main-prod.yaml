@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# github-runners/main in the prod primary stacks: the stack's in-VPC CI runners
+# =============================================================================
+# The instance file, not the abstract: the pool's wiring is the
+# github-runners/prod abstract's (prod.yaml). CI runs the in-cluster instances
+# (settings.github.runner: in-vpc) on it. eks/main admits it directly, and
+# fnx-ue1-prod's eks/data across network/vpc-peering (a security group
+# reference works on a same-account, same-region peering), as for the bastion.
+# Its alarms name the <Environment>-main-alarms topic, which monitoring/main
+# (services.yaml) creates.
+# =============================================================================
+
+import:
+  - catalog/github-runners/prod
+
+components:
+  terraform:
+    github-runners/main:
+      metadata:
+        component: github-runners
+        inherits:
+          - github-runners/prod

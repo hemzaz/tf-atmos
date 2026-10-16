@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# eks-addons/main in the prod primary stacks: eks/main's add-ons
+# =============================================================================
+# The instance file, not the abstract: the add-ons, reads and dependencies are
+# the eks-addons/prod abstract's (prod.yaml). external-dns and cert-manager may
+# change records only in network/main's public zone (each primary's own apex).
+# The cluster endpoint is private, so plan/apply this from inside the VPC (see
+# the eks-addons README).
+# =============================================================================
+
+import:
+  - catalog/eks-addons/prod
+
+components:
+  terraform:
+    eks-addons/main:
+      metadata:
+        component: eks-addons
+        inherits:
+          - eks-addons/prod
