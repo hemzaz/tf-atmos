@@ -560,7 +560,12 @@ standby's region or `kms/main`'s only replica region (with the standby's `<prefi
 there), and one whose enabled `backup/main` does not copy its recovery points there
 (`enable_cross_region_backup: true`, `replica_region` equal to `settings.dr.region`): the standby
 restores `rds/data` from those copies. It is not `settings.tfstate.replica_region`, the state bucket's
-replica.
+replica. The same lint keeps failover step 6's `catalog/eks-backend-services/main-standby-failover`
+equal to `main-standby` (imports and instance) except `metadata.enabled`, `database_name` and
+`cluster_secret_store_name`, without `database_secret_arn`; fails it when its `database_name` is
+not every primary's and standby's `rds/main` `db_name`; and fails a standby whose
+`external-secrets/main` does not set `create_default_cluster_secret_store: true` (the store
+`aws-secretsmanager` names).
 
 The one part outside the EU is Route 53's health checking of `api.<EU apex>` (owner decision B5).
 What sits in us-east-1 is configuration only, with no personal data and nothing persisted: the two
@@ -668,10 +673,10 @@ with it, so nothing here needs Terraform. Terraform catches up after recovery (b
    ```
 
 6. Deploy the in-cluster services, `eks-backend-services/main`, from inside the VPC
-   ([In-cluster components](#in-cluster-components)). It has never been applied in
-   `fnx-ue2-prod`, so it has no state of its own to fork: with the state bucket down it applies
-   with local state, migrated after recovery, while its `!terraform.state` inputs read the
-   bucket's us-east-2 replica
+   ([In-cluster components](#in-cluster-components)). While warm it has no resources in
+   `fnx-ue2-prod` (never applied, or destroyed by failback step 5), so it has no live state to
+   fork: with the state bucket down it applies with local state, migrated after recovery, while
+   its `!terraform.state` inputs read the bucket's us-east-2 replica
    ([State during a us-east-1 outage](#state-during-a-us-east-1-outage)). The replica holds the
    state from before the CLI steps, so on a branch, edit the stack file only
    (`stacks/orgs/fnx/prod/us-east-2/components/compute.yaml`; the catalog files are shared with the
@@ -722,9 +727,9 @@ nodes, the primary's 3) serve as they are, and are resized only if the load need
 modify, not a replacement), in the standby's region:
 `aws rds modify-db-instance --db-instance-identifier ue2-prod-main-db --db-instance-class db.r5.xlarge --apply-immediately --region us-east-2`,
 `aws elasticache increase-replica-count --replication-group-id ue2-prod-cache --new-replica-count 2 --apply-immediately --region us-east-2`.
-A resized database's `instance_class` joins reconciliation step 1, and failback step 5 sets the
+A resized database's `instance_class` joins reconciliation step 1, and failback step 6 sets the
 warm one back before its `-replace`; the cache's added replica stays out of Terraform (reconciliation
-step 4) and failback step 6 removes it by CLI.
+step 4) and failback step 7 removes it by CLI.
 
 #### EU failover
 
@@ -782,9 +787,11 @@ What differs beyond the names:
   are in eu-central-1.
 - **Reconcile and failback** as above with the EU names: the failback's literal
   `replicate_source_db` on `fnx-ew1-prod` is
-  `arn:aws:rds:eu-central-1:{{ .settings.environment.account_id }}:db:ec1-prod-main-db`, and
-  `fnx-ec1-prod`'s is restored to `!terraform.state rds/main fnx-ew1-prod .instance_arn` (with the
-  warm `db.r5.large`); step 6 removes an added replica from `ec1-prod-cache` in eu-central-1.
+  `arn:aws:rds:eu-central-1:{{ .settings.environment.account_id }}:db:ec1-prod-main-db`; step 5
+  destroys `eks-backend-services/main -s fnx-ec1-prod` in-VPC while `fnx-ec1-prod`'s stack file
+  still imports `main-standby-failover`; step 6 restores `fnx-ec1-prod`'s `replicate_source_db` to
+  `!terraform.state rds/main fnx-ew1-prod .instance_arn` (with the warm `db.r5.large`); step 7
+  removes an added replica from `ec1-prod-cache` in eu-central-1.
 
 #### Auth during failover
 
@@ -951,22 +958,28 @@ explicit `-replace` from an operator, not a merge:
 4. Un-invert the health check if failover step 2 inverted it
    (`aws route53 update-health-check --health-check-id <ue1 id> --no-inverted`): DNS returns to
    us-east-1.
-5. Make `fnx-ue2-prod`'s database a replica of us-east-1 again, the same way as step 1: lift
+5. Remove the in-cluster services from `fnx-ue2-prod`, from inside the VPC
+   ([In-cluster components](#in-cluster-components)), while its stack file still imports
+   `catalog/eks-backend-services/main-standby-failover` (enabled: Atmos skips a disabled instance,
+   so after step 7's switch back nothing would destroy them):
+   `atmos terraform destroy eks-backend-services/main -s fnx-ue2-prod`. Its state is in the bucket
+   (reconciliation step 3), and its reads go to the healthy bucket, so no `TFSTATE_SOURCE`.
+6. Make `fnx-ue2-prod`'s database a replica of us-east-1 again, the same way as step 1: lift
    `ue2-prod-main-db`'s deletion protection (in us-east-2), set aside
    `ue2-prod-main-db-final-snapshot` if it exists, restore
    `replicate_source_db: !terraform.state rds/main fnx-ue1-prod .instance_arn` on a branch, with
    the warm `instance_class: db.r5.large` if failover resized it (the `-replace` creates the
    instance at the branch's class), and
    `atmos terraform apply rds/main -s fnx-ue2-prod -- -replace=aws_db_instance.main`; merge.
-6. Back to warm: a PR reverting, in `fnx-ue2-prod`'s stack file, reconciliation step 2 and
-   failover step 6 (the import back to `catalog/eks-backend-services/main-standby`,
-   `database_secret_arn` removed), and the desired sizes Terraform
+7. Back to warm: a PR reverting, in `fnx-ue2-prod`'s stack file, reconciliation step 2 and
+   failover step 6 (the import back to `catalog/eks-backend-services/main-standby`, disabled,
+   `database_secret_arn` removed; step 5 destroyed what it deployed), and the desired sizes Terraform
    ignores by CLI (`update-nodegroup-config ... --scaling-config minSize=2,desiredSize=2,maxSize=12`
    for `workers`, `0/0/<max>` for the others). If failover added a cache replica, remove it
    (`aws elasticache decrease-replica-count --replication-group-id ue2-prod-cache
    --new-replica-count 1 --apply-immediately --region us-east-2`): back to the warm 2 nodes
    `num_cache_nodes` still holds.
-7. Auth: once DNS is back on us-east-1, users sign in to `fnx-ue1-prod`'s pool again (us-east-2
+8. Auth: once DNS is back on us-east-1, users sign in to `fnx-ue1-prod`'s pool again (us-east-2
    tokens are not valid there). Nothing flows back from us-east-2: a password a user changed or
    reset there is not us-east-1's, so they reset it again in us-east-1 (forgot-password), and a
    user an administrator created in us-east-2 is created again in us-east-1. List them with
@@ -975,7 +988,7 @@ explicit `-replace` from an operator, not a merge:
    us-east-2 users do not stay: delete the migrated ones (`admin-delete-user`), so stale passwords
    and statuses do not carry into the next failover; they migrate again then
    ([Auth during failover](#auth-during-failover)).
-8. Re-enable CD: `gh workflow enable terraform-cd.yml`.
+9. Re-enable CD: `gh workflow enable terraform-cd.yml`.
 
 ## Deploys green, does not serve
 

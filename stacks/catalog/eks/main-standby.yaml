@@ -24,7 +24,7 @@ components:
         inherits:
           - eks/defaults
       vars:
-        # The cluster is "<Environment>-<name>": ue2-main, ec1-main.
+        # The cluster is "<Environment>-<name>": <prefix>-main.
         name: main
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
         allowed_security_group_ids:

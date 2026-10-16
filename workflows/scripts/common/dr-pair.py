@@ -12,8 +12,9 @@ runbooks from these, so no stack, region or resource name is hard-coded there:
   --lint             read `atmos describe stacks --process-functions=false
                      --format json` on stdin and fail (exit 1) when a DR
                      primary's budget misses a standby, its DR region
-                     disagrees with its standby or key, or its backups are
-                     not copied to the DR region (below); lint
+                     disagrees with its standby or key, its backups are
+                     not copied to the DR region, or the eks-backend-services
+                     failover flavor drifts from main-standby (below); lint
                      runs it
 
 A DR primary is a stack that another stack names in settings.dr.standby_of
@@ -48,6 +49,19 @@ owner decision 2026-10-07); a standby with no vars.region or settings.prefix;
 and a stack that sets settings.dr.region with no standby. The runbook modes
 (STACK, --check, --dr-region) stay tolerant of a missing backup copy.
 
+Failover step 6 switches a standby's import of
+stacks/catalog/eks-backend-services/main-standby.yaml to
+main-standby-failover.yaml (docs/OPERATIONS.md, "Disaster recovery"). --lint
+loads both files (yq, the !terraform.* tags kept) and fails unless the
+failover file is main-standby.yaml with only metadata.enabled,
+vars.database_name and vars.cluster_secret_store_name changed and no
+vars.database_secret_arn (step 6 sets it in the stack file), in its imports
+and its eks-backend-services/main block; its vars.database_name is the db_name
+of every DR primary's and every standby's rds/main (the promoted database
+keeps its primary's); and every standby's external-secrets/main sets
+create_default_cluster_secret_store: true (the literal aws-secretsmanager is
+the store that creates, components/terraform/external-secrets/outputs.tf).
+
 The DR region (--dr-region) is the stack's settings.dr.region when it sets one
 (a DR primary), else its backup/main replica_region when it copies
 cross-region (enable_cross_region_backup), else its standby's region when it
@@ -55,7 +69,9 @@ is a DR primary, else its own region when it is a standby; empty when none
 applies.
 """
 import argparse
+import copy
 import json
+import pathlib
 import subprocess
 import sys
 
@@ -68,6 +84,15 @@ COMPONENTS = (
 # it runs on the primary key's replica).
 PRIMARY_NEEDS = ("kms/main", "rds/main", "elasticache/main", "eks/main", "apigateway/main")
 STANDBY_NEEDS = ("rds/main", "elasticache/main", "eks/main", "lambda/cognito-user-migration")
+# The failover flavor of eks-backend-services/main (failover_findings): the paths it may change.
+REPO = pathlib.Path(__file__).resolve().parents[3]
+STANDBY_FILE = "stacks/catalog/eks-backend-services/main-standby.yaml"
+FAILOVER_FILE = "stacks/catalog/eks-backend-services/main-standby-failover.yaml"
+FAILOVER_INSTANCE = "eks-backend-services/main"
+FAILOVER_CHANGES = (("metadata", "enabled"), ("vars", "database_name"),
+                    ("vars", "cluster_secret_store_name"), ("vars", "database_secret_arn"))
+# yq drops a scalar's custom tag in JSON; keep !terraform.* reads as "<tag> <value>".
+TAGGED_READS = '(.. | select(tag | test("^!terraform"))) |= (tag + " " + .)'
 
 
 def instances(config: dict) -> dict:
@@ -382,6 +407,91 @@ def dr_region_findings(stacks: dict) -> list:
     return findings
 
 
+def load_catalog(relative: str) -> dict:
+    """The single YAML document of repo file `relative`, its !terraform.* reads as strings; ValueError when it fails."""
+    command = ["yq", "--yaml-fix-merge-anchor-to-spec", "-o", "json", "-I0", TAGGED_READS, str(REPO / relative)]
+    try:
+        docs = [json.loads(line) for line in subprocess.check_output(command, text=True).splitlines() if line.strip()]
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
+        raise ValueError(f"{relative}: cannot be read with yq: {error}") from None
+    if len(docs) != 1 or not isinstance(docs[0], dict):
+        raise ValueError(f"{relative}: expected one YAML mapping, found {len(docs)} documents")
+    return docs[0]
+
+
+class _Missing:
+    def __repr__(self) -> str:
+        return "not set"
+
+
+MISSING = _Missing()
+
+
+def differences(left, right, path=()) -> list:
+    """(dotted path, left value, right value) for each leaf where left and right differ; MISSING for an absent key."""
+    if isinstance(left, dict) and isinstance(right, dict):
+        found = []
+        for key in sorted(set(left) | set(right), key=str):
+            found += differences(left.get(key, MISSING), right.get(key, MISSING), (*path, str(key)))
+        return found
+    return [] if left == right else [(".".join(path) or "(document)", left, right)]
+
+
+def failover_findings(stacks: dict, standby_doc: dict, failover_doc: dict) -> list:
+    """One line per way the eks-backend-services failover flavor drifts from main-standby or the stacks (--lint)."""
+    findings = []
+    blocks = {}
+    for relative, doc in ((STANDBY_FILE, standby_doc), (FAILOVER_FILE, failover_doc)):
+        block = ((doc.get("components") or {}).get("terraform") or {}).get(FAILOVER_INSTANCE)
+        if not isinstance(block, dict):
+            findings.append(f"{relative}: no components.terraform.{FAILOVER_INSTANCE}")
+        blocks[relative] = block or {}
+    if findings:
+        return findings
+    failover_vars = blocks[FAILOVER_FILE].get("vars") or {}
+    if "database_secret_arn" in failover_vars:
+        findings.append(
+            f"{FAILOVER_FILE}: {FAILOVER_INSTANCE} sets vars.database_secret_arn ({failover_vars['database_secret_arn']!r}); "
+            "it must not: the secret exists only after promotion, so failover step 6 sets it in the standby's stack file"
+        )
+
+    def comparable(doc):
+        doc = copy.deepcopy(doc)
+        block = doc["components"]["terraform"][FAILOVER_INSTANCE]
+        for section, key in FAILOVER_CHANGES:
+            (block.get(section) or {}).pop(key, None)
+        return doc
+
+    for where, standby_value, failover_value in differences(comparable(standby_doc), comparable(failover_doc)):
+        findings.append(
+            f"{FAILOVER_FILE}: {where} is {failover_value!r}, not {standby_value!r} as in {STANDBY_FILE}: the failover "
+            "flavor is main-standby with only metadata.enabled, vars.database_name and vars.cluster_secret_store_name "
+            "changed and no vars.database_secret_arn"
+        )
+
+    database_name = failover_vars.get("database_name")
+    standbys = sorted(n for n, config in stacks.items() if setting(config, "dr", "standby_of"))
+    for stack_name in [p for p in primaries(stacks) if p in stacks] + standbys:
+        rds = instances(stacks[stack_name]).get("rds/main") or {}
+        db_name = (rds.get("vars") or {}).get("db_name")
+        if db_name != database_name:
+            findings.append(
+                f"{FAILOVER_FILE}: {FAILOVER_INSTANCE} vars.database_name is {database_name!r}, not {db_name!r}, the "
+                f"db_name of {stack_name} rds/main (the promoted standby database keeps its primary's db_name)"
+            )
+    store = failover_vars.get("cluster_secret_store_name")
+    for stack_name in standbys:
+        external_secrets = instances(stacks[stack_name]).get("external-secrets/main") or {}
+        creates = (external_secrets.get("vars") or {}).get("create_default_cluster_secret_store")
+        if creates is not True:
+            findings.append(
+                f"{stack_name} external-secrets/main: create_default_cluster_secret_store is {creates!r}, not true: "
+                f"{FAILOVER_FILE} sets cluster_secret_store_name to {store!r}, the store only that creates "
+                "(components/terraform/external-secrets/outputs.tf)"
+            )
+    return findings
+
+
 def describe_stacks() -> dict:
     """The stacks' resolved config; ValueError, one line, when atmos fails or returns no JSON."""
     command = ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json",
@@ -404,6 +514,10 @@ def main() -> int:
     if args.lint:
         stacks = json.load(sys.stdin)
         findings = budget_findings(stacks) + dr_region_findings(stacks)
+        try:
+            findings += failover_findings(stacks, load_catalog(STANDBY_FILE), load_catalog(FAILOVER_FILE))
+        except ValueError as error:
+            findings.append(str(error))
         for finding in findings:
             print(f"dr-pair: {finding}", file=sys.stderr)
         return 1 if findings else 0

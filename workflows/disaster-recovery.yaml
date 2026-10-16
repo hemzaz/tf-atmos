@@ -91,7 +91,7 @@ workflows:
              catalog/eks-backend-services/main-standby switched to main-standby-failover (enabled, database_name and the
              secret store literal; its database_name must be {{ $p.db_name }}), and database_secret_arn set there to
              MasterUserSecret.SecretArn of {{ $p.db_instance }}; with the bucket down,
-             {{ if $p.state.replicated }}TFSTATE_SOURCE=replica for its reads{{ else }}no replica to read ({{ $p.state.backend_stack }} does not replicate {{ $p.state.bucket }}): every input literal{{ end }} and local state for its own (migrate later).
+             {{ if $p.state.replicated }}TFSTATE_SOURCE=replica for its reads{{ else }}no replica to read ({{ $p.state.backend_stack }} does not replicate {{ $p.state.bucket }}): plan from local state and pass the reads' values with -var{{ end }} and local state for its own (migrate later).
           7. Auth: nothing while {{ $p.primary_region }} Cognito answers (users sign in again; {{ $p.user_migration }}
              copies them as RESET_REQUIRED: forgot-password, then MFA enrolment). If it does not, bulk-import the users not yet in {{ $p.standby }}'s pool from the latest export.{{ if $eu }}
              The export and users.csv stay in {{ $p.standby_region }} (SSE-KMS), never outside the EU.{{ end }}
@@ -147,13 +147,15 @@ workflows:
           3. Cache primary back: failover-global-replication-group --primary-region {{ $p.primary_region }}
              --primary-replication-group-id {{ $p.primary_cache }}.
           4. Un-invert the primary's health check if it was forced; DNS returns to {{ $p.primary_region }}.
-          5. Re-seed {{ $p.standby }} rds/main from {{ $p.primary_region }} the same way (deletion protection, final snapshot,
+          5. In-VPC, while {{ $p.standby }}'s stack file still imports main-standby-failover (Atmos skips a disabled
+             instance): `atmos terraform destroy eks-backend-services/main -s {{ $p.standby }}`.
+          6. Re-seed {{ $p.standby }} rds/main from {{ $p.primary_region }} the same way (deletion protection, final snapshot,
              replicate_source_db restored, `-replace=aws_db_instance.main` on {{ $p.standby }}).
-          6. {{ $p.standby }} back to warm sizes (PR + desired sizes by CLI), and in the same PR its stack file imports
+          7. {{ $p.standby }} back to warm sizes (PR + desired sizes by CLI), and in the same PR its stack file imports
              catalog/eks-backend-services/main-standby again (disabled), database_secret_arn removed.
-          7. Auth: users sign in to {{ $p.primary }} again; passwords changed in {{ $p.standby_region }} and users created there
+          8. Auth: users sign in to {{ $p.primary }} again; passwords changed in {{ $p.standby_region }} and users created there
              do not flow back (reset in {{ $p.primary_region }}, create again).
-          8. `gh workflow enable terraform-cd.yml`.
+          9. `gh workflow enable terraform-cd.yml`.
 
   recover-state:
     description: List Terraform state object versions available for recovery

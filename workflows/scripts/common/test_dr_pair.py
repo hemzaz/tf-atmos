@@ -59,6 +59,8 @@ def prod_pair(primary_env, primary_region, standby_env, standby_region, tfstate,
         "lambda/cognito-user-migration": instance(standby_env, standby_region, s_settings,
                                                   function_name="cognito-user-migration"),
         "monitoring/main": instance(standby_env, standby_region, s_settings, name="main"),
+        "external-secrets/main": instance(standby_env, standby_region, s_settings,
+                                          create_default_cluster_secret_store=True),
     }
     return {
         f"fnx-{primary_env}-prod": {"components": {"terraform": primary}},
@@ -419,10 +421,144 @@ class DrRegionLintTest(unittest.TestCase):
         self.assertIn("more than one DR standby", findings[0])
 
 
+def flavors():
+    """main-standby.yaml and main-standby-failover.yaml as load_catalog returns them (reads as "<tag> <value>")."""
+    standby = {
+        "import": ["catalog/eks-backend-services/defaults"],
+        "components": {"terraform": {"eks-backend-services/main": {
+            "metadata": {"component": "eks-backend-services", "enabled": False,
+                         "inherits": ["eks-backend-services/defaults"]},
+            "vars": {
+                "cluster_name": "!terraform.state eks/main .eks_cluster_id",
+                "cluster_secret_store_name": "!terraform.state external-secrets/main .default_cluster_secret_store_name",
+                "database_secret_arn": "!terraform.state rds/main .password_secret_arn",
+                "database_endpoint": "!terraform.state rds/main .instance_endpoint",
+                "database_name": "!terraform.state rds/main .instance_name",
+                "redis_enabled": True,
+            },
+            "dependencies": {"components": [{"component": "eks/main"}, {"component": "rds/main"}]},
+        }}},
+    }
+    failover = copy.deepcopy(standby)
+    block = failover["components"]["terraform"]["eks-backend-services/main"]
+    block["metadata"]["enabled"] = True
+    del block["vars"]["database_secret_arn"]
+    block["vars"].update(database_name="productionapp", cluster_secret_store_name="aws-secretsmanager")
+    return standby, failover
+
+
+def block_vars(doc):
+    return doc["components"]["terraform"]["eks-backend-services/main"]["vars"]
+
+
+FAILOVER = "stacks/catalog/eks-backend-services/main-standby-failover.yaml"
+FLAVOR_RULE = ("the failover flavor is main-standby with only metadata.enabled, vars.database_name and "
+               "vars.cluster_secret_store_name changed and no vars.database_secret_arn")
+
+
+class FailoverFlavorTest(unittest.TestCase):
+    def test_todays_flavors_pass(self):
+        self.assertEqual(dr_pair.failover_findings(today(), *flavors()), [])
+
+    def test_the_real_catalog_files_pass(self):
+        docs = [dr_pair.load_catalog(f) for f in (dr_pair.STANDBY_FILE, dr_pair.FAILOVER_FILE)]
+        self.assertEqual(dr_pair.failover_findings(today(), *docs), [])
+        self.assertEqual(block_vars(docs[0])["database_name"], "!terraform.state rds/main .instance_name")
+
+    def test_a_primary_db_name_other_than_database_name_is_reported(self):
+        stacks = today()
+        stacks["fnx-ew1-prod"]["components"]["terraform"]["rds/main"]["vars"]["db_name"] = "euapp"
+        self.assertEqual(dr_pair.failover_findings(stacks, *flavors()), [
+            f"{FAILOVER}: eks-backend-services/main vars.database_name is 'productionapp', not 'euapp', the db_name "
+            "of fnx-ew1-prod rds/main (the promoted standby database keeps its primary's db_name)"])
+
+    def test_a_standby_db_name_other_than_database_name_is_reported(self):
+        stacks = today()
+        del stacks["fnx-ue2-prod"]["components"]["terraform"]["rds/main"]["vars"]["db_name"]
+        self.assertEqual(dr_pair.failover_findings(stacks, *flavors()), [
+            f"{FAILOVER}: eks-backend-services/main vars.database_name is 'productionapp', not None, the db_name "
+            "of fnx-ue2-prod rds/main (the promoted standby database keeps its primary's db_name)"])
+
+    def test_a_var_only_main_standby_sets_is_reported(self):
+        standby, failover = flavors()
+        block_vars(standby)["redis_port"] = "!terraform.state elasticache/main .port"
+        self.assertEqual(dr_pair.failover_findings(today(), standby, failover), [
+            f"{FAILOVER}: components.terraform.eks-backend-services/main.vars.redis_port is not set, not "
+            "'!terraform.state elasticache/main .port' as in stacks/catalog/eks-backend-services/main-standby.yaml: "
+            f"{FLAVOR_RULE}"])
+
+    def test_a_var_only_the_failover_sets_or_changes_is_reported(self):
+        standby, failover = flavors()
+        block_vars(failover)["redis_enabled"] = False
+        block_vars(failover)["extra"] = "x"
+        findings = dr_pair.failover_findings(today(), standby, failover)
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn("vars.extra is 'x', not not set", findings[0])
+        self.assertIn("vars.redis_enabled is False, not True", findings[1])
+
+    def test_a_read_turned_literal_is_reported(self):
+        standby, failover = flavors()
+        block_vars(failover)["cluster_name"] = "ue2-main"
+        findings = dr_pair.failover_findings(today(), standby, failover)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("vars.cluster_name is 'ue2-main', not '!terraform.state eks/main .eks_cluster_id'", findings[0])
+
+    def test_different_imports_or_dependencies_are_reported(self):
+        standby, failover = flavors()
+        failover["import"] = ["catalog/eks-backend-services/prod"]
+        failover["components"]["terraform"]["eks-backend-services/main"]["dependencies"]["components"].append(
+            {"component": "kms/main", "stack": "fnx-ue1-prod"})
+        findings = dr_pair.failover_findings(today(), standby, failover)
+        self.assertEqual(len(findings), 2, findings)
+        self.assertIn(f"{FAILOVER}: components.terraform.eks-backend-services/main.dependencies.components is", findings[0])
+        self.assertIn(f"{FAILOVER}: import is ['catalog/eks-backend-services/prod'], not "
+                      "['catalog/eks-backend-services/defaults']", findings[1])
+
+    def test_a_database_secret_arn_in_the_failover_is_reported(self):
+        standby, failover = flavors()
+        block_vars(failover)["database_secret_arn"] = "arn:aws:secretsmanager:us-east-2:1:secret:x"
+        self.assertEqual(dr_pair.failover_findings(today(), standby, failover), [
+            f"{FAILOVER}: eks-backend-services/main sets vars.database_secret_arn "
+            "('arn:aws:secretsmanager:us-east-2:1:secret:x'); it must not: the secret exists only after promotion, "
+            "so failover step 6 sets it in the standby's stack file"])
+
+    def test_only_the_changed_paths_may_differ(self):
+        standby, failover = flavors()
+        del block_vars(standby)["database_secret_arn"]
+        block_vars(standby)["cluster_secret_store_name"] = "other"
+        self.assertEqual(dr_pair.failover_findings(today(), standby, failover), [])
+
+    def test_a_standby_without_the_default_store_is_reported(self):
+        for change in (False, "delete", "instance"):
+            stacks = today()
+            components = stacks["fnx-ec1-prod"]["components"]["terraform"]
+            if change == "instance":
+                del components["external-secrets/main"]
+                found = None
+            elif change == "delete":
+                del components["external-secrets/main"]["vars"]["create_default_cluster_secret_store"]
+                found = None
+            else:
+                components["external-secrets/main"]["vars"]["create_default_cluster_secret_store"] = change
+                found = change
+            self.assertEqual(dr_pair.failover_findings(stacks, *flavors()), [
+                f"fnx-ec1-prod external-secrets/main: create_default_cluster_secret_store is {found!r}, not true: "
+                f"{FAILOVER} sets cluster_secret_store_name to 'aws-secretsmanager', the store only that creates "
+                "(components/terraform/external-secrets/outputs.tf)"], change)
+
+    def test_a_file_without_the_instance_is_reported(self):
+        standby, _ = flavors()
+        self.assertEqual(dr_pair.failover_findings(today(), standby, {"import": []}), [
+            f"{FAILOVER}: no components.terraform.eks-backend-services/main"])
+
+
 class MainTest(unittest.TestCase):
-    def run_main(self, *argv):
+    def run_main(self, *argv, docs=None):
         out, err = io.StringIO(), io.StringIO()
+        standby, failover = docs or flavors()
+        catalog = {dr_pair.STANDBY_FILE: standby, dr_pair.FAILOVER_FILE: failover}
         with mock.patch.object(dr_pair, "describe_stacks", return_value=today()), \
+                mock.patch.object(dr_pair, "load_catalog", side_effect=catalog.__getitem__), \
                 mock.patch.object(sys, "argv", ["dr-pair.py", *argv]), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = dr_pair.main()
@@ -460,6 +596,26 @@ class MainTest(unittest.TestCase):
             self.assertEqual((code, out), (expected, ""))
             self.assertEqual(bool(err), bool(expected), err)
         self.assertIn("lacks 'ec1'", err)
+
+    def test_lint_fails_on_a_drifted_failover_flavor(self):
+        standby, failover = flavors()
+        block_vars(failover)["database_name"] = "otherapp"
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(today()))):
+            code, out, err = self.run_main("--lint", docs=(standby, failover))
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn(f"dr-pair: {FAILOVER}: eks-backend-services/main vars.database_name is 'otherapp', "
+                      "not 'productionapp', the db_name of fnx-ew1-prod rds/main", err)
+
+    def test_lint_reports_an_unreadable_catalog_file(self):
+        failure = subprocess.CalledProcessError(1, ["yq"])
+        err = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(today()))), \
+                mock.patch.object(dr_pair.subprocess, "check_output", side_effect=failure), \
+                mock.patch.object(sys, "argv", ["dr-pair.py", "--lint"]), \
+                contextlib.redirect_stderr(err):
+            self.assertEqual(dr_pair.main(), 1)
+        self.assertIn("dr-pair: stacks/catalog/eks-backend-services/main-standby.yaml: cannot be read with yq",
+                      err.getvalue())
 
     def test_a_failing_atmos_is_one_line_and_exit_1(self):
         failure = subprocess.CalledProcessError(1, ["atmos"])

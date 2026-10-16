@@ -8,13 +8,17 @@
 # bucket may be down with the primary's region, so the remaining reads
 # (eks/main, rds/main's endpoint, elasticache/main) go to its replica
 # (TFSTATE_SOURCE=replica), which holds the state from before the failover's
-# CLI steps. Where that state is wrong for a promoted database, this file
-# holds the value instead of a read:
-#   - database_name: the promoted instance's db_name, productionapp
-#     (catalog/rds/prod, the primary's and the standby's); a replica's
-#     instance_name may be null.
-#   - cluster_secret_store_name: external-secrets/main's default store,
-#     aws-secretsmanager (create_default_cluster_secret_store: true).
+# CLI steps. This file holds a value instead of a read for:
+#   - database_name: that state is wrong for a promoted database (a
+#     replica's instance_name may be null), so the promoted instance's
+#     db_name, productionapp (catalog/rds/prod, the primary's and the
+#     standby's).
+#   - cluster_secret_store_name: a defence against external-secrets/main
+#     never having been applied while warm (no state to read); its default
+#     store, aws-secretsmanager (create_default_cluster_secret_store: true).
+#   dr-pair.py --lint keeps this file main-standby.yaml with only these
+#   changes, database_name equal to every pair's rds/main db_name, and the
+#   default store created in every standby.
 #   - database_secret_arn: none here. The secret exists only once step 3 has
 #     promoted the database, and its ARN ends in a random suffix, so step 6
 #     sets it as a var in the stack file (the replica's state has null, which
@@ -22,7 +26,8 @@
 #     "No value for required variable".
 # Nothing here reads the failed primary's state, and the dependencies are
 # main-standby's, none of them in the primary stack. Reconciliation keeps
-# this import (its values then match rds/main's outputs); failback step 6
+# this import (its values then match rds/main's outputs); failback step 5
+# destroys the instance while this import still enables it, and step 7
 # switches back to main-standby.
 # =============================================================================
 
