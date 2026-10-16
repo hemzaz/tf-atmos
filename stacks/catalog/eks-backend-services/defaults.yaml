@@ -1,7 +1,10 @@
 ---
-# Catalog defaults for eks-backend-services. Instances set the EKS/ClusterSecretStore/
-# database/redis wiring (all !terraform.state) themselves -- see each stack's
-# compute.yaml -- because those targets differ per stack (redis only in prod).
+# Catalog defaults for eks-backend-services. The EKS/ClusterSecretStore/
+# database/redis wiring (all !terraform.state) is not here, because those
+# targets differ per stack (redis only in prod): the DR standbys set it in
+# their catalog instance file (main-standby.yaml, main-standby-failover.yaml),
+# the prod primaries inherit eks-backend-services/prod, and dev and staging
+# still set it inline in their stack's compute.yaml.
 components:
   terraform:
     eks-backend-services/defaults:

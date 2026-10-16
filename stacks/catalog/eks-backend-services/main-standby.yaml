@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# eks-backend-services/main in the DR warm standby stacks
+# =============================================================================
+# Deployed on failover, not while warm: its database and cache are read-only
+# replicas until promoted, and the database's master secret exists only after
+# promotion (rds replicate_source_db). Wired as the primary stack's
+# (settings.dr.standby_of), every read this stack's own. After promoting
+# them, failover step 6 switches the stack file's import of this file to
+# main-standby-failover.yaml: this instance enabled, with literals for the
+# inputs the state replica cannot give yet (docs/OPERATIONS.md, "Disaster
+# recovery").
+# =============================================================================
+
+import:
+  - catalog/eks-backend-services/defaults
+
+components:
+  terraform:
+    eks-backend-services/main:
+      metadata:
+        component: eks-backend-services
+        enabled: false
+        inherits:
+          - eks-backend-services/defaults
+      vars:
+        environment: "{{ .settings.context.stage }}"
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        cluster_secret_store_name: !terraform.state external-secrets/main .default_cluster_secret_store_name
+        database_secret_arn: !terraform.state rds/main .password_secret_arn
+        database_endpoint: !terraform.state rds/main .instance_endpoint
+        database_name: !terraform.state rds/main .instance_name
+        redis_enabled: true
+        redis_secret_arn: !terraform.state elasticache/main .auth_token_secret_arn
+        redis_host: !terraform.state elasticache/main .primary_endpoint_address
+        redis_port: !terraform.state elasticache/main .port
+        api_gateway_image: '{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}'
+        platform_api_image: '{{ required "settings.environment.backend_service_images.platform_api must be set" .settings.environment.backend_service_images.platform_api }}'
+        auth_service_image: '{{ required "settings.environment.backend_service_images.auth_service must be set" .settings.environment.backend_service_images.auth_service }}'
+        job_processor_image: '{{ required "settings.environment.backend_service_images.job_processor must be set" .settings.environment.backend_service_images.job_processor }}'
+      dependencies:
+        components:
+          - component: eks/main
+          - component: eks-addons/main
+          - component: external-secrets/main
+          - component: rds/main
+          - component: elasticache/main

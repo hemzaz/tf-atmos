@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# github-runners/main in the DR warm standby stacks
+# =============================================================================
+# The in-VPC CI runners, as in the primary stack it stands by for
+# (settings.dr.standby_of): CI and the failover apply the in-cluster
+# components from inside this VPC. This region's key: the primary stack's
+# kms/main multi-region replica.
+# =============================================================================
+
+import:
+  - catalog/github-runners/defaults
+
+components:
+  terraform:
+    github-runners/main:
+      metadata:
+        component: github-runners
+        inherits:
+          - github-runners/defaults
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        kms_key_arn: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        alarm_sns_topic_arns:
+          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+      dependencies:
+        components:
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: vpc/main

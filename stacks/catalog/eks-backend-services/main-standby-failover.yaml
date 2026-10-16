@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# eks-backend-services/main in a DR standby stack during a failover
+# =============================================================================
+# main-standby.yaml enabled, for failover step 6 (docs/OPERATIONS.md,
+# "Disaster recovery"): the standby stack's file switches its import from
+# main-standby to this file, so the shared files never change. The state
+# bucket may be down with the primary's region, so the remaining reads
+# (eks/main, rds/main's endpoint, elasticache/main) go to its replica
+# (TFSTATE_SOURCE=replica), which holds the state from before the failover's
+# CLI steps. This file holds a value instead of a read for:
+#   - database_name: that state is wrong for a promoted database (a
+#     replica's instance_name may be null), so the promoted instance's
+#     db_name, productionapp (catalog/rds/prod, the primary's and the
+#     standby's).
+#   - cluster_secret_store_name: a defence against external-secrets/main
+#     never having been applied while warm (no state to read); its default
+#     store, aws-secretsmanager (create_default_cluster_secret_store: true).
+#   dr-pair.py --lint keeps this file main-standby.yaml with only these
+#   changes, database_name equal to every pair's rds/main db_name, and the
+#   default store created in every standby.
+#   - database_secret_arn: none here. The secret exists only once step 3 has
+#     promoted the database, and its ARN ends in a random suffix, so step 6
+#     sets it as a var in the stack file (the replica's state has null, which
+#     the component's validation rejects). Without it the plan stops with
+#     "No value for required variable".
+# Nothing here reads the failed primary's state, and the dependencies are
+# main-standby's, none of them in the primary stack. Reconciliation keeps
+# this import (its values then match rds/main's outputs); failback step 5
+# destroys the instance while this import still enables it, and step 7
+# switches back to main-standby.
+# =============================================================================
+
+import:
+  - catalog/eks-backend-services/defaults
+
+components:
+  terraform:
+    eks-backend-services/main:
+      metadata:
+        component: eks-backend-services
+        enabled: true
+        inherits:
+          - eks-backend-services/defaults
+      vars:
+        environment: "{{ .settings.context.stage }}"
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        cluster_secret_store_name: "aws-secretsmanager"
+        database_endpoint: !terraform.state rds/main .instance_endpoint
+        database_name: "productionapp"
+        redis_enabled: true
+        redis_secret_arn: !terraform.state elasticache/main .auth_token_secret_arn
+        redis_host: !terraform.state elasticache/main .primary_endpoint_address
+        redis_port: !terraform.state elasticache/main .port
+        api_gateway_image: '{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}'
+        platform_api_image: '{{ required "settings.environment.backend_service_images.platform_api must be set" .settings.environment.backend_service_images.platform_api }}'
+        auth_service_image: '{{ required "settings.environment.backend_service_images.auth_service must be set" .settings.environment.backend_service_images.auth_service }}'
+        job_processor_image: '{{ required "settings.environment.backend_service_images.job_processor must be set" .settings.environment.backend_service_images.job_processor }}'
+      dependencies:
+        components:
+          - component: eks/main
+          - component: eks-addons/main
+          - component: external-secrets/main
+          - component: rds/main
+          - component: elasticache/main
