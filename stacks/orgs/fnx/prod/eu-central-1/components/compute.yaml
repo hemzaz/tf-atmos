@@ -18,7 +18,9 @@
 # (EU to EU, check-data-residency.py).
 #
 # The instances' wiring is the catalog's -standby files, shared with
-# fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod).
+# fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod). Failover step 6
+# switches this file's eks-backend-services import to main-standby-failover
+# and sets database_secret_arn here, never in the shared files.
 # =============================================================================
 
 import:

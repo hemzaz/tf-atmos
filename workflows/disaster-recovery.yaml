@@ -87,15 +87,18 @@ workflows:
              --primary-region {{ .steps.target_region.value }} --primary-replication-group-id {{ $p.cache }} --global-replication-group-id <id>`, <id> from `aws elasticache describe-global-replication-groups --region {{ .steps.target_region.value }} --query "GlobalReplicationGroups[?ends_with(GlobalReplicationGroupId, '-{{ $p.global_datastore_suffix }}')].GlobalReplicationGroupId" --output text` (stop if more than one id comes back).
           5. Node groups: `aws eks update-nodegroup-config --cluster-name {{ $p.cluster }} --nodegroup-name <ng>
              --scaling-config minSize=..,desiredSize=..,maxSize=..` to {{ $p.primary }}'s sizes.
-          6. Deploy eks-backend-services/main in-VPC from a branch: enabled, database_secret_arn set to
-             MasterUserSecret.SecretArn of {{ $p.db_instance }}, database_name {{ $p.db_name }}; with the bucket down,
+          6. Deploy eks-backend-services/main in-VPC from a branch that edits only {{ $p.standby }}'s stack file: its import
+             catalog/eks-backend-services/main-standby switched to main-standby-failover (enabled, database_name and the
+             secret store literal; its database_name must be {{ $p.db_name }}), and database_secret_arn set there to
+             MasterUserSecret.SecretArn of {{ $p.db_instance }}; with the bucket down,
              {{ if $p.state.replicated }}TFSTATE_SOURCE=replica for its reads{{ else }}no replica to read ({{ $p.state.backend_stack }} does not replicate {{ $p.state.bucket }}): every input literal{{ end }} and local state for its own (migrate later).
           7. Auth: nothing while {{ $p.primary_region }} Cognito answers (users sign in again; {{ $p.user_migration }}
              copies them as RESET_REQUIRED: forgot-password, then MFA enrolment). If it does not, bulk-import the users not yet in {{ $p.standby }}'s pool from the latest export.{{ if $eu }}
              The export and users.csv stay in {{ $p.standby_region }} (SSE-KMS), never outside the EU.{{ end }}
           8. Verify: `curl -sf https://api.{{ if $eu }}<EU apex>{{ else }}<domain>{{ end }}/`, then dr-status for {{ $p.standby }}.
           After recovery, reconcile Terraform: {{ $p.standby }} rds/main without replicate_source_db (plan must be
-          update-in-place, never a replacement), eks/main sizes, eks-backend-services/main enabled; apply no
+          update-in-place, never a replacement), eks/main sizes in the stack file, eks-backend-services/main kept on
+          main-standby-failover (migrate its local state); apply no
           elasticache/main until failback.
 
   dr-failback:
@@ -146,7 +149,8 @@ workflows:
           4. Un-invert the primary's health check if it was forced; DNS returns to {{ $p.primary_region }}.
           5. Re-seed {{ $p.standby }} rds/main from {{ $p.primary_region }} the same way (deletion protection, final snapshot,
              replicate_source_db restored, `-replace=aws_db_instance.main` on {{ $p.standby }}).
-          6. {{ $p.standby }} back to warm sizes (PR + desired sizes by CLI), eks-backend-services/main disabled.
+          6. {{ $p.standby }} back to warm sizes (PR + desired sizes by CLI), and in the same PR its stack file imports
+             catalog/eks-backend-services/main-standby again (disabled), database_secret_arn removed.
           7. Auth: users sign in to {{ $p.primary }} again; passwords changed in {{ $p.standby_region }} and users created there
              do not flow back (reset in {{ $p.primary_region }}, create again).
           8. `gh workflow enable terraform-cd.yml`.

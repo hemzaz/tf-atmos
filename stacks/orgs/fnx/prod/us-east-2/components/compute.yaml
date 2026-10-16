@@ -14,7 +14,9 @@
 # here on failover.
 #
 # The instances' wiring is the catalog's -standby files, shared with
-# fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod).
+# fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod). Failover step 6
+# switches this file's eks-backend-services import to main-standby-failover
+# and sets database_secret_arn here, never in the shared files.
 # =============================================================================
 
 import:

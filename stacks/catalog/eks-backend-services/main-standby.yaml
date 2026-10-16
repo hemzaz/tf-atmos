@@ -4,9 +4,12 @@
 # =============================================================================
 # Deployed on failover, not while warm: its database and cache are read-only
 # replicas until promoted, and the database's master secret exists only after
-# promotion (rds replicate_source_db). The failover runbook sets enabled to
-# true after promoting them (docs/OPERATIONS.md, "Disaster recovery"). Wired
-# as the primary stack's (settings.dr.standby_of), every read this stack's own.
+# promotion (rds replicate_source_db). Wired as the primary stack's
+# (settings.dr.standby_of), every read this stack's own. After promoting
+# them, failover step 6 switches the stack file's import of this file to
+# main-standby-failover.yaml: this instance enabled, with literals for the
+# inputs the state replica cannot give yet (docs/OPERATIONS.md, "Disaster
+# recovery").
 # =============================================================================
 
 import:
