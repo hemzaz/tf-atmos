@@ -52,9 +52,10 @@ components:
           - "10.10.101.0/24"
           - "10.10.102.0/24"
           - "10.10.103.0/24"
-        # One element per AZ, from settings.network.database_subnet_cidrs.main.
+        # One element per AZ, from settings.network.database_subnet_cidrs.main;
+        # the first element fails the render unless the list has exactly 3.
         database_subnets:
-          - "{{ index .settings.network.database_subnet_cidrs.main 0 }}"
+          - '{{ if ne (len .settings.network.database_subnet_cidrs.main) 3 }}{{ fail "settings.network.database_subnet_cidrs.main needs exactly 3 entries, one per AZ" }}{{ end }}{{ index .settings.network.database_subnet_cidrs.main 0 }}'
           - "{{ index .settings.network.database_subnet_cidrs.main 1 }}"
           - "{{ index .settings.network.database_subnet_cidrs.main 2 }}"
 

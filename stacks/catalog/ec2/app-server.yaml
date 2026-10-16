@@ -61,9 +61,10 @@ components:
           - from_port: 5432
             to_port: 5432
             protocol: "tcp"
-            # Index by index: a template renders a string, never a list.
+            # Index by index: a template renders a string, never a list. The
+            # first element fails the render unless the list has exactly 3.
             cidr_blocks:
-              - "{{ index .settings.network.database_subnet_cidrs.main 0 }}"
+              - '{{ if ne (len .settings.network.database_subnet_cidrs.main) 3 }}{{ fail "settings.network.database_subnet_cidrs.main needs exactly 3 entries, one per AZ" }}{{ end }}{{ index .settings.network.database_subnet_cidrs.main 0 }}'
               - "{{ index .settings.network.database_subnet_cidrs.main 1 }}"
               - "{{ index .settings.network.database_subnet_cidrs.main 2 }}"
             description: "PostgreSQL to database subnets"
