@@ -1,0 +1,40 @@
+---
+# =============================================================================
+# ec2/app-server in a single-stack dev shape
+# =============================================================================
+# app-server.yaml's host with dev's rules: the application port from vpc/main's
+# CIDR and no SSH rule from the bastion, so no read inside the ingress list.
+# =============================================================================
+
+import:
+  - catalog/ec2/defaults
+
+components:
+  terraform:
+    ec2/app-server:
+      metadata:
+        component: ec2
+        inherits:
+          - ec2
+      vars:
+        name: app-server
+        vpc_id: !terraform.state vpc/main .vpc_id
+        instance_type: "t3.medium"
+        ssh_key_pair: !terraform.state ec2/bastion .ssh_key_pair
+        # Launch with the bastion's key, never a key of its own: if the
+        # reference above resolved to null, the instance would be keyless
+        # (SSM only) instead of silently generating its own key under the
+        # aws/secretsmanager key rather than kms/main.
+        create_ssh_keys: false
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
+        root_volume_size: 50
+        allowed_ingress_rules:
+          - from_port: 8080
+            to_port: 8080
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/16"]
+            description: "Application access"
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: ec2/bastion
