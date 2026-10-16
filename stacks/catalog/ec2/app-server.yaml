@@ -6,6 +6,11 @@
 # read inside the ingress rules list), PostgreSQL out to the database subnets.
 # app-server-dev.yaml is the single-stack dev shape, whose rules name only
 # CIDRs.
+# The CIDRs come from the stack's settings.network: vpc_cidrs.main (the
+# application port) and database_subnet_cidrs.main (three subnets, one per
+# AZ, as vpc/main's database_subnets), so a stack sets those settings rather
+# than restating the rules list and its read.
+# A stack must give exactly 3 database_subnet_cidrs.main entries, one per AZ.
 # =============================================================================
 
 import:
@@ -39,7 +44,7 @@ components:
           - from_port: 8080
             to_port: 8080
             protocol: "tcp"
-            cidr_blocks: ["10.10.0.0/16"]
+            cidr_blocks: ["{{ .settings.network.vpc_cidrs.main }}"]
             description: "Application port"
           - from_port: 22
             to_port: 22
@@ -56,7 +61,12 @@ components:
           - from_port: 5432
             to_port: 5432
             protocol: "tcp"
-            cidr_blocks: ["10.10.201.0/24", "10.10.202.0/24", "10.10.203.0/24"]
+            # Index by index: a template renders a string, never a list. The
+            # first element fails the render unless the list has exactly 3.
+            cidr_blocks:
+              - '{{ if ne (len .settings.network.database_subnet_cidrs.main) 3 }}{{ fail "settings.network.database_subnet_cidrs.main needs exactly 3 entries, one per AZ" }}{{ end }}{{ index .settings.network.database_subnet_cidrs.main 0 }}'
+              - "{{ index .settings.network.database_subnet_cidrs.main 1 }}"
+              - "{{ index .settings.network.database_subnet_cidrs.main 2 }}"
             description: "PostgreSQL to database subnets"
         monitoring: true
       dependencies:
