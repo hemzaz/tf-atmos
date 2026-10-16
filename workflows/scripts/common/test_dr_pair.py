@@ -546,6 +546,31 @@ class FailoverFlavorTest(unittest.TestCase):
                 f"{FAILOVER} sets cluster_secret_store_name to 'aws-secretsmanager', the store only that creates "
                 "(components/terraform/external-secrets/outputs.tf)"], change)
 
+    def test_a_wrong_store_name_is_reported(self):
+        standby, failover = flavors()
+        block_vars(failover)["cluster_secret_store_name"] = "wrong-store"
+        self.assertEqual(dr_pair.failover_findings(today(), standby, failover), [
+            f"{FAILOVER}: eks-backend-services/main vars.cluster_secret_store_name is 'wrong-store', not "
+            "'aws-secretsmanager', the only store external-secrets/main creates "
+            "(components/terraform/external-secrets/outputs.tf)"])
+
+    def test_enabled_is_pinned_on_both_flavors(self):
+        for name, value, line in (
+                ("failover", False, f"{FAILOVER}: eks-backend-services/main metadata.enabled is False, not True: "
+                                    "failover step 6 deploys it"),
+                ("failover", None, f"{FAILOVER}: eks-backend-services/main metadata.enabled is None, not True: "
+                                   "failover step 6 deploys it"),
+                ("standby", True, "stacks/catalog/eks-backend-services/main-standby.yaml: eks-backend-services/main "
+                                  "metadata.enabled is True, not False: it stays off while the standby is warm")):
+            standby, failover = flavors()
+            doc = failover if name == "failover" else standby
+            block = doc["components"]["terraform"]["eks-backend-services/main"].setdefault("metadata", {})
+            if value is None:
+                block.pop("enabled", None)
+            else:
+                block["enabled"] = value
+            self.assertEqual(dr_pair.failover_findings(today(), standby, failover), [line], (name, value))
+
     def test_a_file_without_the_instance_is_reported(self):
         standby, _ = flavors()
         self.assertEqual(dr_pair.failover_findings(today(), standby, {"import": []}), [
