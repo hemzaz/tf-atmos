@@ -4,8 +4,9 @@
 # =============================================================================
 # A cross-region read replica of the rds/main of the primary stack it stands
 # by for (settings.dr.standby_of; Cloud Posse terraform-aws-rds
-# replicate_source_db), kept in sync continuously. Promote it by setting
-# replicate_source_db to null (docs/OPERATIONS.md, "Disaster recovery").
+# replicate_source_db), kept in sync continuously. Once promoted, the stack
+# file imports main-standby-promoted.yaml instead (docs/OPERATIONS.md,
+# "Disaster recovery"), never an edit here: both pairs share this file.
 # This region's key: the primary stack's kms/main multi-region replica.
 # =============================================================================
 

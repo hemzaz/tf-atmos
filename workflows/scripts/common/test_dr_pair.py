@@ -456,6 +456,118 @@ FLAVOR_RULE = ("the failover flavor is main-standby with only metadata.enabled, 
                "vars.cluster_secret_store_name changed and no vars.database_secret_arn")
 
 
+def rds_flavors():
+    """rds/main-standby.yaml and main-standby-promoted.yaml as load_catalog returns them."""
+    kms = "!terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys[\"{{ .vars.region }}\"].key_arn'"
+    replica = {
+        "import": ["catalog/rds/prod"],
+        "components": {"terraform": {"rds/main": {
+            "metadata": {"component": "rds", "inherits": ["rds/prod"]},
+            "vars": {
+                "replicate_source_db": "!terraform.state rds/main {{ .settings.dr.standby_of }} .instance_arn",
+                "db_name": "productionapp",
+                "instance_class": "db.r5.large",
+                "kms_key_id": kms,
+                "vpc_id": "!terraform.state vpc/main .vpc_id",
+            },
+            "dependencies": {"components": [
+                {"component": "rds/main", "stack": "{{ .settings.dr.standby_of }}"},
+                {"component": "vpc/main"},
+                {"component": "kms/main", "stack": "{{ .settings.dr.standby_of }}"},
+            ]},
+        }}},
+    }
+    promoted = copy.deepcopy(replica)
+    block = promoted["components"]["terraform"]["rds/main"]
+    del block["vars"]["replicate_source_db"]
+    del block["dependencies"]["components"][0]
+    return replica, promoted
+
+
+def rds_vars(doc):
+    return doc["components"]["terraform"]["rds/main"]["vars"]
+
+
+def rds_deps(doc):
+    return doc["components"]["terraform"]["rds/main"]["dependencies"]["components"]
+
+
+REPLICA = "stacks/catalog/rds/main-standby.yaml"
+PROMOTED = "stacks/catalog/rds/main-standby-promoted.yaml"
+PROMOTED_RULE = "the promoted flavor is the replica flavor minus only vars.replicate_source_db and its rds/main dependency"
+
+
+class PromotedFlavorTest(unittest.TestCase):
+    def findings(self, replica, promoted):
+        return dr_pair.promoted_findings(REPLICA, replica, PROMOTED, promoted)
+
+    def test_todays_flavors_pass(self):
+        self.assertEqual(self.findings(*rds_flavors()), [])
+
+    def test_the_real_catalog_files_pass(self):
+        self.assertIn((REPLICA, PROMOTED), dr_pair.promoted_files())
+        for base, promoted in dr_pair.promoted_files():
+            docs = [dr_pair.load_catalog(f) for f in (base, promoted)]
+            self.assertEqual(dr_pair.promoted_findings(base, docs[0], promoted, docs[1]), [], promoted)
+        replica = dr_pair.load_catalog(REPLICA)
+        self.assertEqual(rds_vars(replica)["replicate_source_db"],
+                         "!terraform.state rds/main {{ .settings.dr.standby_of }} .instance_arn")
+
+    def test_another_leaf_that_differs_is_reported(self):
+        replica, promoted = rds_flavors()
+        rds_vars(promoted)["instance_class"] = "db.r5.xlarge"
+        self.assertEqual(self.findings(replica, promoted), [
+            f"{PROMOTED}: components.terraform.rds/main.vars.instance_class is 'db.r5.xlarge', not 'db.r5.large' "
+            f"as in {REPLICA}: {PROMOTED_RULE}"])
+
+    def test_a_dropped_kms_read_is_reported(self):
+        replica, promoted = rds_flavors()
+        del rds_vars(promoted)["kms_key_id"]
+        findings = self.findings(replica, promoted)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("rds/main.vars.kms_key_id is not set, not", findings[0])
+
+    def test_another_dropped_dependency_is_reported(self):
+        replica, promoted = rds_flavors()
+        rds_deps(promoted).pop()  # kms/main of the primary
+        findings = self.findings(replica, promoted)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("dependencies.components is", findings[0])
+
+    def test_a_changed_import_is_reported(self):
+        replica, promoted = rds_flavors()
+        promoted["import"] = ["catalog/rds/defaults"]
+        findings = self.findings(replica, promoted)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn(f"{PROMOTED}: import is ['catalog/rds/defaults']", findings[0])
+
+    def test_a_promoted_flavor_keeping_the_read_is_reported(self):
+        replica, promoted = rds_flavors()
+        rds_vars(promoted)["replicate_source_db"] = rds_vars(replica)["replicate_source_db"]
+        findings = self.findings(replica, promoted)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn(f"{PROMOTED}: rds/main keeps the replica link", findings[0])
+
+    def test_a_promoted_flavor_keeping_the_dependency_is_reported(self):
+        replica, promoted = rds_flavors()
+        rds_deps(promoted).insert(0, rds_deps(replica)[0])
+        findings = self.findings(replica, promoted)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("keeps the replica link", findings[0])
+
+    def test_a_base_that_is_not_a_replica_is_reported(self):
+        replica, promoted = rds_flavors()
+        del rds_vars(replica)["replicate_source_db"]
+        findings = self.findings(replica, promoted)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn(f"{REPLICA}: rds/main is not a replica", findings[0])
+
+    def test_a_missing_instance_is_reported(self):
+        replica, _ = rds_flavors()
+        self.assertEqual(self.findings(replica, {"components": {"terraform": {}}}),
+                         [f"{PROMOTED}: no components.terraform.rds/main"])
+
+
 class FailoverFlavorTest(unittest.TestCase):
     def test_todays_flavors_pass(self):
         self.assertEqual(dr_pair.failover_findings(today(), *flavors()), [])
@@ -578,11 +690,15 @@ class FailoverFlavorTest(unittest.TestCase):
 
 
 class MainTest(unittest.TestCase):
-    def run_main(self, *argv, docs=None):
+    def run_main(self, *argv, docs=None, rds_docs=None):
         out, err = io.StringIO(), io.StringIO()
         standby, failover = docs or flavors()
-        catalog = {dr_pair.STANDBY_FILE: standby, dr_pair.FAILOVER_FILE: failover}
+        replica, promoted = rds_docs or rds_flavors()
+        catalog = {dr_pair.STANDBY_FILE: standby, dr_pair.FAILOVER_FILE: failover,
+                   dr_pair.RDS_STANDBY_FILE: replica, dr_pair.RDS_PROMOTED_FILE: promoted}
         with mock.patch.object(dr_pair, "describe_stacks", return_value=today()), \
+                mock.patch.object(dr_pair, "promoted_files",
+                                  return_value=[(dr_pair.RDS_STANDBY_FILE, dr_pair.RDS_PROMOTED_FILE)]), \
                 mock.patch.object(dr_pair, "load_catalog", side_effect=catalog.__getitem__), \
                 mock.patch.object(sys, "argv", ["dr-pair.py", *argv]), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -630,6 +746,19 @@ class MainTest(unittest.TestCase):
         self.assertEqual((code, out), (1, ""))
         self.assertIn(f"dr-pair: {FAILOVER}: eks-backend-services/main vars.database_name is 'otherapp', "
                       "not 'productionapp', the db_name of fnx-ew1-prod rds/main", err)
+
+    def test_lint_fails_on_a_drifted_promoted_flavor(self):
+        replica, promoted = rds_flavors()
+        rds_vars(promoted)["instance_class"] = "db.r5.xlarge"
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(today()))):
+            code, out, err = self.run_main("--lint", rds_docs=(replica, promoted))
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn(f"dr-pair: {PROMOTED}: components.terraform.rds/main.vars.instance_class is 'db.r5.xlarge', "
+                      f"not 'db.r5.large' as in {REPLICA}", err)
+
+    def test_lint_passes_todays_flavors(self):
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(today()))):
+            self.assertEqual(self.run_main("--lint"), (0, "", ""))
 
     def test_lint_reports_an_unreadable_catalog_file(self):
         failure = subprocess.CalledProcessError(1, ["yq"])
