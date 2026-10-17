@@ -44,8 +44,8 @@
 /stacks/catalog/eks-backend-services/ @hemzaz
 /stacks/catalog/github-runners/   @hemzaz
 
-# The services catalog: the stacks' instance wiring (the prod DR standbys'
-# -standby so far), which left /stacks/orgs/** with it.
+# The services catalog: the stacks' instance wiring (the un-suffixed defaults
+# and the -<flavor> files), which left /stacks/orgs/** with it.
 /stacks/catalog/rds/              @hemzaz
 /stacks/catalog/elasticache/      @hemzaz
 /stacks/catalog/cognito/          @hemzaz
