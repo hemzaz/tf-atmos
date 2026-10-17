@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# cost-optimization/main in the nonprod stacks
+# =============================================================================
+# Instance scheduler, Savings Plan/RI analyzer, resource cleanup, cost anomaly
+# detection and the monthly budget, with the budget limit and the recipients
+# taken from the stack's settings.environment.monitoring.
+# =============================================================================
+
+import:
+  - catalog/cost-optimization/defaults
+
+components:
+  terraform:
+    cost-optimization/main:
+      metadata:
+        component: cost-optimization
+        inherits:
+          - cost-optimization/defaults
+      vars:
+        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
+        budget_notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
+        cost_anomaly_notification_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        cost_alert_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"

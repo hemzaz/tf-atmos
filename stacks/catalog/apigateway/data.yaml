@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# apigateway/data in the nonprod stacks: the data REST API (disabled)
+# =============================================================================
+# Disabled with lambda/data-processor, its only backend: an API with no method
+# cannot be deployed. Enable both together. The API's wiring: "/data" proxied
+# to lambda/data-processor, the cognito/main authorizer, the acm/services
+# wildcard certificate and network/services' data zone. Each stack keeps its
+# description, resources list, log retention and any throttling or tags
+# (orgs/fnx/<stage>/<region>/components/services.yaml).
+# =============================================================================
+
+import:
+  - catalog/apigateway/defaults
+
+components:
+  terraform:
+    apigateway/data:
+      metadata:
+        component: apigateway
+        enabled: false
+      vars:
+        stage_name: "v1"
+
+        api_methods:
+          - resource_path: "/data"
+            http_method: "ANY"
+            authorization: "COGNITO_USER_POOLS"
+
+        # Real backend: AWS_PROXY hands the whole request to the function and
+        # returns whatever it produces. lambda_function_name is required so this
+        # component can grant API Gateway permission to invoke it - without that
+        # policy the integration applies fine and every call returns 500.
+        api_integrations:
+          - resource_path: "/data"
+            http_method: "ANY"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state lambda/data-processor .function_invoke_arn
+            lambda_function_name: !terraform.state lambda/data-processor .function_name
+
+        # Authorizer for the COGNITO_USER_POOLS method above, same pool as
+        # apigateway/main. A method that asks for COGNITO_USER_POOLS without a
+        # pool here fails at apply.
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+
+        # Domain Configuration
+        domain_name: "data.services.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
+        enable_logging: true
+        create_dashboard: true
+        enable_waf: true
+
+        api_name: "data-api"
+        zone_id: !terraform.state network/services .zone_ids.data
+      dependencies:
+        components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
+          - component: network/services
+          - component: acm/services
+          - component: cognito/main
+          - component: lambda/data-processor

@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# cognito/main in the nonprod stacks: the API user pool
+# =============================================================================
+# The user pool backing the COGNITO_USER_POOLS authorizer on apigateway/main
+# (and apigateway/data), named from the stack id, with one confidential API
+# client. Each stack keeps its deletion protection
+# (orgs/fnx/<stage>/<region>/components/services.yaml).
+# =============================================================================
+
+import:
+  - catalog/cognito/defaults
+
+components:
+  terraform:
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/defaults
+      vars:
+        name_prefix: '{{ .atmos_stack }}'
+        clients:
+          api:
+            # Confidential client: this consumer is server-side, so it can hold
+            # a secret. A browser or mobile client needs generate_secret: false.
+            generate_secret: true
