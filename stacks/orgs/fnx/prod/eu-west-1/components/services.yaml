@@ -2,11 +2,12 @@
 # =============================================================================
 # Services for fnx-ew1-prod (EU production, its own account)
 # =============================================================================
-# fnx-ue1-prod's serving path (orgs/fnx/prod/us-east-1/components/services.yaml,
-# which explains each input) from the shared prod catalogs
-# (catalog/<component>/prod): the main database and cache, the backend
-# services on eks/main, the user pool, the main API and monitoring, plus the
-# prod-eu account's budget. Its DR warm standby is fnx-ec1-prod
+# fnx-ue1-prod's serving path from the instance files it shares with it
+# (catalog/<c>/<i>-prod, which explain each input): the main database and
+# cache, the user pool, the main API and monitoring (main-prod: no ecs/main
+# read), plus the prod-eu account's budget (cost-optimization/main-prod-eu).
+# This file keeps this stack's values: the health check's checker and relay
+# regions, the relayed alarms' receipt and the budget's standby tag. Its DR warm standby is fnx-ec1-prod
 # (eu-central-1), as fnx-ue2-prod is fnx-ue1-prod's:
 #   - elasticache/main is a Global Datastore primary, rds/main the source of
 #     fnx-ec1-prod's read replica, cognito/main has the dr-migration client
@@ -26,73 +27,20 @@
 
 import:
   - orgs/fnx/prod/eu-west-1/components/globals
-  - catalog/cost-optimization/defaults
-  - catalog/rds/prod
-  - catalog/elasticache/prod
-  - catalog/cognito/prod
-  - catalog/apigateway/prod
-  - catalog/monitoring/prod
+  - catalog/cost-optimization/main-prod-eu
+  - catalog/rds/main-prod
+  - catalog/elasticache/main-prod
+  - catalog/cognito/main-prod
+  - catalog/apigateway/main-prod
+  - catalog/monitoring/main-prod
 
 components:
   terraform:
-    # Multi-AZ in vpc/main's database subnets, on kms/main, selected into
-    # backup/main by its Backup tag.
-    rds/main:
-      metadata:
-        component: rds
-        inherits:
-          - rds/main-prod
-
-    elasticache/main:
-      metadata:
-        component: elasticache
-        inherits:
-          - elasticache/main-prod
-      vars:
-        # DR, as fnx-ue1-prod's: a Global Datastore with this cache as
-        # primary; fnx-ec1-prod's elasticache/main (eu-central-1) is its
-        # secondary. The suffix is global per account, so it carries the full
-        # id. Both members are EU stacks: check-data-residency.py fails a
-        # non-GDPR stack that joins it.
-        global_replication_group_id_suffix: "{{ .atmos_stack }}-cache"
-
-    # The EU pool, as fnx-ue1-prod's: the api client and the dr-migration
-    # client fnx-ec1-prod's user-migration trigger signs in with (EU to EU).
-    cognito/main:
-      metadata:
-        component: cognito
-        inherits:
-          - cognito/prod
-      vars:
-        name_prefix: '{{ .atmos_stack }}'
-        clients:
-          api:
-            generate_secret: true
-            access_token_validity_minutes: 30
-          # DR (as fnx-ue1-prod's): fnx-ec1-prod's
-          # lambda/cognito-user-migration checks a user's password against this
-          # pool with AdminInitiateAuth, which needs a client allowing the
-          # admin password flow and, without a secret, no SECRET_HASH. Admin
-          # flows are IAM-signed calls, so no browser can use this client. The
-          # tokens it issues are discarded: the shortest lifetimes.
-          dr-migration:
-            generate_secret: false
-            explicit_auth_flows: ["ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-            access_token_validity_minutes: 5
-            id_token_validity_minutes: 5
-            refresh_token_validity_days: 1
-
     # api.<EU apex>, as fnx-ue1-prod's: the PRIMARY half of its Route 53
-    # failover pair, health-checked on this region's stage root;
-    # fnx-ec1-prod's apigateway/main is the SECONDARY.
+    # failover pair (catalog/apigateway/main-prod); fnx-ec1-prod's
+    # apigateway/main is the SECONDARY.
     apigateway/main:
-      metadata:
-        component: apigateway
-        inherits:
-          - apigateway/main-prod
       vars:
-        route53_failover_type: PRIMARY
-        route53_set_identifier: "{{ .settings.prefix }}"
         # The checkers: eu-west-1, the only EU checker region, plus two others
         # (Route 53 needs three): probes of the API's stage root, a residency
         # exemption (check-data-residency.py EXEMPTIONS).
@@ -114,32 +62,15 @@ components:
     # pool's alarms name (compute.yaml), and delivers the relayed us-east-1
     # health check alarms of the EU failover pair to it (apigateway/main).
     monitoring/main:
-      metadata:
-        component: monitoring
-        inherits:
-          - monitoring/main-prod
       vars:
         receive_relayed_health_check_alarms: true
 
-    # As in fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/services.yaml):
-    # Savings Plan/RI analyzer, resource cleanup, cost anomaly detection and
-    # the monthly budget (on this stack's Environment tag, ew1). Cost data is
-    # account metadata, not personal data, but staff email addresses are: the
+    # As in fnx-ue1-prod, from catalog/cost-optimization/main-prod-eu (the
     # budget and the anomaly subscription notify the eu-west-1 cost-alerts
-    # topic, which holds the email subscriptions (cost_alert_emails), so the
-    # global Budgets and Cost Explorer services (us-east-1) store only its ARN.
+    # topic, never staff email addresses directly). The prod-eu account's
+    # budget also counts its DR standby fnx-ec1-prod (Environment ec1, same
+    # account, no budget of its own, owner decision); lint check-dr-pairs
+    # (dr-pair.py --lint) fails a standby missing here.
     cost-optimization/main:
-      metadata:
-        component: cost-optimization
-        inherits:
-          - cost-optimization/defaults
       vars:
-        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
-        # The prod-eu account's budget also counts its DR standby fnx-ec1-prod
-        # (Environment ec1, same account, no budget of its own, owner decision);
-        # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
         budget_additional_environment_tags: ["ec1"]
-        billing_notifications_sns_enabled: true
-        cost_alert_emails:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"

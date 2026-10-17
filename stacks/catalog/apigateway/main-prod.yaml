@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# apigateway/main in the prod primary stacks: the main REST API
+# =============================================================================
+# The instance file, not the abstract: the routes, reads and dependencies are
+# the apigateway/main-prod abstract's (prod.yaml). DR (owner decision Q5): the
+# PRIMARY half of api.<domain>'s Route 53 failover pair, health-checked on
+# this region's stage root; the DR standby's apigateway/main
+# (main-standby.yaml) is the SECONDARY.
+#
+# Per stack, in the stack file: where the health check's alarm (in us-east-1,
+# where Route 53's metrics are) goes, and for an EU primary its checker
+# regions and the alarm relay to the EU regions (check-data-residency.py).
+# =============================================================================
+
+import:
+  - catalog/apigateway/prod
+
+components:
+  terraform:
+    apigateway/main:
+      metadata:
+        component: apigateway
+        inherits:
+          - apigateway/main-prod
+      vars:
+        route53_failover_type: PRIMARY
+        route53_set_identifier: "{{ .settings.prefix }}"

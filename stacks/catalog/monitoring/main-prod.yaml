@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# monitoring/main in the prod primary stacks without a data plane
+# =============================================================================
+# The instance file, not the abstract: the topic, dashboards, alarms, reads
+# and dependencies are the monitoring/main-prod abstract's (prod.yaml), on
+# eks/main, rds/main, elasticache/main, apigateway/main and acm/main. It owns
+# <Environment>-main-alarms, the topic the runner pool's alarms and the API's
+# health check alarm name. main-prod-data-plane.yaml is the shape of a primary
+# that also runs ecs/main; the DR standbys' is main-standby.yaml, the nonprod
+# stacks' main.yaml. An EU primary's stack file switches on receipt of the
+# relayed health check alarms (receive_relayed_health_check_alarms).
+# =============================================================================
+
+import:
+  - catalog/monitoring/prod
+
+components:
+  terraform:
+    monitoring/main:
+      metadata:
+        component: monitoring
+        inherits:
+          - monitoring/main-prod

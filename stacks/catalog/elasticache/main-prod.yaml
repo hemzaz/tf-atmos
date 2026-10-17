@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# elasticache/main in the prod primary stacks: the main cache
+# =============================================================================
+# The instance file, not the abstract: the shape, reads and dependencies are
+# the elasticache/main-prod abstract's (prod.yaml). DR (owner decision Q5): a
+# Global Datastore with this cache as primary; the DR standby's
+# elasticache/main (main-standby.yaml) is its secondary. The id suffix is
+# global per account, so it carries the full stack id. An EU primary's
+# standby is an EU stack: check-data-residency.py fails a non-GDPR stack that
+# joins its Global Datastore.
+# =============================================================================
+
+import:
+  - catalog/elasticache/prod
+
+components:
+  terraform:
+    elasticache/main:
+      metadata:
+        component: elasticache
+        inherits:
+          - elasticache/main-prod
+      vars:
+        global_replication_group_id_suffix: "{{ .atmos_stack }}-cache"
