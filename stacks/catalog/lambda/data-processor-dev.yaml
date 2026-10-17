@@ -4,7 +4,8 @@
 # =============================================================================
 # Data processing (was infrastructure/data.lambda). The lambda component is
 # single-function, so one instance per function. Dev's function has no queue:
-# no sqs/data-transform reads and no SQS egress, unlike the staging shape.
+# no sqs/data-transform reads and no SQS egress, unlike the default
+# (catalog/lambda/data-processor.yaml).
 #
 # The application repo's CI builds the package and uploads it as
 # <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket

@@ -65,12 +65,12 @@ components:
       vars:
         receive_relayed_health_check_alarms: true
 
-    # As in fnx-ue1-prod, from catalog/cost-optimization/main-prod-eu (the
-    # budget and the anomaly subscription notify the eu-west-1 cost-alerts
-    # topic, never staff email addresses directly). The prod-eu account's
-    # budget also counts its DR standby fnx-ec1-prod (Environment ec1, same
-    # account, no budget of its own, owner decision); lint check-dr-pairs
-    # (dr-pair.py --lint) fails a standby missing here.
+    # From catalog/cost-optimization/main-prod-eu, not the un-suffixed default
+    # fnx-ue1-prod imports: the budget and the anomaly subscription notify the
+    # eu-west-1 cost-alerts topic, never staff email addresses directly. The
+    # prod-eu account's budget also counts its DR standby fnx-ec1-prod
+    # (Environment ec1, same account, no budget of its own, owner decision);
+    # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
     cost-optimization/main:
       vars:
         budget_additional_environment_tags: ["ec1"]

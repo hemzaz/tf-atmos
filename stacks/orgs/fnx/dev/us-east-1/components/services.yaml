@@ -34,6 +34,7 @@ components:
 
     apigateway/data:
       vars:
+        api_name: "data-api"
         description: "Data API Gateway for {{ .settings.context.tenant }}-{{ .settings.prefix }}"
         api_resources:
           - path_part: "data"
