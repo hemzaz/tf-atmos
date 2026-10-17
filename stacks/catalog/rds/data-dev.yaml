@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# rds/data in a single-stack dev shape: the analytics database
+# =============================================================================
+# Was infrastructure/data.rds. Dev's database inherits the disposable rds/dev
+# abstract and sits in vpc/services' private subnets.
+# =============================================================================
+
+import:
+  - catalog/rds/dev
+
+components:
+  terraform:
+    rds/data:
+      metadata:
+        component: rds
+        inherits:
+          - rds/dev
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "data-db"
+        db_name: "datawarehouse"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.large"
+        allocated_storage: 20
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services

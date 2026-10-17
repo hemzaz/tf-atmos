@@ -1,0 +1,40 @@
+---
+# =============================================================================
+# lambda/data-processor in a single-stack dev shape (disabled)
+# =============================================================================
+# Data processing (was infrastructure/data.lambda). The lambda component is
+# single-function, so one instance per function. Dev's function has no queue:
+# no sqs/data-transform reads and no SQS egress, unlike the staging shape.
+#
+# The application repo's CI builds the package and uploads it as
+# <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
+# with iam/ci's lambda-uploader role; a PR here then sets
+# settings.package_version, and the changed s3_key redeploys the code
+# (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
+# package exists: upload it, set package_version, set enabled: true, and
+# restore its readers, each marked with a "disabled" comment:
+# apigateway/main's "/api" route, apigateway/data, and monitoring/data's
+# dimensions.
+# =============================================================================
+
+components:
+  terraform:
+    lambda/data-processor:
+      metadata:
+        component: lambda
+        enabled: false
+      settings:
+        package_version: "unreleased"
+      vars:
+        function_name: "data-processor"
+        handler: "main.handler"
+        runtime: "python3.13"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
+        memory_size: 512
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: s3/lambda-artifacts

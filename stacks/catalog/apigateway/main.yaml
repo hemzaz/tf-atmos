@@ -1,0 +1,74 @@
+---
+# =============================================================================
+# apigateway/main in the nonprod stacks: the main REST API
+# =============================================================================
+# The API's wiring: the "/" liveness method, the cognito/main authorizer, the
+# acm/main wildcard certificate and network/main's zone for api.<domain>. Each
+# stack keeps its description, resources list, log retention and any
+# throttling, CORS or tags (orgs/fnx/<stage>/<region>/components/services.yaml).
+# =============================================================================
+
+import:
+  - catalog/apigateway/defaults
+
+components:
+  terraform:
+    apigateway/main:
+      metadata:
+        component: apigateway
+      vars:
+        stage_name: "v1"
+
+        # Methods are addressed by resource_path ("/" is the API root), because
+        # a stack cannot know this API's resource IDs before apply.
+        # lambda/data-processor is disabled (no package yet), so "/api" has no
+        # method. When it is enabled, append these items to the two lists below
+        # (delete "#   " to keep the indentation) and add
+        # `- component: lambda/data-processor` to dependencies.components:
+        #   api_methods:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       authorization: "COGNITO_USER_POOLS"
+        #   api_integrations:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+        #       type: "AWS_PROXY"
+        #       uri: !terraform.state lambda/data-processor .function_invoke_arn
+        #       lambda_function_name: !terraform.state lambda/data-processor .function_name
+        api_methods:
+          - resource_path: "/"
+            http_method: "GET"
+            authorization: "NONE"
+
+        # "/" stays MOCK on purpose: it is a liveness endpoint, and a canned 200
+        # is the correct answer for one. The real entry point, "/api" proxied to
+        # Lambda, comes back with lambda/data-processor (see above).
+        api_integrations:
+          - resource_path: "/"
+            http_method: "GET"
+            integration_http_method: "GET"
+            type: "MOCK"
+
+        # Authorizer for the "/api" COGNITO_USER_POOLS method. A method that asks
+        # for COGNITO_USER_POOLS without a pool here fails at apply.
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+
+        # Domain Configuration
+        domain_name: "api.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
+        enable_logging: true
+        create_dashboard: true
+
+        api_name: "main-api"
+        zone_id: !terraform.state network/main .zone_ids.main
+      dependencies:
+        components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
+          - component: network/main
+          - component: acm/main
+          - component: cognito/main

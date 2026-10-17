@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# rds/main in a single-stack dev shape: the application database
+# =============================================================================
+# Was infrastructure/main.rds. Dev's database inherits the disposable rds/dev
+# abstract and sits in vpc/main's private subnets (the staging shape uses its
+# database subnets), reachable from eks/main.
+# =============================================================================
+
+import:
+  - catalog/rds/dev
+
+components:
+  terraform:
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/dev
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "main-db"
+        db_name: "mainapp"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.t3.micro"
+        allocated_storage: 5
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # Without this, the RDS security group's only ingress rule has an
+        # empty security_groups list and nothing on eks/main can reach the
+        # database (eks-backend-services/main's pods run there).
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: eks/main
