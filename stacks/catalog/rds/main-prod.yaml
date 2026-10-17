@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# rds/main in the prod primary stacks: the application database
+# =============================================================================
+# The instance file, not the abstract: the shape, reads and dependencies are
+# the rds/main-prod abstract's (prod.yaml): Multi-AZ in vpc/main's database
+# subnets, every key on the stack's kms/main, reachable from eks/main. The
+# source of the DR standby's cross-region read replica (main-standby.yaml).
+# No replicate_source_db read here: the DR failback steps set a literal
+# replicate_source_db on the primary in its STACK file, and remove it again
+# (docs/OPERATIONS.md, "Disaster recovery"); the nonprod stacks' rds/main is
+# main.yaml (main-dev.yaml in dev).
+# =============================================================================
+
+import:
+  - catalog/rds/prod
+
+components:
+  terraform:
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/main-prod

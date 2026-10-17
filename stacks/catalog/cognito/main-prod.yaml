@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# cognito/main in the prod primary stacks: the API user pool
+# =============================================================================
+# The user pool backing the COGNITO_USER_POOLS authorizer on apigateway/main,
+# with the production pool settings (cognito/prod, kept equal to the DR
+# standby's pool), named from the stack id. Each primary has its own pool:
+# EU users sign up in the EU primary's, never a migration from the US one
+# (owner decision). Two clients: the confidential api client, and the
+# dr-migration client the DR standby's lambda/cognito-user-migration signs in
+# with (owner decision 2026-10-07; EU to EU for the EU pair). The standbys'
+# pool is main-standby.yaml, the nonprod stacks' main.yaml.
+# =============================================================================
+
+import:
+  - catalog/cognito/prod
+
+components:
+  terraform:
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/prod
+      vars:
+        name_prefix: '{{ .atmos_stack }}'
+        clients:
+          api:
+            generate_secret: true
+            access_token_validity_minutes: 30
+          # The DR standby's lambda/cognito-user-migration checks a user's
+          # password against this pool with AdminInitiateAuth, which needs a
+          # client allowing the admin password flow and, without a secret, no
+          # SECRET_HASH. Admin flows are IAM-signed calls, so no browser can
+          # use this client. The tokens it issues are discarded: the shortest
+          # lifetimes.
+          dr-migration:
+            generate_secret: false
+            explicit_auth_flows: ["ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+            access_token_validity_minutes: 5
+            id_token_validity_minutes: 5
+            refresh_token_validity_days: 1

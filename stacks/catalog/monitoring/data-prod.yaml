@@ -1,0 +1,84 @@
+---
+# =============================================================================
+# monitoring/data in the prod primary shape: the data dashboard and alarms
+# =============================================================================
+# The data plane's dashboards and alarms: the stack's kms/main key,
+# acm/services' certificates, the eks/data dimension, and rds/data's with its
+# read replica (.instance_identifiers), plus the RDS events and the CPU,
+# storage and connection alarms on rds/data (data.yaml, the staging shape,
+# has no replica and only a connection alarm). Each stack keeps its alert
+# recipients (alarm_email_subscriptions) in its stack file.
+# =============================================================================
+
+import:
+  - catalog/monitoring/defaults
+
+components:
+  terraform:
+    monitoring/data:
+      metadata:
+        component: monitoring
+        inherits:
+          - monitoring/defaults
+      vars:
+        name: data
+        kms_key_id: !terraform.state kms/main .key_arn
+        create_dashboard: true
+        enable_certificate_monitoring: true
+
+        certificate_arns: !terraform.state acm/services .certificate_arns // {} | [.[]]
+        certificate_expiry_threshold: 30
+
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / "").
+        eks_cluster_name: !terraform.state eks/data .eks_cluster_id
+        # eks/data's node_groups (the stack's compute.yaml): data-workers
+        # (min_group_size 3) + batch-workers (min_group_size 0, spot) = 3
+        # guaranteed nodes. The eks_node_count_low alarm (monitoring's
+        # alarms.tf) only fires below this floor.
+        eks_min_node_count: 3
+        # rds/data and its read replica.
+        rds_instances: !terraform.state rds/data .instance_identifiers
+        # The lambdas are disabled (no package yet), and apigateway/data with
+        # them: no API or Lambda dimensions until they are enabled. Then add
+        # back, each read also in dependencies (lambda_functions: the enabled
+        # ones only):
+        #   api_gateway_name: !terraform.state apigateway/data .api_name
+        #   api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
+        #   lambda_functions:
+        #     - !terraform.state lambda/data-processor .function_name
+        #     - !terraform.state lambda/data-transformer .function_name
+        #     - !terraform.state lambda/report-generator .function_name
+        #   lambda_error_alarms:   # key = stable alarm id, function_name = the dimension
+        #     data-processor:
+        #       function_name: !terraform.state lambda/data-processor .function_name
+        #       evaluation_periods: 2
+        #       period: 300
+        #       threshold: 5
+        #     (same for data-transformer and report-generator)
+
+        create_sns_topic: true
+        # rds/data's and its replica's RDS events, to <Environment>-data-alarms;
+        # kms/main allows RDS events (allow_rds_events).
+        rds_event_subscription_enabled: true
+        lambda_duration_threshold: 500000
+        # rds/data's alarms, as monitoring/main's on rds/main
+        # (catalog/monitoring/prod): CPU and storage on rds_instances, and
+        # connections, on its real identifier. 10% of its 200 GiB is 20 GiB.
+        enable_rds_monitoring: true
+        rds_cpu_threshold: 80
+        db_connection_alarms:
+          rds_connections_high:
+            db_instance_identifier: !terraform.state rds/data .instance_identifier
+            evaluation_periods: 2
+            period: 300
+            threshold: 400
+        rds_storage_threshold: 21474836480
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/services
+          - component: kms/main
+          - component: eks/data
+          - component: rds/data

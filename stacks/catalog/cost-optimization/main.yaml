@@ -1,10 +1,18 @@
 ---
 # =============================================================================
-# cost-optimization/main in the nonprod stacks
+# cost-optimization/main in the nonprod and US prod primary stacks
 # =============================================================================
 # Instance scheduler, Savings Plan/RI analyzer, resource cleanup, cost anomaly
 # detection and the monthly budget, with the budget limit and the recipients
-# taken from the stack's settings.environment.monitoring.
+# taken from the stack's settings.environment.monitoring. The scheduler only
+# where the stage's settings turn auto_shutdown on: prod's turn it off
+# (components/terraform/cost-optimization/main.tf), so a prod stack gets no
+# scheduler Lambda, role or schedule. A change here changes prod.
+#
+# Per stack, in the stack file: a DR primary's
+# budget_additional_environment_tags (its standby shares the account and has
+# no budget of its own; dr-pair.py --lint fails a standby missing there). The
+# EU (GDPR) primaries' shape is main-prod-eu.yaml.
 # =============================================================================
 
 import:

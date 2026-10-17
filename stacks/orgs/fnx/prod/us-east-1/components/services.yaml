@@ -4,62 +4,35 @@
 # =============================================================================
 # Production services with full monitoring, alerting, and compliance
 # Multi-AZ RDS, comprehensive CloudWatch, PagerDuty integration
+# The DR-paired and database instances' wiring is catalog/<c>/<i>-prod
+# (cognito/main, apigateway/main, rds/main, elasticache/main, shared with
+# fnx-ew1-prod; rds/data and monitoring/data), monitoring/main is
+# main-prod-data-plane (main-prod plus the ecs/main read) and
+# cost-optimization/main the un-suffixed default (shared with dev and
+# staging). This file keeps this stack's values: the health check alarm's
+# actions, monitoring/data's recipients and the budget's standby tag.
 # =============================================================================
 
 import:
   - orgs/fnx/prod/us-east-1/components/globals
-  - catalog/apigateway/prod
-  - catalog/cognito/prod
-  - catalog/monitoring/prod
+  - catalog/apigateway/main-prod
+  - catalog/cognito/main-prod
+  - catalog/monitoring/main-prod-data-plane
+  - catalog/monitoring/data-prod
   - catalog/s3/lambda-artifacts
   - catalog/sqs/defaults
-  - catalog/cost-optimization/defaults
-  - catalog/rds/prod
-  - catalog/elasticache/prod
+  - catalog/cost-optimization/main
+  - catalog/rds/main-prod
+  - catalog/rds/data-prod
+  - catalog/elasticache/main-prod
 
 components:
   terraform:
     # ==========================================================================
-    # Cognito - user pool backing the API Gateway authorizer
-    # ==========================================================================
-    cognito/main:
-      metadata:
-        component: cognito
-        inherits:
-          - cognito/prod
-      vars:
-        name_prefix: '{{ .atmos_stack }}'
-        clients:
-          api:
-            generate_secret: true
-            access_token_validity_minutes: 30
-          # DR (owner decision 2026-10-07): fnx-ue2-prod's
-          # lambda/cognito-user-migration checks a user's password against this
-          # pool with AdminInitiateAuth, which needs a client allowing the
-          # admin password flow and, without a secret, no SECRET_HASH. Admin
-          # flows are IAM-signed calls, so no browser can use this client. The
-          # tokens it issues are discarded: the shortest lifetimes.
-          dr-migration:
-            generate_secret: false
-            explicit_auth_flows: ["ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-            access_token_validity_minutes: 5
-            id_token_validity_minutes: 5
-            refresh_token_validity_days: 1
-
-    # ==========================================================================
     # API Gateway - Main API (Production)
     # ==========================================================================
     apigateway/main:
-      metadata:
-        component: apigateway
-        inherits:
-          - apigateway/main-prod
       vars:
-        # DR (owner decision Q5): the PRIMARY half of api.<domain>'s Route 53
-        # failover pair, health-checked on this region's stage root;
-        # fnx-ue2-prod's apigateway/main is the SECONDARY.
-        route53_failover_type: PRIMARY
-        route53_set_identifier: "{{ .settings.prefix }}"
         # The health check's alarm lives in us-east-1 (Route 53's metrics are
         # only there) and notifies monitoring/main's topic, by name: that
         # component reads this one, so a !terraform.state here would be a cycle.
@@ -149,60 +122,6 @@ components:
       dependencies:
         components:
           - component: vpc/main
-
-    # Application database - Multi-AZ (was infrastructure/main.rds).
-    # monitoring_role_arn pointed at an iam/rds-monitoring instance that has
-    # never existed; the component creates the role itself.
-    rds/main:
-      metadata:
-        component: rds
-        inherits:
-          - rds/main-prod
-
-    # Redis cache (was infrastructure/main.elasticache)
-    elasticache/main:
-      metadata:
-        component: elasticache
-        inherits:
-          - elasticache/main-prod
-      vars:
-        # DR (owner decision Q5): a Global Datastore with this cache as primary;
-        # fnx-ue2-prod's elasticache/main is its secondary. The suffix is
-        # global per account, so it carries the full id.
-        global_replication_group_id_suffix: "{{ .atmos_stack }}-cache"
-
-    # Analytics database with a read replica (was infrastructure/data.rds)
-    rds/data:
-      metadata:
-        component: rds
-        inherits:
-          - rds/prod
-      vars:
-        # Without this, environment falls back to the module default "dev"
-        # and every environment == "prod" gate in the component silently
-        # passes.
-        environment: "{{ .settings.context.stage }}"
-        identifier: "{{ .settings.context.stage }}-data-db"
-        db_name: "productiondata"
-        # Selected into backup/main's daily/weekly/monthly plans by tag
-        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
-        # rds state from the same deploy phase.
-        tags:
-          Backup: "true"
-        engine: "{{ .settings.environment.rds_engine }}"
-        engine_version: "{{ .settings.environment.rds_engine_version }}"
-        instance_class: "db.r5.2xlarge"
-        allocated_storage: 200
-        max_allocated_storage: 1000
-        kms_key_id: !terraform.state kms/main .key_arn
-        create_read_replica: true
-        read_replica_instance_class: "db.r5.xlarge"
-        vpc_id: !terraform.state vpc/services .vpc_id
-        subnet_ids: !terraform.state vpc/services .database_subnet_ids
-      dependencies:
-        components:
-          - component: vpc/services
-          - component: kms/main
 
     # Data processing (was infrastructure/data.lambda). The lambda component is
     # single-function, so one instance per function.
@@ -345,116 +264,17 @@ components:
           - component: vpc/services
           - component: s3/lambda-artifacts
 
-
-    monitoring/main:
-      metadata:
-        component: monitoring
-        inherits:
-          - monitoring/main-prod
-      vars:
-        ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
-      dependencies:
-        components:
-          - component: vpc/main
-          - component: acm/main
-          - component: kms/main
-          - component: eks/main
-          - component: rds/main
-          - component: ecs/main
-          - component: elasticache/main
-          - component: apigateway/main
+    # The data dashboard's and alarms' recipients.
     monitoring/data:
-      metadata:
-        component: monitoring
-        inherits:
-          - monitoring/defaults
       vars:
-        name: data
-        kms_key_id: !terraform.state kms/main .key_arn
-        create_dashboard: true
-        enable_certificate_monitoring: true
-
-        certificate_arns: !terraform.state acm/services .certificate_arns // {} | [.[]]
-        certificate_expiry_threshold: 30
-
-        # Dashboard/alarm dimensions: the sources this stack actually
-        # deploys, so the infrastructure and backend dashboards plot real
-        # data instead of empty widgets (they default to [] / "").
-        eks_cluster_name: !terraform.state eks/data .eks_cluster_id
-        # eks/data's node_groups (compute.yaml): data-workers
-        # (min_group_size 3) + batch-workers (min_group_size 0, spot) = 3
-        # guaranteed nodes. The eks_node_count_low alarm (monitoring's
-        # alarms.tf) only fires below this floor.
-        eks_min_node_count: 3
-        # rds/data and its read replica.
-        rds_instances: !terraform.state rds/data .instance_identifiers
-        # The lambdas are disabled (no package yet), and apigateway/data with
-        # them: no API or Lambda dimensions until they are enabled. Then add
-        # back, each read also in dependencies (lambda_functions: the enabled
-        # ones only):
-        #   api_gateway_name: !terraform.state apigateway/data .api_name
-        #   api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
-        #   lambda_functions:
-        #     - !terraform.state lambda/data-processor .function_name
-        #     - !terraform.state lambda/data-transformer .function_name
-        #     - !terraform.state lambda/report-generator .function_name
-        #   lambda_error_alarms:   # key = stable alarm id, function_name = the dimension
-        #     data-processor:
-        #       function_name: !terraform.state lambda/data-processor .function_name
-        #       evaluation_periods: 2
-        #       period: 300
-        #       threshold: 5
-        #     (same for data-transformer and report-generator)
-
         alarm_email_subscriptions:
           - "prod-critical@example.com"
           - "data-team@example.com"
 
-        create_sns_topic: true
-        # rds/data's and its replica's RDS events, to ue1-data-alarms;
-        # kms/main allows RDS events (allow_rds_events).
-        rds_event_subscription_enabled: true
-        lambda_duration_threshold: 500000
-        # rds/data's alarms, as monitoring/main's on rds/main
-        # (catalog/monitoring/prod): CPU and storage on rds_instances, and
-        # connections, on its real identifier. 10% of its 200 GiB is 20 GiB.
-        enable_rds_monitoring: true
-        rds_cpu_threshold: 80
-        db_connection_alarms:
-          rds_connections_high:
-            db_instance_identifier: !terraform.state rds/data .instance_identifier
-            evaluation_periods: 2
-            period: 300
-            threshold: 400
-        rds_storage_threshold: 21474836480
-      dependencies:
-        components:
-          - component: vpc/main
-          - component: acm/services
-          - component: kms/main
-          - component: eks/data
-          - component: rds/data
-
-    # Cost optimization: Savings Plan/RI analyzer, resource cleanup, cost
-    # anomaly detection and monthly budget. No instance scheduler here:
-    # prod's per-stage settings (components/terraform/cost-optimization/
-    # main.tf) turn auto_shutdown off, so no scheduler Lambda/role/schedule
-    # is created for this instance.
+    # Cost optimization (catalog/cost-optimization/main; no instance scheduler
+    # in prod). The account's budget also counts its DR standby fnx-ue2-prod
+    # (Environment ue2, same account, no budget of its own, owner decision);
+    # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
     cost-optimization/main:
-      metadata:
-        component: cost-optimization
-        inherits:
-          - cost-optimization/defaults
       vars:
-        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
-        # The account's budget also counts its DR standby fnx-ue2-prod
-        # (Environment ue2, same account, no budget of its own, owner decision);
-        # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
         budget_additional_environment_tags: ["ue2"]
-        budget_notification_emails:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
-        cost_anomaly_notification_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-        cost_alert_emails:
-          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
-          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"

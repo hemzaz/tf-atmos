@@ -1,0 +1,36 @@
+---
+# =============================================================================
+# cost-optimization/main in the EU (GDPR) prod primary stacks
+# =============================================================================
+# Savings Plan/RI analyzer, resource cleanup, cost anomaly detection and the
+# monthly budget (on the stack's Environment tag), with the budget limit and
+# the recipients taken from the stack's settings.environment.monitoring. Cost
+# data is account metadata, not personal data, but staff email addresses
+# are: the budget and the anomaly subscription notify the stack region's
+# cost-alerts topic, which holds the email subscriptions (cost_alert_emails),
+# so the global Budgets and Cost Explorer services (us-east-1) store only its
+# ARN (billing_notifications_sns_enabled instead of main.yaml's
+# budget_notification_emails and cost_anomaly_notification_email). Prod's
+# per-stage settings turn auto_shutdown off, so no instance scheduler.
+#
+# Per stack, in the stack file: budget_additional_environment_tags, the
+# Environment tag of the DR standby that shares the account and has no budget
+# of its own (owner decision; dr-pair.py --lint fails a standby missing there).
+# =============================================================================
+
+import:
+  - catalog/cost-optimization/defaults
+
+components:
+  terraform:
+    cost-optimization/main:
+      metadata:
+        component: cost-optimization
+        inherits:
+          - cost-optimization/defaults
+      vars:
+        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
+        billing_notifications_sns_enabled: true
+        cost_alert_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"

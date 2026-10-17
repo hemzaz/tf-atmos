@@ -422,8 +422,8 @@ First release of a function: upload, set `package_version`, set `metadata.enable
 apigateway/main's `/api` route and `apigateway/data` for `data-processor`, `monitoring/data`'s
 dimensions for every function. The comments sit in the readers' catalog files
 (`stacks/catalog/apigateway/{main,data,prod,main-standby}.yaml`,
-`stacks/catalog/monitoring/{data,data-dev}.yaml`), or in `components/services.yaml` for a stack
-whose instance is still inline. A catalog file is shared by its importers: restoring a reader in
+`stacks/catalog/monitoring/{data,data-dev,data-prod}.yaml`), or in `components/services.yaml` for a
+stack whose instance is still inline (`fnx-ue1-prod`'s `apigateway/data`). A catalog file is shared by its importers: restoring a reader in
 one stack only takes that stack's own flavor. `check-lambda-packages.py`
 (in `lint`) fails an enabled instance still on the `unreleased` placeholder, and an `iam/ci` whose
 bucket name or KMS alias no longer matches the stack's `s3/lambda-artifacts` and `kms/main`.
@@ -950,7 +950,8 @@ explicit `-replace` from an operator, not a merge:
       fi   # DBSnapshotNotFound above: nothing to set aside
       ```
 
-   3. On a branch, set `fnx-ue1-prod`'s `rds/main`
+   3. On a branch, set, in `fnx-ue1-prod`'s stack file (never in `catalog/rds/main-prod`, which
+      both prod primaries import), its `rds/main`
       `replicate_source_db: "arn:aws:rds:us-east-2:{{ .settings.environment.account_id }}:db:ue2-prod-main-db"`
       (a literal ARN: a `!terraform.state` read of `fnx-ue2-prod` would invert the two stacks'
       deploy order). From that branch:

@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# rds/data in the prod primary shape: the analytics database
+# =============================================================================
+# Was infrastructure/data.rds. The data plane's database inherits the rds/prod
+# abstract (Multi-AZ, deletion protection), is encrypted with the stack's
+# kms/main and sits in vpc/services' database subnets, with a read replica
+# (the staging shape, data.yaml, uses vpc/services' private subnets and no
+# replica). DR (owner decision 2026-10-07): no cross-region replica; the DR
+# standby restores it from backup/main's copies in settings.dr.region
+# (dr-pair.py --lint).
+# =============================================================================
+
+import:
+  - catalog/rds/prod
+
+components:
+  terraform:
+    rds/data:
+      metadata:
+        component: rds
+        inherits:
+          - rds/prod
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "{{ .settings.context.stage }}-data-db"
+        db_name: "productiondata"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.2xlarge"
+        allocated_storage: 200
+        max_allocated_storage: 1000
+        kms_key_id: !terraform.state kms/main .key_arn
+        create_read_replica: true
+        read_replica_instance_class: "db.r5.xlarge"
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .database_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: kms/main
