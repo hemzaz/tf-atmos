@@ -96,7 +96,8 @@ workflows:
              copies them as RESET_REQUIRED: forgot-password, then MFA enrolment). If it does not, bulk-import the users not yet in {{ $p.standby }}'s pool from the latest export.{{ if $eu }}
              The export and users.csv stay in {{ $p.standby_region }} (SSE-KMS), never outside the EU.{{ end }}
           8. Verify: `curl -sf https://api.{{ if $eu }}<EU apex>{{ else }}<domain>{{ end }}/`, then dr-status for {{ $p.standby }}.
-          After recovery, reconcile Terraform: {{ $p.standby }} rds/main without replicate_source_db (plan must be
+          After recovery, reconcile Terraform: {{ $p.standby }}'s stack file imports catalog/rds/main-standby-promoted
+          instead of catalog/rds/main-standby (no replicate_source_db; a resized instance_class as a literal there; plan must be
           update-in-place, never a replacement), eks/main sizes in the stack file, eks-backend-services/main kept on
           main-standby-failover (migrate its local state); apply no
           elasticache/main until failback.
@@ -150,7 +151,9 @@ workflows:
           5. In-VPC, while {{ $p.standby }}'s stack file still imports main-standby-failover (Atmos skips a disabled
              instance): `atmos terraform destroy eks-backend-services/main -s {{ $p.standby }}`.
           6. Re-seed {{ $p.standby }} rds/main from {{ $p.primary_region }} the same way (deletion protection, final snapshot,
-             replicate_source_db restored, `-replace=aws_db_instance.main` on {{ $p.standby }}).
+             on a branch its stack file imports catalog/rds/main-standby again instead of main-standby-promoted, any
+             literal instance_class removed; from it `-replace=aws_db_instance.main` on {{ $p.standby }}). Keep CD off
+             and apply nothing for {{ $p.standby }} rds/main from master until that branch merges.
           7. {{ $p.standby }} back to warm sizes (PR + desired sizes by CLI), and in the same PR its stack file imports
              catalog/eks-backend-services/main-standby again (disabled), database_secret_arn removed.
           8. Auth: users sign in to {{ $p.primary }} again; passwords changed in {{ $p.standby_region }} and users created there

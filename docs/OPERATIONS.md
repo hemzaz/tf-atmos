@@ -728,8 +728,9 @@ nodes, the primary's 3) serve as they are, and are resized only if the load need
 modify, not a replacement), in the standby's region:
 `aws rds modify-db-instance --db-instance-identifier ue2-prod-main-db --db-instance-class db.r5.xlarge --apply-immediately --region us-east-2`,
 `aws elasticache increase-replica-count --replication-group-id ue2-prod-cache --new-replica-count 2 --apply-immediately --region us-east-2`.
-A resized database's `instance_class` joins reconciliation step 1, and failback step 6 sets the
-warm one back before its `-replace`; the cache's added replica stays out of Terraform (reconciliation
+A resized database's `instance_class` joins reconciliation step 1 as a literal under `rds/main`
+`vars` in the standby's stack file, and failback step 6 removes it before its `-replace` (the warm
+one comes back from `catalog/rds/main-standby`); the cache's added replica stays out of Terraform (reconciliation
 step 4) and failback step 7 removes it by CLI.
 
 #### EU failover
@@ -790,8 +791,11 @@ What differs beyond the names:
   `replicate_source_db` on `fnx-ew1-prod` is
   `arn:aws:rds:eu-central-1:{{ .settings.environment.account_id }}:db:ec1-prod-main-db`; step 5
   destroys `eks-backend-services/main -s fnx-ec1-prod` in-VPC while `fnx-ec1-prod`'s stack file
-  still imports `main-standby-failover`; step 6 restores `fnx-ec1-prod`'s `replicate_source_db` to
-  `!terraform.state rds/main fnx-ew1-prod .instance_arn` (with the warm `db.r5.large`); step 7
+  still imports `main-standby-failover`; reconciliation step 1 and failback step 6 switch
+  `fnx-ec1-prod`'s stack file import between `catalog/rds/main-standby` and
+  `catalog/rds/main-standby-promoted` (the read returns as `!terraform.state rds/main fnx-ew1-prod
+  .instance_arn`, with the warm `db.r5.large`; CD stays off and nothing applies `fnx-ec1-prod`'s
+  `rds/main` from master until that branch merges); step 7
   removes an added replica from `ec1-prod-cache` in eu-central-1.
 
 #### Auth during failover
@@ -897,7 +901,11 @@ Leave out users already in the standby's pool (`list-users` there): an existing 
 plan is read before merging; re-enable CD for these merges only (`gh workflow enable
 terraform-cd.yml`) or apply them from an operator machine:
 
-1. `fnx-ue2-prod` `rds/main`: remove `replicate_source_db`. The promotion plan check, before any
+1. `fnx-ue2-prod` `rds/main`: in its stack file, switch the import
+   `catalog/rds/main-standby` to `catalog/rds/main-standby-promoted` (the same instance without
+   the `replicate_source_db` read and its dependency on `fnx-ue1-prod`'s `rds/main`; never edit
+   either catalog file, both DR pairs import them). A resized `instance_class` is set beside it,
+   under `rds/main` `vars` in the stack file, as a literal. The promotion plan check, before any
    Terraform promotion: `atmos terraform plan rds/main -s fnx-ue2-prod` must show
    `aws_db_instance.main` updated in place, never replaced (`-/+`). `db_name` and `username` force
    a replacement, so they must match the promoted instance: `db_name` is set equal to
@@ -967,11 +975,14 @@ explicit `-replace` from an operator, not a merge:
    (reconciliation step 3), and its reads go to the healthy bucket, so no `TFSTATE_SOURCE`.
 6. Make `fnx-ue2-prod`'s database a replica of us-east-1 again, the same way as step 1: lift
    `ue2-prod-main-db`'s deletion protection (in us-east-2), set aside
-   `ue2-prod-main-db-final-snapshot` if it exists, restore
-   `replicate_source_db: !terraform.state rds/main fnx-ue1-prod .instance_arn` on a branch, with
-   the warm `instance_class: db.r5.large` if failover resized it (the `-replace` creates the
-   instance at the branch's class), and
+   `ue2-prod-main-db-final-snapshot` if it exists, and on a branch switch its stack file's import
+   `catalog/rds/main-standby-promoted` back to `catalog/rds/main-standby` (the
+   `replicate_source_db` read of `fnx-ue1-prod` returns with it), removing the literal
+   `instance_class` if failover resized it (the `-replace` creates the instance at the branch's
+   class: the warm `db.r5.large`). From that branch,
    `atmos terraform apply rds/main -s fnx-ue2-prod -- -replace=aws_db_instance.main`; merge.
+   Keep CD off and apply nothing for its `rds/main` from master until that branch merges: master
+   still has the promoted import, and an apply from it would undo the re-seed.
 7. Back to warm: a PR reverting, in `fnx-ue2-prod`'s stack file, reconciliation step 2 and
    failover step 6 (the import back to `catalog/eks-backend-services/main-standby`, disabled,
    `database_secret_arn` removed; step 5 destroyed what it deployed), and the desired sizes Terraform

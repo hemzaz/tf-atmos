@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# monitoring/main in the DR warm standby stacks
+# =============================================================================
+# This region's <prefix>-main-alarms topic and the alarms on the standby's
+# data tier and API. This region's key: the kms/main multi-region replica of
+# the primary stack it stands by for (settings.dr.standby_of). The EU
+# standby's stack file switches on receipt of the EU pair's relayed health
+# check alarms (receive_relayed_health_check_alarms).
+# =============================================================================
+
+import:
+  - catalog/monitoring/defaults
+
+components:
+  terraform:
+    monitoring/main:
+      metadata:
+        component: monitoring
+        inherits:
+          - monitoring/defaults
+      vars:
+        name: main
+        kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        create_dashboard: true
+        enable_certificate_monitoring: true
+        certificate_arns: !terraform.state acm/main .certificate_arns // {} | [.[]]
+        certificate_expiry_threshold: 30
+        alarm_email_subscriptions:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"
+        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
+        # eks/main's warm floor: workers min_group_size 2 (eks/main-standby.yaml).
+        eks_min_node_count: 2
+        rds_instances: !terraform.state rds/main .instance_identifiers
+        elasticache_clusters: !terraform.state elasticache/main .member_clusters
+        api_gateway_name: !terraform.state apigateway/main .api_name
+        api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
+        create_sns_topic: true
+        # rds/main's replica's RDS events, to <prefix>-main-alarms (catalog/monitoring/prod).
+        rds_event_subscription_enabled: true
+        enable_rds_monitoring: true
+        rds_cpu_threshold: 80
+        db_connection_alarms:
+          rds_connections_high:
+            db_instance_identifier: !terraform.state rds/main .instance_identifier
+            evaluation_periods: 2
+            period: 300
+            threshold: 400
+        rds_storage_threshold: 10737418240
+        api_gateway_error_threshold: 10
+        api_gateway_latency_threshold: 5000
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/main
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: eks/main
+          - component: rds/main
+          - component: elasticache/main
+          - component: apigateway/main

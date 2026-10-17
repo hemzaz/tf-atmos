@@ -14,8 +14,8 @@ runbooks from these, so no stack, region or resource name is hard-coded there:
                      primary's budget misses a standby, its DR region
                      disagrees with its standby or key, its backups are
                      not copied to the DR region, or the eks-backend-services
-                     failover flavor drifts from main-standby (below); lint
-                     runs it
+                     failover flavor or an rds promoted flavor drifts from
+                     main-standby (below); lint runs it
 
 A DR primary is a stack that another stack names in settings.dr.standby_of
 (fnx-ue2-prod for fnx-ue1-prod, fnx-ec1-prod for fnx-ew1-prod). Names follow
@@ -63,6 +63,18 @@ keeps its primary's); and every standby's external-secrets/main sets
 create_default_cluster_secret_store: true (aws-secretsmanager is the default
 store that creates, components/terraform/external-secrets/outputs.tf).
 
+Reconciliation step 1 switches a standby's import of
+stacks/catalog/rds/main-standby.yaml to main-standby-promoted.yaml, and
+failback step 6 switches it back (docs/OPERATIONS.md, "Disaster recovery"):
+both pairs share the files, so no step edits them for one stack. No stack
+imports a promoted file while its pair is warm, so a describe never shows one:
+--lint loads each stacks/catalog/rds/*-promoted.yaml and the file it is named
+after (yq, the !terraform.* tags kept) and fails unless the base's rds/main
+is a replica (a vars.replicate_source_db read and a dependencies.components
+entry for rds/main with a stack) and the promoted file is the base without
+exactly that read and that entry, in its imports and its rds/main block.
+main-standby-promoted.yaml must exist.
+
 The DR region (--dr-region) is the stack's settings.dr.region when it sets one
 (a DR primary), else its backup/main replica_region when it copies
 cross-region (enable_cross_region_backup), else its standby's region when it
@@ -92,6 +104,11 @@ FAILOVER_FILE = "stacks/catalog/eks-backend-services/main-standby-failover.yaml"
 FAILOVER_INSTANCE = "eks-backend-services/main"
 FAILOVER_CHANGES = (("metadata", "enabled"), ("vars", "database_name"),
                     ("vars", "cluster_secret_store_name"), ("vars", "database_secret_arn"))
+# The promoted flavor of a standby's rds/main (promoted_findings): the base without the replica link.
+RDS_STANDBY_FILE = "stacks/catalog/rds/main-standby.yaml"
+RDS_PROMOTED_FILE = "stacks/catalog/rds/main-standby-promoted.yaml"
+RDS_PROMOTED_GLOB = "stacks/catalog/rds/*-promoted.yaml"
+RDS_INSTANCE = "rds/main"
 # The default ClusterSecretStore external-secrets/main creates (components/terraform/external-secrets/outputs.tf).
 DEFAULT_STORE = "aws-secretsmanager"
 # yq drops a scalar's custom tag in JSON; keep !terraform.* reads as "<tag> <value>".
@@ -506,6 +523,57 @@ def failover_findings(stacks: dict, standby_doc: dict, failover_doc: dict) -> li
     return findings
 
 
+def promoted_findings(base_file: str, base_doc: dict, promoted_file: str, promoted_doc: dict) -> list:
+    """One line per way an rds promoted flavor drifts from the replica flavor it is named after (--lint)."""
+    blocks = {}
+    for relative, doc in ((base_file, base_doc), (promoted_file, promoted_doc)):
+        block = ((doc.get("components") or {}).get("terraform") or {}).get(RDS_INSTANCE)
+        if not isinstance(block, dict):
+            return [f"{relative}: no components.terraform.{RDS_INSTANCE}"]
+        blocks[relative] = block
+
+    def replica_links(block):
+        """The replicate_source_db read and the cross-stack rds/main dependencies of `block`."""
+        read = (block.get("vars") or {}).get("replicate_source_db", MISSING)
+        deps = [d for d in ((block.get("dependencies") or {}).get("components") or [])
+                if isinstance(d, dict) and d.get("component") == RDS_INSTANCE and d.get("stack") is not None]
+        return read, deps
+
+    findings = []
+    base_read, base_deps = replica_links(blocks[base_file])
+    if not (isinstance(base_read, str) and base_read.startswith("!terraform.state ")) or len(base_deps) != 1:
+        findings.append(
+            f"{base_file}: {RDS_INSTANCE} is not a replica (vars.replicate_source_db {base_read!r}, "
+            f"{len(base_deps)} rds/main dependencies with a stack): {promoted_file} has no replica link to drop"
+        )
+    promoted_read, promoted_deps = replica_links(blocks[promoted_file])
+    if promoted_read is not MISSING or promoted_deps:
+        findings.append(
+            f"{promoted_file}: {RDS_INSTANCE} keeps the replica link (vars.replicate_source_db {promoted_read!r}, "
+            f"rds/main dependencies {promoted_deps!r}): a promoted standby replicates nothing"
+        )
+    if findings:
+        return findings
+
+    expected = copy.deepcopy(base_doc)
+    block = expected["components"]["terraform"][RDS_INSTANCE]
+    del block["vars"]["replicate_source_db"]
+    block["dependencies"]["components"] = [d for d in block["dependencies"]["components"] if d not in base_deps]
+    return [
+        f"{promoted_file}: {where} is {promoted_value!r}, not {base_value!r} as in {base_file}: the promoted flavor "
+        "is the replica flavor minus only vars.replicate_source_db and its rds/main dependency"
+        for where, base_value, promoted_value in differences(expected, promoted_doc)
+    ]
+
+
+def promoted_files() -> list:
+    """(base, promoted) repo-relative paths of each rds promoted flavor, main-standby's first."""
+    found = sorted(str(path.relative_to(REPO)) for path in REPO.glob(RDS_PROMOTED_GLOB))
+    pairs = [(RDS_STANDBY_FILE, RDS_PROMOTED_FILE)]
+    pairs += [(f.replace("-promoted.yaml", ".yaml"), f) for f in found if f != RDS_PROMOTED_FILE]
+    return pairs
+
+
 def describe_stacks() -> dict:
     """The stacks' resolved config; ValueError, one line, when atmos fails or returns no JSON."""
     command = ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json",
@@ -532,6 +600,12 @@ def main() -> int:
             findings += failover_findings(stacks, load_catalog(STANDBY_FILE), load_catalog(FAILOVER_FILE))
         except ValueError as error:
             findings.append(str(error))
+        for base_file, promoted_file in promoted_files():
+            try:
+                findings += promoted_findings(base_file, load_catalog(base_file),
+                                              promoted_file, load_catalog(promoted_file))
+            except ValueError as error:
+                findings.append(str(error))
         for finding in findings:
             print(f"dr-pair: {finding}", file=sys.stderr)
         return 1 if findings else 0

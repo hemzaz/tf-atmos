@@ -1,0 +1,63 @@
+---
+# =============================================================================
+# rds/main in a DR standby stack after promotion
+# =============================================================================
+# main-standby.yaml without the replica link: no replicate_source_db read of
+# the primary stack it stood by for (settings.dr.standby_of), and no
+# dependency on that stack's rds/main. Everything else, the kms/main replica
+# key reads included, stays as main-standby.yaml has it (dr-pair.py --lint).
+#
+# Used from reconciliation step 1 (the promoted standby is the primary) until
+# failback step 6 re-seeds it as a replica (docs/OPERATIONS.md, "Disaster
+# recovery"): those steps switch the STACK file's import of
+# catalog/rds/main-standby to catalog/rds/main-standby-promoted and back.
+# Never edit this file or main-standby.yaml for one stack: both pairs share
+# them. A resized instance_class stays in the stack file as a literal.
+# =============================================================================
+
+import:
+  - catalog/rds/prod
+
+components:
+  terraform:
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/prod
+      vars:
+        environment: "{{ .settings.context.stage }}"
+        identifier: "{{ .settings.context.stage }}-main-db"
+        # Kept equal to the primary's: the promoted instance has it, and
+        # db_name forces a replacement.
+        db_name: "productionapp"
+        # backup/main selects it once promoted (Role=primary).
+        tags:
+          Backup: "true"
+        # The parameter group family follows the source's engine.
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        family: "postgres14"
+        # Warm: one size below the primary's db.r5.xlarge; resize on failover
+        # if the load needs it (a modify, not a replacement).
+        instance_class: "db.r5.large"
+        allocated_storage: 100
+        max_allocated_storage: 500
+        kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        backup_window: "03:00-04:00"
+        maintenance_window: "Sun:04:30-Sun:05:30"
+        performance_insights_retention_period: 7
+        performance_insights_kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        master_user_secret_kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        enabled_cloudwatch_logs_exports:
+          - "postgresql"
+          - "upgrade"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: eks/main

@@ -1,0 +1,58 @@
+---
+# =============================================================================
+# lambda/cognito-user-migration in the DR warm standby stacks
+# =============================================================================
+# The user-migration trigger of cognito/main (cognito/main-standby.yaml). It
+# checks a user against the pool of the primary stack it stands by for
+# (settings.dr.standby_of, in the primary's region; EU to EU for the EU pair)
+# and returns their attributes (functions/cognito-user-migration). Its role
+# may only call AdminInitiateAuth and AdminGetUser on that one pool. Not in
+# the VPC: it reaches nothing but Cognito's public endpoint. Packaged from
+# source_dir like the repo's other in-repo functions (no S3 release to
+# upload). This region's key: the primary stack's kms/main multi-region
+# replica.
+# =============================================================================
+
+components:
+  terraform:
+    lambda/cognito-user-migration:
+      metadata:
+        component: lambda
+      vars:
+        function_name: cognito-user-migration
+        description: "Cognito user migration from {{ .settings.dr.standby_of }}'s user pool (DR)"
+        handler: "lambda_function.lambda_handler"
+        runtime: "python3.13"
+        source_dir: "functions/cognito-user-migration"
+        memory_size: 256
+        # Cognito waits about 5 seconds for a trigger; the handler's source
+        # calls time out first (2 s each).
+        timeout: 5
+        log_retention_days: 90
+        kms_key_arn: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        environment_variables:
+          SOURCE_USER_POOL_ID: !terraform.state cognito/main {{ .settings.dr.standby_of }} .user_pool_id
+          SOURCE_CLIENT_ID: !terraform.state cognito/main {{ .settings.dr.standby_of }} '.client_ids["dr-migration"]'
+        iam_policies:
+          - sid: CheckUsersInTheSourcePool
+            actions:
+              - "cognito-idp:AdminInitiateAuth"
+              - "cognito-idp:AdminGetUser"
+            resources:
+              - !terraform.state cognito/main {{ .settings.dr.standby_of }} .user_pool_arn
+        # On monitoring/main's topic in this region, by name (it is created
+        # later). A wrong password is a function error by design (the trigger
+        # rejects by raising), so the error alarm only fires on a burst;
+        # duration near the 5-second limit is the early sign of a failing
+        # source pool.
+        create_performance_alarms: true
+        duration_alarm_threshold: 3000
+        error_rate_alarm_threshold: 50
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+      dependencies:
+        components:
+          - component: cognito/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"

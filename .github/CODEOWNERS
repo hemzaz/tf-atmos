@@ -43,3 +43,12 @@
 /stacks/catalog/eks-addons/       @hemzaz
 /stacks/catalog/eks-backend-services/ @hemzaz
 /stacks/catalog/github-runners/   @hemzaz
+
+# The services catalog: the stacks' instance wiring (the un-suffixed defaults
+# and the -<flavor> files), which left /stacks/orgs/** with it.
+/stacks/catalog/rds/              @hemzaz
+/stacks/catalog/elasticache/      @hemzaz
+/stacks/catalog/cognito/          @hemzaz
+/stacks/catalog/lambda/           @hemzaz
+/stacks/catalog/apigateway/       @hemzaz
+/stacks/catalog/monitoring/       @hemzaz

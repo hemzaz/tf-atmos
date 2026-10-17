@@ -1,0 +1,81 @@
+---
+# =============================================================================
+# apigateway/main in the DR warm standby stacks
+# =============================================================================
+# The SECONDARY half of api.<domain>'s Route 53 failover pair; the apigateway/
+# main of the primary stack it stands by for (settings.dr.standby_of) is the
+# PRIMARY. Each half has its own health check, so DNS moves without a change
+# here. The same routes as the primary's, authorized by this region's pool,
+# never the primary's (owner decisions 2026-10-07 and B5): a token from either
+# pool is accepted only where it was issued, so a user signs in again after
+# failover.
+#
+# Per stack, in the stack file: where the health check's alarm (in us-east-1,
+# where Route 53's metrics are) goes, and for the EU pair its checker regions
+# and the alarm relay to the EU regions (check-data-residency.py).
+# =============================================================================
+
+import:
+  - catalog/apigateway/defaults
+
+components:
+  terraform:
+    apigateway/main:
+      metadata:
+        component: apigateway
+      vars:
+        description: "Production Main API Gateway (DR)"
+        stage_name: "v1"
+        api_resources:
+          - path_part: "api"
+          - path_part: "auth"
+          - path_part: "health"
+          - path_part: "users"
+          - path_part: "products"
+        # "/api" (COGNITO_USER_POOLS) is disabled with lambda/data-processor,
+        # as in the primary; it comes back here with it.
+        api_methods:
+          - resource_path: "/"
+            http_method: "GET"
+            authorization: "NONE"
+        api_integrations:
+          - resource_path: "/"
+            http_method: "GET"
+            integration_http_method: "GET"
+            type: "MOCK"
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+        domain_name: "api.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/main .certificate_arns.api
+        api_name: "{{ .settings.context.stage }}-main-api"
+        zone_id: !terraform.state network/main {{ .settings.dr.standby_of }} .zone_ids.main
+        route53_failover_type: SECONDARY
+        route53_set_identifier: "{{ .settings.prefix }}"
+        # The in-region signal: the health check's alarm is in us-east-1 (and
+        # during a us-east-1 outage, down with it). These watch this region's
+        # own API (5xx, latency) and notify monitoring/main's topic here, by
+        # name (monitoring/main reads this component).
+        create_performance_alarms: true
+        alarm_5xx_threshold: 10
+        alarm_latency_threshold: 5000
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+        throttling_burst_limit: 5000
+        throttling_rate_limit: 10000
+        enable_logging: true
+        log_retention_days: 90
+        create_dashboard: true
+        tracing_enabled: true
+        enable_caching: false
+        enable_waf: true
+        tags:
+          Service: api-gateway
+          Tier: edge
+          CriticalityLevel: "high"
+      dependencies:
+        components:
+          - component: apigateway-account/main
+          - component: network/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: acm/main
+          - component: cognito/main

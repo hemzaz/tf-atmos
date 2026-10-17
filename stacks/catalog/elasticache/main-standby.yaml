@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# elasticache/main in the DR warm standby stacks
+# =============================================================================
+# A Global Datastore secondary of the elasticache/main of the primary stack it
+# stands by for (settings.dr.standby_of; Cloud Posse aws-elasticache-redis
+# global_replication_group_id), kept in sync continuously.
+# This region's key: the primary stack's kms/main multi-region replica.
+# =============================================================================
+
+import:
+  - catalog/elasticache/prod
+
+components:
+  terraform:
+    elasticache/main:
+      metadata:
+        component: elasticache
+        inherits:
+          - elasticache/prod
+      vars:
+        cluster_id: "{{ .settings.context.stage }}-cache"
+        global_replication_group_id: !terraform.state elasticache/main {{ .settings.dr.standby_of }} .global_replication_group_id
+        # Inherited from the global group, set for the component's own checks
+        # and kept equal to the primary's.
+        engine_version: "7.0"
+        node_type: "cache.r5.large"
+        # Warm: a primary and one replica (the prod floor for failover across
+        # AZs, check-prod-protection); the primary runs 3.
+        num_cache_nodes: 2
+        kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        auth_token_secret_kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_group_ids: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+        allowed_cidr_blocks: []
+      dependencies:
+        components:
+          - component: elasticache/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: vpc/main
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"
+          - component: eks/main
