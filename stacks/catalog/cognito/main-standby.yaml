@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# cognito/main in the DR warm standby stacks
+# =============================================================================
+# This region's own user pool (owner decisions 2026-10-07 and B5: DR auth must
+# not depend on the primary's region). AWS does not replicate user pools, so
+# lambda/cognito-user-migration copies each user from the pool of the primary
+# stack it stands by for (settings.dr.standby_of) on their first sign-in or
+# password reset here.
+#
+# cognito/prod keeps its settings equal to the primary's pool. Cognito domains
+# are global, but neither pool sets domain_prefix (no hosted UI), and every
+# name carries the stack id (<stack>-users), so nothing collides with the
+# primary's.
+# =============================================================================
+
+import:
+  - catalog/cognito/prod
+
+components:
+  terraform:
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/prod
+      vars:
+        name_prefix: '{{ .atmos_stack }}'
+        clients:
+          # The primary's api client plus ALLOW_ADMIN_USER_PASSWORD_AUTH:
+          # Cognito runs the migration trigger only for a password sign-in,
+          # never for SRP (the password does not reach it). The backend signs
+          # in a user this pool does not have yet with AdminInitiateAuth
+          # ADMIN_USER_PASSWORD_AUTH (an IAM-signed call); ALLOW_USER_PASSWORD_AUTH
+          # stays rejected by the component.
+          api:
+            generate_secret: true
+            explicit_auth_flows: ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH"]
+            access_token_validity_minutes: 30
+        lambda_config:
+          user_migration: !terraform.state lambda/cognito-user-migration .function_arn
+      dependencies:
+        components:
+          - component: lambda/cognito-user-migration
