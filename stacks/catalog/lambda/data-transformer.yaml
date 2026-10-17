@@ -1,0 +1,48 @@
+---
+# =============================================================================
+# lambda/data-transformer: the sqs/data-transform consumer (disabled)
+# =============================================================================
+# Packaged, and disabled until its first package, like lambda/data-processor
+# (catalog/lambda/data-processor.yaml). Fed by sqs/data-transform through an
+# event source mapping.
+# =============================================================================
+
+components:
+  terraform:
+    lambda/data-transformer:
+      metadata:
+        component: lambda
+        enabled: false
+      settings:
+        package_version: "unreleased"
+      vars:
+        function_name: "{{ .settings.context.stage }}-data-transformer"
+        handler: "transform.handler"
+        runtime: "python3.13"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
+        memory_size: 1024
+        # sqs/data-transform's visibility_timeout_seconds is derived from this
+        # timeout and the batching window below: change them together.
+        timeout: 600
+        # Failed messages are retried by the queue and moved to its DLQ after
+        # dlq_max_receive_count receives; with ReportBatchItemFailures the
+        # function returns only the failed messages, not the whole batch.
+        event_source_mappings:
+          data-transform:
+            event_source_arn: !terraform.state sqs/data-transform .queue_arn
+            batch_size: 10
+            maximum_batching_window_in_seconds: 5
+            function_response_types:
+              - ReportBatchItemFailures
+        # The queue is encrypted with kms/main: the poller needs kms:Decrypt.
+        event_source_kms_key_arns:
+          - !terraform.state kms/main .key_arn
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: s3/lambda-artifacts
+          - component: sqs/data-transform
+          - component: kms/main

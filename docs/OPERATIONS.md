@@ -418,9 +418,13 @@ contract:
    version.
 
 First release of a function: upload, set `package_version`, set `metadata.enabled: true` on the
-`lambda/*` instance, and restore its readers (each marked with a `disabled` comment in
-`components/services.yaml`: apigateway/main's `/api` route and `apigateway/data` for
-`data-processor`, `monitoring/data`'s dimensions for every function). `check-lambda-packages.py`
+`lambda/*` instance, and restore its readers, each marked with a `disabled` comment:
+apigateway/main's `/api` route and `apigateway/data` for `data-processor`, `monitoring/data`'s
+dimensions for every function. The comments sit in the readers' catalog files
+(`stacks/catalog/apigateway/{main,data,prod,main-standby}.yaml`,
+`stacks/catalog/monitoring/{data,data-dev}.yaml`), or in `components/services.yaml` for a stack
+whose instance is still inline. A catalog file is shared by its importers: restoring a reader in
+one stack only takes that stack's own flavor. `check-lambda-packages.py`
 (in `lint`) fails an enabled instance still on the `unreleased` placeholder, and an `iam/ci` whose
 bucket name or KMS alias no longer matches the stack's `s3/lambda-artifacts` and `kms/main`.
 

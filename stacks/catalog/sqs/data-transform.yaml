@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# sqs/data-transform: the work queue of lambda/data-transformer
+# =============================================================================
+# lambda/data-processor sends, the transformer's event source mapping polls.
+# Failed messages move to <Environment>-data-transform-dlq after 5 receives
+# and stay 14 days. The queue is encrypted with kms/main (sqs/defaults).
+# =============================================================================
+
+import:
+  - catalog/sqs/defaults
+
+components:
+  terraform:
+    sqs/data-transform:
+      metadata:
+        component: sqs
+        inherits:
+          - sqs/defaults
+      vars:
+        name: data-transform
+        # AWS: at least 6x the consumer's timeout plus its batching window,
+        # 6 x 600 (lambda/data-transformer timeout) + 5 = 3605.
+        visibility_timeout_seconds: 3605
+        message_retention_seconds: 345600  # 4 days
+        dlq_enabled: true
+        dlq_max_receive_count: 5
+        dlq_message_retention_seconds: 1209600  # 14 days

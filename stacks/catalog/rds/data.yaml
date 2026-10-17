@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# rds/data in the staging shape: the analytics database
+# =============================================================================
+# Was infrastructure/data.rds. The database inherits the rds/staging abstract
+# (prod-shaped durability, tolerant of teardown) and sits in vpc/services'
+# private subnets.
+# =============================================================================
+
+import:
+  - catalog/rds/staging
+
+components:
+  terraform:
+    rds/data:
+      metadata:
+        component: rds
+        inherits:
+          - rds/staging
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "{{ .settings.context.stage }}-data-db"
+        db_name: "stagingdata"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.large"
+        allocated_storage: 50
+        max_allocated_storage: 200
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
