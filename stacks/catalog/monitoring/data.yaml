@@ -3,8 +3,9 @@
 # monitoring/data in the staging shape: the data dashboard and alarms
 # =============================================================================
 # The data plane's dashboards and alarms: the stack's kms/main key,
-# acm/services' certificates, the eks/data and rds/data dimensions, and an
-# RDS connection alarm on rds/data (the -dev flavor has none). Each stack
+# acm/services' certificates, the eks/data and rds/data dimensions, and the
+# CPU, storage and connection alarms on rds/data (enable_rds_monitoring; the
+# -dev flavor has none). Each stack
 # keeps its alert recipients
 # (orgs/fnx/<stage>/<region>/components/services.yaml).
 # =============================================================================

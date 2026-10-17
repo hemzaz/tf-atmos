@@ -1,13 +1,14 @@
 ---
 # =============================================================================
-# apigateway/data in the nonprod stacks: the data REST API (disabled)
+# apigateway/data: the data REST API (disabled)
 # =============================================================================
-# Disabled with lambda/data-processor, its only backend: an API with no method
-# cannot be deployed. Enable both together. The API's wiring: "/data" proxied
-# to lambda/data-processor, the cognito/main authorizer, the acm/services
+# Shared by nonprod and prod: a change here changes prod. Disabled with
+# lambda/data-processor, its only backend: an API with no method cannot be
+# deployed. Enable both together. The API's wiring: "/data" proxied to
+# lambda/data-processor, the cognito/main authorizer, the acm/services
 # wildcard certificate and network/services' data zone. Each stack keeps its
-# description, resources list, log retention and any throttling or tags
-# (orgs/fnx/<stage>/<region>/components/services.yaml).
+# API name, description, resources list, log retention and any throttling,
+# tracing or tags (orgs/fnx/<stage>/<region>/components/services.yaml).
 # =============================================================================
 
 import:
@@ -53,7 +54,6 @@ components:
         create_dashboard: true
         enable_waf: true
 
-        api_name: "data-api"
         zone_id: !terraform.state network/services .zone_ids.data
       dependencies:
         components:

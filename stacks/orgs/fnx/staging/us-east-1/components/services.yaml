@@ -43,6 +43,7 @@ components:
 
     apigateway/data:
       vars:
+        api_name: "data-api"
         description: "Data API Gateway for staging"
         api_resources:
           - path_part: "data"
@@ -59,6 +60,24 @@ components:
       vars:
         cluster_name: "{{ .settings.context.stage }}-main-apps"
         enable_container_insights: true
+
+    lambda/data-processor:
+      vars:
+        memory_size: 512
+        timeout: 300
+
+    # sqs/data-transform's visibility_timeout_seconds is derived from this
+    # timeout: change them together.
+    lambda/data-transformer:
+      vars:
+        memory_size: 1024
+        timeout: 600
+
+    sqs/data-transform:
+      vars:
+        # AWS: at least 6x the consumer's timeout plus its batching window,
+        # 6 x 600 (lambda/data-transformer timeout) + 5 = 3605.
+        visibility_timeout_seconds: 3605
 
     monitoring/main:
       vars:

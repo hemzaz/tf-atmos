@@ -6,8 +6,8 @@
 # acm/services' certificates, the eks/data dimension, and rds/data's with its
 # read replica (.instance_identifiers), plus the RDS events and the CPU,
 # storage and connection alarms on rds/data (data.yaml, the staging shape,
-# has no replica and only a connection alarm). Each stack keeps its alert
-# recipients (alarm_email_subscriptions) in its stack file.
+# has the same three alarms but no replica and no RDS events). Each stack
+# keeps its alert recipients (alarm_email_subscriptions) in its stack file.
 # =============================================================================
 
 import:

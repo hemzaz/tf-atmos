@@ -1,11 +1,14 @@
 ---
 # =============================================================================
-# lambda/data-processor in the staging shape (disabled)
+# lambda/data-processor: the sqs/data-transform producer (disabled)
 # =============================================================================
-# Data processing (was infrastructure/data.lambda). The lambda component is
-# single-function, so one instance per function. The function enqueues work
-# for lambda/data-transformer on sqs/data-transform (the -dev flavor has no
-# queue).
+# Shared by nonprod and prod: a change here changes prod. Data processing
+# (was infrastructure/data.lambda). The lambda component is single-function,
+# so one instance per function. The function enqueues work for
+# lambda/data-transformer on sqs/data-transform (the -dev flavor has no
+# queue). Each stack keeps its memory_size, timeout and any reserved
+# concurrency or extra environment variables
+# (orgs/fnx/<stage>/<region>/components/services.yaml).
 #
 # The application repo's CI builds the package and uploads it as
 # <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
@@ -32,8 +35,6 @@ components:
         runtime: "python3.13"
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
-        memory_size: 512
-        timeout: 300
         # Enqueues work for lambda/data-transformer on sqs/data-transform: the
         # queue's producer_policy (SendMessage, and its kms/main key through
         # SQS) and its URL.

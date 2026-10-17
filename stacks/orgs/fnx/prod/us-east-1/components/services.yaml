@@ -4,13 +4,17 @@
 # =============================================================================
 # Production services with full monitoring, alerting, and compliance
 # Multi-AZ RDS, comprehensive CloudWatch, PagerDuty integration
-# The DR-paired and database instances' wiring is catalog/<c>/<i>-prod
-# (cognito/main, apigateway/main, rds/main, elasticache/main, shared with
-# fnx-ew1-prod; rds/data and monitoring/data), monitoring/main is
-# main-prod-data-plane (main-prod plus the ecs/main read) and
-# cost-optimization/main the un-suffixed default (shared with dev and
-# staging). This file keeps this stack's values: the health check alarm's
-# actions, monitoring/data's recipients and the budget's standby tag.
+# Every services instance's wiring is catalog/<c>/<i>. The DR-paired and
+# database instances use the -prod flavors (cognito/main, apigateway/main,
+# rds/main, elasticache/main, shared with fnx-ew1-prod; rds/data and
+# monitoring/data), monitoring/main is main-prod-data-plane (main-prod plus
+# the ecs/main read), and the data API path (apigateway/data, ecs/main, the
+# lambdas, sqs/data-transform) and cost-optimization/main use the
+# un-suffixed defaults (shared with dev and staging; report-generator has
+# only this shape). This file keeps this stack's values: the health check
+# alarm's actions, the data API's name, sizes and limits, the lambdas' sizes,
+# the queue's visibility timeout, monitoring/data's recipients and the
+# budget's standby tag.
 # =============================================================================
 
 import:
@@ -20,11 +24,16 @@ import:
   - catalog/monitoring/main-prod-data-plane
   - catalog/monitoring/data-prod
   - catalog/s3/lambda-artifacts
-  - catalog/sqs/defaults
   - catalog/cost-optimization/main
   - catalog/rds/main-prod
   - catalog/rds/data-prod
   - catalog/elasticache/main-prod
+  - catalog/apigateway/data
+  - catalog/ecs/main
+  - catalog/lambda/data-processor
+  - catalog/lambda/data-transformer
+  - catalog/sqs/data-transform
+  - catalog/lambda/report-generator
 
 components:
   terraform:
@@ -42,227 +51,56 @@ components:
     # ==========================================================================
     # API Gateway - Data API (Production)
     # ==========================================================================
-    # Disabled with lambda/data-processor, its only backend: an API with no
-    # method cannot be deployed. Enable both together.
     apigateway/data:
-      metadata:
-        component: apigateway
-        enabled: false
       vars:
+        api_name: "{{ .settings.context.stage }}-data-api"
         description: "Production Data API Gateway"
-        stage_name: "v1"
-
         api_resources:
           - path_part: "data"
           - path_part: "metrics"
           - path_part: "analytics"
           - path_part: "reports"
-
-        api_methods:
-          - resource_path: "/data"
-            http_method: "ANY"
-            authorization: "COGNITO_USER_POOLS"
-
-        # Real backend. lambda_function_name is required so this component can
-        # grant API Gateway permission to invoke the function - without that
-        # policy the integration applies fine and every call returns 500.
-        api_integrations:
-          - resource_path: "/data"
-            http_method: "ANY"
-            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
-            type: "AWS_PROXY"
-            uri: !terraform.state lambda/data-processor .function_invoke_arn
-            lambda_function_name: !terraform.state lambda/data-processor .function_name
-
-        # Authorizer for the COGNITO_USER_POOLS method above, same pool as
-        # apigateway/main. A method that asks for COGNITO_USER_POOLS without a
-        # pool here fails at apply.
-        authorizer_type: "COGNITO_USER_POOLS"
-        cognito_user_pool_arns:
-          - !terraform.state cognito/main .user_pool_arn
-
-        domain_name: "data.services.{{ .settings.environment.domain_name }}"
-        certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
         throttling_burst_limit: 2000
         throttling_rate_limit: 5000
-
-        enable_logging: true
         log_retention_days: 90
-        create_dashboard: true
-        enable_waf: true
+        tracing_enabled: true
         tags:
           Service: data-api
           Tier: backend
 
-    # ==========================================================================
-    # Infrastructure - Main Application Stack (Production HA)
-    # ==========================================================================
-        api_name: "{{ .settings.context.stage }}-data-api"
-        zone_id: !terraform.state network/services .zone_ids.data
-        tracing_enabled: true
-      dependencies:
-        components:
-          # Ordering only: REST stage logging needs the account's
-          # CloudWatch role set first (no output is read).
-          - component: apigateway-account/main
-          - component: network/services
-          - component: acm/services
-          - component: cognito/main
-          - component: lambda/data-processor
-
-    # ECS Fargate cluster (was infrastructure/main.ecs). vpc_id/subnet_ids are
-    # not passed: an aws_ecs_cluster has neither - those belong to ECS services.
     ecs/main:
-      metadata:
-        component: ecs
       vars:
         cluster_name: "{{ .settings.context.stage }}-main-apps"
-        fargate_only: true
         enable_container_insights: true
-      dependencies:
-        components:
-          - component: vpc/main
 
-    # Data processing (was infrastructure/data.lambda). The lambda component is
-    # single-function, so one instance per function.
-    #
-    # The application repo's CI builds each package and uploads it as
-    # <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
-    # with iam/ci's lambda-uploader role; a PR here then sets the instance's
-    # settings.package_version, and the changed s3_key redeploys the code
-    # (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
-    # package exists: upload it, set package_version, set enabled: true, and
-    # restore its readers, each marked with a "disabled" comment:
-    # apigateway/main's "/api" route and apigateway/data (data-processor), and
-    # monitoring/data's dimensions (every function).
     lambda/data-processor:
-      metadata:
-        component: lambda
-        enabled: false
-      settings:
-        package_version: "unreleased"
       vars:
-        function_name: "{{ .settings.context.stage }}-data-processor"
-        handler: "main.handler"
-        runtime: "python3.13"
-        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
-        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
         memory_size: 1024
         timeout: 600
         reserved_concurrent_executions: 100
-        # Enqueues work for lambda/data-transformer on sqs/data-transform
-        # (QUEUE_URL): the queue's producer_policy grants SendMessage and its
-        # kms/main key through SQS.
         environment_variables:
           LOG_LEVEL: "INFO"
           ENVIRONMENT: "{{ .settings.context.stage }}"
-          QUEUE_URL: !terraform.state sqs/data-transform .queue_url
-        custom_policy: !terraform.state sqs/data-transform '.producer_policy | tojson'
-        # The built-in egress reaches S3 only, and vpc/services has no SQS
-        # endpoint: SQS's regional endpoint is reached through the NAT gateway.
-        custom_egress_rules:
-          - description: "HTTPS to the SQS regional endpoint through the NAT gateway"
-            from_port: 443
-            to_port: 443
-            protocol: "tcp"
-            cidr_blocks: ["0.0.0.0/0"]
-        vpc_id: !terraform.state vpc/services .vpc_id
-        subnet_ids: !terraform.state vpc/services .private_subnet_ids
-      dependencies:
-        components:
-          - component: vpc/services
-          - component: s3/lambda-artifacts
-          - component: sqs/data-transform
 
-    # Packaged, and disabled until its first package, like
-    # lambda/data-processor above. Fed by sqs/data-transform.
+    # sqs/data-transform's visibility_timeout_seconds is derived from this
+    # timeout: change them together.
     lambda/data-transformer:
-      metadata:
-        component: lambda
-        enabled: false
-      settings:
-        package_version: "unreleased"
       vars:
-        function_name: "{{ .settings.context.stage }}-data-transformer"
-        handler: "transform.handler"
-        runtime: "python3.13"
-        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
-        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
         memory_size: 2048
-        # sqs/data-transform's visibility_timeout_seconds is derived from this
-        # timeout and the batching window below: change them together.
         timeout: 900
         reserved_concurrent_executions: 50
-        # Failed messages are retried by the queue and moved to its DLQ after
-        # dlq_max_receive_count receives; with ReportBatchItemFailures the
-        # function returns only the failed messages, not the whole batch.
         # maximum_concurrency stays within reserved_concurrent_executions, so
         # the poller backs off instead of being throttled.
         event_source_mappings:
           data-transform:
-            event_source_arn: !terraform.state sqs/data-transform .queue_arn
-            batch_size: 10
-            maximum_batching_window_in_seconds: 5
-            function_response_types:
-              - ReportBatchItemFailures
             scaling_config:
               maximum_concurrency: 50
-        # The queue is encrypted with kms/main: the poller needs kms:Decrypt.
-        event_source_kms_key_arns:
-          - !terraform.state kms/main .key_arn
-        vpc_id: !terraform.state vpc/services .vpc_id
-        subnet_ids: !terraform.state vpc/services .private_subnet_ids
-      dependencies:
-        components:
-          - component: vpc/services
-          - component: s3/lambda-artifacts
-          - component: sqs/data-transform
-          - component: kms/main
 
-    # Work queue of lambda/data-transformer: lambda/data-processor sends, the
-    # transformer's event source mapping polls. Failed messages move to
-    # <Environment>-data-transform-dlq after 5 receives and stay 14 days.
     sqs/data-transform:
-      metadata:
-        component: sqs
-        inherits:
-          - sqs/defaults
       vars:
-        name: data-transform
         # AWS: at least 6x the consumer's timeout plus its batching window,
         # 6 x 900 (lambda/data-transformer timeout) + 5 = 5405.
         visibility_timeout_seconds: 5405
-        message_retention_seconds: 345600  # 4 days
-        dlq_enabled: true
-        dlq_max_receive_count: 5
-        dlq_message_retention_seconds: 1209600  # 14 days
-
-    # Packaged, and disabled until its first package, like
-    # lambda/data-processor above.
-    lambda/report-generator:
-      metadata:
-        component: lambda
-        enabled: false
-      settings:
-        package_version: "unreleased"
-      vars:
-        function_name: "{{ .settings.context.stage }}-report-generator"
-        handler: "reports.handler"
-        runtime: "python3.13"
-        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
-        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
-        memory_size: 3008
-        timeout: 900
-        # Daily at 06:00 UTC (EventBridge cron is always UTC). The rule is
-        # created with the function, so it stays absent while disabled.
-        schedule_expression: "cron(0 6 * * ? *)"
-        schedule_enabled: true
-        vpc_id: !terraform.state vpc/services .vpc_id
-        subnet_ids: !terraform.state vpc/services .private_subnet_ids
-      dependencies:
-        components:
-          - component: vpc/services
-          - component: s3/lambda-artifacts
 
     # The data dashboard's and alarms' recipients.
     monitoring/data:

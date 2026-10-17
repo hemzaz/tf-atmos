@@ -2,9 +2,16 @@
 # =============================================================================
 # lambda/data-transformer: the sqs/data-transform consumer (disabled)
 # =============================================================================
-# Packaged, and disabled until its first package, like lambda/data-processor
+# Shared by nonprod and prod: a change here changes prod. Packaged, and
+# disabled until its first package, like lambda/data-processor
 # (catalog/lambda/data-processor.yaml). Fed by sqs/data-transform through an
 # event source mapping.
+#
+# Each stack keeps its memory_size, timeout and any reserved concurrency or
+# mapping scaling (orgs/fnx/<stage>/<region>/components/services.yaml). The
+# stack's sqs/data-transform visibility_timeout_seconds is derived from that
+# timeout and the batching window below (6 x timeout + window): the two
+# values sit side by side in the stack file, so change them together.
 # =============================================================================
 
 components:
@@ -21,13 +28,11 @@ components:
         runtime: "python3.13"
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
-        memory_size: 1024
-        # sqs/data-transform's visibility_timeout_seconds is derived from this
-        # timeout and the batching window below: change them together.
-        timeout: 600
         # Failed messages are retried by the queue and moved to its DLQ after
         # dlq_max_receive_count receives; with ReportBatchItemFailures the
         # function returns only the failed messages, not the whole batch.
+        # maximum_batching_window_in_seconds is part of sqs/data-transform's
+        # visibility timeout (header).
         event_source_mappings:
           data-transform:
             event_source_arn: !terraform.state sqs/data-transform .queue_arn

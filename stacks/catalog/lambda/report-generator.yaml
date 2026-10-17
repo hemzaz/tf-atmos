@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# lambda/report-generator: the daily report function (disabled)
+# =============================================================================
+# The only shape of this instance, so the default file: a stack that runs
+# reports imports it. Packaged, and disabled until its first package, like
+# lambda/data-processor (catalog/lambda/data-processor.yaml).
+# =============================================================================
+
+components:
+  terraform:
+    lambda/report-generator:
+      metadata:
+        component: lambda
+        enabled: false
+      settings:
+        package_version: "unreleased"
+      vars:
+        function_name: "{{ .settings.context.stage }}-report-generator"
+        handler: "reports.handler"
+        runtime: "python3.13"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
+        memory_size: 3008
+        timeout: 900
+        # Daily at 06:00 UTC (EventBridge cron is always UTC). The rule is
+        # created with the function, so it stays absent while disabled.
+        schedule_expression: "cron(0 6 * * ? *)"
+        schedule_enabled: true
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: s3/lambda-artifacts
