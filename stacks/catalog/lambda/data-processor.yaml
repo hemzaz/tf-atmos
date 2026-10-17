@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# lambda/data-processor in the staging shape (disabled)
+# =============================================================================
+# Data processing (was infrastructure/data.lambda). The lambda component is
+# single-function, so one instance per function. The function enqueues work
+# for lambda/data-transformer on sqs/data-transform (the -dev flavor has no
+# queue).
+#
+# The application repo's CI builds the package and uploads it as
+# <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
+# with iam/ci's lambda-uploader role; a PR here then sets
+# settings.package_version, and the changed s3_key redeploys the code
+# (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
+# package exists: upload it, set package_version, set enabled: true, and
+# restore its readers, each marked with a "disabled" comment:
+# apigateway/main's "/api" route and apigateway/data (data-processor), and
+# monitoring/data's dimensions (every function).
+# =============================================================================
+
+components:
+  terraform:
+    lambda/data-processor:
+      metadata:
+        component: lambda
+        enabled: false
+      settings:
+        package_version: "unreleased"
+      vars:
+        function_name: "{{ .settings.context.stage }}-data-processor"
+        handler: "main.handler"
+        runtime: "python3.13"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
+        memory_size: 512
+        timeout: 300
+        # Enqueues work for lambda/data-transformer on sqs/data-transform: the
+        # queue's producer_policy (SendMessage, and its kms/main key through
+        # SQS) and its URL.
+        environment_variables:
+          QUEUE_URL: !terraform.state sqs/data-transform .queue_url
+        custom_policy: !terraform.state sqs/data-transform '.producer_policy | tojson'
+        # The built-in egress reaches S3 only, and vpc/services has no SQS
+        # endpoint: SQS's regional endpoint is reached through the NAT gateway.
+        custom_egress_rules:
+          - description: "HTTPS to the SQS regional endpoint through the NAT gateway"
+            from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: s3/lambda-artifacts
+          - component: sqs/data-transform

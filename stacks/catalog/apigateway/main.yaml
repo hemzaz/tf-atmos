@@ -22,9 +22,12 @@ components:
         # Methods are addressed by resource_path ("/" is the API root), because
         # a stack cannot know this API's resource IDs before apply.
         # lambda/data-processor is disabled (no package yet), so "/api" has no
-        # method. When it is enabled, append these items to the two lists below
-        # (delete "#   " to keep the indentation) and add
-        # `- component: lambda/data-processor` to dependencies.components:
+        # method. Every importer shares this file, so editing it here enables
+        # "/api" in all of them. To enable it in one stack, give that stack its
+        # own flavor (apigateway/main-<flavor>.yaml, imported instead of this
+        # file) with these items appended to the two lists below (delete "#   "
+        # to keep the indentation) and `- component: lambda/data-processor`
+        # added to dependencies.components:
         #   api_methods:
         #     - resource_path: "/api"
         #       http_method: "ANY"

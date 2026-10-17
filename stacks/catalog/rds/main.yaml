@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# rds/main in the staging shape: the application database
+# =============================================================================
+# Was infrastructure/main.rds. The database inherits the rds/staging abstract
+# (prod-shaped durability, tolerant of teardown) and sits in vpc/main's
+# database subnets (the -dev flavor uses its private subnets), reachable from
+# eks/main.
+# =============================================================================
+
+import:
+  - catalog/rds/staging
+
+components:
+  terraform:
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/staging
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "{{ .settings.context.stage }}-main-db"
+        db_name: "stagingapp"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.t3.medium"
+        allocated_storage: 20
+        max_allocated_storage: 100
+        backup_window: "03:00-04:00"
+        maintenance_window: "Mon:04:30-Mon:05:30"
+        performance_insights_retention_period: 7
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        # Without this, the RDS security group's only ingress rule has an
+        # empty security_groups list and nothing on eks/main can reach the
+        # database (eks-backend-services/main's pods run there).
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: eks/main

@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# monitoring/data in the staging shape: the data dashboard and alarms
+# =============================================================================
+# The data plane's dashboards and alarms: the stack's kms/main key,
+# acm/services' certificates, the eks/data and rds/data dimensions, and an
+# RDS connection alarm on rds/data (the -dev flavor has none). Each stack
+# keeps its alert recipients
+# (orgs/fnx/<stage>/<region>/components/services.yaml).
+# =============================================================================
+
+import:
+  - catalog/monitoring/defaults
+
+components:
+  terraform:
+    monitoring/data:
+      metadata:
+        component: monitoring
+        inherits:
+          - monitoring/defaults
+      vars:
+        name: data
+        kms_key_id: !terraform.state kms/main .key_arn
+        create_dashboard: true
+        enable_certificate_monitoring: true
+
+        certificate_arns: !terraform.state acm/services .certificate_arns // {} | [.[]]
+        certificate_expiry_threshold: 30
+
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / "").
+        eks_cluster_name: !terraform.state eks/data .eks_cluster_id
+        rds_instances: !terraform.state rds/data .instance_identifier | [.]
+        # The lambdas are disabled (no package yet), and apigateway/data with
+        # them: no API or Lambda dimensions until they are enabled. Then add
+        # back, each read also in dependencies (lambda_functions: the enabled
+        # ones only):
+        #   api_gateway_name: !terraform.state apigateway/data .api_name
+        #   api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
+        #   lambda_functions:
+        #     - !terraform.state lambda/data-processor .function_name
+        #     - !terraform.state lambda/data-transformer .function_name
+
+        # Data-specific alarms
+        create_sns_topic: true
+        db_connection_alarms:
+          rds_connections:
+            db_instance_identifier: !terraform.state rds/data .instance_identifier
+            evaluation_periods: 2
+            period: 300
+            threshold: 100
+        enable_rds_monitoring: true
+        rds_storage_threshold: 5368709120
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/services
+          - component: kms/main
+          - component: eks/data
+          - component: rds/data
