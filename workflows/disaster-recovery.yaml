@@ -152,7 +152,8 @@ workflows:
              instance): `atmos terraform destroy eks-backend-services/main -s {{ $p.standby }}`.
           6. Re-seed {{ $p.standby }} rds/main from {{ $p.primary_region }} the same way (deletion protection, final snapshot,
              on a branch its stack file imports catalog/rds/main-standby again instead of main-standby-promoted, any
-             literal instance_class removed; from it `-replace=aws_db_instance.main` on {{ $p.standby }}).
+             literal instance_class removed; from it `-replace=aws_db_instance.main` on {{ $p.standby }}). Keep CD off
+             and apply nothing for {{ $p.standby }} rds/main from master until that branch merges.
           7. {{ $p.standby }} back to warm sizes (PR + desired sizes by CLI), and in the same PR its stack file imports
              catalog/eks-backend-services/main-standby again (disabled), database_secret_arn removed.
           8. Auth: users sign in to {{ $p.primary }} again; passwords changed in {{ $p.standby_region }} and users created there

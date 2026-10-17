@@ -7,8 +7,9 @@
 # over to, kept in sync continuously, EU to EU only (eu-west-1 to
 # eu-central-1, check-data-residency.py):
 #   - rds/main: a cross-region read replica of fnx-ew1-prod's rds/main
-#     (Cloud Posse terraform-aws-rds replicate_source_db). Promote it by
-#     setting replicate_source_db to null.
+#     (Cloud Posse terraform-aws-rds replicate_source_db). Once promoted,
+#     this file's import catalog/rds/main-standby switches to
+#     catalog/rds/main-standby-promoted (reconciliation step 1).
 #   - elasticache/main: a Global Datastore secondary of fnx-ew1-prod's
 #     elasticache/main (Cloud Posse aws-elasticache-redis
 #     global_replication_group_id).

@@ -4,8 +4,9 @@
 # =============================================================================
 # The data tier the serving path fails over to, kept in sync continuously:
 #   - rds/main: a cross-region read replica of fnx-ue1-prod's rds/main
-#     (Cloud Posse terraform-aws-rds replicate_source_db). Promote it by
-#     setting replicate_source_db to null.
+#     (Cloud Posse terraform-aws-rds replicate_source_db). Once promoted,
+#     this file's import catalog/rds/main-standby switches to
+#     catalog/rds/main-standby-promoted (reconciliation step 1).
 #   - elasticache/main: a Global Datastore secondary of fnx-ue1-prod's
 #     elasticache/main (Cloud Posse aws-elasticache-redis
 #     global_replication_group_id).

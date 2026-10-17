@@ -794,7 +794,8 @@ What differs beyond the names:
   still imports `main-standby-failover`; reconciliation step 1 and failback step 6 switch
   `fnx-ec1-prod`'s stack file import between `catalog/rds/main-standby` and
   `catalog/rds/main-standby-promoted` (the read returns as `!terraform.state rds/main fnx-ew1-prod
-  .instance_arn`, with the warm `db.r5.large`); step 7
+  .instance_arn`, with the warm `db.r5.large`; CD stays off and nothing applies `fnx-ec1-prod`'s
+  `rds/main` from master until that branch merges); step 7
   removes an added replica from `ec1-prod-cache` in eu-central-1.
 
 #### Auth during failover
@@ -980,6 +981,8 @@ explicit `-replace` from an operator, not a merge:
    `instance_class` if failover resized it (the `-replace` creates the instance at the branch's
    class: the warm `db.r5.large`). From that branch,
    `atmos terraform apply rds/main -s fnx-ue2-prod -- -replace=aws_db_instance.main`; merge.
+   Keep CD off and apply nothing for its `rds/main` from master until that branch merges: master
+   still has the promoted import, and an apply from it would undo the re-seed.
 7. Back to warm: a PR reverting, in `fnx-ue2-prod`'s stack file, reconciliation step 2 and
    failover step 6 (the import back to `catalog/eks-backend-services/main-standby`, disabled,
    `database_secret_arn` removed; step 5 destroyed what it deployed), and the desired sizes Terraform
