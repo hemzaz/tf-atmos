@@ -245,8 +245,10 @@ zone, so its domain must resolve, or validation times out after 45 minutes. Prod
 that Terraform-managed zone: add an NS record for `dev.`/`staging.fnx.example.com` to prod's
 `network/main` `records` with the child stack's `zone_name_servers.main`, and deploy prod's
 `network/main`. Its existing records are in `stacks/catalog/network/main-prod-data-plane.yaml`;
-put this one under `network/main` `vars.records` in
-`stacks/orgs/fnx/prod/us-east-1/components/networking.yaml` (records merge per key). EU prod
+put this one in prod's stack file, `stacks/orgs/fnx/prod/us-east-1.yaml`, as a key under the
+existing `network/main` entry's `vars.records` in `components.terraform` (add `records:` there if
+it is absent; one key per child zone; not a second `components:` or `network/main` key; records
+merge per key with the catalog's). EU prod
 (`fnx-ew1-prod`) has its own apex, never under the US domain: delegate it at its registrar to
 `fnx-ew1-prod`'s `network/main` `zone_name_servers.main`.
 `services.<d>` delegation is wired by the stacks themselves.
@@ -753,6 +755,7 @@ reading each name in its EU form:
 | Cache | `ue2-prod-cache` (`ue1-prod-cache`), `redis-auth/ue2/prod-cache` | `ec1-prod-cache` (`ew1-prod-cache`), `redis-auth/ec1/prod-cache` |
 | Cluster | `ue2-main` | `ec1-main` |
 | Step 6 stack file | `stacks/orgs/fnx/prod/us-east-2.yaml` | `stacks/orgs/fnx/prod/eu-central-1.yaml` |
+| Failback 1.3 stack file | `stacks/orgs/fnx/prod/us-east-1.yaml` | `stacks/orgs/fnx/prod/eu-west-1.yaml` |
 | State, its replica | `fnx-terraform-state` (us-east-1), `fnx-terraform-state-replica` (us-east-2) | `fnx-ew1-terraform-state` (eu-west-1), `fnx-ew1-terraform-state-replica` (eu-central-1) |
 | Backup copies | `ue1-backup-replica` (us-east-2) | `ew1-backup-replica` (eu-central-1) |
 | User migration, pools | `ue2-cognito-user-migration`; `<ue1 pool id>`, `<ue2 pool id>` | `ec1-cognito-user-migration`; `<ew1 pool id>`, `<ec1 pool id>` |
@@ -954,8 +957,10 @@ explicit `-replace` from an operator, not a merge:
       fi   # DBSnapshotNotFound above: nothing to set aside
       ```
 
-   3. On a branch, add an `rds/main` block to `fnx-ue1-prod`'s stack file (never to
-      `catalog/rds/main-prod`, which both prod primaries import) that sets
+   3. On a branch, add an `rds/main` entry under the existing `components.terraform` of
+      `fnx-ue1-prod`'s stack file, `stacks/orgs/fnx/prod/us-east-1.yaml` (not a second
+      `components:` key; never to `catalog/rds/main-prod`, which both prod primaries import),
+      whose `vars` set
       `replicate_source_db: "arn:aws:rds:us-east-2:{{ .settings.environment.account_id }}:db:ue2-prod-main-db"`
       (a literal ARN: a `!terraform.state` read of `fnx-ue2-prod` would invert the two stacks'
       deploy order). From that branch:
@@ -965,7 +970,7 @@ explicit `-replace` from an operator, not a merge:
       PR afterwards; CD then has nothing to change.
    4. Wait until `ReplicaLag` of `ue1-prod-main-db` (CloudWatch, `AWS/RDS`, us-east-1) is 0.
 2. In a maintenance window, stop writes in us-east-2 (scale the backend deployments to 0), check
-   the lag is 0, then promote `ue1-prod-main-db`: a PR removing that `rds/main` block, with the
+   the lag is 0, then promote `ue1-prod-main-db`: a PR removing that `rds/main` entry, with the
    promotion plan check above on `fnx-ue1-prod` (update in place only), merged and applied.
 3. Move the cache primary back: `aws elasticache failover-global-replication-group --region
    us-east-1 --global-replication-group-id <id> --primary-region us-east-1

@@ -140,10 +140,11 @@ workflows:
           replacement, so each re-seed is an operator `-replace`, not a merge)
           1. Re-seed {{ $p.primary }} rds/main from {{ $p.standby_region }}: `aws rds modify-db-instance --db-instance-identifier
              {{ $p.primary_db_instance }} --no-deletion-protection --apply-immediately --region {{ $p.primary_region }}`; set aside an existing
-             {{ $p.primary_db_instance }}-final-snapshot (copy to a dated name, delete); on a branch add an rds/main block to its
-             stack file (never to the shared catalog/rds/main-prod) setting replicate_source_db to {{ $p.db_instance }}'s ARN (literal), then
+             {{ $p.primary_db_instance }}-final-snapshot (copy to a dated name, delete); on a branch add an rds/main entry to its
+             stack file's components.terraform (merged into the existing map, not a second components: key; never to the
+             shared catalog/rds/main-prod) whose vars set replicate_source_db to {{ $p.db_instance }}'s ARN (literal), then
              `atmos terraform apply rds/main -s {{ $p.primary }} -- -replace=aws_db_instance.main`; merge after.
-          2. At ReplicaLag 0, with writes stopped: promote it by a PR removing that rds/main block (plan check:
+          2. At ReplicaLag 0, with writes stopped: promote it by a PR removing that rds/main entry (plan check:
              update in place only).
           3. Cache primary back: failover-global-replication-group --primary-region {{ $p.primary_region }}
              --primary-replication-group-id {{ $p.primary_cache }}.
