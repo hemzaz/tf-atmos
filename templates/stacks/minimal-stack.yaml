@@ -6,6 +6,7 @@
 # the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
 # lane (settings.prefix, <region code>-<name>), so it deploys in the same
 # account and region:
+#   mkdir -p stacks/orgs/fnx/dev/us-east-1
 #   cp templates/stacks/minimal-stack.yaml stacks/orgs/fnx/dev/us-east-1/minimal.yaml
 #   atmos validate stacks
 #   atmos terraform plan vpc/main -s fnx-ue1-dev-minimal
