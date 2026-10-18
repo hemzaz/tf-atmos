@@ -7,6 +7,7 @@
 # the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
 # lane (settings.prefix, <region code>-<name>), so it deploys in the same
 # account and region:
+#   mkdir -p stacks/orgs/fnx/prod/us-east-1
 #   cp templates/stacks/full-stack.yaml stacks/orgs/fnx/prod/us-east-1/platform.yaml
 #   atmos validate stacks
 #   atmos workflow plan -f plan-environment -s fnx-ue1-prod-platform

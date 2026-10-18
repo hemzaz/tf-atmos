@@ -1,10 +1,12 @@
 ---
-# =============================================================================
 # fnx-ue1-prod: the prod account's us-east-1 stack
-# =============================================================================
 # Production environment with full high availability, security, and compliance
 # ALL CHANGES REQUIRE CHANGE MANAGEMENT APPROVAL
-# =============================================================================
+# One file per stack: the imports, then one vars/settings/components body,
+# grouped by domain (globals, networking, security, compute, services).
+# Each instance's wiring is catalog/<c>/<i>: a -prod flavor where a prod
+# primary differs, else the un-suffixed default (each domain section below
+# names which); this file keeps this stack's values.
 
 import:
   # Import base configuration first
@@ -16,16 +18,87 @@ import:
   # Import stage defaults (org defaults, tenant and stage mixins)
   - orgs/fnx/prod/_defaults
 
-  # Import component-specific configurations
-  - orgs/fnx/prod/us-east-1/components/globals
-  - orgs/fnx/prod/us-east-1/components/networking
-  - orgs/fnx/prod/us-east-1/components/security
-  - orgs/fnx/prod/us-east-1/components/compute
-  - orgs/fnx/prod/us-east-1/components/services
+  # --- globals: shared catalog defaults (the rest come with their instances)
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/external-secrets/defaults
+  - catalog/ec2/defaults
+  - catalog/eks/defaults
+  - catalog/iam/defaults
+  - catalog/acm/defaults
+  - catalog/apigateway/defaults
+  - catalog/monitoring/defaults
+
+  # --- networking
+  - catalog/vpc/main-prod
+  - catalog/vpc/services-prod
+  - catalog/network/vpc-peering
+  - catalog/network/main-prod-data-plane
+  - catalog/network/services-prod
+
+  # --- security
+  - catalog/iam/main-prod
+  - catalog/iam/ci-prod
+  - catalog/kms/main-prod
+  - catalog/secretsmanager/app-prod
+  - catalog/secretsmanager/infra-prod
+  - catalog/acm/main-prod
+  - catalog/acm/services
+  - catalog/cloudtrail/main
+  - catalog/awsconfig/main
+  - catalog/guardduty/main-prod
+  - catalog/securityhub/main-prod
+  - catalog/inspector2/main
+  - catalog/apigateway-account/main
+  - catalog/security-monitoring/main
+  - catalog/backup/main-prod
+
+  # --- compute
+  - catalog/eks/main-prod
+  - catalog/eks/data
+  - catalog/github-runners/main-prod
+  - catalog/ec2/bastion-prod
+  - catalog/external-secrets/main-prod
+  - catalog/external-secrets/data
+  - catalog/eks-addons/main-prod
+  - catalog/eks-addons/data
+  - catalog/eks-backend-services/main-prod
+
+  # --- services
+  - catalog/apigateway/main-prod
+  - catalog/cognito/main-prod
+  - catalog/monitoring/main-prod-data-plane
+  - catalog/monitoring/data-prod
+  - catalog/s3/lambda-artifacts
+  - catalog/cost-optimization/main
+  - catalog/rds/main-prod
+  - catalog/rds/data-prod
+  - catalog/elasticache/main-prod
+  - catalog/apigateway/data
+  - catalog/ecs/main
+  - catalog/lambda/data-processor
+  - catalog/lambda/data-transformer
+  - catalog/sqs/data-transform
+  - catalog/lambda/report-generator
 
 vars:
   # Core variables for stack naming
   region: us-east-1
+  # Core environment identifiers
+  tags:
+    Team: "Platform"
+    CostCenter: "Production"
+    Project: "Infrastructure"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Production"
+    Provisioner: "Atmos"
+    DataClassification: "confidential"
+    Compliance: "pci-sox"
+    CriticalityLevel: "high"
+    SLA: "99.9"
+    BackupRequired: "true"
 
 settings:
   # DR region of this primary (owner decision Q5: warm standby fnx-ue2-prod):
@@ -35,8 +108,387 @@ settings:
   # state bucket's replica.
   dr:
     region: us-east-2
-  environment:
-    account: prod
   context:
     tenant: fnx
     stage: prod
+  # Environment metadata (not passed to Terraform). Moved here from a stack-wide
+  # `metadata:` block, which Atmos no longer allows; component templates read it
+  # as {{ .settings.environment.<key> }}.
+  environment:
+    account: prod
+    # The stack's one domain. Every dns zone/record, acm domain/SAN and
+    # apigateway custom domain derives from it; the Route 53 zone ids come from
+    # the dns instances' zone_ids output, never from settings. example.com is a
+    # placeholder base until the owner sets the real domain.
+    domain_name: "fnx.example.com"
+
+    # Monitoring contacts - 24/7 coverage
+    monitoring:
+      critical_alerts:
+        - "prod-critical@example.com"
+        - "oncall@example.com"
+      warning_alerts:
+        - "prod-alerts@example.com"
+      pagerduty_service_key_ssm_parameter: /fnx/production/pagerduty/service_key
+      # cost-optimization/main's monthly AWS Budget (numeric string - see
+      # components/terraform/cost-optimization/variables.tf).
+      budget_monthly_limit: "10000"
+
+    eks_kubernetes_version: "1.36"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
+    use_external_secrets: true
+    # eks-backend-services/main's images. Release-pipeline-owned: these
+    # repositories/tags are not built by this repo. Terraform requires each
+    # value to be repository:tag or repository@sha256:<digest>, never :latest
+    # (variable validation) -- keep this map's tags in step with what the
+    # release pipeline actually pushes.
+    backend_service_images:
+      api_gateway: "ghcr.io/fnx-platform/api-gateway:1.4.2"
+      platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
+      auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
+      job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
+    enable_vpc_flow_logs: true
+
+  # The two VPCs' CIDRs, in one place: each vpc instance's
+  # ipv4_primary_cidr_block, the other one's
+  # private_network_acl_peer_cidr_blocks and network/vpc-peering's routes all
+  # read them. Literals, not !terraform.state <vpc> .vpc_cidr: vpc/main and
+  # vpc/services would then read each other, a cycle.
+  network:
+    vpc_cidrs:
+      main: "10.20.0.0/16"
+      services: "10.21.0.0/16"
+
+components:
+  terraform:
+    # ========================================================================
+    # Globals
+    # ========================================================================
+    # Human cluster admins of every eks instance in this stack (eks/main and
+    # eks/data inherit eks/defaults): Cloud Posse's map_additional_iam_roles
+    # (components/terraform/eks/variables.tf); groups ["system:masters"] is a
+    # cluster-scoped AmazonEKSClusterAdminPolicy access entry. They apply the
+    # in-cluster components through the bastion's SSM port-forward
+    # (docs/OPERATIONS.md, "In-cluster components"), so
+    # each rolearn must also be in backend/main's
+    # access_roles.prod_write allowed_principal_arns
+    # (stacks/orgs/fnx/root/us-east-1.yaml). check-cluster-api-ci.py fails
+    # a role listed here but not there, and warns while this list is empty.
+    # The full role ARN WITH its path, e.g. IAM Identity Center's:
+    #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>"
+    #     groups: ["system:masters"]
+    # Empty until the owner supplies the real ARN: an access entry for a role
+    # that does not exist fails eks/main's apply.
+    eks/defaults:
+      vars:
+        map_additional_iam_roles: []
+
+    # ========================================================================
+    # Networking
+    # VPC and network resources with full high availability
+    # Multi-AZ deployment, redundant NAT Gateways, comprehensive flow logging
+    # The instances' wiring is catalog/vpc/<i>-prod (vpc/main shared with
+    # fnx-ew1-prod), catalog/network/vpc-peering (the default, as in
+    # nonprod) and catalog/network/<i>-prod; network/main is
+    # main-prod-data-plane, the shape of a prod primary with the data plane
+    # its records read. This file keeps the CIDRs, AZs, subnets and this
+    # stack's DNS values (zone comments, query logging, query-log retention).
+    # ========================================================================
+    # Primary VPC - Main Application Workloads (High Availability)
+    vpc/main:
+      vars:
+        # The private NACL admits vpc/services, peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.services }}"
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
+
+        # Private subnets - application tier
+        private_subnets:
+          - "10.20.1.0/24"
+          - "10.20.2.0/24"
+          - "10.20.3.0/24"
+
+        # Public subnets - load balancers, NAT
+        public_subnets:
+          - "10.20.101.0/24"
+          - "10.20.102.0/24"
+          - "10.20.103.0/24"
+
+        # Database subnets - isolated tier
+        database_subnets:
+          - "10.20.201.0/24"
+          - "10.20.202.0/24"
+          - "10.20.203.0/24"
+
+    # Services VPC - Dedicated Backend Services (High Availability)
+    vpc/services:
+      vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
+
+        private_subnets:
+          - "10.21.1.0/24"
+          - "10.21.2.0/24"
+          - "10.21.3.0/24"
+
+        public_subnets:
+          - "10.21.101.0/24"
+          - "10.21.102.0/24"
+          - "10.21.103.0/24"
+
+        database_subnets:
+          - "10.21.201.0/24"
+          - "10.21.202.0/24"
+          - "10.21.203.0/24"
+
+    # Network Resources - DNS for Main VPC
+    network/main:
+      vars:
+        # Query log groups (us-east-1): prod keeps 90 days, like eks's
+        # cluster_log_retention_period; dev and staging keep the default 7.
+        query_log_retention_in_days: 90
+        zones:
+          main:
+            comment: "Production main zone"
+            enable_query_logging: true
+          internal:
+            comment: "Production internal DNS"
+
+    # Network Resources - DNS for Services VPC
+    network/services:
+      vars:
+        query_log_retention_in_days: 90
+        zones:
+          services:
+            comment: "Production services zone"
+            enable_query_logging: true
+          data:
+            comment: "Data services DNS"
+
+    # ========================================================================
+    # Security
+    # PRODUCTION SECURITY - Maximum protection for business-critical data
+    # IAM with least privilege, KMS encryption, secrets replicated to the DR
+    # region. Every security instance's wiring is catalog/<c>/<i>: the -prod
+    # files where a prod primary differs (each shared with fnx-ew1-prod), else
+    # the default one (acm/services, cloudtrail, awsconfig, inspector2,
+    # apigateway-account, security-monitoring); this file keeps their
+    # per-stack values.
+    # ========================================================================
+    iam/ci:
+      vars:
+        # Lambda package uploader (<prefix>-lambda-uploader, the iam
+        # component's lambda-uploader.tf): the application repo's CI uploads
+        # each function's zip to this stage's s3/lambda-artifacts bucket with
+        # it (docs/OPERATIONS.md, "Lambda packages"). No role until the app
+        # repo is named here as "<org>/<repo>:<branch>" - an owner input. The
+        # alias is kms/main's, the bucket's key; check-lambda-packages.py
+        # keeps it and the bucket name in step with the storage instances.
+        lambda_uploader_trusted_github_repos: []
+        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
+    kms/main:
+      vars:
+        description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
+        # The replica in the DR region (owner decision Q5: warm standby in
+        # us-east-2; replica_regions is catalog/kms/main-prod's
+        # settings.dr.region). The replica's alias is fnx-ue2-prod's
+        # settings.prefix + "-main", the name its iam/ci
+        # ci_apply_kms_key_aliases expects.
+        replica_alias_names:
+          us-east-2: ue2-main
+
+    # ACM Certificates - Production
+    acm/services:
+      vars:
+        dns_domains:
+          services_wildcard:
+            subject_alternative_names:
+              - "api.services.{{ .settings.environment.domain_name }}"
+            # No data.services SAN: *.services covers it, and its validation
+            # record would sit in the services zone while the name belongs to
+            # network/services' own data zone.
+
+    # ========================================================================
+    # Compute
+    # Production compute with high availability, auto-scaling, and full
+    # monitoring. Multi-AZ deployments, reserved capacity, enhanced security
+    # The instances' wiring is catalog/<c>/<i>-prod (eks/main, the bastion,
+    # the runner pool, external-secrets/main, eks-addons/main and
+    # eks-backend-services/main, shared with fnx-ew1-prod) and the data
+    # plane's un-suffixed catalog/<c>/data (shared with dev and staging). This
+    # file keeps this stack's values: eks/data's tags, logs and node groups,
+    # the bastion's egress rules, and the data plane's switches and log
+    # retention.
+    # ========================================================================
+    # EKS Cluster - Data Processing Workloads (Production HA)
+    eks/data:
+      vars:
+        tags:
+          Cluster: "{{ .settings.prefix }}-data"
+          Purpose: "data-processing"
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+        cluster_log_retention_period: 90
+        node_groups:
+          # Data processing workers
+          data-workers:
+            instance_types: ["r5.2xlarge"]
+            desired_group_size: 4
+            min_group_size: 3
+            max_group_size: 8
+            kubernetes_labels:
+              role: data-processing
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 200
+          # Batch processing (can use spot for cost savings)
+          batch-workers:
+            instance_types: ["m5.2xlarge", "m5.xlarge"]
+            desired_group_size: 2
+            min_group_size: 0
+            max_group_size: 10
+            kubernetes_labels:
+              role: batch
+            kubernetes_taints:
+              - key: workload
+                value: batch
+                effect: "NO_SCHEDULE"
+            capacity_type: "SPOT"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+
+    # EC2 Bastion Host (Production Hardened)
+    # The SSH rule names vpc/main's and vpc/services' CIDRs.
+    ec2/bastion:
+      vars:
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.20.0.0/16", "10.21.0.0/16"]
+            description: "SSH to VPC resources"
+
+    # External Secrets Operator - Data Cluster
+    external-secrets/data:
+      vars:
+        enabled: true
+
+    # EKS add-ons on eks/data: Container Insights keeps 90 days in prod.
+    eks-addons/data:
+      vars:
+        clusters:
+          data:
+            container_insights_log_retention_days: 90
+
+    # ========================================================================
+    # Services
+    # Production services with full monitoring, alerting, and compliance
+    # Multi-AZ RDS, comprehensive CloudWatch, PagerDuty integration
+    # Every services instance's wiring is catalog/<c>/<i>. The DR-paired and
+    # database instances use the -prod flavors (cognito/main, apigateway/main,
+    # rds/main, elasticache/main, shared with fnx-ew1-prod; rds/data and
+    # monitoring/data), monitoring/main is main-prod-data-plane (main-prod
+    # plus the ecs/main read), and the data API path (apigateway/data,
+    # ecs/main, the lambdas, sqs/data-transform) and cost-optimization/main
+    # use the un-suffixed defaults (apigateway/data, ecs/main and
+    # cost-optimization/main shared with dev and staging, lambda/data-processor,
+    # lambda/data-transformer and sqs/data-transform with staging;
+    # report-generator has only this shape). This file keeps this stack's
+    # values: the health check alarm's actions, the data API's name, sizes
+    # and limits, the lambdas' sizes, the queue's visibility timeout,
+    # monitoring/data's recipients and the budget's standby tag.
+    # ========================================================================
+    # API Gateway - Main API (Production)
+    apigateway/main:
+      vars:
+        # The health check's alarm lives in us-east-1 (Route 53's metrics are
+        # only there) and notifies monitoring/main's topic, by name: that
+        # component reads this one, so a !terraform.state here would be a cycle.
+        health_check_alarm_actions:
+          - "arn:aws:sns:us-east-1:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
+
+    # API Gateway - Data API (Production)
+    apigateway/data:
+      vars:
+        api_name: "{{ .settings.context.stage }}-data-api"
+        description: "Production Data API Gateway"
+        api_resources:
+          - path_part: "data"
+          - path_part: "metrics"
+          - path_part: "analytics"
+          - path_part: "reports"
+        throttling_burst_limit: 2000
+        throttling_rate_limit: 5000
+        log_retention_days: 90
+        tracing_enabled: true
+        tags:
+          Service: data-api
+          Tier: backend
+
+    ecs/main:
+      vars:
+        cluster_name: "{{ .settings.context.stage }}-main-apps"
+        enable_container_insights: true
+
+    lambda/data-processor:
+      vars:
+        memory_size: 1024
+        timeout: 600
+        reserved_concurrent_executions: 100
+        environment_variables:
+          LOG_LEVEL: "INFO"
+          ENVIRONMENT: "{{ .settings.context.stage }}"
+
+    # sqs/data-transform's visibility_timeout_seconds is derived from this
+    # timeout: change them together.
+    lambda/data-transformer:
+      vars:
+        memory_size: 2048
+        timeout: 900
+        reserved_concurrent_executions: 50
+        # maximum_concurrency stays within reserved_concurrent_executions, so
+        # the poller backs off instead of being throttled.
+        event_source_mappings:
+          data-transform:
+            scaling_config:
+              maximum_concurrency: 50
+
+    sqs/data-transform:
+      vars:
+        # AWS: at least 6x the consumer's timeout plus its batching window,
+        # 6 x 900 (lambda/data-transformer timeout) + 5 = 5405.
+        visibility_timeout_seconds: 5405
+
+    # The data dashboard's and alarms' recipients.
+    monitoring/data:
+      vars:
+        alarm_email_subscriptions:
+          - "prod-critical@example.com"
+          - "data-team@example.com"
+
+    # Cost optimization (catalog/cost-optimization/main; no instance scheduler
+    # in prod). The account's budget also counts its DR standby fnx-ue2-prod
+    # (Environment ue2, same account, no budget of its own, owner decision);
+    # lint check-dr-pairs (dr-pair.py --lint) fails a standby missing here.
+    cost-optimization/main:
+      vars:
+        budget_additional_environment_tags: ["ue2"]
