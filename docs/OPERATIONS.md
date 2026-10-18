@@ -245,9 +245,10 @@ zone, so its domain must resolve, or validation times out after 45 minutes. Prod
 that Terraform-managed zone: add an NS record for `dev.`/`staging.fnx.example.com` to prod's
 `network/main` `records` with the child stack's `zone_name_servers.main`, and deploy prod's
 `network/main`. Its existing records are in `stacks/catalog/network/main-prod-data-plane.yaml`;
-put this one in prod's stack file, `stacks/orgs/fnx/prod/us-east-1.yaml`, as a `records` key in
-the existing `network/main` entry's `vars` under `components.terraform` (not a second
-`components:` or `network/main` key; records merge per key with the catalog's). EU prod
+put this one in prod's stack file, `stacks/orgs/fnx/prod/us-east-1.yaml`, as a key under the
+existing `network/main` entry's `vars.records` in `components.terraform` (add `records:` there if
+it is absent; one key per child zone; not a second `components:` or `network/main` key; records
+merge per key with the catalog's). EU prod
 (`fnx-ew1-prod`) has its own apex, never under the US domain: delegate it at its registrar to
 `fnx-ew1-prod`'s `network/main` `zone_name_servers.main`.
 `services.<d>` delegation is wired by the stacks themselves.
@@ -754,6 +755,7 @@ reading each name in its EU form:
 | Cache | `ue2-prod-cache` (`ue1-prod-cache`), `redis-auth/ue2/prod-cache` | `ec1-prod-cache` (`ew1-prod-cache`), `redis-auth/ec1/prod-cache` |
 | Cluster | `ue2-main` | `ec1-main` |
 | Step 6 stack file | `stacks/orgs/fnx/prod/us-east-2.yaml` | `stacks/orgs/fnx/prod/eu-central-1.yaml` |
+| Failback 1.3 stack file | `stacks/orgs/fnx/prod/us-east-1.yaml` | `stacks/orgs/fnx/prod/eu-west-1.yaml` |
 | State, its replica | `fnx-terraform-state` (us-east-1), `fnx-terraform-state-replica` (us-east-2) | `fnx-ew1-terraform-state` (eu-west-1), `fnx-ew1-terraform-state-replica` (eu-central-1) |
 | Backup copies | `ue1-backup-replica` (us-east-2) | `ew1-backup-replica` (eu-central-1) |
 | User migration, pools | `ue2-cognito-user-migration`; `<ue1 pool id>`, `<ue2 pool id>` | `ec1-cognito-user-migration`; `<ew1 pool id>`, `<ec1 pool id>` |
