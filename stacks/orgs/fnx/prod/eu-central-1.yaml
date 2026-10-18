@@ -9,7 +9,7 @@
 # prefix (settings.prefix) and the account's singletons stay in fnx-ew1-prod:
 # the GitHub OIDC provider, the Auto Scaling service-linked role, the
 # multi-region CloudTrail trail, AWS Config's global-resource recording and
-# the account budget. Tagged Compliance "pci-sox-gdpr" (components/globals.yaml);
+# the account budget. Tagged Compliance "pci-sox-gdpr" (vars.tags below);
 # check-data-residency.py fails it if it names a non-EU region or depends on a
 # US stack.
 #
@@ -34,6 +34,15 @@
 #     configuration only, nothing persisted, no personal data;
 #   - cognito/main: its own pool, filled from fnx-ew1-prod's by a
 #     user-migration trigger.
+#
+# Same tags, domain and contacts as fnx-ew1-prod (orgs/fnx/prod/eu-west-1.yaml):
+# one EU production service, two regions. Compliance
+# "pci-sox-gdpr", which check-data-residency.py requires on every instance of a
+# GDPR-scoped stack. The catalogs are imported first, as in fnx-ew1-prod, so
+# these vars win over catalog/_base/defaults' tags (Project).
+#
+# One file per stack: the imports, then one vars/settings/components body,
+# grouped by domain (globals, networking, security, compute, services).
 # =============================================================================
 
 import:
@@ -41,14 +50,58 @@ import:
   # Region mixin: region eu-central-1, environment (region code) ec1
   - mixins/region/eu-central-1
   - orgs/fnx/prod/_defaults
-  - orgs/fnx/prod/eu-central-1/components/globals
-  - orgs/fnx/prod/eu-central-1/components/networking
-  - orgs/fnx/prod/eu-central-1/components/security
-  - orgs/fnx/prod/eu-central-1/components/compute
-  - orgs/fnx/prod/eu-central-1/components/services
+
+  # --- globals: catalog defaults for every component used in this stack
+  - catalog/iam/defaults
+  - catalog/vpc/defaults
+  - catalog/eks/defaults
+
+  # --- networking
+  - catalog/vpc/main-standby
+
+  # --- security
+  - catalog/iam/ci-standby
+  - catalog/acm/main-standby
+  - catalog/awsconfig/main-standby
+  - catalog/guardduty/main-standby
+  - catalog/securityhub/main-standby
+  - catalog/security-monitoring/main-standby
+  - catalog/backup/main-standby
+  - catalog/inspector2/main
+  - catalog/apigateway-account/main
+
+  # --- compute
+  - catalog/eks/main-standby
+  - catalog/github-runners/main-standby
+  - catalog/ec2/bastion-standby
+  - catalog/external-secrets/main-standby
+  - catalog/eks-addons/main-standby
+  - catalog/eks-backend-services/main-standby
+
+  # --- services
+  - catalog/rds/main-standby
+  - catalog/elasticache/main-standby
+  - catalog/cognito/main-standby
+  - catalog/lambda/cognito-user-migration-standby
+  - catalog/apigateway/main-standby
+  - catalog/monitoring/main-standby
 
 vars:
   region: eu-central-1
+  tags:
+    Team: "Platform"
+    CostCenter: "Production"
+    Project: "Infrastructure"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Production"
+    Provisioner: "Atmos"
+    DataClassification: "confidential"
+    Compliance: "pci-sox-gdpr"
+    CriticalityLevel: "high"
+    SLA: "99.9"
+    BackupRequired: "true"
+    DisasterRecovery: "warm-standby"
 
 settings:
   # DR standby of fnx-ew1-prod, whose state it reads: CD deploys it right after
@@ -59,6 +112,32 @@ settings:
     # The EU prod account, fnx-ew1-prod's (stacks/orgs/fnx/_defaults.yaml
     # account map): prod/_defaults derives account_id from this key.
     account: prod-eu
+    # The EU apex: api.<domain> will fail over to this stack. Its zone is
+    # fnx-ew1-prod's network/main (Route 53 has no region). fnx-ew1-prod's
+    # placeholder until the owner registers the real one (the preflight flags
+    # it, row "Domains").
+    domain_name: "fnx-eu.example.com"
+    # fnx-ew1-prod's contacts (backup/main's notification_emails read them):
+    # placeholders until the owner sets the EU ones (row "Alert recipients").
+    monitoring:
+      critical_alerts:
+        - "prod-critical@example.com"
+        - "oncall@example.com"
+      warning_alerts:
+        - "prod-alerts@example.com"
+    eks_kubernetes_version: "1.36"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
+    use_external_secrets: true
+    # The release pipeline's images, as in fnx-ew1-prod: a failover deploys
+    # the same release (row "Backend service images").
+    backend_service_images:
+      api_gateway: "ghcr.io/fnx-platform/api-gateway:1.4.2"
+      platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
+      auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
+      job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
+    enable_vpc_flow_logs: true
   context:
     tenant: fnx
     stage: prod
@@ -72,3 +151,172 @@ settings:
     bucket: '{{ .settings.context.tenant }}-ew1-terraform-state'
     role_prefix: '{{ .settings.context.tenant }}-ew1-terraform-backend'
     stack: '{{ .settings.context.tenant }}-ew1-root'
+  network:
+    vpc_cidrs:
+      main: "10.32.0.0/16"
+
+components:
+  terraform:
+    # ========================================================================
+    # Globals
+    # ========================================================================
+    # Human cluster admins of eks/main (with compute), as in fnx-ew1-prod:
+    # the same operators fail the in-cluster services over. Each
+    # rolearn, an IAM role in the prod-eu account, must also be in the EU
+    # backend's access_roles.prod_write (stacks/orgs/fnx/root/eu-west-1.yaml).
+    # Empty until the owner supplies the ARN (row "EKS cluster admins").
+    eks/defaults:
+      vars:
+        map_additional_iam_roles: []
+
+    # ========================================================================
+    # Networking
+    #
+    # Warm = full, as fnx-ue2-prod's (orgs/fnx/prod/us-east-2.yaml):
+    # vpc/main as in fnx-ew1-prod (three AZs, a NAT gateway per
+    # AZ, flow logs), on its own CIDR (10.32.0.0/16, reserved for it in
+    # fnx-ew1-prod's networking) so the two regions can be peered later
+    # without renumbering. No vpc/services: the EU data plane is not in fnx-ew1-prod
+    # either. No dns instance: the public zone is fnx-ew1-prod's network/main.
+    # Flow logs stay in eu-central-1, on this region's key.
+    # vpc/main's wiring, shared with fnx-ue2-prod, is catalog/vpc/main-standby;
+    # this file keeps its CIDR, AZs and subnets.
+    # ========================================================================
+    vpc/main:
+      vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - euc1-az1
+          - euc1-az2
+          - euc1-az3
+        private_subnets:
+          - "10.32.1.0/24"
+          - "10.32.2.0/24"
+          - "10.32.3.0/24"
+        public_subnets:
+          - "10.32.101.0/24"
+          - "10.32.102.0/24"
+          - "10.32.103.0/24"
+        database_subnets:
+          - "10.32.201.0/24"
+          - "10.32.202.0/24"
+          - "10.32.203.0/24"
+
+    # ========================================================================
+    # Security
+    #
+    # As fnx-ue2-prod is to fnx-ue1-prod (orgs/fnx/prod/us-east-2.yaml, whose
+    # security section this mirrors): regional services run here as in
+    # fnx-ew1-prod (GuardDuty, Security Hub, AWS Config, Inspector, finding
+    # routing, backups); account-wide ones do not:
+    #   - KMS: no kms/main here. This region's key is fnx-ew1-prod kms/main's
+    #     multi-region replica (replica_keys["eu-central-1"], alias ec1-main),
+    #     read cross-stack wherever fnx-ew1-prod reads kms/main.
+    #   - no iam/main: the account's cross-account role and the Auto Scaling
+    #     service-linked role are fnx-ew1-prod's iam/main.
+    #   - iam/ci trusts the account's GitHub OIDC provider, created by
+    #     fnx-ew1-prod's iam/ci.
+    #   - no cloudtrail/main: fnx-ew1-prod's trail is multi-region and records
+    #     this region too, into eu-west-1; its CIS metric filters run there.
+    #   - awsconfig/main records this region's resources only
+    #     (include_global_resource_types: false; fnx-ew1-prod records IAM).
+    # Every finding stays in eu-central-1: no Security Hub cross-region
+    # aggregation, no GuardDuty export, the alert topic on this region's key, and
+    # no enrichment Lambda (check-data-residency.py).
+    # Every read of fnx-ew1-prod is EU to EU; nothing outside the EU reads this stack.
+    #
+    # The instances' wiring is the catalog's -standby files, shared with
+    # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod; the backup copy
+    # target here is the vault ew1-backup-replica that fnx-ew1-prod's backup/main
+    # creates in eu-central-1), plus the plain inspector2/main and
+    # apigateway-account/main files every dev, staging and prod stack
+    # imports. This file keeps
+    # security-monitoring/main's alert settings.
+    # ========================================================================
+    security-monitoring/main:
+      vars:
+        # Off in a GDPR-scoped stack (check-data-residency.py).
+        enable_alert_enrichment: false
+        security_email_subscriptions: []
+
+    # ========================================================================
+    # Compute (imports only: the instances come whole from the -standby files)
+    #
+    # fnx-ue2-prod's compute (orgs/fnx/prod/us-east-2.yaml), which this
+    # mirrors for fnx-ew1-prod. Warm = the same cluster shape as
+    # fnx-ew1-prod's eks/main at its floor: the
+    # workers node group runs at 2 nodes, spread over vpc/main's three private
+    # subnets (euc1-az1..az3) like every group here, the monitoring and
+    # memory-optimized groups at 0, each keeping fnx-ew1-prod's max_group_size.
+    # Failover scales them with aws eks update-nodegroup-config, and a PR setting
+    # min_group_size/desired_group_size reconciles Terraform afterwards
+    # (docs/OPERATIONS.md, "Disaster recovery"). Cloud Posse's eks/cluster node groups take the same
+    # min/desired/max inputs. The operator path (bastion) and the in-VPC CI
+    # runners are as in fnx-ew1-prod, so the in-cluster components can be applied
+    # here on failover. Everything stays in eu-central-1 on fnx-ew1-prod
+    # kms/main's replica (ec1-main); the only other stack read is fnx-ew1-prod
+    # (EU to EU, check-data-residency.py).
+    #
+    # The instances' wiring is the catalog's -standby files, shared with
+    # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod). Failover step 6
+    # switches this file's eks-backend-services import to main-standby-failover
+    # and sets database_secret_arn here, never in the shared files.
+    # ========================================================================
+
+    # ========================================================================
+    # Services
+    #
+    # fnx-ue2-prod's services (orgs/fnx/prod/us-east-2.yaml), which this
+    # mirrors for fnx-ew1-prod. The data tier the serving path fails
+    # over to, kept in sync continuously, EU to EU only (eu-west-1 to
+    # eu-central-1, check-data-residency.py):
+    #   - rds/main: a cross-region read replica of fnx-ew1-prod's rds/main
+    #     (Cloud Posse terraform-aws-rds replicate_source_db). Once promoted,
+    #     this file's import catalog/rds/main-standby switches to
+    #     catalog/rds/main-standby-promoted (reconciliation step 1).
+    #   - elasticache/main: a Global Datastore secondary of fnx-ew1-prod's
+    #     elasticache/main (Cloud Posse aws-elasticache-redis
+    #     global_replication_group_id).
+    #   - cognito/main: this region's own user pool (owner decision B5, as
+    #     fnx-ue2-prod's 2026-10-07: DR auth must not depend on eu-west-1). AWS
+    #     does not replicate user pools, so lambda/cognito-user-migration copies
+    #     each user from fnx-ew1-prod's pool on their first sign-in or password
+    #     reset here.
+    #   - apigateway/main: the SECONDARY half of api.<EU apex>'s Route 53
+    #     failover pair; fnx-ew1-prod's apigateway/main is the PRIMARY. Each half
+    #     has its own health check, so DNS moves without a change here. Its
+    #     health check and alarm, like every Route 53 health check's, are in
+    #     us-east-1, with the EventBridge rule, targets and role relaying the
+    #     alarm to both EU regions (configuration only, nothing persisted, no
+    #     personal data; owner decision B5).
+    #   - monitoring/main: this region's ec1-main-alarms topic and alarms, and the
+    #     relayed health check alarms of both halves.
+    # No rds/data: the EU data plane is not in fnx-ew1-prod either.
+    #
+    # The instances' wiring is the catalog's -standby files, shared with
+    # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod). This file keeps
+    # apigateway/main's health check regions and alarm relay, and
+    # monitoring/main's receipt of the relayed alarms.
+    # ========================================================================
+    apigateway/main:
+      vars:
+        # The checkers: eu-west-1, the only EU checker region, plus two others
+        # (Route 53 needs three): probes of the API's stage root, a residency
+        # exemption (check-data-residency.py EXEMPTIONS).
+        health_check_regions: ["eu-west-1", "us-east-1", "ap-southeast-1"]
+        # The health check's alarm is in us-east-1 (Route 53's metrics are only
+        # there). Where fnx-ue2-prod's notifies ue1-main-alarms, this one
+        # notifies nothing in us-east-1: EventBridge relays its state changes to
+        # the default bus of both EU regions, where each monitoring/main
+        # delivers them to its topic (ew1-main-alarms, ec1-main-alarms).
+        # What sits in us-east-1 for it: the Route 53 health check, its alarm,
+        # and an EventBridge rule, its targets and their IAM role (configuration
+        # only: no topic, key, subscription, archive or queue, nothing
+        # persisted; no personal data). Owner decision B5.
+        health_check_alarm_relay_regions: ["eu-west-1", "eu-central-1"]
+
+    monitoring/main:
+      vars:
+        # Delivers the relayed us-east-1 health check alarms of the EU failover
+        # pair (both apigateway/main halves) to ec1-main-alarms.
+        receive_relayed_health_check_alarms: true

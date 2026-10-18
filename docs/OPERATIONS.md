@@ -683,7 +683,7 @@ with it, so nothing here needs Terraform. Terraform catches up after recovery (b
    its `!terraform.state` inputs read the bucket's us-east-2 replica
    ([State during a us-east-1 outage](#state-during-a-us-east-1-outage)). The replica holds the
    state from before the CLI steps, so on a branch, edit the stack file only
-   (`stacks/orgs/fnx/prod/us-east-2/components/compute.yaml`; the catalog files are shared with the
+   (`stacks/orgs/fnx/prod/us-east-2.yaml`; the catalog files are shared with the
    other standby): switch its import `catalog/eks-backend-services/main-standby` to
    `catalog/eks-backend-services/main-standby-failover`, and set the database secret there:
 
@@ -750,7 +750,7 @@ reading each name in its EU form:
 | Database | `ue2-prod-main-db` (`ue1-prod-main-db`), key `alias/ue2-main` | `ec1-prod-main-db` (`ew1-prod-main-db`), key `alias/ec1-main` |
 | Cache | `ue2-prod-cache` (`ue1-prod-cache`), `redis-auth/ue2/prod-cache` | `ec1-prod-cache` (`ew1-prod-cache`), `redis-auth/ec1/prod-cache` |
 | Cluster | `ue2-main` | `ec1-main` |
-| Step 6 stack file | `stacks/orgs/fnx/prod/us-east-2/components/compute.yaml` | `stacks/orgs/fnx/prod/eu-central-1/components/compute.yaml` |
+| Step 6 stack file | `stacks/orgs/fnx/prod/us-east-2.yaml` | `stacks/orgs/fnx/prod/eu-central-1.yaml` |
 | State, its replica | `fnx-terraform-state` (us-east-1), `fnx-terraform-state-replica` (us-east-2) | `fnx-ew1-terraform-state` (eu-west-1), `fnx-ew1-terraform-state-replica` (eu-central-1) |
 | Backup copies | `ue1-backup-replica` (us-east-2) | `ew1-backup-replica` (eu-central-1) |
 | User migration, pools | `ue2-cognito-user-migration`; `<ue1 pool id>`, `<ue2 pool id>` | `ec1-cognito-user-migration`; `<ew1 pool id>`, `<ec1 pool id>` |
