@@ -15,7 +15,7 @@ import:
   # Import stage defaults (org defaults, tenant and stage mixins)
   - orgs/fnx/dev/_defaults
 
-  # --- globals: catalog defaults for every component used in this stack
+  # --- globals: shared catalog defaults (the rest come with their instances)
   - catalog/vpc/defaults
   - catalog/network/defaults
   - catalog/secretsmanager/defaults
@@ -266,7 +266,7 @@ components:
         monthly_retention_days: 30
 
     # ========================================================================
-    # Compute (ec2/app-server: catalog/ec2/app-server-dev)
+    # Compute. ec2/app-server is import-only: catalog/ec2/app-server-dev
     # ========================================================================
     # EKS instances: one cluster each
     eks/main:
@@ -326,8 +326,8 @@ components:
             cert_manager_acme_server: "https://acme-staging-v02.api.letsencrypt.org/directory"
 
     # ========================================================================
-    # Services (rds/main, rds/data, lambda/data-processor and monitoring/data:
-    # the -dev flavors)
+    # Services. rds/main, rds/data, lambda/data-processor and monitoring/data
+    # are import-only (their -dev flavors)
     # ========================================================================
     cognito/main:
       vars:

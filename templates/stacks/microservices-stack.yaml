@@ -8,6 +8,7 @@
 # the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
 # lane (settings.prefix, <region code>-<name>), so it deploys in the same
 # account and region:
+#   mkdir -p stacks/orgs/fnx/dev/us-east-1
 #   cp templates/stacks/microservices-stack.yaml stacks/orgs/fnx/dev/us-east-1/micro.yaml
 #   atmos validate stacks
 #   atmos workflow plan -f plan-environment -s fnx-ue1-dev-micro
