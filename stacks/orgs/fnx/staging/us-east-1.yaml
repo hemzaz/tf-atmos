@@ -1,9 +1,10 @@
 ---
-# =============================================================================
 # fnx-ue1-staging: the staging account's us-east-1 stack
-# =============================================================================
 # Production-like staging environment for final validation before production
-# =============================================================================
+# One file per stack: the imports, then one vars/settings/components body,
+# grouped by domain (globals, networking, security, compute, services).
+# Each instance's wiring is catalog/<c>/<i> (shared with fnx-ue1-dev); this
+# file keeps staging's per-stage values.
 
 import:
   # Import base configuration first
@@ -15,20 +16,494 @@ import:
   # Import stage defaults (org defaults, tenant and stage mixins)
   - orgs/fnx/staging/_defaults
 
-  # Import component-specific configurations
-  - orgs/fnx/staging/us-east-1/components/globals
-  - orgs/fnx/staging/us-east-1/components/networking
-  - orgs/fnx/staging/us-east-1/components/security
-  - orgs/fnx/staging/us-east-1/components/compute
-  - orgs/fnx/staging/us-east-1/components/services
+  # --- globals: shared catalog defaults (the rest come with their instances)
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/external-secrets/defaults
+  - catalog/ec2/defaults
+  - catalog/eks/defaults
+  - catalog/iam/defaults
+  - catalog/acm/defaults
+  - catalog/apigateway/defaults
+  - catalog/monitoring/defaults
+
+  # --- networking
+  - catalog/vpc/main
+  - catalog/vpc/services
+  - catalog/network/vpc-peering
+  - catalog/network/main
+  - catalog/network/services
+
+  # --- security
+  - catalog/iam/main
+  - catalog/iam/ci
+  - catalog/kms/main
+  - catalog/secretsmanager/app
+  - catalog/secretsmanager/infra
+  - catalog/acm/main
+  - catalog/acm/services
+  - catalog/cloudtrail/main
+  - catalog/awsconfig/main
+  - catalog/guardduty/main
+  - catalog/securityhub/main
+  - catalog/inspector2/main
+  - catalog/apigateway-account/main
+  - catalog/security-monitoring/main
+  - catalog/backup/main
+
+  # --- compute
+  - catalog/eks/main
+  - catalog/eks/data
+  - catalog/github-runners/main
+  - catalog/ec2/bastion
+  - catalog/ec2/app-server
+  - catalog/external-secrets/main
+  - catalog/external-secrets/data
+  - catalog/eks-addons/main
+  - catalog/eks-addons/data
+  - catalog/eks-backend-services/main
+
+  # --- services
+  - catalog/apigateway/main
+  - catalog/apigateway/data
+  - catalog/cognito/main
+  - catalog/monitoring/main
+  - catalog/monitoring/data
+  - catalog/s3/lambda-artifacts
+  - catalog/sqs/data-transform
+  - catalog/cost-optimization/main
+  - catalog/rds/main
+  - catalog/rds/data
+  - catalog/ecs/main
+  - catalog/lambda/data-processor
+  - catalog/lambda/data-transformer
 
 vars:
   # Core variables for stack naming
   region: us-east-1
+  # Core environment identifiers
+  tags:
+    Team: "Platform"
+    CostCenter: "Staging"
+    Project: "Infrastructure"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Staging"
+    Provisioner: "Atmos"
+    DataClassification: "internal"
 
 settings:
-  environment:
-    account: staging
   context:
     tenant: fnx
     stage: staging
+  # Environment metadata (not passed to Terraform). Moved here from a stack-wide
+  # `metadata:` block, which Atmos no longer allows; component templates read it
+  # as {{ .settings.environment.<key> }}.
+  environment:
+    account: staging
+    # The stack's one domain. Every dns zone/record, acm domain/SAN and
+    # apigateway custom domain derives from it; the Route 53 zone ids come from
+    # the dns instances' zone_ids output, never from settings. example.com is a
+    # placeholder base until the owner sets the real domain.
+    domain_name: "staging.fnx.example.com"
+
+    # Monitoring contacts
+    monitoring:
+      critical_alerts: ["staging-alerts@example.com"]
+      warning_alerts: ["team@example.com"]
+      # cost-optimization/main's monthly AWS Budget (numeric string - see
+      # components/terraform/cost-optimization/variables.tf).
+      budget_monthly_limit: "2000"
+
+    eks_kubernetes_version: "1.36"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
+    use_external_secrets: true
+    # eks-backend-services/main's images. Release-pipeline-owned: these
+    # repositories/tags are not built by this repo. Terraform requires each
+    # value to be repository:tag or repository@sha256:<digest>, never :latest
+    # (variable validation) -- keep this map's tags in step with what the
+    # release pipeline actually pushes.
+    backend_service_images:
+      api_gateway: "ghcr.io/fnx-platform/api-gateway:1.4.2"
+      platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
+      auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
+      job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
+    enable_vpc_flow_logs: true
+
+  # The two VPCs' CIDRs, in one place: each vpc instance's
+  # ipv4_primary_cidr_block, the other one's private_network_acl_peer_cidr_blocks
+  # and network/vpc-peering's routes all read them. Literals, not
+  # !terraform.state <vpc> .vpc_cidr: vpc/main and vpc/services would then
+  # read each other, a cycle. database_subnet_cidrs.main is vpc/main's
+  # database_subnets, which ec2/app-server's PostgreSQL egress also reads.
+  network:
+    vpc_cidrs:
+      main: "10.10.0.0/16"
+      services: "10.11.0.0/16"
+    database_subnet_cidrs:
+      main:
+        - "10.10.201.0/24"
+        - "10.10.202.0/24"
+        - "10.10.203.0/24"
+
+components:
+  terraform:
+    # ========================================================================
+    # Globals
+    # ========================================================================
+    # Human cluster admins of every eks instance in this stack (eks/main and
+    # eks/data inherit eks/defaults): Cloud Posse's map_additional_iam_roles
+    # (components/terraform/eks/variables.tf); groups ["system:masters"] is a
+    # cluster-scoped AmazonEKSClusterAdminPolicy access entry. They apply the
+    # in-cluster components through the bastion's SSM port-forward
+    # (docs/OPERATIONS.md, "In-cluster components"), so
+    # each rolearn must also be in backend/main's
+    # access_roles.write allowed_principal_arns
+    # (stacks/orgs/fnx/root/us-east-1.yaml). check-cluster-api-ci.py fails
+    # a role listed here but not there, and warns while this list is empty.
+    # The full role ARN WITH its path, e.g. IAM Identity Center's:
+    #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>"
+    #     groups: ["system:masters"]
+    # Empty until the owner supplies the real ARN: an access entry for a role
+    # that does not exist fails eks/main's apply.
+    eks/defaults:
+      vars:
+        map_additional_iam_roles: []
+
+    # ========================================================================
+    # Networking
+    # VPC and network resources - mirrors production architecture
+    # The instances' wiring, shared with fnx-ue1-dev, is catalog/vpc/<i> and
+    # catalog/network/<i>; this file keeps the CIDRs, AZs, subnets and
+    # per-stage values.
+    # ========================================================================
+    # Primary VPC - Main application workloads
+    vpc/main:
+      vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
+        private_subnets:
+          - "10.10.1.0/24"
+          - "10.10.2.0/24"
+          - "10.10.3.0/24"
+        public_subnets:
+          - "10.10.101.0/24"
+          - "10.10.102.0/24"
+          - "10.10.103.0/24"
+        # One element per AZ, from settings.network.database_subnet_cidrs.main;
+        # the first element fails the render unless the list has exactly 3.
+        database_subnets:
+          - '{{ if ne (len .settings.network.database_subnet_cidrs.main) 3 }}{{ fail "settings.network.database_subnet_cidrs.main needs exactly 3 entries, one per AZ" }}{{ end }}{{ index .settings.network.database_subnet_cidrs.main 0 }}'
+          - "{{ index .settings.network.database_subnet_cidrs.main 1 }}"
+          - "{{ index .settings.network.database_subnet_cidrs.main 2 }}"
+
+        tags:
+          NetworkTier: "primary"
+        vpc_flow_logs_enabled: true
+
+    # Services VPC - Dedicated for backend services
+    vpc/services:
+      vars:
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
+        private_subnets:
+          - "10.11.1.0/24"
+          - "10.11.2.0/24"
+          - "10.11.3.0/24"
+        public_subnets:
+          - "10.11.101.0/24"
+          - "10.11.102.0/24"
+          - "10.11.103.0/24"
+
+        tags:
+          NetworkTier: "services"
+        vpc_flow_logs_enabled: true
+
+    # Network Resources - DNS and routing for main VPC
+    network/main:
+      vars:
+        zones:
+          main:
+            comment: "Main zone for staging environment"
+          internal:
+            comment: "Internal DNS for staging"
+        records:
+          www_main:
+            records: ["10.10.101.100"]
+          db_internal:
+            records: ["10.10.201.50"]
+
+    # Network Resources - DNS and routing for services VPC
+    network/services:
+      vars:
+        zones:
+          services:
+            comment: "Services zone for staging"
+          data:
+            comment: "Data services DNS"
+
+    # ========================================================================
+    # Security
+    # IAM, secrets, certificates, and security configurations
+    # Every security instance's wiring, shared with fnx-ue1-dev, is
+    # catalog/<c>/<i>; this file keeps their per-stage values.
+    # ========================================================================
+    # KMS - customer-managed key for Secrets Manager and other encrypted services
+    kms/main:
+      vars:
+        description: Staging main encryption key (Secrets Manager, EBS, RDS)
+
+    acm/services:
+      vars:
+        dns_domains:
+          services_wildcard:
+            subject_alternative_names:
+              - "api.services.{{ .settings.environment.domain_name }}"
+
+    # Secrets Manager
+    secretsmanager/app:
+      vars:
+        secrets:
+          app_credentials:
+            name: "credentials"
+            description: "Application credentials for staging"
+            path: "app"
+            generate_random_password: true
+            password_length: 32
+          api_keys:
+            name: "api-keys"
+            description: "API integration keys for staging"
+            path: "app/api"
+            generate_random_password: true
+          database_credentials:
+            name: "db-credentials"
+            description: "Database connection credentials"
+            path: "app/database"
+            generate_random_password: true
+            password_length: 24
+
+        default_recovery_window_in_days: 7
+    secretsmanager/infra:
+      vars:
+        secrets:
+          tls_certificates:
+            name: "tls-certificates"
+            description: "TLS certificates for services"
+            path: "certificates"
+          ssh_keys:
+            name: "ssh-keys"
+            description: "SSH keys for infrastructure access"
+            path: "ssh"
+        default_recovery_window_in_days: 7
+
+    # AWS Backup - medium retention in staging.
+    backup/main:
+      vars:
+        daily_retention_days: 14
+        weekly_retention_days: 30
+        monthly_retention_days: 90
+
+    # ========================================================================
+    # Compute
+    # EC2, EKS, and compute resources - mirrors production setup
+    # Every compute instance's wiring, shared with fnx-ue1-dev, is
+    # catalog/<c>/<i>; this file keeps the per-stage values.
+    # ========================================================================
+    # EKS Cluster - Main Application Workloads
+    eks/main:
+      vars:
+        tags:
+          Cluster: main
+          Purpose: "application-workloads"
+        # Endpoint access - private only for staging
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+        node_groups:
+          workers:
+            desired_group_size: 3
+            min_group_size: 2
+            max_group_size: 6
+            kubernetes_labels:
+              environment: "{{ .settings.context.stage }}"
+            tags:
+              NodeGroup: workers
+
+    # EKS Cluster - Data Processing Workloads
+    eks/data:
+      vars:
+        tags:
+          Cluster: data
+          Purpose: "data-processing"
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+        node_groups:
+          data-workers:
+            instance_types: ["m5.large"]
+            desired_group_size: 2
+            min_group_size: 2
+            max_group_size: 4
+            kubernetes_labels:
+              role: data-processing
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+
+    # EC2 Bastion Host
+    ec2/bastion:
+      vars:
+        tags:
+          Role: bastion
+          Access: restricted
+        ebs_optimized: true
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal networks"
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH to internal hosts"
+        monitoring: true
+        root_volume_type: "gp3"
+        root_volume_size: 20
+        root_block_device_encrypted: true
+        delete_on_termination: true
+
+    # External Secrets Operator for EKS
+    external-secrets/main:
+      vars:
+        enabled: true
+    external-secrets/data:
+      vars:
+        enabled: true
+
+    # EKS add-ons
+    eks-addons/data:
+      vars:
+        clusters:
+          data:
+            container_insights_log_retention_days: 7
+
+    # ========================================================================
+    # Services
+    # Every services instance's wiring is catalog/<c>/<i> (the un-suffixed
+    # defaults); this file keeps staging's per-stage values.
+    # ========================================================================
+    apigateway/main:
+      vars:
+        description: "Main API Gateway for staging environment"
+        api_resources:
+          - path_part: "api"
+          - path_part: "auth"
+          - path_part: "health"
+        throttling_burst_limit: 500
+        throttling_rate_limit: 1000
+        log_retention_days: 14
+        tags:
+          Service: api-gateway
+          Tier: edge
+        cors_configuration:
+          allow_origins: ["*"]
+          allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+          allow_headers:
+            - '*'
+          expose_headers: []
+          max_age: 300
+          allow_credentials: false
+
+    apigateway/data:
+      vars:
+        api_name: "data-api"
+        description: "Data API Gateway for staging"
+        api_resources:
+          - path_part: "data"
+          - path_part: "metrics"
+          - path_part: "analytics"
+        throttling_burst_limit: 300
+        throttling_rate_limit: 500
+        log_retention_days: 14
+        tags:
+          Service: data-api
+          Tier: backend
+
+    ecs/main:
+      vars:
+        cluster_name: "{{ .settings.context.stage }}-main-apps"
+        enable_container_insights: true
+
+    lambda/data-processor:
+      vars:
+        memory_size: 512
+        timeout: 300
+
+    # sqs/data-transform's visibility_timeout_seconds is derived from this
+    # timeout: change them together.
+    lambda/data-transformer:
+      vars:
+        memory_size: 1024
+        timeout: 600
+
+    sqs/data-transform:
+      vars:
+        # AWS: at least 6x the consumer's timeout plus its batching window,
+        # 6 x 600 (lambda/data-transformer timeout) + 5 = 3605.
+        visibility_timeout_seconds: 3605
+
+    monitoring/main:
+      vars:
+        # eks/main's node_groups (compute section): workers (min_group_size 2)
+        # + monitoring (min_group_size 1) = 3 guaranteed nodes. The
+        # eks_node_count_low alarm (monitoring's alarms.tf) only fires below
+        # this floor.
+        eks_min_node_count: 3
+
+        # SNS Topics for alerts
+        alarm_email_subscriptions:
+          - "staging-alerts@example.com"
+          - "oncall@example.com"
+
+        # CloudWatch Alarms
+        cpu_alarms:
+          high_cpu:
+            namespace: "AWS/EC2"
+            evaluation_periods: 2
+            period: 300
+            threshold: 80
+            dimensions: {}
+        memory_alarms:
+          high_memory:
+            namespace: "CWAgent"
+            evaluation_periods: 2
+            period: 300
+            threshold: 85
+            dimensions: {}
+
+    monitoring/data:
+      vars:
+        alarm_email_subscriptions:
+          - "staging-alerts@example.com"
