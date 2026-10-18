@@ -793,7 +793,8 @@ What differs beyond the names:
   ([Auth during failover](#auth-during-failover)): the export, `users.csv` and their bucket and key
   are in eu-central-1.
 - **Reconcile and failback** as above with the EU names: the failback's literal
-  `replicate_source_db` on `fnx-ew1-prod` is
+  `replicate_source_db` on `fnx-ew1-prod` (step 1.3: an `rds/main` entry under the existing
+  `components.terraform` of `stacks/orgs/fnx/prod/eu-west-1.yaml`, not a second `components:` key) is
   `arn:aws:rds:eu-central-1:{{ .settings.environment.account_id }}:db:ec1-prod-main-db`; step 5
   destroys `eks-backend-services/main -s fnx-ec1-prod` in-VPC while `fnx-ec1-prod`'s stack file
   still imports `main-standby-failover`; reconciliation step 1 and failback step 6 switch
