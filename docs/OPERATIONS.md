@@ -685,15 +685,17 @@ with it, so nothing here needs Terraform. Terraform catches up after recovery (b
    state from before the CLI steps, so on a branch, edit the stack file only
    (`stacks/orgs/fnx/prod/us-east-2.yaml`; the catalog files are shared with the
    other standby): switch its import `catalog/eks-backend-services/main-standby` to
-   `catalog/eks-backend-services/main-standby-failover`, and set the database secret there:
+   `catalog/eks-backend-services/main-standby-failover`, and set the database secret there. The
+   file already has one `import:` list and one `components:` → `terraform:` map: edit the import
+   line in place and add the `eks-backend-services/main` entry under the existing
+   `components.terraform` (its compute section). Never paste a second `import:`, `components:` or
+   `terraform:` key, because a duplicate key fails to parse:
 
    ```yaml
-   import:
-     # ...
+   # in import:, the compute line
      - catalog/eks-backend-services/main-standby-failover   # was catalog/eks-backend-services/main-standby
 
-   components:
-     terraform:
+   # under the existing components: terraform:
        eks-backend-services/main:
          vars:
            database_secret_arn: "<the secret step 3 created>"
@@ -908,7 +910,8 @@ terraform-cd.yml`) or apply them from an operator machine:
    `catalog/rds/main-standby` to `catalog/rds/main-standby-promoted` (the same instance without
    the `replicate_source_db` read and its dependency on `fnx-ue1-prod`'s `rds/main`; never edit
    either catalog file, both DR pairs import them). A resized `instance_class` is set beside it,
-   under `rds/main` `vars` in the stack file, as a literal. The promotion plan check, before any
+   under `rds/main` `vars` in the stack file, as a literal (a new `rds/main` entry under the file's
+   existing `components.terraform`, not a second `components:` key). The promotion plan check, before any
    Terraform promotion: `atmos terraform plan rds/main -s fnx-ue2-prod` must show
    `aws_db_instance.main` updated in place, never replaced (`-/+`). `db_name` and `username` force
    a replacement, so they must match the promoted instance: `db_name` is set equal to
@@ -916,7 +919,8 @@ terraform-cd.yml`) or apply them from an operator machine:
    replacement in the plan means stop, not apply.
 2. `fnx-ue2-prod` `eks/main`: the node groups' `min_group_size`/`desired_group_size` to the sizes of
    step 5 (Terraform ignores `desired_size` drift, not `min_size`), set per group under
-   `eks/main` `vars.node_groups` in the stack file; the shared `catalog/eks/main-standby` stays
+   `eks/main` `vars.node_groups` in the stack file (again an entry under the existing
+   `components.terraform`); the shared `catalog/eks/main-standby` stays
    as it is.
 3. `fnx-ue2-prod` `eks-backend-services/main`: keep step 6's `main-standby-failover` import and
    `database_secret_arn` (they now match `rds/main`'s reconciled outputs); migrate its local state

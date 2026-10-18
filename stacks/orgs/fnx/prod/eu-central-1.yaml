@@ -230,8 +230,7 @@ components:
     # target here is the vault ew1-backup-replica that fnx-ew1-prod's backup/main
     # creates in eu-central-1), plus the plain inspector2/main and
     # apigateway-account/main files every dev, staging and prod stack
-    # imports. This file keeps
-    # security-monitoring/main's alert settings.
+    # imports. This file keeps security-monitoring/main's alert settings.
     # ========================================================================
     security-monitoring/main:
       vars:
