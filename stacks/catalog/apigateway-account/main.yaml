@@ -1,8 +1,10 @@
 ---
 # =============================================================================
-# apigateway-account/main in the nonprod and prod primary stacks
+# apigateway-account/main in every environment stack
 # =============================================================================
-# The catalog defaults as they are (apigateway-account/defaults).
+# The catalog defaults as they are (apigateway-account/defaults). Nonprod, the
+# prod primaries and the DR standbys all import this file, so a change here
+# changes the DR standbys too; a stack that differs sets vars in its own file.
 # =============================================================================
 
 import:

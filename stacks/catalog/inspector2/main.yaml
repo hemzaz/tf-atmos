@@ -1,8 +1,10 @@
 ---
 # =============================================================================
-# inspector2/main in the nonprod and prod primary stacks: Inspector
+# inspector2/main in every environment stack: Inspector
 # =============================================================================
-# The catalog defaults as they are (inspector2/defaults).
+# The catalog defaults as they are (inspector2/defaults). Nonprod, the prod
+# primaries and the DR standbys all import this file, so a change here changes
+# the DR standbys too; a stack that differs sets vars in its own file.
 # =============================================================================
 
 import:
