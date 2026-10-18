@@ -6,7 +6,7 @@
 # (settings.dr.standby_of: three AZs, a NAT gateway per AZ, flow logs), on its
 # own CIDR so the two regions can be peered later without renumbering. Each
 # stack keeps its own settings.network.vpc_cidrs.main, availability_zone_ids
-# and subnets (orgs/fnx/prod/<region>/components/networking.yaml).
+# and subnets (its stack file, orgs/fnx/prod/<region>.yaml).
 # =============================================================================
 
 import:
