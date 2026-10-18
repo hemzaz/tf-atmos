@@ -25,15 +25,13 @@
 # The instances' wiring is the catalog's -standby files, shared with
 # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod; the backup copy
 # target here is the vault ew1-backup-replica that fnx-ew1-prod's backup/main
-# creates in eu-central-1). This file keeps inspector2/main and
-# apigateway-account/main, which are plain defaults, and
+# creates in eu-central-1), plus the plain inspector2/main and
+# apigateway-account/main files every stack imports. This file keeps
 # security-monitoring/main's alert settings.
 # =============================================================================
 
 import:
   - orgs/fnx/prod/eu-central-1/components/globals
-  - catalog/inspector2/defaults
-  - catalog/apigateway-account/defaults
   - catalog/iam/ci-standby
   - catalog/acm/main-standby
   - catalog/awsconfig/main-standby
@@ -41,24 +39,11 @@ import:
   - catalog/securityhub/main-standby
   - catalog/security-monitoring/main-standby
   - catalog/backup/main-standby
+  - catalog/inspector2/main
+  - catalog/apigateway-account/main
 
 components:
   terraform:
-    # Off, as in fnx-ew1-prod: Inspector bills per resource scanned.
-    inspector2/main:
-      metadata:
-        component: inspector2
-        inherits:
-          - inspector2/defaults
-
-    # The region's API Gateway CloudWatch Logs role setting (apigateway/main,
-    # with services).
-    apigateway-account/main:
-      metadata:
-        component: apigateway-account
-        inherits:
-          - apigateway-account/defaults
-
     security-monitoring/main:
       vars:
         # Off in a GDPR-scoped stack (check-data-residency.py).

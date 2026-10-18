@@ -18,15 +18,13 @@
 #     global_resource_collector_region is us-east-1).
 #
 # The instances' wiring is the catalog's -standby files, shared with
-# fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod). This file keeps
-# inspector2/main and apigateway-account/main, which are plain defaults, and
-# security-monitoring/main's alert settings.
+# fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod), plus the plain
+# inspector2/main and apigateway-account/main files every stack imports. This
+# file keeps security-monitoring/main's alert settings.
 # =============================================================================
 
 import:
   - orgs/fnx/prod/us-east-2/components/globals
-  - catalog/inspector2/defaults
-  - catalog/apigateway-account/defaults
   - catalog/security-monitoring/defaults
   - catalog/iam/ci-standby
   - catalog/acm/main-standby
@@ -35,22 +33,11 @@ import:
   - catalog/securityhub/main-standby
   - catalog/security-monitoring/main-standby
   - catalog/backup/main-standby
+  - catalog/inspector2/main
+  - catalog/apigateway-account/main
 
 components:
   terraform:
-    inspector2/main:
-      metadata:
-        component: inspector2
-        inherits:
-          - inspector2/defaults
-
-    # The region's API Gateway CloudWatch Logs role setting (apigateway/main).
-    apigateway-account/main:
-      metadata:
-        component: apigateway-account
-        inherits:
-          - apigateway-account/defaults
-
     security-monitoring/main:
       vars:
         enable_alert_enrichment: false
