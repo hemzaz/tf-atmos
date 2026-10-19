@@ -28,7 +28,9 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   (`check-dependencies.py`) and in an earlier layer of `workflows/deploy-full-stack.yaml`
   (`check-deploy-layers.py`).
 - A `!terraform.state` read in an abstract is resolved for every inheriting instance, even one that
-  overrides it, so abstracts carry no local reads: `check-inherited-state-reads.py` (lint) enforces it.
+  overrides it, so an abstract's local read must name a real instance in every stack that inherits
+  it (`check-inherited-state-reads.py`, lint); a read some inheritor's stack lacks goes in the
+  instance's catalog file.
 - A `!terraform.state`/`!terraform.output` read of a JSON-string output (e.g. a `*_policy`) into a `type = string`
   input needs `| tojson` (`'.producer_policy | tojson'`); otherwise Atmos decodes it into an object.
 - A stack template that repeats a component's `<Environment>-<x>` name writes `{{ .settings.prefix }}-<x>`

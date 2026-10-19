@@ -153,14 +153,12 @@ class MainTest(unittest.TestCase):
                 "components: {terraform: {vpc/main: {vars: {b: !terraform.state kms/main .k}}}}\n",
             # The prod stack sets b: residue, since its vpc/main reads only a.
             "orgs/fnx/prod/us-east-1.yaml": """\
-                import: [orgs/fnx/prod/us-east-1/components/networking]
+                import: [catalog/vpc/main]
                 components: {terraform: {vpc/main: {vars: {b: literal}}}}
                 """,
-            "orgs/fnx/prod/us-east-1/components/networking.yaml": "import: [catalog/vpc/main]\n",
-            "orgs/fnx/prod/us-east-2/components/networking.yaml": "import: [catalog/vpc/main-standby]\n",
         }
         standby = """\
-            import: [orgs/fnx/prod/us-east-2/components/networking]
+            import: [catalog/vpc/main-standby]
             components: {terraform: {vpc/main: {vars: {%s: literal}}}}
             """
         code, out = run_tree({**tree, "orgs/fnx/prod/us-east-2.yaml": standby % "a"})
@@ -170,6 +168,23 @@ class MainTest(unittest.TestCase):
         self.assertIn("us-east-2.yaml: vpc/main sets vars.b over the state read at vars.b", out)
         self.assertIn("catalog/vpc/main-standby.yaml", out)
         self.assertNotIn("catalog/vpc/main.yaml", out)
+
+    def test_catalog_file_reached_through_an_intermediate_import(self):
+        # stack -> catalog/vpc/main-prod -> catalog/vpc/main: the read is two imports deep.
+        tree = {
+            "catalog/vpc/main.yaml": "components: {terraform: {vpc/main: {vars: {a: !terraform.state kms/main .k}}}}\n",
+            "catalog/vpc/main-prod.yaml": "import: [catalog/vpc/main]\n",
+        }
+        stack = """\
+            import: [catalog/vpc/main-prod]
+            components: {terraform: {vpc/main: {vars: {%s: literal}}}}
+            """
+        code, out = run_tree({**tree, "orgs/fnx/prod/us-east-1.yaml": stack % "b"})
+        self.assertEqual(code, 0, out)
+        code, out = run_tree({**tree, "orgs/fnx/prod/us-east-1.yaml": stack % "a"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("us-east-1.yaml: vpc/main sets vars.a over the state read at vars.a", out)
+        self.assertIn("catalog/vpc/main.yaml", out)
 
     def test_overrides_sections_whatever_the_key(self):
         stack = """\

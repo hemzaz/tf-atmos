@@ -15,7 +15,8 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
 - Both depend on `apigateway-account/main` (the account's CloudWatch Logs role; ordering only).
 - `fnx-ue1-prod`'s and `fnx-ew1-prod`'s `apigateway/main` inherit `apigateway/main-prod`
   (`stacks/catalog/apigateway/prod.yaml`) and are the PRIMARY halves of `api.<d>`'s failover
-  pairs; `fnx-ue2-prod`'s and `fnx-ec1-prod`'s, configured inline, the SECONDARY ones.
+  pairs; `fnx-ue2-prod`'s and `fnx-ec1-prod`'s, from `stacks/catalog/apigateway/main-standby.yaml`,
+  the SECONDARY ones.
 - Used by: `monitoring` (`.api_name`, `.rest_api_stage_name`).
 - In the `microservices-platform` template, `http_routes` send `ANY /{proxy+}` over the VPC link to
   `alb-controller-ingress-group`'s `https_listener_arn`, with `tls_server_name_to_verify` set.

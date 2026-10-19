@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Fail when a stack file overrides a state read that a catalog instance file sets.
 
-Wave C1 moves instance wiring (vars that read other instances with
-!terraform.state / !terraform.output) out of stacks/orgs/** into
-stacks/catalog/<c>/<i>[-flavor].yaml. A read in a catalog instance must then
+Instance wiring (vars that read other instances with !terraform.state /
+!terraform.output) lives in stacks/catalog/<c>/<i>[-flavor].yaml, not in
+stacks/orgs/**. A read in a catalog instance must then
 never be replaced by a stack: the stack's value wins in describe, but the read
 stays in the import chain, so the shape no longer says which value the instance
 gets. For each real (non-abstract) component instance in a catalog file, this

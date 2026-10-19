@@ -362,7 +362,7 @@ run "map_entries_expand_policies_and_translate_system_masters" {
   }
 }
 
-# The stacks' human admins (globals.yaml): Cloud Posse's
+# The stacks' human admins (eks/defaults in each stack file): Cloud Posse's
 # map_additional_iam_roles with system:masters, next to a map entry of a
 # different shape and the CI roles' list entries.
 # The sso.amazonaws.com/<region>/ path segment is the IAM Identity Center home

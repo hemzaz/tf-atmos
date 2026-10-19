@@ -353,7 +353,7 @@ run "monthly_cold_storage_default_is_null_no_transition" {
 }
 
 # An instance that explicitly opts into cold storage (e.g. prod's
-# monthly_cold_storage_days = 90 in security.yaml) with a retention long
+# monthly_cold_storage_days = 90 in catalog/backup/prod.yaml) with a retention long
 # enough to satisfy delete_after >= cold_storage_after + 90 gets an actual
 # transition, and the precondition passes rather than rejecting the plan.
 run "monthly_cold_storage_days_explicit_90_sets_transition" {

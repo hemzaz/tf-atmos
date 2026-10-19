@@ -7,9 +7,10 @@ component actually creates once it has resources.
 
 ## Deployed as
 
-Not deployed yet. Add a real instance to a stack under
-`stacks/orgs/fnx/<account>/<region>/<environment>/components/`, inheriting
-`{{ .Config.component_name }}/defaults` from the catalog.
+Not deployed yet. Add a real instance as an instance file,
+`stacks/catalog/{{ .Config.component_name }}/<instance>.yaml`, inheriting
+`{{ .Config.component_name }}/defaults`, and import it from the stack file
+(`stacks/orgs/fnx/<stage>/<region>.yaml`).
 
 | Input | Notes |
 |---|---|

@@ -37,8 +37,8 @@ a command must list that command's tool in dependencies.tools (aws ->
 aws/aws-cli), and an unknown command is an ERROR.
 
 That operator is an eks map_additional_iam_roles role with system:masters (a
-cluster-scoped AmazonEKSClusterAdminPolicy access entry, set in each stack's
-components/globals.yaml). In such a stack, every one of those roles must also be
+cluster-scoped AmazonEKSClusterAdminPolicy access entry, set on eks/defaults
+in each stack file). In such a stack, every one of those roles must also be
 trusted by the stage's state write role of the backend instance owning the eks
 instance's state bucket (backends.owner_of: backend/main for fnx-terraform-state,
 its EU twin for the EU bucket; access_roles.write for dev/staging, .prod_write
@@ -333,7 +333,7 @@ def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[st
             warnings.append(
                 f"{stack_name}: no map_additional_iam_roles entry with system:masters on "
                 f"{'; '.join(unmanaged)}, so nobody can apply those in-cluster instances (set it "
-                "in the stack's components/globals.yaml)"
+                "on eks/defaults in the stack file)"
             )
     return errors, warnings
 

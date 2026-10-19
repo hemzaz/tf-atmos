@@ -10,15 +10,15 @@
 #
 # compare snapshots <base-ref> (checked out in a temporary git worktree, always
 # removed) and the working tree, prints IDENTICAL or a bounded diff
-# (SNAPSHOT_DIFF_LINES, default 200) and exits 1 on a difference. Wave C1
-# moves instance wiring into stacks/catalog/ and must be identical to its
-# merge-base: scripts/stack-snapshot.sh compare "$(git merge-base origin/master HEAD)"
+# (SNAPSHOT_DIFF_LINES, default 200) and exits 1 on a difference. A refactor
+# of stack wiring must be identical to its merge-base:
+# scripts/stack-snapshot.sh compare "$(git merge-base origin/master HEAD)"
 #
 # The result line names the repository (the git top level of the current
 # directory, not of this script), its HEAD short SHA, "+dirty" when stacks/,
 # atmos.yaml or schemas/ have uncommitted changes, and the stack count (16).
 #
-# A local proof tool, run by hand for each C1 PR; it is not wired into CI.
+# A local proof tool, run by hand for each such PR; it is not wired into CI.
 #
 # Usage:
 #   scripts/stack-snapshot.sh [--raw] <out.json>

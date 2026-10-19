@@ -14,16 +14,16 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
-| Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex). The EU apex is its own registered domain, never under the US one, delegated at its own registrar to `fnx-ew1-prod`'s `network/main` (see [Deploying a stack](#deploying-a-stack)) |
-| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml` (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach people only through each stack's `security-monitoring/main` topic, whose `security_email_subscriptions` is empty everywhere (a preflight notice per stack) |
-| Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in `components/globals.yaml` (USD: dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s). Each budget counts the spend tagged with its stack's `Environment`; a prod primary's also counts its DR standby's (`budget_additional_environment_tags`: `fnx-ue1-prod` ue1+ue2, `fnx-ew1-prod` ew1+ec1, owner decision; lint `check-dr-pairs` fails a standby missing there), so the owner may raise those amounts |
+| Domains | `settings.environment.domain_name` in each stack's file (`stacks/orgs/fnx/<stage>/<region>.yaml`); every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex). The EU apex is its own registered domain, never under the US one, delegated at its own registrar to `fnx-ew1-prod`'s `network/main` (see [Deploying a stack](#deploying-a-stack)) |
+| Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in each stack's file (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach people only through each stack's `security-monitoring/main` topic, whose `security_email_subscriptions` is empty everywhere (a preflight notice per stack) |
+| Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in the stack file (USD: dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s). Each budget counts the spend tagged with its stack's `Environment`; a prod primary's also counts its DR standby's (`budget_additional_environment_tags`: `fnx-ue1-prod` ue1+ue2, `fnx-ew1-prod` ew1+ec1, owner decision; lint `check-dr-pairs` fails a standby missing there), so the owner may raise those amounts |
 | Cost-allocation tags | the `Environment` tag activated as a user-defined cost-allocation tag in the payer (management) account's Billing console (Cost allocation tags); until then every budget's `user:Environment$<tag>` filter matches no spend and no budget alerts |
-| Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on each stack's `iam/ci` (`components/security.yaml`), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
+| Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on `iam/ci`, set per stack in the stack file (the `[]` placeholder is in `stacks/catalog/iam/ci.yaml` for dev and staging and in `fnx-ue1-prod`'s stack file), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
 | GitHub App | the self-hosted CI runners' just-in-time registration: a GitHub App installed on this repository (Administration read/write); its IDs in `settings.github_app` (`app_id`, `installation_id`; `0` until set) in `stacks/orgs/fnx/_defaults.yaml`; and, after each runner pool's first apply, its private key in that account's SSM, in the pool's region (`fnx-ew1-prod`'s: `prod-eu`, eu-west-1; `fnx-ec1-prod`'s: `prod-eu`, eu-central-1), at the pool's `.app_private_key_parameter_name`, encrypted with the pool's own key (`.app_key_kms_key_alias`): see `components/terraform/github-runners/README.md`. The repository is public: turn on Settings → Actions → General → "Require approval for all outside collaborators" |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
-| EKS cluster admins | `map_additional_iam_roles` in each stack's `components/globals.yaml`: see [In-cluster components](#in-cluster-components). While empty, nobody can apply the in-cluster components. `fnx-ew1-prod`'s and `fnx-ec1-prod`'s roles are in the `prod-eu` account and must also be in `backend/main`'s `access_roles.prod_write` `allowed_principal_arns` in `stacks/orgs/fnx/root/eu-west-1.yaml` (`fnx-ew1-root`) |
-| Backend service images | `settings.environment.backend_service_images` in each stack's `components/globals.yaml` (`eks-backend-services/main`): the release pipeline's `ghcr.io/fnx-platform/<service>:1.4.2` placeholders until it publishes real ones, flagged per stack and service; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s |
+| EKS cluster admins | `map_additional_iam_roles` in each stack's file: see [In-cluster components](#in-cluster-components). While empty, nobody can apply the in-cluster components. `fnx-ew1-prod`'s and `fnx-ec1-prod`'s roles are in the `prod-eu` account and must also be in `backend/main`'s `access_roles.prod_write` `allowed_principal_arns` in `stacks/orgs/fnx/root/eu-west-1.yaml` (`fnx-ew1-root`) |
+| Backend service images | `settings.environment.backend_service_images` in each stack's file (`eks-backend-services/main`): the release pipeline's `ghcr.io/fnx-platform/<service>:1.4.2` placeholders until it publishes real ones, flagged per stack and service; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s |
 
 Every workload `account_id` must differ from `management_account_id`. The stage split of state
 access below holds only then: a workload stack in the management account puts its
@@ -327,7 +327,7 @@ GitHub OIDC on master):
    `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>`
    (`<sso-region>` is the IAM Identity Center home region, not the stack's),
    from `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`) in two places:
-   `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
+   `map_additional_iam_roles` (`groups: ["system:masters"]`) on `eks/defaults` in the stack file,
    which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
    `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
    `stacks/orgs/fnx/root/us-east-1.yaml` (EU stacks: `root/eu-west-1.yaml`), so it can write the stack's state. Apply `backend/main`
@@ -337,7 +337,7 @@ GitHub OIDC on master):
    `export AWS_PROFILE=<profile>`), forward the endpoint through `ec2/bastion` (a private subnet of
    `vpc/main`; SSM agent via `enable_ssm`, the default, reaching SSM through the NAT gateway). Every
    `eks` instance admits the bastion's security group on 443 (`allowed_security_group_ids` in the
-   stack's `components/compute.yaml`); `eks/data` in `vpc/services` is reached over
+   `stacks/catalog/eks/` files); `eks/data` in `vpc/services` is reached over
    `network/vpc-peering`, whose CIDRs both vpcs' private NACLs admit
    (`private_network_acl_peer_cidr_blocks`). That relies on a private-only endpoint (public access
    off): public DNS then returns the private IPs, which is how the bastion in `vpc/main` resolves
@@ -434,7 +434,8 @@ prod; the queue deploys in the storage layer, before the function), which `data-
 to; `report-generator` (prod) runs daily at 06:00 UTC. Messages that fail 5 receives move to
 `<Environment>-data-transform-dlq` (kept 14 days); after a fix, redrive them from the SQS console
 or `aws sqs start-message-move-task --source-arn <dlq arn>`. A change to `data-transformer`'s
-`timeout` needs the queue's `visibility_timeout_seconds` (6x timeout + 5) changed with it.
+`timeout` needs the queue's `visibility_timeout_seconds` (6x timeout + 5) changed with it; both
+are set in the stack file.
 
 ## Day-2 tasks
 
@@ -455,8 +456,9 @@ Destroying the backend is irreversible: it deletes the bucket and every stack's 
 ### Pinned versions: providers, the Atmos image, actions
 
 Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for all three; each must pass
-`CI gate`. `.github/CODEOWNERS` requests the owner's review on `.github/`, `iam`, `backend` and the
-stacks' `security.yaml` (advisory until branch protection requires code-owner review).
+`CI gate`. `.github/CODEOWNERS` requests the owner's review on `.github/`, `iam`, `backend`, the
+stack files and the security, compute and services catalogs (advisory until branch protection
+requires code-owner review).
 
 - **Providers.** Every root module commits a `.terraform.lock.hcl` for `linux_amd64` (CI and
   the amd64 devops container), `darwin_arm64` and `darwin_amd64` (developer Macs), plus a

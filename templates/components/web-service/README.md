@@ -8,7 +8,7 @@ cp -r templates/components/web-service components/terraform/web-service
 ```
 
 ```yaml
-# in a stack's components/services.yaml
+# in a stack file (stacks/orgs/fnx/<stage>/<region>.yaml)
 components:
   terraform:
     web-service/api:
