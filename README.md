@@ -36,8 +36,8 @@ stage stack in the same account and region: its names carry the lane (below), an
 `check-lane-names.py` (lint) fails two stacks or instances of one account and region that create the same name (and IAM/S3 names across the regions of one account). The
 `templates/stacks` samples are such lanes: `scripts/check-stack-samples.sh` copies them in and runs
 the stack checks (lint) and plan-sweep (validate-enhanced) over them. Only files under `stacks/orgs/` are stack manifests;
-each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/components/` domain files
-(`globals`, `networking`, `security`, `compute`, `services`). EU personal data lives only in EU
+each real stack is one file, `<stage>/<region>.yaml`, that imports its catalog instances and keeps
+its per-stack values, grouped by domain (globals, networking, security, compute, services). EU personal data lives only in EU
 stacks, tagged `Compliance: "pci-sox-gdpr"` (US prod is `"pci-sox"`): `check-data-residency.py`
 (lint) fails a gdpr-tagged or `eu-` stack that lacks the tag, names a non-`eu-` region, turns on
 Route 53 query logging (written only to us-east-1) or depends on a non-gdpr stack, and any other
@@ -96,8 +96,9 @@ real AWS (`workflows/localemu.yaml`).
 also writes the catalog entry). `atmos scaffold generate catalog-entry . --force` adds catalog
 defaults for an existing component.
 
-**Add an instance:** add it under `components.terraform` in the stack's domain file, with
-`metadata.component` (and `inherits` for the catalog base), then list every instance it reads
+**Add an instance:** write it as `stacks/catalog/<c>/<i>[-<flavor>].yaml`, with
+`metadata.component` (and `inherits` for the catalog base), import it from the stack file, which
+keeps only the stack's own values for it, then list every instance it reads
 in `dependencies.components` and make sure a layer in `workflows/deploy-full-stack.yaml` deploys
 it after them. validate-all fails otherwise. A new stack also needs its CI roles in the state
 backend's trust: see [State backend](./docs/OPERATIONS.md#state-backend). A prod primary also sets

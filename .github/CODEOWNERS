@@ -15,9 +15,6 @@
 # The state backend: bucket, KMS key and the state access roles.
 /components/terraform/backend/    @hemzaz
 
-# Per-stack security domain files (guardduty, securityhub, kms, ...).
-/stacks/**/security.yaml          @hemzaz
-
 # The stacks themselves: which instances each stack deploys, and with what.
 /stacks/orgs/**                   @hemzaz
 

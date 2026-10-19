@@ -537,7 +537,7 @@ run "backup_publishes_to_sns_topics_only_for_this_accounts_topics" {
 # validates every principal named there at CreateKey/PutKeyPolicy time
 # ("invalid principal" MalformedPolicyDocumentException for one that doesn't
 # exist yet). A prod-shaped instance (no named key_administrators/key_users
-# -- see stacks/orgs/fnx/prod/.../security.yaml's kms/main -- must not name
+# -- see stacks/catalog/kms/main-prod.yaml -- must not name
 # any principal beyond the account root (enable_default_policy above), so
 # the first real apply against a fresh account cannot fail that way. Real
 # consumers instead get least-privilege access through their own IAM policy

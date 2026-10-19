@@ -8,7 +8,7 @@ default, TLS-only bucket policy.
 ## Wiring
 
 - `s3/defaults` reads `kms/main .key_arn`. `s3/lambda-artifacts` (`stacks/catalog/s3/lambda-artifacts.yaml`,
-  imported by each AWS stack's `components/services.yaml`, the `microservices-platform` template
+  imported by the dev, staging and `fnx-ue1-prod` stack files, the `microservices-platform` template
   and `templates/stacks/serverless-stack.yaml`) is the lambda package bucket, deployed in the
   `deploy-full-stack` storage layer. The `batch-processing` and `data-pipeline` templates create
   buckets from `s3/defaults` too (`serverless-api` also declares one).

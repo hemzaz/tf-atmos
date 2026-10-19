@@ -48,7 +48,7 @@ class HitsTest(unittest.TestCase):
             "fnx-ue1-prod fnx-ue2-prod fnx-ew1-prod fnx-ue1-root",
             "stacks/orgs/fnx/root/us-east-1.yaml NetworkTier: core aws_eks_addon.core",
             "fnx-ue1-fixtures-batch fnx-ue1-local-sandbox fnx-ue1-dev-perf",
-            "stacks/orgs/fnx/dev/us-east-1.yaml stacks/orgs/fnx/dev/us-east-1/components/globals.yaml",
+            "stacks/orgs/fnx/dev/us-east-1.yaml stacks/orgs/fnx/dev/us-east-1/perf.yaml",
             "stacks/orgs/fnx/fixtures/us-east-1/idp.yaml",
             "domain_name: dev.fnx.example.com",
             "fnx-sandbox-local-state",

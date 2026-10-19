@@ -271,7 +271,7 @@ run "no_ci_apply_kms_policy_without_the_key_aliases" {
 # fnx-ue1-root) only through its stage-split access roles -- prod's plan role
 # may assume only the prod READ-only role, prod's apply role only the prod
 # WRITE role -- and hold no S3/KMS grant on the state bucket themselves (so no
-# lock-object writes from plans either). The values are prod's security.yaml.
+# lock-object writes from plans either). The values are catalog/iam/ci-prod.yaml's.
 run "ci_state_access_is_sts_assume_role_on_the_stage_backend_roles_only" {
   command = plan
 

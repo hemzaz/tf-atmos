@@ -29,7 +29,7 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
 - `stacks/catalog/eks/defaults.yaml` grants the CI plan role `AmazonEKSViewPolicy` and the CI apply
   role `AmazonEKSClusterAdminPolicy`, both cluster-scoped.
 - Human admins (the operators of the in-cluster components): Cloud Posse's
-  `map_additional_iam_roles`, set per stack in `components/globals.yaml` on `eks/defaults`;
+  `map_additional_iam_roles`, set per stack on `eks/defaults` in the stack file;
   `groups: ["system:masters"]` becomes a cluster-scoped `AmazonEKSClusterAdminPolicy` entry. The
   `rolearn` keeps its path (access entries need it, unlike `aws-auth`): an IAM Identity Center role is
   `role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<set>_<hash>`, and a stripped one is

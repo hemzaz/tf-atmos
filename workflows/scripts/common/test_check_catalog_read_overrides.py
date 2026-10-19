@@ -153,14 +153,12 @@ class MainTest(unittest.TestCase):
                 "components: {terraform: {vpc/main: {vars: {b: !terraform.state kms/main .k}}}}\n",
             # The prod stack sets b: residue, since its vpc/main reads only a.
             "orgs/fnx/prod/us-east-1.yaml": """\
-                import: [orgs/fnx/prod/us-east-1/components/networking]
+                import: [catalog/vpc/main]
                 components: {terraform: {vpc/main: {vars: {b: literal}}}}
                 """,
-            "orgs/fnx/prod/us-east-1/components/networking.yaml": "import: [catalog/vpc/main]\n",
-            "orgs/fnx/prod/us-east-2/components/networking.yaml": "import: [catalog/vpc/main-standby]\n",
         }
         standby = """\
-            import: [orgs/fnx/prod/us-east-2/components/networking]
+            import: [catalog/vpc/main-standby]
             components: {terraform: {vpc/main: {vars: {%s: literal}}}}
             """
         code, out = run_tree({**tree, "orgs/fnx/prod/us-east-2.yaml": standby % "a"})

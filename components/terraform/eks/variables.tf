@@ -564,7 +564,7 @@ variable "access_policy_associations" {
 # as its kubernetes_groups, so `system:masters` becomes a cluster-scoped
 # AmazonEKSClusterAdminPolicy association (auth.tf). As upstream, `username`
 # is accepted and ignored. The stacks list their human admin roles here
-# (stacks/orgs/fnx/<stage>/<region>/<stack>/components/globals.yaml).
+# (on eks/defaults in each stack file, stacks/orgs/fnx/<stage>/<region>.yaml).
 variable "map_additional_iam_roles" {
   type = list(object({
     rolearn  = string

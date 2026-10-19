@@ -4,7 +4,7 @@
 # Two roles, because .github/workflows model two different trust surfaces:
 #   plan  - assumed by terraform-ci.yml (pull_request, i.e. PR-controlled code;
 #           prod's instance trusts the default branch only - see
-#           ci_plan_role_subjects in its security.yaml),
+#           ci_plan_role_subjects in stacks/catalog/iam/ci-prod.yaml),
 #           drift-detection.yml and disaster-recovery.yml (default branch).
 #           Read-only. Each workflow derives this stack's ARN from its iam/ci
 #           config (workflows/scripts/common/ci-apply-role-arn.py --kind plan);

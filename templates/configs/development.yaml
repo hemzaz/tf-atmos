@@ -7,7 +7,7 @@
 #
 # Usage:
 #   cp templates/configs/development.yaml stacks/mixins/profiles/development.yaml
-#   # in the stack (e.g. stacks/orgs/fnx/dev/us-east-1/<environment>.yaml):
+#   # in the stack (e.g. stacks/orgs/fnx/dev/us-east-1/<lane>.yaml):
 #   import:
 #     - orgs/fnx/dev/_defaults
 #     - mixins/region/us-east-1
