@@ -2,8 +2,8 @@
 # =============================================================================
 # apigateway/main in the prod primary stacks: the main REST API
 # =============================================================================
-# The instance file, not the abstract: the routes, reads and dependencies are
-# the apigateway/main-prod abstract's (prod.yaml). DR (owner decision Q5): the
+# The routes, reads and dependencies are the apigateway/main-prod-defaults
+# abstract's (prod.yaml). DR (owner decision Q5): the
 # PRIMARY half of api.<domain>'s Route 53 failover pair, health-checked on
 # this region's stage root; the DR standby's apigateway/main
 # (main-standby.yaml) is the SECONDARY.
@@ -22,7 +22,7 @@ components:
       metadata:
         component: apigateway
         inherits:
-          - apigateway/main-prod
+          - apigateway/main-prod-defaults
       vars:
         route53_failover_type: PRIMARY
         route53_set_identifier: "{{ .settings.prefix }}"

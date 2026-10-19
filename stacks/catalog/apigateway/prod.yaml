@@ -9,7 +9,7 @@ import:
 # standby's apigateway/main, main-standby.yaml, is the SECONDARY half).
 components:
   terraform:
-    apigateway/main-prod:
+    apigateway/main-prod-defaults:
       metadata:
         component: apigateway
         type: abstract

@@ -2,8 +2,8 @@
 # =============================================================================
 # elasticache/main in the prod primary stacks: the main cache
 # =============================================================================
-# The instance file, not the abstract: the shape, reads and dependencies are
-# the elasticache/main-prod abstract's (prod.yaml). DR (owner decision Q5): a
+# The shape, reads and dependencies are the elasticache/main-prod-defaults
+# abstract's (prod.yaml). DR (owner decision Q5): a
 # Global Datastore with this cache as primary; the DR standby's
 # elasticache/main (main-standby.yaml) is its secondary. The id suffix is
 # global per account, so it carries the full stack id. An EU primary's
@@ -20,6 +20,6 @@ components:
       metadata:
         component: elasticache
         inherits:
-          - elasticache/main-prod
+          - elasticache/main-prod-defaults
       vars:
         global_replication_group_id_suffix: "{{ .atmos_stack }}-cache"

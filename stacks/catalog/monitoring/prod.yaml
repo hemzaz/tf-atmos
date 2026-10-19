@@ -11,7 +11,7 @@ import:
 # adds the ecs/main read.
 components:
   terraform:
-    monitoring/main-prod:
+    monitoring/main-prod-defaults:
       metadata:
         component: monitoring
         type: abstract
