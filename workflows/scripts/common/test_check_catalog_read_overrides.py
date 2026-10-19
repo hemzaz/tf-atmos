@@ -169,6 +169,23 @@ class MainTest(unittest.TestCase):
         self.assertIn("catalog/vpc/main-standby.yaml", out)
         self.assertNotIn("catalog/vpc/main.yaml", out)
 
+    def test_catalog_file_reached_through_an_intermediate_import(self):
+        # stack -> catalog/vpc/main-prod -> catalog/vpc/main: the read is two imports deep.
+        tree = {
+            "catalog/vpc/main.yaml": "components: {terraform: {vpc/main: {vars: {a: !terraform.state kms/main .k}}}}\n",
+            "catalog/vpc/main-prod.yaml": "import: [catalog/vpc/main]\n",
+        }
+        stack = """\
+            import: [catalog/vpc/main-prod]
+            components: {terraform: {vpc/main: {vars: {%s: literal}}}}
+            """
+        code, out = run_tree({**tree, "orgs/fnx/prod/us-east-1.yaml": stack % "b"})
+        self.assertEqual(code, 0, out)
+        code, out = run_tree({**tree, "orgs/fnx/prod/us-east-1.yaml": stack % "a"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("us-east-1.yaml: vpc/main sets vars.a over the state read at vars.a", out)
+        self.assertIn("catalog/vpc/main.yaml", out)
+
     def test_overrides_sections_whatever_the_key(self):
         stack = """\
             import: [catalog/eks/main]
