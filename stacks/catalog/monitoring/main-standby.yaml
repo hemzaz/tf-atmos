@@ -37,7 +37,8 @@ components:
         api_gateway_name: !terraform.state apigateway/main .api_name
         api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
         create_sns_topic: true
-        # rds/main's replica's RDS events, to <prefix>-main-alarms (catalog/monitoring/prod).
+        # rds/main's replica's RDS events, to <prefix>-main-alarms (kms/main
+        # allows them: allow_rds_events, catalog/kms/main-prod.yaml).
         rds_event_subscription_enabled: true
         enable_rds_monitoring: true
         rds_cpu_threshold: 80

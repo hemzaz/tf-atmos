@@ -1,10 +1,10 @@
 ---
 # =============================================================================
-# network/services in the nonprod stacks (fnx-ue1-dev, fnx-ue1-staging)
+# network/services in the nonprod stacks (dev and staging)
 # =============================================================================
 # The services.<domain> zone (delegated from network/main) and its data
 # subzone. Each stack keeps its zone comments
-# (orgs/fnx/<stage>/<region>/components/networking.yaml).
+# (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

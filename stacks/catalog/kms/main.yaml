@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# kms/main in the nonprod stacks: the account's customer-managed key
+# kms/main in a nonprod stack: the account's customer-managed key
 # =============================================================================
 # The key depends on iam/main, which provisions the Auto Scaling
 # service-linked role its key policy names; main-dev.yaml is the same key for

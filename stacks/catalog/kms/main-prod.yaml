@@ -58,7 +58,7 @@ components:
         #     components/terraform/kms/README.md. No node-role grant needed;
         #     EBS encryption at launch is performed by the ASG service, not the
         #     node's own role.
-        #   - EKS cluster secrets encryption (compute.yaml's
+        #   - EKS cluster secrets encryption (catalog/eks/{prod,data}.yaml's
         #     cluster_encryption_config_kms_key_id): the principal that calls
         #     eks:CreateCluster/UpdateClusterConfig needs kms:DescribeKey,
         #     kms:CreateGrant and kms:Encrypt on this key (AWS's

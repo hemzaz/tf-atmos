@@ -51,19 +51,21 @@
 # =============================================================================
 # REQUIREMENTS FOR THE IMPORTING STACK
 # =============================================================================
-# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
-#    from catalog/kms/defaults). This template does not define it: doing so would
+# 1. A kms/main instance (the nonprod and prod primary fnx stacks import one
+#    from catalog/kms/, inheriting catalog/kms/defaults; a DR standby has
+#    none). This template does not define it: doing so would
 #    deep-merge over that stack's own alias_name/description. It must keep the
 #    grants catalog/kms/defaults turns on (allow_cloudwatch_logs for the
 #    Lambda, API and WAF log groups, allow_cloudwatch_alarms for the alarm
 #    topic) and also set
 #      allow_cloudfront: true        # CloudFront decrypts the assets through OAC
 #      allow_log_delivery_s3: true   # CloudFront log delivery into the log bucket
-# 2. An apigateway-account/main instance (the three AWS stacks have one, in
-#    components/security.yaml): REST stage logging needs the account's API
-#    Gateway CloudWatch role, one per account and region, never per template.
-# 3. s3/lambda-artifacts (imported below; an fnx org stack imports the same file
-#    in components/services.yaml) applied, with
+# 2. An apigateway-account/main instance (every fnx AWS stack imports
+#    catalog/apigateway-account/main): REST stage logging needs the account's
+#    API Gateway CloudWatch role, one per account and region, never per
+#    template.
+# 3. s3/lambda-artifacts (imported below; an fnx org stack that runs lambdas
+#    imports the same file in its stack file) applied, with
 #    api-handler/<api_handler_version>.zip and
 #    async-processor/<async_processor_version>.zip in it, before the Lambdas:
 #    deploy-full-stack's storage layer applies it before compute.
@@ -112,7 +114,7 @@ import:
   - catalog/cloudfront/defaults
   - catalog/monitoring/defaults
   # s3/lambda-artifacts, the stack's lambda package bucket (an fnx org stack
-  # imports the same file in components/services.yaml).
+  # that runs lambdas imports the same file in its stack file).
   - catalog/s3/lambda-artifacts
 
 # =============================================================================

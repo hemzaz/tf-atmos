@@ -2,7 +2,7 @@
 import:
   - catalog/ec2/defaults
 
-# The production bastion, shared by fnx-ue1-prod's and fnx-ew1-prod's
+# The production bastion, shared by the prod primaries'
 # ec2/bastion: the operator's SSM port-forward path to the private EKS
 # endpoints, in vpc/main's first private subnet, with every key on the
 # stack's kms/main. Each stack sets allowed_egress_rules, whose SSH rule

@@ -5,7 +5,7 @@
 # Wired to eks/main and the stack's kms/main, with the default
 # ClusterSecretStore (aws-secretsmanager) that eks-backend-services/main reads
 # its name from. Each stack keeps its enabled switch
-# (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

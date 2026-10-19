@@ -9,7 +9,9 @@
 # cloudtrail/main a standby does not have (a null cannot unset an inherited
 # value); the rest mirrors it. The alert topic is on this region's key, the
 # primary's kms/main multi-region replica. Each stack keeps its
-# security_email_subscriptions and enable_alert_enrichment.
+# security_email_subscriptions and enable_alert_enrichment: the recipients
+# are per stack, and the EU standby's GDPR-required enrichment off stays
+# visible in its stack file.
 # =============================================================================
 
 components:

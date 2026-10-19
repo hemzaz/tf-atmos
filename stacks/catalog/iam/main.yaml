@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# iam/main in the nonprod stacks: the account IAM instance
+# iam/main in a nonprod stack: the account IAM instance
 # =============================================================================
 # Cross-account trust and the Auto Scaling service-linked role that kms/main's
 # key policy names (catalog/kms/main.yaml depends on this instance).

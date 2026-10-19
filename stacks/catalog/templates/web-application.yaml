@@ -45,8 +45,9 @@
 # =============================================================================
 # REQUIREMENTS FOR THE IMPORTING STACK
 # =============================================================================
-# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
-#    from catalog/kms/defaults). This template does not define it: doing so would
+# 1. A kms/main instance (the nonprod and prod primary fnx stacks import one
+#    from catalog/kms/, inheriting catalog/kms/defaults; a DR standby has
+#    none). This template does not define it: doing so would
 #    deep-merge over that stack's own alias_name/description. It must keep the
 #    grants catalog/kms/defaults turns on (allow_cloudwatch_logs for the ECS and
 #    WAF log groups, allow_cloudwatch_alarms for the alarm topic) and also set

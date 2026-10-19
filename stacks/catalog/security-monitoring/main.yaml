@@ -2,8 +2,9 @@
 # =============================================================================
 # security-monitoring/main in the nonprod and prod primary stacks
 # =============================================================================
-# The catalog defaults as they are (security-monitoring/defaults), CIS metric
-# filters on this stack's cloudtrail/main log group included.
+# Shared by nonprod and prod: a change here changes prod. The catalog
+# defaults as they are (security-monitoring/defaults), CIS metric filters on
+# this stack's cloudtrail/main log group included.
 # =============================================================================
 
 import:

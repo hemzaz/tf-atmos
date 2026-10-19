@@ -2,13 +2,13 @@
 # =============================================================================
 # eks-addons/data in the stacks with the data plane: eks/data's add-ons
 # =============================================================================
-# Shared by dev, staging and the prod primary with the data plane
-# (fnx-ue1-prod). eks-addons/main's set on eks/data, in vpc/services, with
-# external-dns and cert-manager limited to network/services' services and data
-# zones. Each stack keeps clusters.data.container_insights_log_retention_days
-# and may set clusters.data.cert_manager_acme_server
-# (orgs/fnx/<stage>/<region>/components/compute.yaml). The cluster endpoints are
-# private, so plan/apply this from inside the VPC (see the eks-addons README).
+# Shared by dev, staging and the prod primary with the data plane.
+# eks-addons/main's set on eks/data, in vpc/services, with external-dns and
+# cert-manager limited to network/services' services and data zones. Each
+# stack keeps clusters.data.container_insights_log_retention_days and may set
+# clusters.data.cert_manager_acme_server (the stack file,
+# orgs/fnx/<stage>/<region>.yaml). The cluster endpoints are private, so
+# plan/apply this from inside the VPC (see the eks-addons README).
 # =============================================================================
 
 import:

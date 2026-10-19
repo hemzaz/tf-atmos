@@ -3,7 +3,7 @@ import:
   - catalog/secretsmanager/defaults
 
 # Production secret sets, shared by the prod stacks with their own key
-# (fnx-ue1-prod and fnx-ew1-prod: secretsmanager/app and secretsmanager/infra).
+# (the prod primaries: secretsmanager/app and secretsmanager/infra).
 # Secrets are regional and each stack reads its own kms/main; each stack
 # replicates them to its own DR region only (catalog/secretsmanager/
 # {app,infra}-prod.yaml: the stack's settings.dr.region). No rotation

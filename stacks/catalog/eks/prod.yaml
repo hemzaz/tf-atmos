@@ -2,9 +2,9 @@
 import:
   - catalog/eks/defaults
 
-# The production main cluster, shared by fnx-ue1-prod's and fnx-ew1-prod's
-# eks/main (the warm standby fnx-ue2-prod keeps its own floor sizes and
-# replica key): "<Environment>-main" (ue1-main, ew1-main) in vpc/main's
+# The production main cluster, shared by the prod primaries' eks/main (a
+# DR standby keeps its own floor sizes and replica key, main-standby.yaml):
+# "<Environment>-main" (ue1-main, ew1-main) in vpc/main's
 # private subnets, a private-only endpoint, every control-plane log type,
 # secrets and node volumes on the stack's kms/main, and the three node groups.
 # The operator's path to the private endpoint (docs/OPERATIONS.md, "In-cluster

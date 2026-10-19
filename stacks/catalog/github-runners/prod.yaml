@@ -2,8 +2,8 @@
 import:
   - catalog/github-runners/defaults
 
-# The production in-VPC runner pool, shared by fnx-ue1-prod's and
-# fnx-ew1-prod's github-runners/main: vpc/main's private subnets, labelled
+# The production in-VPC runner pool, shared by the prod primaries'
+# github-runners/main: vpc/main's private subnets, labelled
 # with the stack's full id, registered just in time with the owner's GitHub
 # App (settings.github_app; docs/OPERATIONS.md, "First-deploy inputs", GitHub
 # App). CI runs the in-cluster instances (settings.github.runner: in-vpc) on

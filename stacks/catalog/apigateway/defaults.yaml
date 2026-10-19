@@ -44,7 +44,7 @@ components:
 
         # Monitoring
         create_dashboard: true
-        # X-Ray bills per recorded trace; prod opts in explicitly (orgs/fnx/prod/.../services.yaml)
+        # X-Ray bills per recorded trace; prod opts in explicitly (catalog/apigateway/prod.yaml)
         tracing_enabled: false
 
         tags:
@@ -92,7 +92,7 @@ components:
 
         # Monitoring
         create_dashboard: true
-        # X-Ray bills per recorded trace; prod opts in explicitly (orgs/fnx/prod/.../services.yaml)
+        # X-Ray bills per recorded trace; a prod instance opts in explicitly
         tracing_enabled: false
 
         tags:

@@ -27,8 +27,8 @@ components:
         create_monitoring_role: true
         iam_database_authentication_enabled: true
 
-    # The production main database, shared by fnx-ue1-prod's and
-    # fnx-ew1-prod's rds/main: Multi-AZ (rds/prod) in vpc/main's database
+    # The production main database, shared by the prod primaries'
+    # rds/main: Multi-AZ (rds/prod) in vpc/main's database
     # subnets, every key on the stack's kms/main, reachable from eks/main.
     # monitoring_role_arn pointed at an iam/rds-monitoring instance that has
     # never existed; the component creates the role itself.

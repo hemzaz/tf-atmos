@@ -5,7 +5,7 @@
 # The API's wiring: the "/" liveness method, the cognito/main authorizer, the
 # acm/main wildcard certificate and network/main's zone for api.<domain>. Each
 # stack keeps its description, resources list, log retention and any
-# throttling, CORS or tags (orgs/fnx/<stage>/<region>/components/services.yaml).
+# throttling, CORS or tags (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

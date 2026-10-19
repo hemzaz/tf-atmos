@@ -59,10 +59,11 @@
 # REQUIREMENTS FOR THE IMPORTING STACK
 # =============================================================================
 # 1. vpc/main (private and public subnets), kms/main and iam/ci instances, as
-#    every fnx org stack has (components/networking.yaml, security.yaml). The
-#    platform deploys into that VPC, as the idp-platform component did. kms/main
-#    keeps the grants catalog/kms/defaults turns on: allow_cloudwatch_logs (the
-#    Redis slow-log group) and allow_cloudwatch_alarms (the alerts topic).
+#    the nonprod and prod primary fnx stacks import (a DR standby has no
+#    kms/main). The platform deploys into that VPC, as the idp-platform
+#    component did. kms/main keeps the grants catalog/kms/defaults turns on:
+#    allow_cloudwatch_logs (the Redis slow-log group) and
+#    allow_cloudwatch_alarms (the alerts topic).
 # 2. settings.idp_platform.domain_name: the platform's domain, a zone this
 #    template creates (idp-platform/dns) and the registrar or parent zone
 #    delegates to it (its name servers: idp-platform/dns .zone_name_servers).

@@ -2,8 +2,8 @@
 import:
   - catalog/eks-addons/defaults
 
-# EKS add-ons on the production main cluster, shared by fnx-ue1-prod's and
-# fnx-ew1-prod's eks-addons/main: the load balancer controller,
+# EKS add-ons on the production main cluster, shared by the prod primaries'
+# eks-addons/main: the load balancer controller,
 # cluster-autoscaler, metrics-server, external-dns, cert-manager and Container
 # Insights, each with its own IRSA role. external-dns and cert-manager may
 # change records only in network/main's public zone (internal.* is private

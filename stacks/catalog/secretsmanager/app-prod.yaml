@@ -4,8 +4,8 @@
 # =============================================================================
 # The secret set is catalog/secretsmanager/prod's (secretsmanager/app-prod),
 # shared by the prod primary stacks. Replicated to the stack's DR region only
-# (settings.dr.region: us-east-2 for fnx-ue1-prod, eu-central-1 for
-# fnx-ew1-prod) on kms/main's replica key there, so the DR standby's
+# (settings.dr.region: us-east-2 for the US primary, eu-central-1 for the
+# EU one) on kms/main's replica key there, so the DR standby's
 # external-secrets stores read the same names during an outage of the primary
 # region (promote a replica to write it). An EU stack's DR region is an EU one:
 # the values never leave the EU (check-data-residency.py checks

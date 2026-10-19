@@ -30,7 +30,7 @@ components:
         # the in-cluster components on the stack's in-VPC runners with these
         # roles; an operator (break-glass) applies them from inside the VPC
         # with their own access entry: the stack's map_additional_iam_roles,
-        # set in its components/globals.yaml (docs/OPERATIONS.md, "In-cluster
+        # set in its stack file (docs/OPERATIONS.md, "In-cluster
         # components"). Cloud Posse's list form
         # (access_entries + access_policy_associations), not access_entry_map:
         # the role ARNs come from !terraform.state, and an Atmos YAML function

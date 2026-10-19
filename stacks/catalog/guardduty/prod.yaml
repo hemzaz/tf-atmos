@@ -2,9 +2,9 @@
 import:
   - catalog/guardduty/defaults
 
-# Production detector settings, shared by the prod stacks' guardduty/main
-# (fnx-ue1-prod, its DR region fnx-ue2-prod, the EU fnx-ew1-prod and its DR
-# region fnx-ec1-prod): prod turns on the protection plans the catalog leaves
+# Production detector settings, shared by every prod stack's guardduty/main
+# (the prod primaries and the DR standbys): prod turns on the protection
+# plans the catalog leaves
 # opt-in (EKS audit logs and EBS malware scanning bill per event / per GB
 # scanned) and auto-archives port-scan noise.
 components:

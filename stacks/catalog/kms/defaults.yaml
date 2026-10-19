@@ -87,9 +87,9 @@ components:
         # value lands in the ARN as raw text and CreateKey rejects the policy.
         # No instance names one either (prod doesn't): KMS validates every
         # named principal at CreateKey/PutKeyPolicy time, and this repo's IaC
-        # creates no admin role to name (see prod's security.yaml). Add named
-        # administrators only once a real instance provisions that role, with
-        # a literal account id.
+        # creates no admin role to name (see catalog/kms/main-prod.yaml). Add
+        # named administrators only once a real instance provisions that role,
+        # with a literal account id.
         #
         # Real consumers (CI/deploy roles, application roles) that need
         # least-privilege key use, as opposed to full administration, should

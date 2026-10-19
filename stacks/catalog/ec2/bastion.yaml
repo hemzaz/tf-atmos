@@ -4,7 +4,7 @@
 # =============================================================================
 # The bastion's wiring: a private subnet of vpc/main and its generated SSH key
 # on the stack's kms/main. Each stack keeps its tags, volume settings and
-# ingress/egress rules (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# ingress/egress rules (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

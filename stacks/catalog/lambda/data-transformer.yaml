@@ -2,13 +2,13 @@
 # =============================================================================
 # lambda/data-transformer: the sqs/data-transform consumer (disabled)
 # =============================================================================
-# Shared by nonprod and prod: a change here changes prod. Packaged, and
+# Shared by staging and prod: a change here changes prod. Packaged, and
 # disabled until its first package, like lambda/data-processor
 # (catalog/lambda/data-processor.yaml). Fed by sqs/data-transform through an
 # event source mapping.
 #
 # Each stack keeps its memory_size, timeout and any reserved concurrency or
-# mapping scaling (orgs/fnx/<stage>/<region>/components/services.yaml). The
+# mapping scaling (the stack file, orgs/fnx/<stage>/<region>.yaml). The
 # stack's sqs/data-transform visibility_timeout_seconds is derived from that
 # timeout and the batching window below (6 x timeout + window): the two
 # values sit side by side in the stack file, so change them together.

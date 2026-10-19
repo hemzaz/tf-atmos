@@ -6,8 +6,7 @@
 # infrastructure/main.ecs. vpc_id/subnet_ids are not passed: an
 # aws_ecs_cluster has neither - those belong to ECS services, which this
 # component does not manage. Each stack keeps its cluster name and any
-# Container Insights setting
-# (orgs/fnx/<stage>/<region>/components/services.yaml).
+# Container Insights setting (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 components:

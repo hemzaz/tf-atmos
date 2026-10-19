@@ -2,13 +2,13 @@
 # =============================================================================
 # eks/data in the stacks with the data plane: the data-processing cluster
 # =============================================================================
-# Shared by dev, staging and the prod primary with the data plane
-# (fnx-ue1-prod). The cluster's wiring: vpc/services' private subnets, the
-# operator's and the CI runners' paths to the private endpoint across
-# network/vpc-peering, and secrets and node volumes on the stack's kms/main.
-# Each stack keeps its log types, log retention, tags and node groups (their
-# instance types, sizes, labels, capacity and volumes)
-# (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# Shared by dev, staging and the prod primary with the data plane. The
+# cluster's wiring: vpc/services' private subnets, the operator's and the CI
+# runners' paths to the private endpoint across network/vpc-peering, and
+# secrets and node volumes on the stack's kms/main. Each stack keeps its log
+# types, log retention, tags and node groups (their instance types, sizes,
+# labels, capacity and volumes) in the stack file
+# (orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

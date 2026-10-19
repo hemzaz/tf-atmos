@@ -4,7 +4,7 @@
 # targets differ per stack (redis only in prod): the DR standbys set it in
 # their catalog instance file (main-standby.yaml, main-standby-failover.yaml),
 # the prod primaries inherit eks-backend-services/prod, and dev and staging
-# still set it inline in their stack's compute.yaml.
+# import catalog/eks-backend-services/main.
 components:
   terraform:
     eks-backend-services/defaults:
@@ -17,9 +17,9 @@ components:
         github:
           runner: in-vpc
       vars:
-        # Only fnx-ue1-prod runs an elasticache/main instance today
-        # (stacks/catalog/elasticache/defaults.yaml); every stack starts with
-        # redis off and prod's instance turns it on explicitly.
+        # Only the prod primaries and their DR standbys run an
+        # elasticache/main instance (stacks/catalog/elasticache/); every stack
+        # starts with redis off and the prod instances turn it on explicitly.
         redis_enabled: false
         # No stack in this repo installs the Prometheus Operator or its CRDs
         # (monitoring.coreos.com), so ServiceMonitor resources have no schema

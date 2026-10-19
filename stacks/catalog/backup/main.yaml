@@ -15,7 +15,7 @@ components:
   terraform:
     # ==========================================================================
     # AWS Backup - vault, plans and tag-based selection for rds/main,
-    # rds/data (Backup=true in their own services.yaml vars.tags) and any
+    # rds/data (Backup=true in their catalog/rds files' vars.tags) and any
     # EC2/EBS resource tagged the same way.
     # ==========================================================================
     backup/main:

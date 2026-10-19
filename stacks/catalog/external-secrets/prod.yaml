@@ -3,7 +3,7 @@ import:
   - catalog/external-secrets/defaults
 
 # External Secrets Operator on the production main cluster, shared by
-# fnx-ue1-prod's and fnx-ew1-prod's external-secrets/main: wired to the
+# the prod primaries' external-secrets/main: wired to the
 # stack's eks/main, with the ClusterSecretStore eks-backend-services/main
 # reads rds/main's RDS-managed master user secret (name "rds!db-<id>")
 # through, open to that namespace only.
