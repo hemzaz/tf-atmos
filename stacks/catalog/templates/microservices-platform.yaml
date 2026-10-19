@@ -364,8 +364,8 @@ components:
         components:
           - component: microservices/vpc
           - component: kms/main
-          # eks/defaults gives the CI roles EKS access entries; every fnx AWS
-          # stack has an iam/ci instance (catalog/iam/ci*.yaml).
+          # eks/defaults gives the CI roles EKS access entries; every nonprod
+          # and prod stack has an iam/ci instance (catalog/iam/ci*.yaml).
           - component: iam/ci
           - component: microservices/github-runners
 

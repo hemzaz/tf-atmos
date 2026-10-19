@@ -18,8 +18,8 @@
 # package exists: upload it, set package_version, set enabled: true, and
 # restore its readers, each marked with a "disabled" comment:
 # apigateway/main's "/api" route and apigateway/data (this function only),
-# and monitoring/data's dimensions (this function and
-# lambda/data-transformer).
+# and monitoring/data's dimensions (this function, lambda/data-transformer
+# and, in prod, lambda/report-generator).
 # =============================================================================
 
 components:

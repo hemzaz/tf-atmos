@@ -60,7 +60,7 @@
 #    topic) and also set
 #      allow_cloudfront: true        # CloudFront decrypts the assets through OAC
 #      allow_log_delivery_s3: true   # CloudFront log delivery into the log bucket
-# 2. An apigateway-account/main instance (every fnx AWS stack imports
+# 2. An apigateway-account/main instance (every nonprod and prod stack imports
 #    catalog/apigateway-account/main): REST stage logging needs the account's
 #    API Gateway CloudWatch role, one per account and region, never per
 #    template.
