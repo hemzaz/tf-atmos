@@ -112,6 +112,9 @@ settings:
   # that stack, whatever the names (workflows/scripts/common/ci-stacks.py).
   dr:
     standby_of: fnx-ew1-prod
+  context:
+    tenant: fnx
+    stage: prod
   environment:
     # The EU prod account, fnx-ew1-prod's (stacks/orgs/fnx/_defaults.yaml
     # account map): prod/_defaults derives account_id from this key.
@@ -142,9 +145,6 @@ settings:
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     enable_vpc_flow_logs: true
-  context:
-    tenant: fnx
-    stage: prod
   # The EU backend, as in fnx-ew1-prod (overriding every settings.tfstate key,
   # literal .settings.context.* references only, see
   # stacks/orgs/fnx/_defaults.yaml): the state stays in eu-west-1 whatever

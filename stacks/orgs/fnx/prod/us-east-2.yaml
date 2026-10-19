@@ -103,6 +103,9 @@ settings:
   # that stack, whatever the names (workflows/scripts/common/ci-stacks.py).
   dr:
     standby_of: fnx-ue1-prod
+  context:
+    tenant: fnx
+    stage: prod
   environment:
     account: prod
     # The production domain: api.<domain> fails over to this stack. Its zone is
@@ -127,9 +130,6 @@ settings:
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     enable_vpc_flow_logs: true
-  context:
-    tenant: fnx
-    stage: prod
   network:
     vpc_cidrs:
       main: "10.22.0.0/16"

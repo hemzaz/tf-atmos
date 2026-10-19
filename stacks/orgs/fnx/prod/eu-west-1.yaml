@@ -113,6 +113,9 @@ settings:
   # the state bucket's replica.
   dr:
     region: eu-central-1
+  context:
+    tenant: fnx
+    stage: prod
   environment:
     # The EU prod account (stacks/orgs/fnx/_defaults.yaml account map), not
     # prod's: prod/_defaults derives account_id from this key.
@@ -150,9 +153,6 @@ settings:
       platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
-  context:
-    tenant: fnx
-    stage: prod
   # The EU backend, overriding every settings.tfstate key (literal
   # .settings.context.* references only, see stacks/orgs/fnx/_defaults.yaml);
   # the same values as fnx-ew1-root's, which owns it.
