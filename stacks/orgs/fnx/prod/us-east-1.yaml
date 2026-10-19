@@ -4,9 +4,10 @@
 # ALL CHANGES REQUIRE CHANGE MANAGEMENT APPROVAL
 # One file per stack: the imports, then one vars/settings/components body,
 # grouped by domain (globals, networking, security, compute, services).
-# Each instance's wiring is catalog/<c>/<i>: a -prod flavor where a prod
-# primary differs, else the un-suffixed default (each domain section below
-# names which); this file keeps this stack's values.
+# Each instance's wiring is catalog/<c>/<i>: a prod flavor (-prod,
+# -prod-data-plane) where a prod primary differs, else the un-suffixed
+# default (each domain section below names which); this file keeps this
+# stack's values.
 
 import:
   # Import base configuration first
@@ -402,7 +403,6 @@ components:
     # ========================================================================
     # Services
     # Production services with full monitoring, alerting, and compliance
-    # Multi-AZ RDS, comprehensive CloudWatch, PagerDuty integration
     # Every services instance's wiring is catalog/<c>/<i>. The DR-paired and
     # database instances use the -prod flavors (cognito/main, apigateway/main,
     # rds/main, elasticache/main, shared with fnx-ew1-prod; rds/data and
@@ -413,8 +413,10 @@ components:
     # cost-optimization/main shared with dev and staging, lambda/data-processor,
     # lambda/data-transformer and sqs/data-transform with staging;
     # report-generator has only this shape). This file keeps this stack's
-    # values: the health check alarm's actions, the data API's name, sizes
-    # and limits, the lambdas' sizes, the queue's visibility timeout,
+    # values: the health check alarm's actions, the data API's name,
+    # description, resources, throttling, retention, tracing and tags, the
+    # ECS cluster's name and Container Insights, the lambdas' sizes,
+    # concurrency and environment, the queue's visibility timeout,
     # monitoring/data's recipients and the budget's standby tag.
     # ========================================================================
     # API Gateway - Main API (Production)

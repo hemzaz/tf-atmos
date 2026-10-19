@@ -3,8 +3,10 @@
 # Production-like staging environment for final validation before production
 # One file per stack: the imports, then one vars/settings/components body,
 # grouped by domain (globals, networking, security, compute, services).
-# Each instance's wiring is catalog/<c>/<i> (shared with fnx-ue1-dev); this
-# file keeps staging's per-stage values.
+# Each instance's wiring is catalog/<c>/<i>, the un-suffixed default.
+# fnx-ue1-dev imports most of the same files and its own flavors for the rest
+# (the security, compute and services sections below name them); this file
+# keeps staging's per-stage values.
 
 import:
   # Import base configuration first
@@ -134,11 +136,12 @@ settings:
     enable_vpc_flow_logs: true
 
   # The two VPCs' CIDRs, in one place: each vpc instance's
-  # ipv4_primary_cidr_block, the other one's private_network_acl_peer_cidr_blocks
-  # and network/vpc-peering's routes all read them. Literals, not
-  # !terraform.state <vpc> .vpc_cidr: vpc/main and vpc/services would then
-  # read each other, a cycle. database_subnet_cidrs.main is vpc/main's
-  # database_subnets, which ec2/app-server's PostgreSQL egress also reads.
+  # ipv4_primary_cidr_block, the other one's
+  # private_network_acl_peer_cidr_blocks and network/vpc-peering's routes all
+  # read them. Literals, not !terraform.state <vpc> .vpc_cidr: vpc/main and
+  # vpc/services would then read each other, a cycle.
+  # database_subnet_cidrs.main is vpc/main's database_subnets, which
+  # ec2/app-server's PostgreSQL egress also reads.
   network:
     vpc_cidrs:
       main: "10.10.0.0/16"
@@ -239,6 +242,8 @@ components:
         records:
           www_main:
             records: ["10.10.101.100"]
+          # A literal: it must stay inside
+          # settings.network.database_subnet_cidrs.main[0].
           db_internal:
             records: ["10.10.201.50"]
 
@@ -254,10 +259,13 @@ components:
     # ========================================================================
     # Security
     # IAM, secrets, certificates, and security configurations
-    # Every security instance's wiring, shared with fnx-ue1-dev, is
-    # catalog/<c>/<i>; this file keeps their per-stage values.
+    # Every security instance's wiring is catalog/<c>/<i>, shared with
+    # fnx-ue1-dev except iam/main, kms/main and secretsmanager/infra (dev
+    # imports iam/dev, kms/main-dev and secretsmanager/infra-dev); this file
+    # keeps their per-stage values.
     # ========================================================================
-    # KMS - customer-managed key for Secrets Manager and other encrypted services
+    # KMS - customer-managed key for Secrets Manager and other encrypted
+    # services
     kms/main:
       vars:
         description: Staging main encryption key (Secrets Manager, EBS, RDS)
@@ -315,8 +323,9 @@ components:
     # ========================================================================
     # Compute
     # EC2, EKS, and compute resources - mirrors production setup
-    # Every compute instance's wiring, shared with fnx-ue1-dev, is
-    # catalog/<c>/<i>; this file keeps the per-stage values.
+    # Every compute instance's wiring is catalog/<c>/<i>, shared with
+    # fnx-ue1-dev except ec2/app-server (dev imports ec2/app-server-dev); this
+    # file keeps the per-stage values.
     # ========================================================================
     # EKS Cluster - Main Application Workloads
     eks/main:
@@ -412,7 +421,10 @@ components:
     # ========================================================================
     # Services
     # Every services instance's wiring is catalog/<c>/<i> (the un-suffixed
-    # defaults); this file keeps staging's per-stage values.
+    # defaults). fnx-ue1-dev imports -dev flavors of rds/main, rds/data,
+    # monitoring/data and lambda/data-processor, and has no
+    # lambda/data-transformer or sqs/data-transform; this file keeps
+    # staging's per-stage values.
     # ========================================================================
     apigateway/main:
       vars:

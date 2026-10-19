@@ -127,10 +127,10 @@ settings:
     enable_vpc_flow_logs: false
 
   # The two VPCs' CIDRs, in one place: each vpc instance's
-  # ipv4_primary_cidr_block, the other one's private_network_acl_peer_cidr_blocks
-  # and network/vpc-peering's routes all read them. Literals, not
-  # !terraform.state <vpc> .vpc_cidr: vpc/main and vpc/services would then
-  # read each other, a cycle.
+  # ipv4_primary_cidr_block, the other one's
+  # private_network_acl_peer_cidr_blocks and network/vpc-peering's routes all
+  # read them. Literals, not !terraform.state <vpc> .vpc_cidr: vpc/main and
+  # vpc/services would then read each other, a cycle.
   network:
     vpc_cidrs:
       main: "10.0.0.0/16"
@@ -226,7 +226,8 @@ components:
     # ========================================================================
     # Security
     # ========================================================================
-    # KMS - customer-managed key for Secrets Manager and other encrypted services
+    # KMS - customer-managed key for Secrets Manager and other encrypted
+    # services
     kms/main:
       vars:
         description: Dev main encryption key (Secrets Manager, EBS, RDS)

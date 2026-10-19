@@ -19,15 +19,21 @@
 #   - apigateway/main: the SECONDARY half of api.<domain>'s failover pair,
 #     authorized by this region's cognito/main;
 #   - cognito/main: its own pool (AWS has no cross-region user pools), filled
-#     from fnx-ue1-prod's by a user-migration trigger.
+#     from fnx-ue1-prod's by a user-migration trigger
+#     (lambda/cognito-user-migration);
+#   - monitoring/main: this region's ue2-main-alarms topic and alarms.
 # Not replicated: rds/data and the data VPC (restored from backup/main's
 # copies in us-east-2).
 #
-# Same tags, domain and contacts as fnx-ue1-prod (orgs/fnx/prod/us-east-1.yaml):
-# one production service, two regions.
+# Same tags, domain and contacts as fnx-ue1-prod
+# (orgs/fnx/prod/us-east-1.yaml): one production service, two regions.
 #
 # One file per stack: the imports, then one vars/settings/components body,
 # grouped by domain (globals, networking, security, compute, services).
+# Every instance's wiring is the catalog's -standby files, shared with
+# fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod), plus the plain
+# inspector2/main and apigateway-account/main files every dev, staging and
+# prod stack imports; each domain section below says what this file keeps.
 # =============================================================================
 
 import:
@@ -36,7 +42,7 @@ import:
   - mixins/region/us-east-2
   - orgs/fnx/prod/_defaults
 
-  # --- globals: catalog defaults for every component used in this stack
+  # --- globals: shared catalog defaults (the rest come with their instances)
   - catalog/vpc/defaults
   - catalog/eks/defaults
   - catalog/iam/defaults
@@ -97,6 +103,9 @@ settings:
   # that stack, whatever the names (workflows/scripts/common/ci-stacks.py).
   dr:
     standby_of: fnx-ue1-prod
+  context:
+    tenant: fnx
+    stage: prod
   environment:
     account: prod
     # The production domain: api.<domain> fails over to this stack. Its zone is
@@ -121,9 +130,6 @@ settings:
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     enable_vpc_flow_logs: true
-  context:
-    tenant: fnx
-    stage: prod
   network:
     vpc_cidrs:
       main: "10.22.0.0/16"
@@ -144,14 +150,13 @@ components:
     # ========================================================================
     # Networking
     #
-    # Warm = full: vpc/main as in fnx-ue1-prod (three AZs, a NAT gateway per AZ,
-    # flow logs), on its own CIDR so the two regions can be peered later without
-    # renumbering. No vpc/services: the data tier it holds in us-east-1 (rds/data,
-    # eks/data) is restored from backup copies, not run warm (docs/OPERATIONS.md,
-    # "Disaster recovery"). No dns instance: the public zone is fnx-ue1-prod's
-    # network/main, which this stack writes its failover record into.
-    # vpc/main's wiring, shared with fnx-ec1-prod, is catalog/vpc/main-standby;
-    # this file keeps its CIDR, AZs and subnets.
+    # Warm = full: vpc/main as in fnx-ue1-prod (three AZs, a NAT gateway per
+    # AZ, flow logs), on its own CIDR so the two regions can be peered later
+    # without renumbering. No vpc/services: the data tier it holds in
+    # us-east-1 (rds/data, eks/data) is restored from backup copies, not run
+    # warm (docs/OPERATIONS.md, "Disaster recovery"). No dns instance: the
+    # public zone is fnx-ue1-prod's network/main, which this stack writes its
+    # failover record into. This file keeps vpc/main's CIDR, AZs and subnets.
     # ========================================================================
     vpc/main:
       vars:
@@ -176,8 +181,9 @@ components:
     # ========================================================================
     # Security
     #
-    # Regional services run here as in fnx-ue1-prod (GuardDuty, Security Hub, AWS
-    # Config, Inspector, finding routing, backups); account-wide ones do not:
+    # Regional services run here as in fnx-ue1-prod (GuardDuty, Security Hub,
+    # AWS Config, Inspector, finding routing, backups); account-wide ones do
+    # not:
     #   - KMS: no kms/main here. This region's key is fnx-ue1-prod kms/main's
     #     multi-region replica (replica_keys["us-east-2"], alias ue2-main), read
     #     cross-stack wherever fnx-ue1-prod reads kms/main.
@@ -191,11 +197,7 @@ components:
     #     (include_global_resource_types: false, Cloud Posse's
     #     global_resource_collector_region is us-east-1).
     #
-    # The instances' wiring is the catalog's -standby files, shared with
-    # fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod), plus the plain
-    # inspector2/main and apigateway-account/main files every dev, staging and
-    # prod stack imports. This file keeps security-monitoring/main's alert
-    # settings.
+    # This file keeps security-monitoring/main's alert settings.
     # ========================================================================
     security-monitoring/main:
       vars:
@@ -205,21 +207,21 @@ components:
     # ========================================================================
     # Compute (imports only: the instances come whole from the -standby files)
     #
-    # Warm = the same cluster shape as fnx-ue1-prod's eks/main at its floor: the
-    # workers node group runs at 2 nodes, spread over vpc/main's three private
-    # subnets (use2-az1..az3) like every group here, the monitoring and
-    # memory-optimized groups at 0, each keeping fnx-ue1-prod's max_group_size.
-    # Failover scales them with aws eks update-nodegroup-config, and a PR setting
+    # Warm = the same cluster shape as fnx-ue1-prod's eks/main at its floor:
+    # the workers node group runs at 2 nodes, spread over vpc/main's three
+    # private subnets (use2-az1..az3) like every group here, the monitoring
+    # and memory-optimized groups at 0, each keeping fnx-ue1-prod's
+    # max_group_size. Failover scales them with aws eks
+    # update-nodegroup-config, and a PR setting
     # min_group_size/desired_group_size reconciles Terraform afterwards
-    # (docs/OPERATIONS.md, "Disaster recovery"). Cloud Posse's eks/cluster node groups take the same
-    # min/desired/max inputs. The operator path (bastion) and the in-VPC CI
-    # runners are as in fnx-ue1-prod, so the in-cluster components can be applied
-    # here on failover.
+    # (docs/OPERATIONS.md, "Disaster recovery"). Cloud Posse's eks/cluster
+    # node groups take the same min/desired/max inputs. The operator path
+    # (bastion) and the in-VPC CI runners are as in fnx-ue1-prod, so the
+    # in-cluster components can be applied here on failover.
     #
-    # The instances' wiring is the catalog's -standby files, shared with
-    # fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod). Failover step 6
-    # switches this file's eks-backend-services import to main-standby-failover
-    # and sets database_secret_arn here, never in the shared files.
+    # Failover step 6 switches this file's eks-backend-services import to
+    # main-standby-failover and sets database_secret_arn here, never in the
+    # shared files.
     # ========================================================================
 
     # ========================================================================
@@ -233,25 +235,27 @@ components:
     #   - elasticache/main: a Global Datastore secondary of fnx-ue1-prod's
     #     elasticache/main (Cloud Posse aws-elasticache-redis
     #     global_replication_group_id).
-    #   - apigateway/main: the SECONDARY half of api.<domain>'s Route 53 failover
-    #     pair; fnx-ue1-prod's apigateway/main is the PRIMARY. Each half has its
-    #     own health check, so DNS moves without a change here.
+    #   - apigateway/main: the SECONDARY half of api.<domain>'s Route 53
+    #     failover pair; fnx-ue1-prod's apigateway/main is the PRIMARY. Each
+    #     half has its own health check, so DNS moves without a change here.
     #   - cognito/main: this region's own user pool (owner decision 2026-10-07:
     #     DR auth must not depend on us-east-1). AWS does not replicate user
     #     pools, so lambda/cognito-user-migration copies each user from
     #     fnx-ue1-prod's pool on their first sign-in or password reset here.
-    # rds/data (analytics) is not replicated: it is restored from backup/main's
-    # copies in us-east-2 (docs/OPERATIONS.md, "Disaster recovery").
+    #   - monitoring/main: this region's ue2-main-alarms topic and the alarms
+    #     on its data tier and API.
+    # rds/data (analytics) is not replicated: it is restored from
+    # backup/main's copies in us-east-2 (docs/OPERATIONS.md, "Disaster
+    # recovery").
     #
-    # The instances' wiring is the catalog's -standby files, shared with
-    # fnx-ec1-prod (settings.dr.standby_of names fnx-ue1-prod). This file keeps
-    # apigateway/main's health check alarm target.
+    # This file keeps apigateway/main's health check alarm target.
     # ========================================================================
     apigateway/main:
       vars:
         # The health check's alarm is in us-east-1 (Route 53's metrics are only
         # there), so it notifies fnx-ue1-prod monitoring/main's topic (ue1).
         # During a us-east-1 outage it is down with it; the out-of-region
-        # signal is this region's own API alarms (catalog/apigateway/main-standby).
+        # signal is this region's own API alarms
+        # (catalog/apigateway/main-standby).
         health_check_alarm_actions:
           - "arn:aws:sns:us-east-1:{{ .settings.environment.account_id }}:ue1-main-alarms"

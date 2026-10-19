@@ -43,6 +43,10 @@
 #
 # One file per stack: the imports, then one vars/settings/components body,
 # grouped by domain (globals, networking, security, compute, services).
+# Every instance's wiring is the catalog's -standby files, shared with
+# fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod), plus the plain
+# inspector2/main and apigateway-account/main files every dev, staging and
+# prod stack imports; each domain section below says what this file keeps.
 # =============================================================================
 
 import:
@@ -51,7 +55,7 @@ import:
   - mixins/region/eu-central-1
   - orgs/fnx/prod/_defaults
 
-  # --- globals: catalog defaults for every component used in this stack
+  # --- globals: shared catalog defaults (the rest come with their instances)
   - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/eks/defaults
@@ -108,6 +112,9 @@ settings:
   # that stack, whatever the names (workflows/scripts/common/ci-stacks.py).
   dr:
     standby_of: fnx-ew1-prod
+  context:
+    tenant: fnx
+    stage: prod
   environment:
     # The EU prod account, fnx-ew1-prod's (stacks/orgs/fnx/_defaults.yaml
     # account map): prod/_defaults derives account_id from this key.
@@ -138,9 +145,6 @@ settings:
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     enable_vpc_flow_logs: true
-  context:
-    tenant: fnx
-    stage: prod
   # The EU backend, as in fnx-ew1-prod (overriding every settings.tfstate key,
   # literal .settings.context.* references only, see
   # stacks/orgs/fnx/_defaults.yaml): the state stays in eu-west-1 whatever
@@ -160,11 +164,11 @@ components:
     # ========================================================================
     # Globals
     # ========================================================================
-    # Human cluster admins of eks/main (with compute), as in fnx-ew1-prod:
-    # the same operators fail the in-cluster services over. Each
-    # rolearn, an IAM role in the prod-eu account, must also be in the EU
-    # backend's access_roles.prod_write (stacks/orgs/fnx/root/eu-west-1.yaml).
-    # Empty until the owner supplies the ARN (row "EKS cluster admins").
+    # Human cluster admins of eks/main (compute section), as in fnx-ew1-prod:
+    # the same operators fail the in-cluster services over. Each rolearn, an
+    # IAM role in the prod-eu account, must also be in the EU backend's
+    # access_roles.prod_write (stacks/orgs/fnx/root/eu-west-1.yaml). Empty
+    # until the owner supplies the ARN (row "EKS cluster admins").
     eks/defaults:
       vars:
         map_additional_iam_roles: []
@@ -172,15 +176,14 @@ components:
     # ========================================================================
     # Networking
     #
-    # Warm = full, as fnx-ue2-prod's (orgs/fnx/prod/us-east-2.yaml):
-    # vpc/main as in fnx-ew1-prod (three AZs, a NAT gateway per
-    # AZ, flow logs), on its own CIDR (10.32.0.0/16, reserved for it in
-    # fnx-ew1-prod's networking) so the two regions can be peered later
-    # without renumbering. No vpc/services: the EU data plane is not in fnx-ew1-prod
-    # either. No dns instance: the public zone is fnx-ew1-prod's network/main.
-    # Flow logs stay in eu-central-1, on this region's key.
-    # vpc/main's wiring, shared with fnx-ue2-prod, is catalog/vpc/main-standby;
-    # this file keeps its CIDR, AZs and subnets.
+    # Warm = full, as fnx-ue2-prod's (orgs/fnx/prod/us-east-2.yaml): vpc/main
+    # as in fnx-ew1-prod (three AZs, a NAT gateway per AZ, flow logs), on its
+    # own CIDR (10.32.0.0/16, reserved for it in fnx-ew1-prod's networking) so
+    # the two regions can be peered later without renumbering. No
+    # vpc/services: the EU data plane is not in fnx-ew1-prod either. No dns
+    # instance: the public zone is fnx-ew1-prod's network/main. Flow logs stay
+    # in eu-central-1, on this region's key. This file keeps vpc/main's CIDR,
+    # AZs and subnets.
     # ========================================================================
     vpc/main:
       vars:
@@ -221,16 +224,14 @@ components:
     #   - awsconfig/main records this region's resources only
     #     (include_global_resource_types: false; fnx-ew1-prod records IAM).
     # Every finding stays in eu-central-1: no Security Hub cross-region
-    # aggregation, no GuardDuty export, the alert topic on this region's key, and
-    # no enrichment Lambda (check-data-residency.py).
-    # Every read of fnx-ew1-prod is EU to EU; nothing outside the EU reads this stack.
+    # aggregation, no GuardDuty export, the alert topic on this region's key,
+    # and no enrichment Lambda (check-data-residency.py).
+    # Every read of fnx-ew1-prod is EU to EU; nothing outside the EU reads
+    # this stack.
     #
-    # The instances' wiring is the catalog's -standby files, shared with
-    # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod; the backup copy
-    # target here is the vault ew1-backup-replica that fnx-ew1-prod's backup/main
-    # creates in eu-central-1), plus the plain inspector2/main and
-    # apigateway-account/main files every dev, staging and prod stack
-    # imports. This file keeps security-monitoring/main's alert settings.
+    # The backup copy target here is the vault ew1-backup-replica that
+    # fnx-ew1-prod's backup/main creates in eu-central-1. This file keeps
+    # security-monitoring/main's alert settings.
     # ========================================================================
     security-monitoring/main:
       vars:
@@ -243,23 +244,22 @@ components:
     #
     # fnx-ue2-prod's compute (orgs/fnx/prod/us-east-2.yaml), which this
     # mirrors for fnx-ew1-prod. Warm = the same cluster shape as
-    # fnx-ew1-prod's eks/main at its floor: the
-    # workers node group runs at 2 nodes, spread over vpc/main's three private
-    # subnets (euc1-az1..az3) like every group here, the monitoring and
-    # memory-optimized groups at 0, each keeping fnx-ew1-prod's max_group_size.
-    # Failover scales them with aws eks update-nodegroup-config, and a PR setting
+    # fnx-ew1-prod's eks/main at its floor: the workers node group runs at 2
+    # nodes, spread over vpc/main's three private subnets (euc1-az1..az3) like
+    # every group here, the monitoring and memory-optimized groups at 0, each
+    # keeping fnx-ew1-prod's max_group_size. Failover scales them with aws eks
+    # update-nodegroup-config, and a PR setting
     # min_group_size/desired_group_size reconciles Terraform afterwards
-    # (docs/OPERATIONS.md, "Disaster recovery"). Cloud Posse's eks/cluster node groups take the same
-    # min/desired/max inputs. The operator path (bastion) and the in-VPC CI
-    # runners are as in fnx-ew1-prod, so the in-cluster components can be applied
-    # here on failover. Everything stays in eu-central-1 on fnx-ew1-prod
-    # kms/main's replica (ec1-main); the only other stack read is fnx-ew1-prod
-    # (EU to EU, check-data-residency.py).
+    # (docs/OPERATIONS.md, "Disaster recovery"). Cloud Posse's eks/cluster
+    # node groups take the same min/desired/max inputs. The operator path
+    # (bastion) and the in-VPC CI runners are as in fnx-ew1-prod, so the
+    # in-cluster components can be applied here on failover. Everything stays
+    # in eu-central-1 on fnx-ew1-prod kms/main's replica (ec1-main); the only
+    # other stack read is fnx-ew1-prod (EU to EU, check-data-residency.py).
     #
-    # The instances' wiring is the catalog's -standby files, shared with
-    # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod). Failover step 6
-    # switches this file's eks-backend-services import to main-standby-failover
-    # and sets database_secret_arn here, never in the shared files.
+    # Failover step 6 switches this file's eks-backend-services import to
+    # main-standby-failover and sets database_secret_arn here, never in the
+    # shared files.
     # ========================================================================
 
     # ========================================================================
@@ -282,20 +282,18 @@ components:
     #     each user from fnx-ew1-prod's pool on their first sign-in or password
     #     reset here.
     #   - apigateway/main: the SECONDARY half of api.<EU apex>'s Route 53
-    #     failover pair; fnx-ew1-prod's apigateway/main is the PRIMARY. Each half
-    #     has its own health check, so DNS moves without a change here. Its
-    #     health check and alarm, like every Route 53 health check's, are in
-    #     us-east-1, with the EventBridge rule, targets and role relaying the
-    #     alarm to both EU regions (configuration only, nothing persisted, no
-    #     personal data; owner decision B5).
-    #   - monitoring/main: this region's ec1-main-alarms topic and alarms, and the
-    #     relayed health check alarms of both halves.
+    #     failover pair; fnx-ew1-prod's apigateway/main is the PRIMARY. Each
+    #     half has its own health check, so DNS moves without a change here.
+    #     Its health check and alarm, like every Route 53 health check's, are
+    #     in us-east-1, with the EventBridge rule, targets and role relaying
+    #     the alarm to both EU regions (configuration only, nothing persisted,
+    #     no personal data; owner decision B5).
+    #   - monitoring/main: this region's ec1-main-alarms topic and alarms, and
+    #     the relayed health check alarms of both halves.
     # No rds/data: the EU data plane is not in fnx-ew1-prod either.
     #
-    # The instances' wiring is the catalog's -standby files, shared with
-    # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod). This file keeps
-    # apigateway/main's health check regions and alarm relay, and
-    # monitoring/main's receipt of the relayed alarms.
+    # This file keeps apigateway/main's health check regions and alarm relay,
+    # and monitoring/main's receipt of the relayed alarms.
     # ========================================================================
     apigateway/main:
       vars:
