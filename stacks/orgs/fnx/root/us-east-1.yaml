@@ -5,13 +5,13 @@
 # Owns the Terraform state backend every US stack uses: bucket
 # fnx-terraform-state, its KMS key, and the stage-split read-only / read-write
 # access roles (components/terraform/backend). The EU stacks' backend is
-# fnx-ew1-root's (stacks/orgs/fnx/root/eu-west-1.yaml). Workload stacks have no backend
-# instance; their iam/ci names this instance's roles by the same naming
-# convention the stack backend uses (stacks/orgs/fnx/_defaults.yaml), so no CI
-# role ever reads this stack's state.
+# fnx-ew1-root's (stacks/orgs/fnx/root/eu-west-1.yaml). Workload stacks have
+# no backend instance; their iam/ci names this instance's roles by the same
+# naming convention the stack backend uses (stacks/orgs/fnx/_defaults.yaml),
+# so no CI role ever reads this stack's state.
 #
-# Bootstrap (cold start, once): workflows/bootstrap.yaml `backend-cold-start`, or by
-# hand - see components/terraform/backend/README.md#bootstrap.
+# Bootstrap (cold start, once): workflows/bootstrap.yaml `backend-cold-start`,
+# or by hand - see components/terraform/backend/README.md#bootstrap.
 # =============================================================================
 
 import:
@@ -45,31 +45,33 @@ components:
         s3_replication_enabled: true
         replica_region: "{{ .settings.tfstate.replica_region }}"
         # Who may use the state. The CI roles are named from iam/ci's
-        # ci_role_name_prefix ("<tenant>-<environment>-<stage>-ci", see each
-        # workload stack's components/security.yaml) in that stack's
-        # account, its settings.account_map entry (stacks/orgs/fnx/_defaults.yaml)
-        # - strings, not !terraform.state:
-        # iam/ci deploys after this instance, and CI roles never read the
-        # root state. The trust is an aws:PrincipalArn condition, so the roles do
-        # not have to exist yet (see components/terraform/backend/iam.tf).
+        # ci_role_name_prefix ("<tenant>-<environment>-<stage>-ci", see
+        # stacks/catalog/iam/ci*.yaml) in that stack's account, its
+        # settings.account_map entry (stacks/orgs/fnx/_defaults.yaml) -
+        # strings, not !terraform.state: iam/ci deploys after this instance,
+        # and CI roles never read the root state. The trust is an
+        # aws:PrincipalArn condition, so the roles do not have to exist yet
+        # (see components/terraform/backend/iam.tf).
         # Add a stack's roles here when adding a stack. The administrator who
         # applies this instance is always trusted as well (Cloud Posse's
         # caller rule); list any other human/admin role ARN explicitly.
         # The account IDs come from the account map; its values are the
-        # repository's placeholders - see docs/OPERATIONS.md#first-deploy-inputs.
+        # repository's placeholders - see
+        # docs/OPERATIONS.md#first-deploy-inputs.
         #
         # Human operators: every rolearn in a workload stack's eks
-        # map_additional_iam_roles (its components/globals.yaml) applies that
-        # stack's in-cluster components from inside the VPC, so it goes in the
-        # stage's write role too - `write` for dev/staging, `prod_write` for
-        # prod - with the same full ARN, path included (aws:PrincipalArn
+        # map_additional_iam_roles (eks/defaults in its stack file) applies
+        # that stack's in-cluster components from inside the VPC, so it goes
+        # in the stage's write role too - `write` for dev/staging, `prod_write`
+        # for prod - with the same full ARN, path included (aws:PrincipalArn
         # carries the role's path). check-cluster-api-ci.py fails a stack
         # whose admin role is missing here. None yet: the owner supplies them.
         #
-        # State: each stack's exact pattern pair, "*/<stack>/*" and "*/<stack>-*"
-        # (stacks/catalog/backend/defaults.yaml explains the key layout), on its
-        # stage's read and write roles. Adding a stack = its pair and its CI
-        # roles here (check-state-keys.py, check-ci-state-roles.py).
+        # State: each stack's exact pattern pair, "*/<stack>/*" and
+        # "*/<stack>-*" (stacks/catalog/backend/defaults.yaml explains the key
+        # layout), on its stage's read and write roles. Adding a stack = its
+        # pair and its CI roles here (check-state-keys.py,
+        # check-ci-state-roles.py).
         access_roles:
           read:
             # Dev/staging state: their CI plan roles (PR plans, drift).

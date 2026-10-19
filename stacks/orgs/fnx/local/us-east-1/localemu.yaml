@@ -50,8 +50,8 @@
 # fidelity, not a component defect. The `localemu` workflow
 # (workflows/localemu.yaml, run in CI by .github/workflows/emulator.yml) works
 # around it with a clear-lane-state step that removes this lane's
-# fnx-ue1-local-localemu-* workspace state before every apply, so a fresh cycle is
-# what actually runs even when the same LocalEmu process is reused; a manual
+# fnx-ue1-local-localemu-* workspace state before every apply, so a fresh cycle
+# is what actually runs even when the same LocalEmu process is reused; a manual
 # run without that workflow still needs a freshly started LocalEmu or the
 # state cleared by hand.
 #
@@ -169,7 +169,8 @@ components:
         # Windows must be separated by >= 30 minutes. Prod and staging both
         # carried adjacent windows (backup 03:00-04:00, maintenance 04:00-...)
         # and were rejected here with "The backup window and maintenance
-        # window must not overlap" - see the fix in their services.yaml.
+        # window must not overlap" - see the fix in catalog/rds/main.yaml
+        # (staging) and catalog/rds/prod.yaml.
         backup_window: "03:00-04:00"
         maintenance_window: "Sun:04:30-Sun:05:30"
         # SETTLED 2026-09-21: a LocalEmu gap, NOT a component defect. The

@@ -117,11 +117,12 @@ settings:
     # The EU prod account (stacks/orgs/fnx/_defaults.yaml account map), not
     # prod's: prod/_defaults derives account_id from this key.
     account: prod-eu
-    # The stack's one domain, as in fnx-ue1-prod (every zone, record, certificate
-    # and API domain derives from it). A SEPARATE EU apex owned by the prod-eu
-    # account, never a name under the US domain: no delegation from fnx-ue1-prod's
-    # zone and no read of US state. A placeholder until the owner registers the real
-    # one: the first-deploy preflight flags it (example domain, row "Domains").
+    # The stack's one domain, as in fnx-ue1-prod (every zone, record,
+    # certificate and API domain derives from it). A SEPARATE EU apex owned by
+    # the prod-eu account, never a name under the US domain: no delegation
+    # from fnx-ue1-prod's zone and no read of US state. A placeholder until
+    # the owner registers the real one: the first-deploy preflight flags it
+    # (example domain, row "Domains").
     domain_name: "fnx-eu.example.com"
     # Alert contacts and the prod-eu account's monthly budget
     # (cost-optimization/main, services section): fnx-ue1-prod's placeholder
@@ -171,13 +172,12 @@ components:
     # Globals
     # ========================================================================
     # Human cluster admins of eks/main, as in fnx-ue1-prod
-    # (orgs/fnx/prod/us-east-1.yaml, which explains the format): each
-    # rolearn, an IAM role in the prod-eu
-    # account, must also be in the EU backend's access_roles.prod_write
-    # allowed_principal_arns (stacks/orgs/fnx/root/eu-west-1.yaml);
-    # check-cluster-api-ci.py fails one that is not, and warns while this is
-    # empty. Empty until the owner supplies the ARN (the preflight flags it,
-    # row "EKS cluster admins").
+    # (orgs/fnx/prod/us-east-1.yaml, which explains the format): each rolearn,
+    # an IAM role in the prod-eu account, must also be in the EU backend's
+    # access_roles.prod_write allowed_principal_arns
+    # (stacks/orgs/fnx/root/eu-west-1.yaml); check-cluster-api-ci.py fails one
+    # that is not, and warns while this is empty. Empty until the owner
+    # supplies the ARN (the preflight flags it, row "EKS cluster admins").
     eks/defaults:
       vars:
         map_additional_iam_roles: []
@@ -186,23 +186,26 @@ components:
     # Networking
     #
     # fnx-ue2-prod's core subset (orgs/fnx/prod/us-east-2.yaml's networking,
-    # which mirrors fnx-ue1-prod): vpc/main with three AZs, a NAT gateway per AZ and
-    # flow logs. No vpc/services or peering: the EU data plane (data VPC, eks/data,
-    # rds/data) is not in this stack; 10.31.0.0/16 is reserved for it, and
-    # 10.32.0.0/16 is the EU DR stack fnx-ec1-prod's vpc/main.
+    # which mirrors fnx-ue1-prod): vpc/main with three AZs, a NAT gateway per
+    # AZ and flow logs. No vpc/services or peering: the EU data plane (data
+    # VPC, eks/data, rds/data) is not in this stack; 10.31.0.0/16 is reserved
+    # for it, and 10.32.0.0/16 is the EU DR stack fnx-ec1-prod's vpc/main.
     #
     # Unlike fnx-ue2-prod it owns its DNS: network/main holds the EU apex
-    # (settings.environment.domain_name), delegated at the registrar,
-    # never from a US zone. Everything stays in eu-west-1 (check-data-residency.py):
-    #   - flow logs: a log group in this region on kms/main (security section);
-    #   - Route 53 public query logging is OFF: its log group, resource policy and
-    #     key can only be in us-east-1 (components/terraform/dns/query-logging.tf),
-    #     and the logs hold client IPs. check-data-residency.py fails a GDPR-scoped
-    #     dns zone with enable_query_logging. The dns component has no Resolver
-    #     (in-VPC) query logging yet.
+    # (settings.environment.domain_name), delegated at the registrar, never
+    # from a US zone. Everything stays in eu-west-1
+    # (check-data-residency.py):
+    #   - flow logs: a log group in this region on kms/main (security
+    #     section);
+    #   - Route 53 public query logging is OFF: its log group, resource policy
+    #     and key can only be in us-east-1
+    #     (components/terraform/dns/query-logging.tf), and the logs hold client
+    #     IPs. check-data-residency.py fails a GDPR-scoped dns zone with
+    #     enable_query_logging. The dns component has no Resolver (in-VPC)
+    #     query logging yet.
     #
-    # The instances' wiring is catalog/vpc/main-prod (shared with fnx-ue1-prod;
-    # its flow logs use this stack's eu-west-1 kms/main) and
+    # The instances' wiring is catalog/vpc/main-prod (shared with
+    # fnx-ue1-prod; its flow logs use this stack's eu-west-1 kms/main) and
     # catalog/network/main-prod (no records: db.internal.<domain> comes with
     # rds/main). This file keeps the CIDR, AZs, subnets and the EU DNS values.
     # ========================================================================
@@ -231,7 +234,8 @@ components:
         zones:
           main:
             comment: "EU production main zone"
-            # Off for every EU zone: Route 53 writes query logs only to us-east-1.
+            # Off for every EU zone: Route 53 writes query logs only to
+            # us-east-1.
             enable_query_logging: false
           internal:
             comment: "EU production internal DNS"
@@ -240,38 +244,40 @@ components:
     # Security
     #
     # The account and identity layer (iam/main, iam/ci), the stack's key
-    # (kms/main) and the prod-eu account's singletons: the multi-region CloudTrail
-    # trail (cloudtrail/main) and AWS Config's global-resource recording
-    # (awsconfig/main); the account budget is cost-optimization/main
-    # (services section). Then the regional security services: GuardDuty, Security
-    # Hub, Inspector and finding routing with the CIS metric filters on this
-    # stack's trail (security-monitoring/main); the API Gateway account settings,
-    # backups, the EU apex's certificate and the prod secret sets. As in fnx-ue1-prod
-    # (orgs/fnx/prod/us-east-1.yaml's security; every instance's wiring
-    # is the same catalog/<c>/<i> file, -prod where a prod primary differs, which
-    # explains each input, and the shared prod settings are
-    # catalog/<component>/prod), except:
+    # (kms/main) and the prod-eu account's singletons: the multi-region
+    # CloudTrail trail (cloudtrail/main) and AWS Config's global-resource
+    # recording (awsconfig/main); the account budget is cost-optimization/main
+    # (services section). Then the regional security services: GuardDuty,
+    # Security Hub, Inspector and finding routing with the CIS metric filters
+    # on this stack's trail (security-monitoring/main); the API Gateway
+    # account settings, backups, the EU apex's certificate and the prod secret
+    # sets. As in fnx-ue1-prod (orgs/fnx/prod/us-east-1.yaml's security; every
+    # instance's wiring is the same catalog/<c>/<i> file, -prod where a prod
+    # primary differs, which explains each input, and the shared prod settings
+    # are catalog/<component>/prod), except:
     #   - DR copies (kms/main's replica, backup/main's copies) go to
     #     eu-central-1, the EU DR region (settings.dr.region), never us-east-2;
     #   - a new account: this stack owns every singleton fnx-ue2-prod leaves to
-    #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling service-linked
-    #     role, the trail, global-resource recording, the budget); nothing here
-    #     reads a US stack;
+    #     fnx-ue1-prod (the GitHub OIDC provider, the Auto Scaling
+    #     service-linked role, the trail, global-resource recording, the
+    #     budget); nothing here reads a US stack;
     #   - state: the EU backend's prod roles in the management account
-    #     (settings.tfstate, role_prefix fnx-ew1-terraform-backend, fnx-ew1-root),
-    #     which trust these CI roles (stacks/orgs/fnx/root/eu-west-1.yaml);
+    #     (settings.tfstate, role_prefix fnx-ew1-terraform-backend,
+    #     fnx-ew1-root), which trust these CI roles
+    #     (stacks/orgs/fnx/root/eu-west-1.yaml);
     #   - no lambda uploader yet: the PR adding the Lambda bucket adds it.
     # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
-    # Every finding stays in eu-west-1: no Security Hub cross-region aggregation,
-    # no GuardDuty export, the alert topic on kms/main, and no enrichment Lambda
-    # (check-data-residency.py fails enable_alert_enrichment in a GDPR-scoped
-    # stack: it posts findings, IPs included, to Slack/PagerDuty).
-    # The secrets' EU replica (eu-central-1 only) is catalog/secretsmanager/
-    # {app,infra}-prod's, in settings.dr.region (stacks/orgs/fnx/prod/
-    # eu-west-1.yaml). The apex's certificate is validated in network/main's
-    # zone (networking section), its *.api SAN's record also validates fnx-ec1-prod's
-    # acm/main; there is no acm/services (no services zone here). This file keeps
-    # the per-stack values.
+    # Every finding stays in eu-west-1: no Security Hub cross-region
+    # aggregation, no GuardDuty export, the alert topic on kms/main, and no
+    # enrichment Lambda (check-data-residency.py fails enable_alert_enrichment
+    # in a GDPR-scoped stack: it posts findings, IPs included, to
+    # Slack/PagerDuty).
+    # The secrets' EU replica (eu-central-1 only) is
+    # catalog/secretsmanager/{app,infra}-prod's, in settings.dr.region
+    # (above). The apex's certificate is validated in network/main's zone
+    # (networking section), its *.api SAN's record also validates
+    # fnx-ec1-prod's acm/main; there is no acm/services (no services zone
+    # here). This file keeps the per-stack values.
     # ========================================================================
     kms/main:
       vars:
@@ -289,27 +295,28 @@ components:
     # ========================================================================
     # Compute
     #
-    # fnx-ue1-prod's main cluster and what runs around it, from the shared prod
-    # instance files (catalog/<component>/<i>-prod): eks/main (ew1-main, the name
-    # vpc/main's load balancer subnet tags expect), the bastion, the in-VPC runner
-    # pool, and the in-cluster external-secrets/main, eks-addons/main (external-dns
-    # and cert-manager in the EU apex's zone, network/main) and
-    # eks-backend-services/main (on the services section's rds/main and
-    # elasticache/main). No eks/data: the EU data plane (data VPC, eks/data,
-    # rds/data) is not in this stack. This file keeps the bastion's egress rules.
+    # fnx-ue1-prod's main cluster and what runs around it, from the shared
+    # prod instance files (catalog/<component>/<i>-prod): eks/main (ew1-main,
+    # the name vpc/main's load balancer subnet tags expect), the bastion, the
+    # in-VPC runner pool, and the in-cluster external-secrets/main,
+    # eks-addons/main (external-dns and cert-manager in the EU apex's zone,
+    # network/main) and eks-backend-services/main (on the services section's
+    # rds/main and elasticache/main). No eks/data: the EU data plane (data
+    # VPC, eks/data, rds/data) is not in this stack. This file keeps the
+    # bastion's egress rules.
     #
     # The endpoint is private, so CI runs the in-cluster instances on this
-    # stack's own pool (settings.github.runner: in-vpc, owner decision Q8), which
-    # CI starts in eu-west-1 (its vars.region, #350); iam/ci lets only this
-    # stack's apply role start it (ci_runner_pool_names, security section). The
-    # pool's alarms name the ew1-main-alarms topic, which monitoring/main
-    # (services section) creates.
+    # stack's own pool (settings.github.runner: in-vpc, owner decision Q8),
+    # which CI starts in eu-west-1 (its vars.region, #350); iam/ci lets only
+    # this stack's apply role start it (ci_runner_pool_names, security
+    # section). The pool's alarms name the ew1-main-alarms topic, which
+    # monitoring/main (services section) creates.
     #
-    # Everything stays in eu-west-1 (check-data-residency.py): control-plane logs
-    # and Container Insights go to this region's CloudWatch on kms/main, the
-    # runners' JIT configuration to this region's SSM. The GitHub App private key
-    # is a parameter in the prod-eu account's SSM (docs/OPERATIONS.md,
-    # "First-deploy inputs", GitHub App).
+    # Everything stays in eu-west-1 (check-data-residency.py): control-plane
+    # logs and Container Insights go to this region's CloudWatch on kms/main,
+    # the runners' JIT configuration to this region's SSM. The GitHub App
+    # private key is a parameter in the prod-eu account's SSM
+    # (docs/OPERATIONS.md, "First-deploy inputs", GitHub App).
     # ========================================================================
     # The SSH rule names this stack's one VPC.
     ec2/bastion:
@@ -334,19 +341,20 @@ components:
     # (catalog/<c>/<i>-prod, which explain each input), plus monitoring/main
     # (catalog/monitoring/main-prod, not fnx-ue1-prod's main-prod-data-plane:
     # no ecs/main read) and the prod-eu account's budget
-    # (cost-optimization/main-prod-eu). This file keeps this stack's values: the
-    # health check's checker and relay regions, the relayed alarms' receipt and
-    # the budget's standby tag. Its DR warm standby is fnx-ec1-prod
+    # (cost-optimization/main-prod-eu). This file keeps this stack's values:
+    # the health check's checker and relay regions, the relayed alarms'
+    # receipt and the budget's standby tag. Its DR warm standby is fnx-ec1-prod
     # (eu-central-1), as fnx-ue2-prod is fnx-ue1-prod's:
     #   - elasticache/main is a Global Datastore primary, rds/main the source of
     #     fnx-ec1-prod's read replica, cognito/main has the dr-migration client
     #     fnx-ec1-prod's user-migration trigger signs in with, and
     #     apigateway/main is the PRIMARY half of api.<EU apex>'s Route 53
     #     failover pair. All EU to EU, except what Route 53 has only in
-    #     us-east-1: the health check, its alarm and the EventBridge rule, targets
-    #     and role relaying the alarm to both EU regions (configuration only,
-    #     nothing persisted, no personal data), plus two of its three checker
-    #     regions (eu-west-1 is the only EU one); owner decision B5;
+    #     us-east-1: the health check, its alarm and the EventBridge rule,
+    #     targets and role relaying the alarm to both EU regions
+    #     (configuration only, nothing persisted, no personal data), plus two
+    #     of its three checker regions (eu-west-1 is the only EU one); owner
+    #     decision B5;
     #   - its own user pool, never a migration from fnx-ue1-prod's (owner
     #     decision): EU users sign up here;
     #   - no ECS cluster, analytics database, data API or Lambda functions.
