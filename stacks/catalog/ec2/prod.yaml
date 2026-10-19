@@ -9,7 +9,7 @@ import:
 # names its own VPC CIDRs.
 components:
   terraform:
-    ec2/bastion-prod:
+    ec2/bastion-prod-defaults:
       metadata:
         component: ec2
         type: abstract

@@ -54,7 +54,6 @@ import:
   - catalog/vpc/main-standby
 
   # --- security
-  - catalog/security-monitoring/defaults
   - catalog/iam/ci-standby
   - catalog/acm/main-standby
   - catalog/awsconfig/main-standby

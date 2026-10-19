@@ -11,7 +11,7 @@ import:
 # password is rotated by RDS itself.
 components:
   terraform:
-    secretsmanager/app-prod:
+    secretsmanager/app-prod-defaults:
       metadata:
         component: secretsmanager
         type: abstract
@@ -40,7 +40,7 @@ components:
         context_name: "app"
         default_recovery_window_in_days: 30
 
-    secretsmanager/infra-prod:
+    secretsmanager/infra-prod-defaults:
       metadata:
         component: secretsmanager
         type: abstract

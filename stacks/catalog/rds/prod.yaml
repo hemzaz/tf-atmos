@@ -32,7 +32,7 @@ components:
     # subnets, every key on the stack's kms/main, reachable from eks/main.
     # monitoring_role_arn pointed at an iam/rds-monitoring instance that has
     # never existed; the component creates the role itself.
-    rds/main-prod:
+    rds/main-prod-defaults:
       metadata:
         component: rds
         type: abstract

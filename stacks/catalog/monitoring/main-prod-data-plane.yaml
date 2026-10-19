@@ -2,7 +2,7 @@
 # =============================================================================
 # monitoring/main in the prod primary stacks with a data plane
 # =============================================================================
-# main-prod.yaml's instance (the monitoring/main-prod abstract, prod.yaml)
+# main-prod.yaml's instance (the monitoring/main-prod-defaults abstract, prod.yaml)
 # plus the ecs/main dimension of a primary that runs the ECS cluster, with
 # the full dependencies list restated for that read (a list replaces the
 # abstract's, never merges with it).
@@ -17,7 +17,7 @@ components:
       metadata:
         component: monitoring
         inherits:
-          - monitoring/main-prod
+          - monitoring/main-prod-defaults
       vars:
         ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
       dependencies:

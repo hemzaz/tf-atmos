@@ -24,7 +24,7 @@ components:
     # elasticache/main: vpc/main's private subnets, every key on the stack's
     # kms/main, reachable from eks/main. Each adds its Global Datastore, which
     # its DR standby's elasticache/main joins (main-standby.yaml).
-    elasticache/main-prod:
+    elasticache/main-prod-defaults:
       metadata:
         component: elasticache
         type: abstract

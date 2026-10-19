@@ -2,7 +2,7 @@
 # =============================================================================
 # secretsmanager/app in a prod primary stack: the prod application secrets
 # =============================================================================
-# The secret set is catalog/secretsmanager/prod's (secretsmanager/app-prod),
+# The secret set is catalog/secretsmanager/prod's (secretsmanager/app-prod-defaults),
 # shared by the prod primary stacks. Replicated to the stack's DR region only
 # (settings.dr.region: us-east-2 for the US primary, eu-central-1 for the
 # EU one) on kms/main's replica key there, so the DR standby's
@@ -21,7 +21,7 @@ components:
       metadata:
         component: secretsmanager
         inherits:
-          - secretsmanager/app-prod
+          - secretsmanager/app-prod-defaults
       vars:
         replica_regions:
           - region: '{{ required "settings.dr.region (the DR region of a prod primary stack) is not set" .settings.dr.region }}'

@@ -10,9 +10,11 @@
 # alerts) are declared in dependencies.components so they deploy first;
 # workflows/scripts/common/check-dependencies.py enforces that.
 #
-# Every stack runs kms/main, cloudtrail/main, guardduty/main,
-# securityhub/main, inspector2/main and iam/ci, so the references resolve in
-# all of them.
+# Only main.yaml imports this file, and every stack that imports main.yaml
+# runs kms/main, cloudtrail/main, guardduty/main, securityhub/main,
+# inspector2/main and iam/ci, so the references resolve in all of them. The
+# DR standbys (main-standby.yaml) have no kms/main or cloudtrail/main and
+# neither import nor inherit it.
 
 components:
   terraform:

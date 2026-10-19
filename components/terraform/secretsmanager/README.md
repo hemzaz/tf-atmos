@@ -7,8 +7,8 @@ One Secrets Manager secret per `secrets` entry, with an optional value, resource
 
 - Instances: `secretsmanager/app` in the three AWS stacks, `fnx-ew1-prod` and
   `fnx-ue1-local-sandbox`; `secretsmanager/infra` in the three AWS stacks and `fnx-ew1-prod`. Both
-  read `kms/main .key_arn`. The prod stacks' secret sets are `secretsmanager/app-prod` and
-  `/infra-prod` (`stacks/catalog/secretsmanager/prod.yaml`).
+  read `kms/main .key_arn`. The prod stacks' secret sets are `secretsmanager/app-prod-defaults` and
+  `/infra-prod-defaults` (`stacks/catalog/secretsmanager/prod.yaml`).
   `secretsmanager/api`, `/app-db` and `/infra-defaults` in the catalog are abstract.
 - `replica_regions`: `fnx-ue1-prod`'s and `fnx-ew1-prod`'s `app` and `infra` replicate every
   secret to their DR region (us-east-2, eu-central-1), each on `kms/main`'s replica key there

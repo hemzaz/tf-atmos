@@ -2,8 +2,8 @@
 # =============================================================================
 # monitoring/main in the prod primary stacks without a data plane
 # =============================================================================
-# The instance file, not the abstract: the topic, dashboards, alarms, reads
-# and dependencies are the monitoring/main-prod abstract's (prod.yaml), on
+# The topic, dashboards, alarms, reads and dependencies are the
+# monitoring/main-prod-defaults abstract's (prod.yaml), on
 # eks/main, rds/main, elasticache/main, apigateway/main and acm/main. It owns
 # <Environment>-main-alarms, the topic the runner pool's alarms and the API's
 # health check alarm name. main-prod-data-plane.yaml is the shape of a primary
@@ -21,4 +21,4 @@ components:
       metadata:
         component: monitoring
         inherits:
-          - monitoring/main-prod
+          - monitoring/main-prod-defaults
