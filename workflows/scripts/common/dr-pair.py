@@ -39,8 +39,9 @@ Environment tag) in budget_additional_environment_tags (--lint).
 A DR primary names its DR region in settings.dr.region, which the prod catalog
 files template its replicas from (catalog/kms/main-prod,
 catalog/secretsmanager/{app,infra}-prod, catalog/backup/main-prod). --lint
-fails a primary whose settings.dr.region is not its standby's region, whose
-kms/main replica_regions is not [settings.dr.region], whose
+fails a primary whose settings.dr.region is not its standby's region, that
+has no enabled, non-abstract kms/main or whose kms/main replica_regions is not
+[settings.dr.region], whose
 replica_alias_names has no settings.dr.region entry equal to the standby's
 settings.prefix + "-main" (the alias the standby reaches the replica by), or
 that has no enabled, non-abstract backup/main with enable_cross_region_backup
@@ -70,7 +71,8 @@ both pairs share the files, so no step edits them for one stack. No stack
 imports a promoted file while its pair is warm, so a describe never shows one:
 --lint loads each stacks/catalog/rds/*-promoted.yaml and the file it is named
 after (yq, the !terraform.* tags kept) and fails unless the base's rds/main
-is a replica (a vars.replicate_source_db read and a dependencies.components
+is a replica (a vars.replicate_source_db read, a real !terraform.state tag
+and not a quoted look-alike string, and a dependencies.components
 entry for rds/main with a stack) and the promoted file is the base without
 exactly that read and that entry, in its imports and its rds/main block.
 main-standby-promoted.yaml must exist.
@@ -111,8 +113,11 @@ RDS_PROMOTED_GLOB = "stacks/catalog/rds/*-promoted.yaml"
 RDS_INSTANCE = "rds/main"
 # The default ClusterSecretStore external-secrets/main creates (components/terraform/external-secrets/outputs.tf).
 DEFAULT_STORE = "aws-secretsmanager"
-# yq drops a scalar's custom tag in JSON; keep !terraform.* reads as "<tag> <value>".
-TAGGED_READS = '(.. | select(tag | test("^!terraform"))) |= (tag + " " + .)'
+# yq drops a scalar's custom tag in JSON; keep !terraform.* reads as READ_MARK + "<tag> <value>". The
+# marker (U+0001, raw in the yq expression: yq has no string escapes) keeps a quoted look-alike string,
+# which Atmos passes on as text, from equalling a real read; a finding shows a read as '\x01!terraform...'.
+READ_MARK = "\x01"
+TAGGED_READS = f'(.. | select(tag | test("^!terraform"))) |= ("{READ_MARK}" + tag + " " + .)'
 
 
 def instances(config: dict) -> dict:
@@ -152,6 +157,16 @@ def primaries(stacks: dict) -> list:
 
 def enabled(spec: dict) -> bool:
     return ((spec or {}).get("metadata") or {}).get("enabled") is not False
+
+
+def concrete(spec) -> bool:
+    """Whether instance `spec` exists, is enabled and is not abstract (an abstract deploys nothing)."""
+    return bool(spec) and enabled(spec) and (spec.get("metadata") or {}).get("type") != "abstract"
+
+
+def is_read(value) -> bool:
+    """Whether `value` is a real !terraform.state read as load_catalog returns it, not a quoted look-alike."""
+    return isinstance(value, str) and value.startswith(READ_MARK + "!terraform.state ")
 
 
 def environment(spec: dict, where: str) -> str:
@@ -332,7 +347,7 @@ def budget_findings(stacks: dict) -> list:
         for instance_name, spec in sorted(instances(stacks[primary_name]).items()):
             metadata = (spec or {}).get("metadata") or {}
             component = metadata.get("component") or instance_name
-            if component == "cost-optimization" and metadata.get("type") != "abstract" and enabled(spec):
+            if component == "cost-optimization" and concrete(spec):
                 budgets.append((instance_name, spec))
         if not budgets:
             findings.append(
@@ -364,23 +379,23 @@ def primary_dr_findings(stacks: dict, primary_name: str, standby_name: str) -> l
         return [f"{where}: settings.dr.region is {declared!r}, not {standby_region!r}, the region of its DR standby"]
     findings = []
     primary = instances(stacks[primary_name])
+    prefix = setting(stacks[standby_name], "prefix")
+    expected = f"{prefix}-main"
+    if not prefix:
+        findings.append(
+            f"{where} kms/main: standby {standby_name} has no settings.prefix, so the alias it reaches the "
+            f"replica by (replica_alias_names[{declared!r}], <prefix>-main) cannot be checked"
+        )
     kms = primary.get("kms/main")
-    if not kms or not enabled(kms):
-        findings.append(f"{where}: no enabled kms/main, so nothing replicates the key to {declared}")
+    if not concrete(kms):
+        findings.append(f"{where}: no enabled, non-abstract kms/main, so nothing replicates the key to {declared}")
     else:
         variables = kms.get("vars") or {}
         replicas = variables.get("replica_regions")
         if replicas != [declared]:
             findings.append(f"{where} kms/main: replica_regions is {replicas}, not [{declared!r}] (settings.dr.region)")
         alias = (variables.get("replica_alias_names") or {}).get(declared)
-        prefix = setting(stacks[standby_name], "prefix")
-        expected = f"{prefix}-main"
-        if not prefix:
-            findings.append(
-                f"{where} kms/main: standby {standby_name} has no settings.prefix, so the alias it reaches the "
-                f"replica by (replica_alias_names[{declared!r}], <prefix>-main) cannot be checked"
-            )
-        elif alias != expected:
+        if prefix and alias != expected:
             findings.append(
                 f"{where} kms/main: replica_alias_names[{declared!r}] is {alias!r}, not {expected!r} "
                 f"({standby_name}'s settings.prefix + \"-main\", the alias it reaches the replica by)"
@@ -388,11 +403,11 @@ def primary_dr_findings(stacks: dict, primary_name: str, standby_name: str) -> l
     # rds/data recovers from backup copies in the DR region (owner decision 2026-10-07).
     backup = primary.get("backup/main")
     variables = (backup or {}).get("vars") or {}
-    concrete = backup and enabled(backup) and (backup.get("metadata") or {}).get("type") != "abstract"
-    if not (concrete and variables.get("enable_cross_region_backup") is True):
+    if not (concrete(backup) and variables.get("enable_cross_region_backup") is True):
         findings.append(
-            f"{where}: backup/main copies no recovery point to {declared}, so the standby has no backup to "
-            "restore rds/data from (docs/OPERATIONS.md, Disaster recovery)"
+            f"{where}: no enabled, non-abstract backup/main with enable_cross_region_backup: true copies recovery "
+            f"points to {declared} (replica_region = settings.dr.region), so the standby has no backup to restore "
+            "rds/data from (docs/OPERATIONS.md, Disaster recovery)"
         )
     elif variables.get("replica_region") != declared:
         findings.append(
@@ -541,7 +556,7 @@ def promoted_findings(base_file: str, base_doc: dict, promoted_file: str, promot
 
     findings = []
     base_read, base_deps = replica_links(blocks[base_file])
-    if not (isinstance(base_read, str) and base_read.startswith("!terraform.state ")) or len(base_deps) != 1:
+    if not is_read(base_read) or len(base_deps) != 1:
         findings.append(
             f"{base_file}: {RDS_INSTANCE} is not a replica (vars.replicate_source_db {base_read!r}, "
             f"{len(base_deps)} rds/main dependencies with a stack): {promoted_file} has no replica link to drop"
