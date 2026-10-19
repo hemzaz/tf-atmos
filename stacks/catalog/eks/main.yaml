@@ -6,7 +6,7 @@
 # runners' paths to the private endpoint, secrets and node volumes on the
 # stack's kms/main, and the monitoring node group. Each stack keeps its
 # endpoint access, log types, tags and the workers group's sizes
-# (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

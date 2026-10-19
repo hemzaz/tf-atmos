@@ -2,8 +2,8 @@
 import:
   - catalog/eks-backend-services/defaults
 
-# The backend microservices on the production main cluster, shared by
-# fnx-ue1-prod's and fnx-ew1-prod's eks-backend-services/main: eks/main, the
+# The backend microservices on the production main cluster, shared by the
+# prod primaries' eks-backend-services/main: eks/main, the
 # external-secrets/main store, rds/main's database and elasticache/main's
 # cache (prod turns redis on), and the release pipeline's images from the
 # stack's settings.environment.backend_service_images. Plans/applies in the

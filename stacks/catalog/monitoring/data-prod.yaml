@@ -33,7 +33,7 @@ components:
         # deploys, so the infrastructure and backend dashboards plot real
         # data instead of empty widgets (they default to [] / "").
         eks_cluster_name: !terraform.state eks/data .eks_cluster_id
-        # eks/data's node_groups (the stack's compute.yaml): data-workers
+        # eks/data's node_groups (the stack file): data-workers
         # (min_group_size 3) + batch-workers (min_group_size 0, spot) = 3
         # guaranteed nodes. The eks_node_count_low alarm (monitoring's
         # alarms.tf) only fires below this floor.

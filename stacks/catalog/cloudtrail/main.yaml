@@ -2,7 +2,8 @@
 # =============================================================================
 # cloudtrail/main in the nonprod and prod primary stacks: the account's trail
 # =============================================================================
-# The catalog defaults as they are (cloudtrail/defaults).
+# Shared by nonprod and prod: a change here changes prod. The catalog
+# defaults as they are (cloudtrail/defaults).
 # =============================================================================
 
 import:

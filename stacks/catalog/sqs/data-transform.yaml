@@ -2,13 +2,13 @@
 # =============================================================================
 # sqs/data-transform: the work queue of lambda/data-transformer
 # =============================================================================
-# Shared by nonprod and prod: a change here changes prod.
+# Shared by staging and prod: a change here changes prod.
 # lambda/data-processor sends, the transformer's event source mapping polls.
 # Failed messages move to <Environment>-data-transform-dlq after 5 receives
 # and stay 14 days. The queue is encrypted with kms/main (sqs/defaults).
 #
 # Each stack keeps visibility_timeout_seconds
-# (orgs/fnx/<stage>/<region>/components/services.yaml): AWS wants at least 6x
+# (the stack file, orgs/fnx/<stage>/<region>.yaml): AWS wants at least 6x
 # the consumer's timeout plus its batching window, and the transformer's
 # timeout is that stack's too, set beside it. Change the two together.
 # =============================================================================

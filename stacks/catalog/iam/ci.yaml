@@ -69,7 +69,7 @@ components:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-read-role"
         ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-role"
         # kms/main's key: eks/main's cluster_encryption_config_kms_key_id
-        # (compute.yaml) points every EKS cluster this apply role deploys at
+        # (catalog/eks/) points every EKS cluster this apply role deploys at
         # this key, and AWS requires the calling principal -- not the
         # cluster's own service role -- to hold kms:DescribeKey/CreateGrant/
         # Encrypt on it. Scoped by alias, not !terraform.state kms/main

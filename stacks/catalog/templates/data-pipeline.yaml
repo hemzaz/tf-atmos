@@ -40,15 +40,16 @@
 # =============================================================================
 # REQUIREMENTS FOR THE IMPORTING STACK
 # =============================================================================
-# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
-#    from catalog/kms/defaults). This template does not define it: doing so would
+# 1. A kms/main instance (the nonprod and prod primary fnx stacks import one
+#    from catalog/kms/, inheriting catalog/kms/defaults; a DR standby has
+#    none). This template does not define it: doing so would
 #    deep-merge over that stack's own alias_name/description. It must keep the
 #    grants catalog/kms/defaults turns on: allow_cloudwatch_logs and
 #    allow_log_delivery (the Lambda, Firehose, state machine, EventBridge and
 #    Glue log groups) and allow_cloudwatch_alarms (the Lambdas' alarms and the
 #    monitoring alarm topic).
-# 2. s3/lambda-artifacts (imported below; an fnx org stack imports the same file
-#    in components/services.yaml) applied, with
+# 2. s3/lambda-artifacts (imported below; an fnx org stack that runs lambdas
+#    imports the same file in its stack file) applied, with
 #    pipeline-transformer/<transformer_version>.zip and
 #    pipeline-validator/<validator_version>.zip in it, before the Lambdas:
 #    deploy-full-stack's storage layer applies it before compute.
@@ -105,7 +106,7 @@ import:
   - catalog/stepfunctions/defaults
   - catalog/eventbridge/defaults
   # s3/lambda-artifacts, the stack's lambda package bucket (an fnx org stack
-  # imports the same file in components/services.yaml).
+  # that runs lambdas imports the same file in its stack file).
   - catalog/s3/lambda-artifacts
 
 # =============================================================================

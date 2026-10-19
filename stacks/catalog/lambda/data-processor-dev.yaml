@@ -14,8 +14,8 @@
 # (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
 # package exists: upload it, set package_version, set enabled: true, and
 # restore its readers, each marked with a "disabled" comment:
-# apigateway/main's "/api" route, apigateway/data, and monitoring/data's
-# dimensions.
+# apigateway/main's "/api" route and apigateway/data, and monitoring/data's
+# dimensions (dev has no lambda/data-transformer).
 # =============================================================================
 
 components:

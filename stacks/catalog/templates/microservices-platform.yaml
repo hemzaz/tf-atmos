@@ -49,8 +49,9 @@
 # =============================================================================
 # REQUIREMENTS FOR THE IMPORTING STACK
 # =============================================================================
-# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
-#    from catalog/kms/defaults). This template does not define it: doing so would
+# 1. A kms/main instance (the nonprod and prod primary fnx stacks import one
+#    from catalog/kms/, inheriting catalog/kms/defaults; a DR standby has
+#    none). This template does not define it: doing so would
 #    deep-merge over that stack's own alias_name/description. CloudWatch Logs
 #    (the EventBridge, Lambda and API Gateway log groups) and EventBridge (the
 #    bus and archive, and delivery to the encrypted queues) use the key as
@@ -115,7 +116,7 @@ import:
   - catalog/secretsmanager/defaults
   - catalog/github-runners/defaults
   # s3/lambda-artifacts, the stack's lambda package bucket (an fnx org stack
-  # imports the same file in components/services.yaml).
+  # that runs lambdas imports the same file in its stack file).
   - catalog/s3/lambda-artifacts
 
 # =============================================================================
@@ -363,8 +364,8 @@ components:
         components:
           - component: microservices/vpc
           - component: kms/main
-          # eks/defaults gives the CI roles EKS access entries; every fnx org
-          # stack has an iam/ci instance (components/security.yaml).
+          # eks/defaults gives the CI roles EKS access entries; every nonprod
+          # and prod stack has an iam/ci instance (catalog/iam/ci*.yaml).
           - component: iam/ci
           - component: microservices/github-runners
 

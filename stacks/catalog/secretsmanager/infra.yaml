@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# secretsmanager/infra in the nonprod stacks: infrastructure secrets
+# secretsmanager/infra in a nonprod stack: infrastructure secrets
 # =============================================================================
 # Each stack keeps its secrets map and its recovery window. infra-dev.yaml is
 # the same instance for a stack that feeds a static_value secret through the

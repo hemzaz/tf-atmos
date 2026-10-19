@@ -4,10 +4,10 @@
 # =============================================================================
 # The instance file, not the abstract: the wiring is the
 # eks-backend-services/prod abstract's (prod.yaml), on eks/main, rds/main and
-# elasticache/main (only prod runs it, so only prod turns redis_enabled on)
-# through external-secrets/main's store. Plans/applies in the "services" layer
-# of workflows/deploy-full-stack.yaml (after compute, platform, data and
-# addons), so it can read that state on a first deploy.
+# elasticache/main (only prod runs elasticache/main, so only prod turns
+# redis_enabled on) through external-secrets/main's store. Plans/applies in
+# the "services" layer of workflows/deploy-full-stack.yaml (after compute,
+# platform, data and addons), so it can read that state on a first deploy.
 # =============================================================================
 
 import:

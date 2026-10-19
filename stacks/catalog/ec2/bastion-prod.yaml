@@ -5,7 +5,7 @@
 # The instance file, not the abstract: the bastion's wiring is the
 # ec2/bastion-prod abstract's (prod.yaml). Each stack keeps its
 # allowed_egress_rules, whose SSH rule names its own VPC CIDRs
-# (orgs/fnx/prod/<region>/components/compute.yaml).
+# (the stack file, orgs/fnx/prod/<region>.yaml).
 # =============================================================================
 
 import:

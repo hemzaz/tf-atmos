@@ -2,10 +2,10 @@
 # =============================================================================
 # external-secrets/data in the stacks with the data plane: the operator on eks/data
 # =============================================================================
-# Shared by dev, staging and the prod primary with the data plane
-# (fnx-ue1-prod). Wired to eks/data and the stack's kms/main, with no
-# ClusterSecretStore yet. Each stack keeps its enabled switch
-# (orgs/fnx/<stage>/<region>/components/compute.yaml).
+# Shared by dev, staging and the prod primary with the data plane. Wired to
+# eks/data and the stack's kms/main, with no ClusterSecretStore yet. Each
+# stack keeps its enabled switch (the stack file,
+# orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

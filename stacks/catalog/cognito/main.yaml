@@ -4,8 +4,8 @@
 # =============================================================================
 # The user pool backing the COGNITO_USER_POOLS authorizer on apigateway/main
 # (and apigateway/data), named from the stack id, with one confidential API
-# client. A stack may turn deletion protection off (dev does) in
-# orgs/fnx/<stage>/<region>/components/services.yaml.
+# client. A stack may turn deletion protection off (dev does) in its stack
+# file (orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

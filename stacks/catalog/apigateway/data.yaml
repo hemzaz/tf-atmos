@@ -8,7 +8,7 @@
 # lambda/data-processor, the cognito/main authorizer, the acm/services
 # wildcard certificate and network/services' data zone. Each stack keeps its
 # API name, description, resources list, log retention and any throttling,
-# tracing or tags (orgs/fnx/<stage>/<region>/components/services.yaml).
+# tracing or tags (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

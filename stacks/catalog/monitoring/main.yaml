@@ -6,7 +6,7 @@
 # topic, acm/main's certificates, and the dimensions of the sources the stack
 # deploys (eks/main, rds/main, ecs/main, apigateway/main). Each stack keeps
 # its alert recipients and any extra alarms or node-count floor
-# (orgs/fnx/<stage>/<region>/components/services.yaml).
+# (the stack file, orgs/fnx/<stage>/<region>.yaml).
 # =============================================================================
 
 import:

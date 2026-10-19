@@ -5,14 +5,14 @@
 # The production retention and notifications (catalog/backup/prod: 7-year
 # monthly retention for SOX, the prod accounts' pci-sox compliance tag), on the
 # stack's own kms/main key. Every recovery point is also copied to the stack's
-# DR region (owner decision Q5; settings.dr.region: us-east-2 for fnx-ue1-prod,
-# eu-central-1 for fnx-ew1-prod): vault <Environment>-backup-replica there, on
-# kms/main's replica key, kept as long as the source point (Cloud Posse
-# aws-backup's copy_action destination_vault_arn). An EU stack's DR region is
-# an EU one: check-data-residency.py fails a non-EU replica_region or key. The
-# DR standby's backup/main (main-standby.yaml) is that region's own vault and
-# plans. Vault lock stays off. A stack without settings.dr.region fails to
-# render.
+# DR region (owner decision Q5; settings.dr.region: us-east-2 for the US
+# primary, eu-central-1 for the EU one): vault <Environment>-backup-replica
+# there, on kms/main's replica key, kept as long as the source point (Cloud
+# Posse aws-backup's copy_action destination_vault_arn). An EU stack's DR
+# region is an EU one: check-data-residency.py fails a non-EU replica_region
+# or key. The DR standby's backup/main (main-standby.yaml) is that region's
+# own vault and plans. Vault lock stays off. A stack without
+# settings.dr.region fails to render.
 # =============================================================================
 
 import:
@@ -22,7 +22,7 @@ components:
   terraform:
     # ==========================================================================
     # AWS Backup - vault, plans and tag-based selection for rds/main,
-    # rds/data (Backup=true in their own services.yaml vars.tags) and any
+    # rds/data (Backup=true in their catalog/rds files' vars.tags) and any
     # EC2/EBS resource tagged the same way.
     # ==========================================================================
     backup/main:

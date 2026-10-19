@@ -2,13 +2,13 @@
 # =============================================================================
 # lambda/data-processor: the sqs/data-transform producer (disabled)
 # =============================================================================
-# Shared by nonprod and prod: a change here changes prod. Data processing
+# Shared by staging and prod: a change here changes prod. Data processing
 # (was infrastructure/data.lambda). The lambda component is single-function,
 # so one instance per function. The function enqueues work for
 # lambda/data-transformer on sqs/data-transform (the -dev flavor has no
 # queue). Each stack keeps its memory_size, timeout and any reserved
 # concurrency or extra environment variables
-# (orgs/fnx/<stage>/<region>/components/services.yaml).
+# (the stack file, orgs/fnx/<stage>/<region>.yaml).
 #
 # The application repo's CI builds the package and uploads it as
 # <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
@@ -17,8 +17,9 @@
 # (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
 # package exists: upload it, set package_version, set enabled: true, and
 # restore its readers, each marked with a "disabled" comment:
-# apigateway/main's "/api" route and apigateway/data (data-processor), and
-# monitoring/data's dimensions (every function).
+# apigateway/main's "/api" route and apigateway/data (this function only),
+# and monitoring/data's dimensions (this function, lambda/data-transformer
+# and, in prod, lambda/report-generator).
 # =============================================================================
 
 components:
