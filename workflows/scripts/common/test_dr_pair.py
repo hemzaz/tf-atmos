@@ -7,6 +7,7 @@ import json
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -14,6 +15,7 @@ _spec = importlib.util.spec_from_file_location("dr_pair", pathlib.Path(__file__)
 dr_pair = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dr_pair)
 
+R = dr_pair.READ_MARK  # load_catalog prefixes each real !terraform.* read with it
 PRIMARY_SIZES = {"workers": (3, 6, 12), "monitoring": (2, 3, 4), "memory-optimized": (2, 3, 6)}
 WARM_SIZES = {"workers": (2, 2, 12), "monitoring": (0, 0, 4), "memory-optimized": (0, 0, 6)}
 
@@ -343,8 +345,23 @@ class DrRegionLintTest(unittest.TestCase):
     def test_a_primary_without_kms_main_is_reported(self):
         stacks = today()
         del stacks["fnx-ue1-prod"]["components"]["terraform"]["kms/main"]
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [self.NO_KMS])
+
+    def test_an_abstract_kms_main_is_reported(self):
+        stacks = today()
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["kms/main"]["metadata"]["type"] = "abstract"
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [self.NO_KMS])
+
+    def test_a_standby_without_a_prefix_is_reported_without_kms_main(self):
+        stacks = today()
+        del stacks["fnx-ew1-prod"]["components"]["terraform"]["kms/main"]
+        for spec in stacks["fnx-ec1-prod"]["components"]["terraform"].values():
+            spec["settings"] = {k: v for k, v in spec["settings"].items() if k != "prefix"}
         self.assertEqual(dr_pair.dr_region_findings(stacks), [
-            "fnx-ue1-prod (DR primary of fnx-ue2-prod): no enabled kms/main, so nothing replicates the key to us-east-2"])
+            "fnx-ew1-prod (DR primary of fnx-ec1-prod) kms/main: standby fnx-ec1-prod has no settings.prefix, so the "
+            "alias it reaches the replica by (replica_alias_names['eu-central-1'], <prefix>-main) cannot be checked",
+            "fnx-ew1-prod (DR primary of fnx-ec1-prod): no enabled, non-abstract kms/main, so nothing replicates the "
+            "key to eu-central-1"])
 
     def test_backup_copies_to_another_region_are_reported(self):
         stacks = today()
@@ -353,8 +370,12 @@ class DrRegionLintTest(unittest.TestCase):
             "fnx-ue1-prod (DR primary of fnx-ue2-prod) backup/main: replica_region is 'us-west-2', "
             "not 'us-east-2' (settings.dr.region)"])
 
-    NO_BACKUP_COPY = ("fnx-ue1-prod (DR primary of fnx-ue2-prod): backup/main copies no recovery point to us-east-2, "
-                      "so the standby has no backup to restore rds/data from (docs/OPERATIONS.md, Disaster recovery)")
+    NO_BACKUP_COPY = ("fnx-ue1-prod (DR primary of fnx-ue2-prod): no enabled, non-abstract backup/main with "
+                      "enable_cross_region_backup: true copies recovery points to us-east-2 (replica_region = "
+                      "settings.dr.region), so the standby has no backup to restore rds/data from "
+                      "(docs/OPERATIONS.md, Disaster recovery)")
+    NO_KMS = ("fnx-ue1-prod (DR primary of fnx-ue2-prod): no enabled, non-abstract kms/main, so nothing replicates "
+              "the key to us-east-2")
 
     def test_backup_without_copies_is_reported(self):
         for copies in (False, None):
@@ -385,8 +406,7 @@ class DrRegionLintTest(unittest.TestCase):
     def test_a_disabled_kms_main_is_reported(self):
         stacks = today()
         stacks["fnx-ue1-prod"]["components"]["terraform"]["kms/main"]["metadata"]["enabled"] = False
-        self.assertEqual(dr_pair.dr_region_findings(stacks), [
-            "fnx-ue1-prod (DR primary of fnx-ue2-prod): no enabled kms/main, so nothing replicates the key to us-east-2"])
+        self.assertEqual(dr_pair.dr_region_findings(stacks), [self.NO_KMS])
 
     def test_a_standby_without_a_prefix_is_reported(self):
         stacks = today()
@@ -422,18 +442,18 @@ class DrRegionLintTest(unittest.TestCase):
 
 
 def flavors():
-    """main-standby.yaml and main-standby-failover.yaml as load_catalog returns them (reads as "<tag> <value>")."""
+    """main-standby.yaml and main-standby-failover.yaml as load_catalog returns them (reads as R + "<tag> <value>")."""
     standby = {
         "import": ["catalog/eks-backend-services/defaults"],
         "components": {"terraform": {"eks-backend-services/main": {
             "metadata": {"component": "eks-backend-services", "enabled": False,
                          "inherits": ["eks-backend-services/defaults"]},
             "vars": {
-                "cluster_name": "!terraform.state eks/main .eks_cluster_id",
-                "cluster_secret_store_name": "!terraform.state external-secrets/main .default_cluster_secret_store_name",
-                "database_secret_arn": "!terraform.state rds/main .password_secret_arn",
-                "database_endpoint": "!terraform.state rds/main .instance_endpoint",
-                "database_name": "!terraform.state rds/main .instance_name",
+                "cluster_name": R + "!terraform.state eks/main .eks_cluster_id",
+                "cluster_secret_store_name": R + "!terraform.state external-secrets/main .default_cluster_secret_store_name",
+                "database_secret_arn": R + "!terraform.state rds/main .password_secret_arn",
+                "database_endpoint": R + "!terraform.state rds/main .instance_endpoint",
+                "database_name": R + "!terraform.state rds/main .instance_name",
                 "redis_enabled": True,
             },
             "dependencies": {"components": [{"component": "eks/main"}, {"component": "rds/main"}]},
@@ -458,17 +478,17 @@ FLAVOR_RULE = ("the failover flavor is main-standby with only metadata.enabled, 
 
 def rds_flavors():
     """rds/main-standby.yaml and main-standby-promoted.yaml as load_catalog returns them."""
-    kms = "!terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys[\"{{ .vars.region }}\"].key_arn'"
+    kms = R + "!terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys[\"{{ .vars.region }}\"].key_arn'"
     replica = {
         "import": ["catalog/rds/prod"],
         "components": {"terraform": {"rds/main": {
             "metadata": {"component": "rds", "inherits": ["rds/prod"]},
             "vars": {
-                "replicate_source_db": "!terraform.state rds/main {{ .settings.dr.standby_of }} .instance_arn",
+                "replicate_source_db": R + "!terraform.state rds/main {{ .settings.dr.standby_of }} .instance_arn",
                 "db_name": "productionapp",
                 "instance_class": "db.r5.large",
                 "kms_key_id": kms,
-                "vpc_id": "!terraform.state vpc/main .vpc_id",
+                "vpc_id": R + "!terraform.state vpc/main .vpc_id",
             },
             "dependencies": {"components": [
                 {"component": "rds/main", "stack": "{{ .settings.dr.standby_of }}"},
@@ -511,7 +531,7 @@ class PromotedFlavorTest(unittest.TestCase):
             self.assertEqual(dr_pair.promoted_findings(base, docs[0], promoted, docs[1]), [], promoted)
         replica = dr_pair.load_catalog(REPLICA)
         self.assertEqual(rds_vars(replica)["replicate_source_db"],
-                         "!terraform.state rds/main {{ .settings.dr.standby_of }} .instance_arn")
+                         R + "!terraform.state rds/main {{ .settings.dr.standby_of }} .instance_arn")
 
     def test_another_leaf_that_differs_is_reported(self):
         replica, promoted = rds_flavors()
@@ -575,7 +595,7 @@ class FailoverFlavorTest(unittest.TestCase):
     def test_the_real_catalog_files_pass(self):
         docs = [dr_pair.load_catalog(f) for f in (dr_pair.STANDBY_FILE, dr_pair.FAILOVER_FILE)]
         self.assertEqual(dr_pair.failover_findings(today(), *docs), [])
-        self.assertEqual(block_vars(docs[0])["database_name"], "!terraform.state rds/main .instance_name")
+        self.assertEqual(block_vars(docs[0])["database_name"], R + "!terraform.state rds/main .instance_name")
 
     def test_a_primary_db_name_other_than_database_name_is_reported(self):
         stacks = today()
@@ -593,10 +613,10 @@ class FailoverFlavorTest(unittest.TestCase):
 
     def test_a_var_only_main_standby_sets_is_reported(self):
         standby, failover = flavors()
-        block_vars(standby)["redis_port"] = "!terraform.state elasticache/main .port"
+        block_vars(standby)["redis_port"] = R + "!terraform.state elasticache/main .port"
         self.assertEqual(dr_pair.failover_findings(today(), standby, failover), [
             f"{FAILOVER}: components.terraform.eks-backend-services/main.vars.redis_port is not set, not "
-            "'!terraform.state elasticache/main .port' as in stacks/catalog/eks-backend-services/main-standby.yaml: "
+            "'\\x01!terraform.state elasticache/main .port' as in stacks/catalog/eks-backend-services/main-standby.yaml: "
             f"{FLAVOR_RULE}"])
 
     def test_a_var_only_the_failover_sets_or_changes_is_reported(self):
@@ -613,7 +633,7 @@ class FailoverFlavorTest(unittest.TestCase):
         block_vars(failover)["cluster_name"] = "ue2-main"
         findings = dr_pair.failover_findings(today(), standby, failover)
         self.assertEqual(len(findings), 1, findings)
-        self.assertIn("vars.cluster_name is 'ue2-main', not '!terraform.state eks/main .eks_cluster_id'", findings[0])
+        self.assertIn("vars.cluster_name is 'ue2-main', not '\\x01!terraform.state eks/main .eks_cluster_id'", findings[0])
 
     def test_different_imports_or_dependencies_are_reported(self):
         standby, failover = flavors()
@@ -687,6 +707,41 @@ class FailoverFlavorTest(unittest.TestCase):
         standby, _ = flavors()
         self.assertEqual(dr_pair.failover_findings(today(), standby, {"import": []}), [
             f"{FAILOVER}: no components.terraform.eks-backend-services/main"])
+
+
+class QuotedLookAlikeTest(unittest.TestCase):
+    """A quoted "!terraform.state ..." is a plain string to Atmos, never the read its real tag is."""
+
+    def load_quoted(self, relative, read):
+        """`relative` as load_catalog returns it, with the real read `read` written as a quoted string."""
+        text = (dr_pair.REPO / relative).read_text()
+        self.assertEqual(text.count(f": {read}\n"), 1, read)
+        with tempfile.TemporaryDirectory() as tmp:
+            copy_path = pathlib.Path(tmp, relative)
+            copy_path.parent.mkdir(parents=True)
+            copy_path.write_text(text.replace(f": {read}\n", f': "{read}"\n'))
+            with mock.patch.object(dr_pair, "REPO", pathlib.Path(tmp)):
+                return dr_pair.load_catalog(relative)
+
+    def test_a_quoted_replica_read_is_not_a_replica(self):
+        base = self.load_quoted(REPLICA, "!terraform.state rds/main {{ .settings.dr.standby_of }} .instance_arn")
+        findings = dr_pair.promoted_findings(REPLICA, base, PROMOTED, dr_pair.load_catalog(PROMOTED))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn(f"{REPLICA}: rds/main is not a replica", findings[0])
+
+    def test_a_quoted_read_in_the_promoted_flavor_is_reported(self):
+        promoted = self.load_quoted(PROMOTED, "!terraform.state vpc/main .vpc_id")
+        findings = dr_pair.promoted_findings(REPLICA, dr_pair.load_catalog(REPLICA), PROMOTED, promoted)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn(f"{PROMOTED}: components.terraform.rds/main.vars.vpc_id is '!terraform.state vpc/main .vpc_id'",
+                      findings[0])
+
+    def test_a_quoted_read_in_the_failover_flavor_is_reported(self):
+        failover = self.load_quoted(FAILOVER, "!terraform.state eks/main .eks_cluster_id")
+        findings = dr_pair.failover_findings(today(), dr_pair.load_catalog(dr_pair.STANDBY_FILE), failover)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn(f"{FAILOVER}: components.terraform.eks-backend-services/main.vars.cluster_name is "
+                      "'!terraform.state eks/main .eks_cluster_id'", findings[0])
 
 
 class MainTest(unittest.TestCase):
