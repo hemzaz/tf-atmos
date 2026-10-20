@@ -1,7 +1,13 @@
 """Tests for check-sqs-visibility.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import importlib.util
+import io
+import json
 import pathlib
+import subprocess
+import sys
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "check_sqs_visibility", pathlib.Path(__file__).with_name("check-sqs-visibility.py")
@@ -101,6 +107,39 @@ class SqsVisibilityTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         errors, warnings = visibility.check(stack(**{"sqs/work": bad, "lambda/work": function(600, arn=other)}))
         self.assertEqual((errors, len(warnings)), ([], 1))
+
+
+    def test_other_read_functions_are_not_paired(self):
+        arn = "!terraform.output sqs/work .queue_arn"
+        stacks = stack(**{"sqs/work": queue(visibility_timeout_seconds=1), "lambda/work": function(600, arn=arn)})
+        self.assertEqual(visibility.check(stacks), ([], []))
+
+    def test_cli_exits_1_on_a_failing_queue_and_0_otherwise(self):
+        script = pathlib.Path(__file__).with_name("check-sqs-visibility.py")
+
+        def run(visibility_seconds):
+            stacks = stack(**{"sqs/work": queue(visibility_timeout_seconds=visibility_seconds), "lambda/work": function(600)})
+            return subprocess.run([sys.executable, str(script)], input=json.dumps(stacks),
+                                  capture_output=True, text=True)
+
+        bad = run(1)
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("ERROR fnx-ue1-staging: lambda/work", bad.stdout)
+        self.assertIn("1 SQS visibility timeout problem(s)", bad.stdout)
+        warn = run(600)
+        self.assertEqual(warn.returncode, 0)
+        self.assertIn("WARN fnx-ue1-staging", warn.stdout)
+
+    def test_known_broken_fixture_errors_are_not_fatal(self):
+        stacks = stack(**{"sqs/work": queue(visibility_timeout_seconds=1), "lambda/work": function(600)})
+        broken = {"fnx-ue1-staging": visibility.fixtures.ALL}
+        out = io.StringIO()
+        with mock.patch.dict(visibility.fixtures.KNOWN_BROKEN_FIXTURES, broken), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(stacks))), \
+                contextlib.redirect_stdout(out):
+            rc = visibility.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("KNOWN-BROKEN fnx-ue1-staging: lambda/work", out.getvalue())
 
 
 if __name__ == "__main__":

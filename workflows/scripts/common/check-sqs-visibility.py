@@ -12,10 +12,12 @@ metadata.component: sqs one) pairs the queue with the function. For each pair:
 A mapping whose ARN is not a queue read (a Kinesis stream, a literal ARN) is ignored, as
 is a queue no lambda reads. An omitted visibility_timeout_seconds or timeout is the
 component's default (DEFAULT_VISIBILITY, DEFAULT_TIMEOUT: variables.tf), as it is for
-Terraform. A value that is not a number, or a read of an instance the stack lacks, is
-WARNed and skipped (check-dependencies reports a missing instance). A lambda with
-metadata.enabled: false is checked too: it is the one switched on later. Abstract
-instances are skipped. Exits 1 on any ERROR.
+Terraform. Warn-and-skip (no failure): a value that is not a number, a read of an
+instance the stack lacks (check-dependencies reports it) and a cross-stack read (a
+`<stack>` other than the lambda's own; only same-stack queues are resolved). A lambda
+with metadata.enabled: false, and a mapping with its own `enabled: false`, are checked
+too: both are the ones switched on later and a bad value would then break the apply.
+Abstract instances are skipped. Exits 1 on any ERROR.
 """
 import json
 import os
