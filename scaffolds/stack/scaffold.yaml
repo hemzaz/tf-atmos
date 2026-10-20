@@ -1,0 +1,250 @@
+---
+# Generates one stage stack, stacks/orgs/<tenant>/<stage>/<region>.yaml, in the
+# folded layout (the imports, then one vars/settings/components body):
+#
+#   atmos scaffold generate stack . --force
+#   atmos scaffold generate stack . --force --defaults --set profile=standby --set ...
+#
+# The target is the REPOSITORY ROOT, run from the repository root: `target:`
+# below places the file, and Atmos 1.229 runs hooks in the invocation directory
+# where 1.233 runs them in the target directory, so `.` from the root makes the
+# two the same. `--force` is required only because the root is non-empty; it
+# would also overwrite an existing stack, so the `guard` hook refuses one.
+#
+# Each profile's template is a near-copy of its reference stacks, whose answers
+# are scaffolds/stack-golden/<stack>.env. scripts/check-stack-scaffold.sh (lint
+# step stack-scaffold) regenerates every reference stack from its answers and
+# fails unless Atmos resolves it identically, so a residue edit to a reference
+# stack must update its template or .env in the same PR.
+#
+# Templates use the [[ ]] delimiters, so the {{ }} the stack itself needs
+# (`{{ .settings.prefix }}`, `{{ .settings.environment.account_id }}`) is
+# emitted verbatim; hook commands still use {{ .Answers.<field> }}. No computed
+# fields (Atmos 1.229 has none): the templates derive the rest.
+apiVersion: atmos/v1
+kind: AtmosScaffoldConfig
+metadata:
+  name: stack
+  description: Stage stack (stacks/orgs/<tenant>/<stage>/<region>.yaml) for an existing stage, account and region
+  version: 1.0.0
+spec:
+  delimiters: ["[[", "]]"]
+  fields:
+    # standby: a prod DR warm standby (reference stacks fnx-ue2-prod,
+    # fnx-ec1-prod), every instance from the catalog's -standby files.
+    - name: profile
+      type: select
+      label: Stack profile
+      default: standby
+      options:
+        - standby
+
+    - name: tenant
+      type: input
+      label: Tenant
+      default: fnx
+      validation:
+        pattern: "^[a-z][a-z0-9]{1,9}$"
+        message: 2-10 lowercase letters/digits, starting with a letter.
+
+    - name: stage
+      type: select
+      label: Stage (an existing stacks/orgs/<tenant>/<stage>/_defaults.yaml)
+      default: prod
+      options:
+        - dev
+        - staging
+        - prod
+
+    # The settings.account_map key; empty means the stage's own account.
+    - name: account
+      type: input
+      label: Account (settings.account_map key; empty = the stage)
+      default: ""
+      validation:
+        pattern: "^$|^(dev|staging|prod|prod-eu)$"
+        message: One of dev, staging, prod, prod-eu (or empty for the stage's account).
+
+    - name: region
+      type: select
+      label: Region (an existing stacks/mixins/region/<region>.yaml)
+      default: us-east-1
+      options:
+        - us-east-1
+        - us-east-2
+        - us-west-2
+        - eu-west-1
+        - eu-central-1
+
+    # Must equal the region mixin's settings.context.environment (the guard
+    # hook checks it); it names the stack: <tenant>-<region_code>-<stage>.
+    - name: region_code
+      type: input
+      label: Region code (the region mixin's settings.context.environment)
+      required: true
+      placeholder: ue1
+      validation:
+        pattern: "^[a-z]{2}[a-z]?[0-9]$"
+        message: A Cloud Posse short region code, e.g. ue1, ew1, ec1.
+
+    # vpc/main's /16; its subnets are cut from it (private x.y.1-3,
+    # public x.y.101-103, database x.y.201-203).
+    - name: vpc_cidr_main
+      type: input
+      label: vpc/main CIDR (/16)
+      required: true
+      placeholder: 10.22.0.0/16
+      validation:
+        pattern: "^10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.0\\.0/16$"
+        message: A 10.x.0.0/16 CIDR.
+
+    - name: az_ids
+      type: input
+      label: Three AZ IDs, comma-separated (e.g. use2-az1,use2-az2,use2-az3)
+      required: true
+      validation:
+        pattern: "^[a-z0-9]+-az[0-9]+,[a-z0-9]+-az[0-9]+,[a-z0-9]+-az[0-9]+$"
+        message: Exactly three AZ IDs, comma-separated, no spaces.
+
+    - name: domain_name
+      type: input
+      label: settings.environment.domain_name
+      required: true
+      placeholder: fnx.example.com
+      validation:
+        pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+        message: A lowercase DNS name.
+
+    - name: critical_alerts
+      type: input
+      label: Critical alert emails, comma-separated
+      required: true
+      validation:
+        pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
+        message: One or more email addresses, comma-separated, no spaces.
+
+    - name: warning_alerts
+      type: input
+      label: Warning alert emails, comma-separated
+      required: true
+      validation:
+        pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
+        message: One or more email addresses, comma-separated, no spaces.
+
+    # standby: the primary stack it is the DR standby of, and that stack's
+    # region (the guard hook checks the two agree).
+    - name: standby_of
+      type: input
+      label: Primary stack (settings.dr.standby_of)
+      placeholder: fnx-ue1-prod
+      when: "answers.profile == 'standby'"
+      validation:
+        pattern: "^[a-z][a-z0-9]{1,9}-[a-z]{2}[a-z]?[0-9]-prod$"
+        message: A prod stack name, <tenant>-<region code>-prod.
+
+    - name: primary_region
+      type: select
+      label: The primary stack's region
+      default: us-east-1
+      when: "answers.profile == 'standby'"
+      options:
+        - us-east-1
+        - us-east-2
+        - us-west-2
+        - eu-west-1
+        - eu-central-1
+
+  # Every file under scaffolds/stack is output (a `files` entry only gates
+  # one), so the goldens live beside it, in scaffolds/stack-golden.
+  files:
+    - path: stack/standby.yaml.tmpl
+      target: "stacks/orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/[[ .Config.region ]].yaml"
+      when: "answers.profile == 'standby'"
+
+  hooks:
+    # Refuses to overwrite a stack (--force alone would), and checks the
+    # answers against the files they name. Hooks run in the invocation
+    # directory (1.229) or the target (1.233); both are the root from `.`.
+    guard:
+      events:
+        - before.scaffold.generate
+      kind: step
+      type: shell
+      with:
+        command: |
+          set -eu
+          root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          stack_file="$root/stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/{{ .Answers.region }}.yaml"
+          mixin="$root/stacks/mixins/region/{{ .Answers.region }}.yaml"
+          fail() { echo "scaffold stack: $*" >&2; exit 1; }
+          [ ! -e "$stack_file" ] || fail "$stack_file exists; remove it first to regenerate it"
+          [ -f "$root/stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/_defaults.yaml" ] \
+            || fail "no stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/_defaults.yaml: a new tenant or stage is out of scope"
+          [ -f "$mixin" ] || fail "no region mixin $mixin: add it first (docs/OPERATIONS.md)"
+          code="$(sed -n 's/^ *environment: *\([a-z0-9]*\) *$/\1/p' "$mixin" | head -n 1)"
+          [ "$code" = "{{ .Answers.region_code }}" ] \
+            || fail "region_code {{ .Answers.region_code }} is not $mixin's environment ($code)"
+          # The account is the stage's own, or prod-eu for an EU prod stack.
+          account="{{ .Answers.account }}"
+          [ -n "$account" ] || account="{{ .Answers.stage }}"
+          [ "$account" = "{{ .Answers.stage }}" ] \
+            || { [ "{{ .Answers.stage }}" = "prod" ] && [ "$account" = "prod-eu" ]; } \
+            || fail "account $account does not belong to stage {{ .Answers.stage }} (its own, or prod-eu for prod)"
+          # GDPR scope: the prod-eu account holds exactly the EU regions' prod stacks.
+          eu() { case "$1" in eu-*) echo yes ;; *) echo no ;; esac; }
+          gdpr=no
+          [ "$account" != "prod-eu" ] || gdpr=yes
+          [ "{{ .Answers.stage }}" != "prod" ] || [ "$(eu "{{ .Answers.region }}")" = "$gdpr" ] \
+            || fail "account $account and region {{ .Answers.region }} disagree: the EU regions are exactly the prod-eu account's (GDPR)"
+          {{- if eq .Answers.profile "standby" }}
+          # Only rendered for a standby, so a field its `when` hides never
+          # reaches the shell.
+            [ "{{ .Answers.stage }}" = "prod" ] || fail "a standby is a prod stack (stage prod)"
+            [ "{{ .Answers.region }}" != "{{ .Answers.primary_region }}" ] \
+              || fail "a standby's region must differ from its primary's ({{ .Answers.primary_region }})"
+            [ "$(eu "{{ .Answers.primary_region }}")" = "$gdpr" ] \
+              || fail "primary_region {{ .Answers.primary_region }} and region {{ .Answers.region }} must both be EU (GDPR) or both not"
+            # The US template's health check alarm notifies <primary code>-main-alarms
+            # in us-east-1, where Route 53's alarms live (a CloudWatch alarm only
+            # notifies a topic in its own region): only a us-east-1 primary has it.
+            [ "$gdpr" = yes ] || [ "{{ .Answers.primary_region }}" = "us-east-1" ] \
+              || fail "a non-EU standby's primary must be in us-east-1 (its health check alarm notifies the primary's topic there)"
+            pmixin="$root/stacks/mixins/region/{{ .Answers.primary_region }}.yaml"
+            [ -f "$pmixin" ] || fail "no region mixin $pmixin for primary_region"
+            pcode="$(sed -n 's/^ *environment: *\([a-z0-9]*\) *$/\1/p' "$pmixin" | head -n 1)"
+            [ "{{ .Answers.standby_of }}" = "{{ .Answers.tenant }}-$pcode-prod" ] \
+              || fail "standby_of {{ .Answers.standby_of }} is not {{ .Answers.tenant }}-$pcode-prod ({{ .Answers.primary_region }})"
+            pfile="$root/stacks/orgs/{{ .Answers.tenant }}/prod/{{ .Answers.primary_region }}.yaml"
+            [ -f "$pfile" ] || fail "the primary {{ .Answers.standby_of }} ($pfile) does not exist"
+            ! grep -q '^ *standby_of:' "$pfile" \
+              || fail "the primary {{ .Answers.standby_of }} is itself a standby ($pfile)"
+            # catalog/monitoring/main-standby reads critical_alerts[1]. Hook
+            # templates have no sprig to count them, so the shell sees the
+            # answer only through Go's urlquery: every character but
+            # [A-Za-z0-9._~-] becomes %XX (a comma %2C), never shell syntax.
+            case "{{ urlquery .Answers.critical_alerts }}" in
+              *%2C*) ;;
+              *) fail "a standby needs at least two critical_alerts (catalog/monitoring/main-standby reads the second)" ;;
+            esac
+          {{- end }}
+          echo "scaffold stack: writing $stack_file"
+
+    # The new stack resolves with the rest.
+    verify:
+      events:
+        - after.scaffold.generate
+      kind: step
+      type: shell
+      with:
+        command: |
+          set -eu
+          root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          cd "$root"
+          file="stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/{{ .Answers.region }}.yaml"
+          if ! atmos validate stacks \
+            || ! atmos describe stacks -s "{{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }}" \
+              --process-functions=false --format json > /dev/null; then
+            echo "scaffold stack: the generated $file does not resolve; remove it, fix the answers and generate again" >&2
+            exit 1
+          fi
+          echo "scaffold stack: {{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }} resolves"

@@ -282,6 +282,13 @@ workflows:
       - name: stack-samples
         type: shell
         command: bash scripts/check-stack-samples.sh
+      # The stack scaffold (scaffolds/stack) regenerates every reference stack
+      # from its answers (scaffolds/stack-golden/<stack>.env) and Atmos resolves
+      # each identically, normal and raw; its guard refuses an existing stack
+      # and each bad answer set the script lists (REFUSALS).
+      - name: stack-scaffold
+        type: shell
+        command: bash scripts/check-stack-scaffold.sh
       # iam/ci's lambda uploader role names its stage's s3/lambda-artifacts
       # bucket and kms/main alias instead of reading their state (it applies
       # first); this fails when either stops matching, and when an enabled
