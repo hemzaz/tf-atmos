@@ -811,6 +811,16 @@ class MainTest(unittest.TestCase):
         self.assertIn(f"dr-pair: {PROMOTED}: components.terraform.rds/main.vars.instance_class is 'db.r5.xlarge', "
                       f"not 'db.r5.large' as in {REPLICA}", err)
 
+    def test_lint_findings_carry_no_read_marker(self):
+        standby, failover = flavors()
+        block_vars(failover)["cluster_name"] = "ue2-main"
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(today()))):
+            code, _, err = self.run_main("--lint", docs=(standby, failover))
+        self.assertEqual(code, 1)
+        self.assertIn("vars.cluster_name is 'ue2-main', not '!terraform.state eks/main .eks_cluster_id'", err)
+        self.assertNotIn(dr_pair.READ_MARK, err)
+        self.assertNotIn("\\x01", err)
+
     def test_lint_passes_todays_flavors(self):
         with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(today()))):
             self.assertEqual(self.run_main("--lint"), (0, "", ""))
