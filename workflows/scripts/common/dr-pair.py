@@ -115,9 +115,14 @@ RDS_INSTANCE = "rds/main"
 DEFAULT_STORE = "aws-secretsmanager"
 # yq drops a scalar's custom tag in JSON; keep !terraform.* reads as READ_MARK + "<tag> <value>". The
 # marker (U+0001, raw in the yq expression: yq has no string escapes) keeps a quoted look-alike string,
-# which Atmos passes on as text, from equalling a real read; a finding shows a read as '\x01!terraform...'.
+# which Atmos passes on as text, from equalling a real read; the lint output drops the marker (plain_finding).
 READ_MARK = "\x01"
 TAGGED_READS = f'(.. | select(tag | test("^!terraform"))) |= ("{READ_MARK}" + tag + " " + .)'
+
+
+def plain_finding(finding: str) -> str:
+    """A finding without READ_MARK, raw or as the \\x01 a repr() of it shows."""
+    return finding.replace(READ_MARK, "").replace("\\x01", "")
 
 
 def instances(config: dict) -> dict:
@@ -622,7 +627,7 @@ def main() -> int:
             except ValueError as error:
                 findings.append(str(error))
         for finding in findings:
-            print(f"dr-pair: {finding}", file=sys.stderr)
+            print(f"dr-pair: {plain_finding(finding)}", file=sys.stderr)
         return 1 if findings else 0
     try:
         stacks = describe_stacks()
