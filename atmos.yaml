@@ -116,6 +116,13 @@ scaffold:
       description: "Catalog defaults + disabled entry for an existing component"
       source: "./scaffolds/catalog-entry"
       version: "1.0.0"
+    # One stage stack, stacks/orgs/<tenant>/<stage>/<region>.yaml; its golden
+    # answers (scaffolds/stack-golden) are checked by scripts/check-stack-scaffold.sh:
+    #   atmos scaffold generate stack . --force
+    stack:
+      description: "Stage stack for an existing stage, account and region"
+      source: "./scaffolds/stack"
+      version: "1.0.0"
 
 # A repo file, relative to base_path, is read in place. A URL is fetched by
 # go-getter into $TMPDIR/atmos-manifest.json, which it never truncates: it keeps
