@@ -12,21 +12,35 @@
 #   - `atmos scaffold generate stack . --force --defaults --set ...` with the
 #     stack file still there must fail (the guard hook) and leave it unchanged;
 #   - delete the stack file, generate it again with the hooks (guard, then
-#     verify: atmos validate stacks), yamllint it, and snapshot it again: both
-#     snapshots must be identical to the committed stack's.
+#     verify: atmos validate stacks), check the run wrote that file and nothing
+#     else, yamllint it (relaxed, the lint gate's config) and snapshot it again:
+#     both snapshots must be identical to the committed stack's.
 # The regenerated file sits at the committed file's path, so no normalising
 # is needed (atmos_manifest and atmos_stack_file are equal by construction).
+# Then each REFUSALS case (a golden with some answers changed) must be refused
+# by the guard with its message, writing nothing.
 #
 # A residue edit to a reference stack must update its template or .env in the
 # same PR, or this fails.
 #
 # Usage: scripts/check-stack-scaffold.sh
 # Needs atmos, python3 and yamllint. Exit 0 when every golden regenerates
-# identically, 1 otherwise.
+# identically and every refusal is refused, 1 otherwise.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Guard refusals: <golden>|<expected guard message>|<answer overrides...>.
+REFUSALS=(
+    "fnx-ue2-prod|at least two critical_alerts|critical_alerts=oncall@example.com"
+    "fnx-ue2-prod|primary must be in us-east-1|primary_region=us-west-2 standby_of=fnx-uw2-prod"
+    "fnx-ue2-prod|must both be EU (GDPR) or both not|primary_region=eu-west-1 standby_of=fnx-ew1-prod"
+    "fnx-ec1-prod|the EU regions are exactly the prod-eu account's|account=prod"
+    "fnx-ue2-prod|must differ from its primary's|primary_region=us-east-2 standby_of=fnx-ue2-prod"
+    "fnx-ec1-prod|is itself a standby|region=eu-west-1 region_code=ew1 primary_region=eu-central-1 standby_of=fnx-ec1-prod"
+    "fnx-ue2-prod|does not belong to stage prod|account=dev"
+)
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -58,93 +72,151 @@ files_list() {
     find . -type f ! -path './.atmos/*' ! -path "./${out##*/}/*" | LC_ALL=C sort
 }
 
-failed=""
-goldens=0
-for env in scaffolds/stack-golden/*.env; do
-    stack="$(basename "$env" .env)"
-    goldens=$((goldens + 1))
+# load <env> [key=value...]: the golden's answers with the overrides applied,
+# as the --set array `sets`, plus tenant, stage, region, code and file.
+load() {
+    local env="$1" line key override
+    shift
     sets=()
     tenant="" stage="" region="" code=""
     while IFS= read -r line || [[ -n "$line" ]]; do
         case "$line" in ''|'#'*) continue ;; esac
+        key="${line%%=*}"
+        for override in "$@"; do
+            [[ "${override%%=*}" == "$key" ]] && line="$override"
+        done
         sets+=(--set "$line")
-        case "$line" in
-            tenant=*) tenant="${line#*=}" ;;
-            stage=*) stage="${line#*=}" ;;
-            region=*) region="${line#*=}" ;;
-            region_code=*) code="${line#*=}" ;;
+        case "$key" in
+            tenant) tenant="${line#*=}" ;;
+            stage) stage="${line#*=}" ;;
+            region) region="${line#*=}" ;;
+            region_code) code="${line#*=}" ;;
         esac
     done < "$env"
+    file="stacks/orgs/$tenant/$stage/$region.yaml"
+}
+
+generate() {
+    atmos scaffold generate stack . --force --defaults "${sets[@]}"
+}
+
+# golden <env>: regenerate its stack; returns 1 on any difference.
+golden() {
+    local env="$1" stack kind rc=0
+    stack="$(basename "$env" .env)"
+    load "$env"
     if [[ "$tenant-$code-$stage" != "$stack" ]]; then
         echo "ERROR $env: its answers name $tenant-$code-$stage, not $stack" >&2
-        failed="$failed $stack"
-        continue
+        return 1
     fi
-    file="stacks/orgs/$tenant/$stage/$region.yaml"
     if [[ ! -f "$file" ]]; then
         echo "ERROR $env: $file does not exist" >&2
-        failed="$failed $stack"
-        continue
+        return 1
     fi
     echo "== $stack ($file)"
-    snapshot "$stack" "$out/$stack.before.json"
-    snapshot "$stack" "$out/$stack.before.raw.json" --process-templates=false
+    snapshot "$stack" "$out/$stack.before.json" || return 1
+    snapshot "$stack" "$out/$stack.before.raw.json" --process-templates=false || return 1
     cp "$file" "$out/$stack.committed.yaml"
 
     # The guard: an existing stack file is never overwritten.
-    if atmos scaffold generate stack . --force --defaults "${sets[@]}" > "$out/$stack.guard.log" 2>&1; then
+    if generate > "$out/$stack.guard.log" 2>&1; then
         echo "ERROR $stack: the scaffold overwrote an existing $file (guard hook did not refuse)" >&2
         cat "$out/$stack.guard.log" >&2
-        failed="$failed $stack"
-        cp "$out/$stack.committed.yaml" "$file"
-        continue
+        return 1
     fi
     if ! grep -q "exists; remove it first" "$out/$stack.guard.log" \
         || ! cmp -s "$file" "$out/$stack.committed.yaml"; then
         echo "ERROR $stack: the run over an existing $file failed, but not by the guard, or changed it:" >&2
         cat "$out/$stack.guard.log" >&2
-        failed="$failed $stack"
-        cp "$out/$stack.committed.yaml" "$file"
-        continue
+        return 1
     fi
     echo "guard: refused to overwrite $file"
 
     rm "$file"
     files_list > "$out/$stack.files.before"
-    if ! atmos scaffold generate stack . --force --defaults "${sets[@]}"; then
+    if ! generate; then
         echo "ERROR $stack: atmos scaffold generate stack failed" >&2
-        failed="$failed $stack"
-        cp "$out/$stack.committed.yaml" "$file"
-        continue
+        return 1
     fi
     # The run writes the stack file and nothing else (bar its .atmos record).
     files_list > "$out/$stack.files.after"
     if ! diff <(echo "./$file") <(LC_ALL=C comm -13 "$out/$stack.files.before" "$out/$stack.files.after") > /dev/null; then
         echo "ERROR $stack: the scaffold wrote more or less than $file:" >&2
         LC_ALL=C comm -3 "$out/$stack.files.before" "$out/$stack.files.after" >&2
-        failed="$failed $stack"
+        rc=1
     fi
-    yamllint -d relaxed "$file"
-    snapshot "$stack" "$out/$stack.after.json"
-    snapshot "$stack" "$out/$stack.after.raw.json" --process-templates=false
+    yamllint -d relaxed "$file" || rc=1
+    snapshot "$stack" "$out/$stack.after.json" || return 1
+    snapshot "$stack" "$out/$stack.after.raw.json" --process-templates=false || return 1
     for kind in "" .raw; do
         if ! cmp -s "$out/$stack.before$kind.json" "$out/$stack.after$kind.json"; then
             echo "DIFFERENT $stack${kind:+ (raw)}: the scaffold no longer regenerates $file from $env" >&2
             diff -u --label "committed $file" --label "generated from $env" \
                 "$out/$stack.before$kind.json" "$out/$stack.after$kind.json" | head -n 100 >&2 || true
-            failed="$failed $stack"
+            rc=1
         fi
     done
-    # Leave the committed file for the next golden.
-    cp "$out/$stack.committed.yaml" "$file"
-done
+    return "$rc"
+}
 
+# refusal <golden> <message> <overrides>: the guard refuses, writing nothing.
+refusal() {
+    local stack="$1" message="$2" overrides log rc
+    read -r -a overrides <<< "$3"
+    load "scaffolds/stack-golden/$stack.env" "${overrides[@]}"
+    log="$out/refusal.log"
+    # The target may be a real stack; remove it so only the case's own
+    # answers can be refused.
+    [[ ! -f "$file" ]] || mv "$file" "$out/refusal.target"
+    files_list > "$out/refusal.before"
+    if generate > "$log" 2>&1; then
+        echo "ERROR refusal ($stack with $3): generated, but the guard should refuse: $message" >&2
+        rc=1
+    elif ! grep -qF "$message" "$log"; then
+        echo "ERROR refusal ($stack with $3): failed, but not with the guard's \"$message\":" >&2
+        cat "$log" >&2
+        rc=1
+    else
+        rc=0
+    fi
+    files_list > "$out/refusal.after"
+    if ! cmp -s "$out/refusal.before" "$out/refusal.after"; then
+        echo "ERROR refusal ($stack with $3): the refused run wrote files:" >&2
+        LC_ALL=C comm -3 "$out/refusal.before" "$out/refusal.after" >&2
+        rc=1
+    fi
+    [[ "$rc" -ne 0 ]] || echo "guard: refused $stack with $3 ($message)"
+    # Undo whatever the case did.
+    LC_ALL=C comm -13 "$out/refusal.before" "$out/refusal.after" | while IFS= read -r f; do rm -f "$f"; done
+    [[ ! -f "$out/refusal.target" ]] || mv "$out/refusal.target" "$file"
+    return "$rc"
+}
+
+failed=""
+goldens=0
+for env in scaffolds/stack-golden/*.env; do
+    goldens=$((goldens + 1))
+    stack="$(basename "$env" .env)"
+    files_list > "$out/files.before"
+    golden "$env" || failed="$failed $stack"
+    # Leave the committed file, and nothing a run wrote, for the next golden.
+    [[ ! -f "$out/$stack.committed.yaml" ]] || cp "$out/$stack.committed.yaml" "$file"
+    files_list > "$out/files.after"
+    LC_ALL=C comm -13 "$out/files.before" "$out/files.after" | while IFS= read -r f; do rm -f "$f"; done
+done
 if [[ "$goldens" -eq 0 ]]; then
     echo "ERROR no scaffolds/stack-golden/*.env" >&2
     exit 1
 fi
+
+echo "== guard refusals"
+for case in "${REFUSALS[@]}"; do
+    IFS='|' read -r stack message overrides <<< "$case"
+    refusal "$stack" "$message" "$overrides" || failed="$failed refusal:$stack"
+done
+
 if [[ -n "$failed" ]]; then
     echo "stack scaffold check failed for: $(echo "$failed" | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd ' ' -)" >&2
     exit 1
 fi
-echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw)"
+echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw); the guard refuses all ${#REFUSALS[@]} bad answer sets"

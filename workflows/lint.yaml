@@ -284,7 +284,8 @@ workflows:
         command: bash scripts/check-stack-samples.sh
       # The stack scaffold (scaffolds/stack) regenerates every reference stack
       # from its answers (scaffolds/stack-golden/<stack>.env) and Atmos resolves
-      # each identically, normal and raw; its guard refuses an existing stack.
+      # each identically, normal and raw; its guard refuses an existing stack
+      # and each bad answer set the script lists (REFUSALS).
       - name: stack-scaffold
         type: shell
         command: bash scripts/check-stack-scaffold.sh

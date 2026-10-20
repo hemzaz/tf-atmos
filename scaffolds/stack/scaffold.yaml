@@ -184,13 +184,43 @@ spec:
           code="$(sed -n 's/^ *environment: *\([a-z0-9]*\) *$/\1/p' "$mixin" | head -n 1)"
           [ "$code" = "{{ .Answers.region_code }}" ] \
             || fail "region_code {{ .Answers.region_code }} is not $mixin's environment ($code)"
+          # The account is the stage's own, or prod-eu for an EU prod stack.
+          account="{{ .Answers.account }}"
+          [ -n "$account" ] || account="{{ .Answers.stage }}"
+          [ "$account" = "{{ .Answers.stage }}" ] \
+            || { [ "{{ .Answers.stage }}" = "prod" ] && [ "$account" = "prod-eu" ]; } \
+            || fail "account $account does not belong to stage {{ .Answers.stage }} (its own, or prod-eu for prod)"
+          # GDPR scope: the prod-eu account holds exactly the EU regions' prod stacks.
+          eu() { case "$1" in eu-*) echo yes ;; *) echo no ;; esac; }
+          gdpr=no
+          [ "$account" != "prod-eu" ] || gdpr=yes
+          [ "{{ .Answers.stage }}" != "prod" ] || [ "$(eu "{{ .Answers.region }}")" = "$gdpr" ] \
+            || fail "account $account and region {{ .Answers.region }} disagree: the EU regions are exactly the prod-eu account's (GDPR)"
           if [ "{{ .Answers.profile }}" = "standby" ]; then
             [ "{{ .Answers.stage }}" = "prod" ] || fail "a standby is a prod stack (stage prod)"
+            [ "{{ .Answers.region }}" != "{{ .Answers.primary_region }}" ] \
+              || fail "a standby's region must differ from its primary's ({{ .Answers.primary_region }})"
+            [ "$(eu "{{ .Answers.primary_region }}")" = "$gdpr" ] \
+              || fail "primary_region {{ .Answers.primary_region }} and region {{ .Answers.region }} must both be EU (GDPR) or both not"
+            # The US template's health check alarm notifies <primary code>-main-alarms
+            # in us-east-1, where Route 53's alarms live (a CloudWatch alarm only
+            # notifies a topic in its own region): only a us-east-1 primary has it.
+            [ "$gdpr" = yes ] || [ "{{ .Answers.primary_region }}" = "us-east-1" ] \
+              || fail "a non-EU standby's primary must be in us-east-1 (its health check alarm notifies the primary's topic there)"
             pmixin="$root/stacks/mixins/region/{{ .Answers.primary_region }}.yaml"
             [ -f "$pmixin" ] || fail "no region mixin $pmixin for primary_region"
             pcode="$(sed -n 's/^ *environment: *\([a-z0-9]*\) *$/\1/p' "$pmixin" | head -n 1)"
             [ "{{ .Answers.standby_of }}" = "{{ .Answers.tenant }}-$pcode-prod" ] \
               || fail "standby_of {{ .Answers.standby_of }} is not {{ .Answers.tenant }}-$pcode-prod ({{ .Answers.primary_region }})"
+            pfile="$root/stacks/orgs/{{ .Answers.tenant }}/prod/{{ .Answers.primary_region }}.yaml"
+            [ -f "$pfile" ] || fail "the primary {{ .Answers.standby_of }} ($pfile) does not exist"
+            ! grep -q '^ *standby_of:' "$pfile" \
+              || fail "the primary {{ .Answers.standby_of }} is itself a standby ($pfile)"
+            # catalog/monitoring/main-standby reads critical_alerts[1].
+            case "{{ .Answers.critical_alerts }}" in
+              *,*) ;;
+              *) fail "a standby needs at least two critical_alerts (catalog/monitoring/main-standby reads the second)" ;;
+            esac
           fi
           echo "scaffold stack: writing $stack_file"
 
@@ -205,7 +235,11 @@ spec:
           set -eu
           root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           cd "$root"
-          atmos validate stacks
-          atmos describe stacks -s "{{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }}" \
-            --process-functions=false --format json > /dev/null
+          file="stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/{{ .Answers.region }}.yaml"
+          if ! atmos validate stacks \
+            || ! atmos describe stacks -s "{{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }}" \
+              --process-functions=false --format json > /dev/null; then
+            echo "scaffold stack: the generated $file does not resolve; remove it, fix the answers and generate again" >&2
+            exit 1
+          fi
           echo "scaffold stack: {{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }} resolves"
