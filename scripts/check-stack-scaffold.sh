@@ -31,6 +31,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# A critical_alerts answer that runs a command if any hook interpolates it
+# into shell unchecked (literal: the $( ) is the point).
+# shellcheck disable=SC2016
+INJECTION='a@example.com,x$(touch${IFS}INJECTED)@example.com'
 # Guard refusals: <golden>|<expected guard message>|<answer overrides...>.
 REFUSALS=(
     "fnx-ue2-prod|at least two critical_alerts|critical_alerts=oncall@example.com"
@@ -40,6 +44,9 @@ REFUSALS=(
     "fnx-ue2-prod|must differ from its primary's|primary_region=us-east-2 standby_of=fnx-ue2-prod"
     "fnx-ec1-prod|is itself a standby|region=eu-west-1 region_code=ew1 primary_region=eu-central-1 standby_of=fnx-ec1-prod"
     "fnx-ue2-prod|does not belong to stage prod|account=dev"
+    # Shell injection through an answer: refused by the field pattern, and the
+    # command substitution never runs (no INJECTED file anywhere).
+    "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
 )
 
 scratch="$(mktemp -d)"
@@ -178,6 +185,10 @@ refusal() {
         rc=1
     else
         rc=0
+    fi
+    if [[ -n "$(find . -name INJECTED)" ]] || [[ -e "$REPO_ROOT/INJECTED" ]]; then
+        echo "ERROR refusal ($stack with $3): an answer was executed by the shell (INJECTED exists)" >&2
+        rc=1
     fi
     files_list > "$out/refusal.after"
     if ! cmp -s "$out/refusal.before" "$out/refusal.after"; then

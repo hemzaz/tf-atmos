@@ -120,7 +120,7 @@ spec:
       label: Critical alert emails, comma-separated
       required: true
       validation:
-        pattern: "^[^,@ ]+@[^,@ ]+(,[^,@ ]+@[^,@ ]+)*$"
+        pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
         message: One or more email addresses, comma-separated, no spaces.
 
     - name: warning_alerts
@@ -128,7 +128,7 @@ spec:
       label: Warning alert emails, comma-separated
       required: true
       validation:
-        pattern: "^[^,@ ]+@[^,@ ]+(,[^,@ ]+@[^,@ ]+)*$"
+        pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
         message: One or more email addresses, comma-separated, no spaces.
 
     # standby: the primary stack it is the DR standby of, and that stack's
@@ -196,7 +196,9 @@ spec:
           [ "$account" != "prod-eu" ] || gdpr=yes
           [ "{{ .Answers.stage }}" != "prod" ] || [ "$(eu "{{ .Answers.region }}")" = "$gdpr" ] \
             || fail "account $account and region {{ .Answers.region }} disagree: the EU regions are exactly the prod-eu account's (GDPR)"
-          if [ "{{ .Answers.profile }}" = "standby" ]; then
+          {{- if eq .Answers.profile "standby" }}
+          # Only rendered for a standby, so a field its `when` hides never
+          # reaches the shell.
             [ "{{ .Answers.stage }}" = "prod" ] || fail "a standby is a prod stack (stage prod)"
             [ "{{ .Answers.region }}" != "{{ .Answers.primary_region }}" ] \
               || fail "a standby's region must differ from its primary's ({{ .Answers.primary_region }})"
@@ -216,12 +218,15 @@ spec:
             [ -f "$pfile" ] || fail "the primary {{ .Answers.standby_of }} ($pfile) does not exist"
             ! grep -q '^ *standby_of:' "$pfile" \
               || fail "the primary {{ .Answers.standby_of }} is itself a standby ($pfile)"
-            # catalog/monitoring/main-standby reads critical_alerts[1].
-            case "{{ .Answers.critical_alerts }}" in
-              *,*) ;;
+            # catalog/monitoring/main-standby reads critical_alerts[1]. Hook
+            # templates have no sprig to count them, so the shell sees the
+            # answer only through Go's urlquery: every character but
+            # [A-Za-z0-9._~-] becomes %XX (a comma %2C), never shell syntax.
+            case "{{ urlquery .Answers.critical_alerts }}" in
+              *%2C*) ;;
               *) fail "a standby needs at least two critical_alerts (catalog/monitoring/main-standby reads the second)" ;;
             esac
-          fi
+          {{- end }}
           echo "scaffold stack: writing $stack_file"
 
     # The new stack resolves with the rest.
