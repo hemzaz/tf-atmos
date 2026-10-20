@@ -30,14 +30,32 @@ metadata:
 spec:
   delimiters: ["[[", "]]"]
   fields:
+    # nonprod: a dev or staging stack (reference stacks fnx-ue1-dev,
+    # fnx-ue1-staging; nonprod_flavor picks which one's imports and sizing).
     # standby: a prod DR warm standby (reference stacks fnx-ue2-prod,
     # fnx-ec1-prod), every instance from the catalog's -standby files.
+    # The defaults are the cheapest stack, a dev one.
     - name: profile
       type: select
       label: Stack profile
-      default: standby
+      default: nonprod
       options:
+        - nonprod
         - standby
+
+    # nonprod: whose imports and sizing (the residue) to copy: dev is
+    # fnx-ue1-dev's (-dev flavors: smaller, deletable), default is
+    # fnx-ue1-staging's (the un-suffixed catalog defaults, plus
+    # lambda/data-transformer and sqs/data-transform). Edit the sizes in the
+    # generated file afterwards.
+    - name: nonprod_flavor
+      type: select
+      label: Nonprod flavor (dev = fnx-ue1-dev's sizing, default = fnx-ue1-staging's)
+      default: dev
+      when: "answers.profile == 'nonprod'"
+      options:
+        - dev
+        - default
 
     - name: tenant
       type: input
@@ -50,7 +68,7 @@ spec:
     - name: stage
       type: select
       label: Stage (an existing stacks/orgs/<tenant>/<stage>/_defaults.yaml)
-      default: prod
+      default: dev
       options:
         - dev
         - staging
@@ -98,6 +116,17 @@ spec:
         pattern: "^10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.0\\.0/16$"
         message: A 10.x.0.0/16 CIDR.
 
+    # nonprod: vpc/services' /16, cut like vpc/main's (no database subnets).
+    - name: vpc_cidr_services
+      type: input
+      label: vpc/services CIDR (/16)
+      required: true
+      placeholder: 10.23.0.0/16
+      when: "answers.profile == 'nonprod'"
+      validation:
+        pattern: "^10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.0\\.0/16$"
+        message: A 10.x.0.0/16 CIDR.
+
     - name: az_ids
       type: input
       label: Three AZ IDs, comma-separated (e.g. use2-az1,use2-az2,use2-az3)
@@ -131,6 +160,29 @@ spec:
         pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
         message: One or more email addresses, comma-separated, no spaces.
 
+    # nonprod: cost-optimization/main's monthly AWS Budget, in USD (the
+    # standby has none: its primary owns the account budget).
+    - name: budget_monthly_limit
+      type: input
+      label: Monthly AWS Budget (USD)
+      required: true
+      placeholder: "500"
+      when: "answers.profile == 'nonprod'"
+      validation:
+        pattern: "^[1-9][0-9]{0,6}$"
+        message: A whole number of US dollars, 1 to 9999999.
+
+    # nonprod, default flavor: monitoring/main's alarm_email_subscriptions
+    # (the dev flavor reads the first critical and warning alert instead).
+    - name: alarm_emails
+      type: input
+      label: monitoring/main alarm emails, comma-separated
+      required: true
+      when: "answers.profile == 'nonprod' && answers.nonprod_flavor == 'default'"
+      validation:
+        pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
+        message: One or more email addresses, comma-separated, no spaces.
+
     # standby: the primary stack it is the DR standby of, and that stack's
     # region (the guard hook checks the two agree).
     - name: standby_of
@@ -157,6 +209,9 @@ spec:
   # Every file under scaffolds/stack is output (a `files` entry only gates
   # one), so the goldens live beside it, in scaffolds/stack-golden.
   files:
+    - path: stack/nonprod.yaml.tmpl
+      target: "stacks/orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/[[ .Config.region ]].yaml"
+      when: "answers.profile == 'nonprod'"
     - path: stack/standby.yaml.tmpl
       target: "stacks/orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/[[ .Config.region ]].yaml"
       when: "answers.profile == 'standby'"
@@ -190,12 +245,33 @@ spec:
           [ "$account" = "{{ .Answers.stage }}" ] \
             || { [ "{{ .Answers.stage }}" = "prod" ] && [ "$account" = "prod-eu" ]; } \
             || fail "account $account does not belong to stage {{ .Answers.stage }} (its own, or prod-eu for prod)"
-          # GDPR scope: the prod-eu account holds exactly the EU regions' prod stacks.
+          # GDPR scope: the prod-eu account holds exactly the EU regions'
+          # stacks, whatever the stage. check-data-residency.py treats any stack
+          # in an eu- region as GDPR-scoped (its tags must say gdpr, its state
+          # stay in the EU backend), which only the prod-eu account's stacks
+          # are: so no dev or staging stack in an EU region (owner decision B5).
           eu() { case "$1" in eu-*) echo yes ;; *) echo no ;; esac; }
           gdpr=no
           [ "$account" != "prod-eu" ] || gdpr=yes
-          [ "{{ .Answers.stage }}" != "prod" ] || [ "$(eu "{{ .Answers.region }}")" = "$gdpr" ] \
+          [ "$(eu "{{ .Answers.region }}")" = "$gdpr" ] \
             || fail "account $account and region {{ .Answers.region }} disagree: the EU regions are exactly the prod-eu account's (GDPR)"
+          {{- if eq .Answers.profile "nonprod" }}
+          # Only rendered for a nonprod stack, so a field its `when` hides
+          # never reaches the shell.
+            [ "{{ .Answers.stage }}" != "prod" ] || fail "a nonprod stack is a dev or staging stack, not stage prod"
+            [ "{{ .Answers.vpc_cidr_services }}" != "{{ .Answers.vpc_cidr_main }}" ] \
+              || fail "vpc_cidr_services and vpc_cidr_main must differ (network/vpc-peering joins them)"
+            # Both flavors create the account's singletons (iam/ci's GitHub OIDC
+            # provider, the Auto Scaling service-linked role), so the account
+            # (= the stage) may hold no other stack: check-lane-names.py fails
+            # two. A second region of a nonprod account needs a flavor without
+            # them, as the standby's -standby files are for prod.
+            for other in "$root/stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}"/*.yaml; do
+              case "${other##*/}" in _defaults.yaml) continue ;; esac
+              [ ! -e "$other" ] \
+                || fail "the {{ .Answers.stage }} account already has a stack ($other), which owns its account singletons (GitHub OIDC provider, Auto Scaling service-linked role): a nonprod stack is one per account"
+            done
+          {{- end }}
           {{- if eq .Answers.profile "standby" }}
           # Only rendered for a standby, so a field its `when` hides never
           # reaches the shell.

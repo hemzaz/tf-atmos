@@ -44,6 +44,10 @@ REFUSALS=(
     "fnx-ue2-prod|must differ from its primary's|primary_region=us-east-2 standby_of=fnx-ue2-prod"
     "fnx-ec1-prod|is itself a standby|region=eu-west-1 region_code=ew1 primary_region=eu-central-1 standby_of=fnx-ec1-prod"
     "fnx-ue2-prod|does not belong to stage prod|account=dev"
+    "fnx-ue1-dev|a nonprod stack is a dev or staging stack|stage=prod account=prod"
+    "fnx-ue1-dev|vpc_cidr_services and vpc_cidr_main must differ|vpc_cidr_services=10.0.0.0/16"
+    "fnx-ue1-staging|the EU regions are exactly the prod-eu account's|region=eu-west-1 region_code=ew1"
+    "fnx-ue1-dev|a nonprod stack is one per account|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
     # Shell injection through an answer: refused by the field pattern, and the
     # command substitution never runs (no INJECTED file anywhere).
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
@@ -64,6 +68,12 @@ fi
 cd "$scratch"
 out="$(mktemp -d "$scratch/.check-stack-scaffold.XXXXXX")"
 atmos scaffold validate scaffolds/stack/scaffold.yaml
+# The INJECTION refusal pins critical_alerts' field pattern; this pins the
+# guard's second defence, the urlquery encoding of the answer it reads.
+if ! grep -qF 'case "{{ urlquery .Answers.critical_alerts }}" in' scaffolds/stack/scaffold.yaml; then
+    echo "ERROR scaffolds/stack/scaffold.yaml: the guard no longer reads critical_alerts through urlquery" >&2
+    exit 1
+fi
 
 # snapshot <stack> <out.json> [describe flags...]: the stack, keys sorted.
 snapshot() {
