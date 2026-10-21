@@ -263,6 +263,18 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/dr-pair.py --lint < "$stacks_json"
+      # A queue a lambda's event source mapping reads: visibility_timeout_seconds
+      # below the function timeout fails (AWS rejects the mapping); below
+      # 6 x timeout + 5 warns (check-sqs-visibility.py).
+      - name: check-sqs-visibility
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_sqs_visibility.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-sqs-visibility.py < "$stacks_json"
       # Atmos resolves a read in an abstract for every inheriting instance, even
       # one the instance overrides: every local read an instance resolves, its
       # own or inherited, names a real instance of its stack (the DR standbys
