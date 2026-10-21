@@ -47,7 +47,8 @@ REFUSALS=(
     "fnx-ue1-dev|a nonprod stack is a dev or staging stack|stage=prod account=prod"
     "fnx-ue1-dev|vpc_cidr_services and vpc_cidr_main must differ|vpc_cidr_services=10.0.0.0/16"
     "fnx-ue1-staging|the EU regions are exactly the prod-eu account's|region=eu-west-1 region_code=ew1"
-    "fnx-ue1-dev|a nonprod stack is one per account|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
+    "fnx-ue1-dev|account_singletons=yes, but the dev account already has a stack|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
+    "fnx-ue1-staging|account_singletons=no, but the staging account has no other stack|account_singletons=no"
     # Shell injection through an answer: refused by the field pattern, and the
     # command substitution never runs (no INJECTED file anywhere).
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
