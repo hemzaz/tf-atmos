@@ -6,6 +6,10 @@
 [[- $net := trimSuffix ".0.0/16" .Config.vpc_cidr_main -]]
 [[- $svc := trimSuffix ".0.0/16" (default "" .Config.vpc_cidr_services) -]]
 [[- $transformer_timeout := 900 -]]
+[[- /* The guard's pairing, also under --skip-hooks: the data plane runs in the
+prod account's primary only, the prod-eu account's EU primary has none (owner
+decision B5); no reference stack pins the other two combinations. */ -]]
+[[- if ne $data_plane (not $gdpr) ]][[ fail "prod-primary: data_plane=yes is the prod account's primary only, data_plane=no the prod-eu account's only" ]][[ end -]]
 ---
 # =============================================================================
 # [[ $stack ]]: the [[ $account ]] account's prod primary, [[ .Config.region ]]

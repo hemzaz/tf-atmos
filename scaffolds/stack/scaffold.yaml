@@ -10,6 +10,8 @@
 # where 1.233 runs them in the target directory, so `.` from the root makes the
 # two the same. `--force` is required only because the root is non-empty; it
 # would also overwrite an existing stack, so the `guard` hook refuses one.
+# After it writes the stack, `verify` resolves it and `wire` adds it to the
+# state backend's access roles (scripts/stack-wiring.py).
 #
 # Each profile's template is a near-copy of its reference stacks, whose answers
 # are scaffolds/stack-golden/<stack>.env. scripts/check-stack-scaffold.sh (lint
@@ -442,3 +444,24 @@ spec:
             exit 1
           fi
           echo "scaffold stack: {{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }} resolves"
+
+    # Owner decision C2 Q3: the stack's state pattern pair and CI role ARNs
+    # on its stage's access roles in the backend owning its state
+    # (stacks/orgs/<tenant>/root/us-east-1.yaml; eu-west-1.yaml for prod-eu),
+    # which check-state-keys.py and check-ci-state-roles.py require. A second
+    # run adds nothing. Every argument is a select or a field whose pattern
+    # admits no shell metacharacter (tenant, account, region_code), and the
+    # script validates them again. It prints the NS delegation step, which
+    # needs the deployed zone and stays manual.
+    wire:
+      events:
+        - after.scaffold.generate
+      kind: step
+      type: shell
+      with:
+        command: |
+          set -eu
+          root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          python3 "$root/scripts/stack-wiring.py" "{{ .Answers.tenant }}" "{{ .Answers.stage }}" \
+            "{{ .Answers.account }}" "{{ .Answers.region }}" \
+            "{{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }}"
