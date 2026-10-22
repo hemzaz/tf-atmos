@@ -34,6 +34,9 @@ spec:
     # fnx-ue1-staging; nonprod_flavor picks which one's imports and sizing).
     # standby: a prod DR warm standby (reference stacks fnx-ue2-prod,
     # fnx-ec1-prod), every instance from the catalog's -standby files.
+    # prod-primary: an account's prod primary, owner of its singletons, with
+    # a DR warm standby in dr_region (reference stacks fnx-ew1-prod, the EU
+    # core subset; fnx-ue1-prod, the data plane, comes in a later PR).
     # The defaults are the cheapest stack, a dev one.
     - name: profile
       type: select
@@ -42,6 +45,20 @@ spec:
       options:
         - nonprod
         - standby
+        - prod-primary
+
+    # prod-primary: whether the stack runs fnx-ue1-prod's data plane (the
+    # services VPC, eks/data, rds/data, the ECS cluster, the data API and
+    # Lambdas). Only "no" (fnx-ew1-prod's core subset) is in the template
+    # yet; the guard refuses "yes".
+    - name: data_plane
+      type: select
+      label: Run the data plane (yes = fnx-ue1-prod's, no = fnx-ew1-prod's core subset)
+      default: "no"
+      when: "answers.profile == 'prod-primary'"
+      options:
+        - "yes"
+        - "no"
 
     # nonprod: whose imports and sizing (the residue) to copy: dev is
     # fnx-ue1-dev's (-dev flavors: smaller, deletable), default is
@@ -174,14 +191,14 @@ spec:
         pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
         message: One or more email addresses, comma-separated, no spaces.
 
-    # nonprod: cost-optimization/main's monthly AWS Budget, in USD (the
-    # standby has none: its primary owns the account budget).
+    # nonprod, prod-primary: cost-optimization/main's monthly AWS Budget, in
+    # USD (the standby has none: its primary owns the account budget).
     - name: budget_monthly_limit
       type: input
       label: Monthly AWS Budget (USD)
       required: true
       placeholder: "500"
-      when: "answers.profile == 'nonprod'"
+      when: "answers.profile == 'nonprod' || answers.profile == 'prod-primary'"
       validation:
         pattern: "^[1-9][0-9]{0,6}$"
         message: A whole number of US dollars, 1 to 9999999.
@@ -220,6 +237,34 @@ spec:
         - eu-west-1
         - eu-central-1
 
+    # prod-primary: the region of its DR warm standby (settings.dr.region:
+    # the replica key, backup copies and secret replicas go there, and the
+    # account budget also counts the standby's Environment, dr_region_code).
+    - name: dr_region
+      type: select
+      label: DR region (settings.dr.region, the warm standby's region)
+      default: us-east-2
+      when: "answers.profile == 'prod-primary'"
+      options:
+        - us-east-1
+        - us-east-2
+        - us-west-2
+        - eu-west-1
+        - eu-central-1
+
+    # Must equal the dr_region mixin's settings.context.environment (the
+    # guard hook checks it): the standby's region code, as region_code is
+    # this stack's.
+    - name: dr_region_code
+      type: input
+      label: DR region code (the dr_region mixin's settings.context.environment)
+      required: true
+      placeholder: ue2
+      when: "answers.profile == 'prod-primary'"
+      validation:
+        pattern: "^[a-z]{2}[a-z]?[0-9]$"
+        message: A Cloud Posse short region code, e.g. ue2, ec1.
+
   # Every file under scaffolds/stack is output (a `files` entry only gates
   # one), so the goldens live beside it, in scaffolds/stack-golden.
   files:
@@ -229,6 +274,9 @@ spec:
     - path: stack/standby.yaml.tmpl
       target: "stacks/orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/[[ .Config.region ]].yaml"
       when: "answers.profile == 'standby'"
+    - path: stack/prod-primary.yaml.tmpl
+      target: "stacks/orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/[[ .Config.region ]].yaml"
+      when: "answers.profile == 'prod-primary'"
 
   hooks:
     # Refuses to overwrite a stack (--force alone would), and checks the
@@ -325,6 +373,37 @@ spec:
               *%2C*) ;;
               *) fail "a standby needs at least two critical_alerts (catalog/monitoring/main-standby reads the second)" ;;
             esac
+          {{- end }}
+          {{- if eq .Answers.profile "prod-primary" }}
+          # Only rendered for a prod primary, so a field its `when` hides
+          # never reaches the shell.
+            [ "{{ .Answers.stage }}" = "prod" ] || fail "a prod primary is a prod stack (stage prod)"
+            # The template has fnx-ew1-prod's branch only: the EU core subset,
+            # in the prod-eu account. fnx-ue1-prod's (the data plane, account
+            # prod) comes with its golden.
+            [ "{{ .Answers.data_plane }}" = "no" ] \
+              || fail "prod-primary with data_plane=yes (fnx-ue1-prod's data plane) is not in the template yet"
+            [ "$gdpr" = yes ] \
+              || fail "a non-EU prod primary (account $account) is not in the template yet: only the prod-eu account's EU primary"
+            [ "{{ .Answers.dr_region }}" != "{{ .Answers.region }}" ] \
+              || fail "dr_region must differ from region ({{ .Answers.region }}): it is the warm standby's"
+            [ "$(eu "{{ .Answers.dr_region }}")" = "$gdpr" ] \
+              || fail "dr_region {{ .Answers.dr_region }} and region {{ .Answers.region }} must both be EU (GDPR) or both not"
+            drmixin="$root/stacks/mixins/region/{{ .Answers.dr_region }}.yaml"
+            drcode="$(sed -n 's/^ *environment: *\([a-z0-9]*\) *$/\1/p' "$drmixin" 2>/dev/null | head -n 1)"
+            [ "$drcode" = "{{ .Answers.dr_region_code }}" ] \
+              || fail "dr_region_code {{ .Answers.dr_region_code }} is not $drmixin's environment (${drcode:-no such mixin})"
+            # A prod primary creates its account's singletons (the GitHub OIDC
+            # provider, the Auto Scaling service-linked role, the multi-region
+            # trail, Config's global recording, the budget): one per account.
+            # Its standbys (settings.dr.standby_of) create none.
+            for other in "$root/stacks/orgs/{{ .Answers.tenant }}/prod"/*.yaml; do
+              case "${other##*/}" in _defaults.yaml) continue ;; esac
+              [ -e "$other" ] || continue
+              if grep -q "^ *account: *$account *\$" "$other" && ! grep -q '^ *standby_of:' "$other"; then
+                fail "the $account account already has its prod primary (${other##*/}), which creates its singletons"
+              fi
+            done
           {{- end }}
           echo "scaffold stack: writing $stack_file"
 

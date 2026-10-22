@@ -24,7 +24,8 @@ it cannot be checked. Within a group this fails:
     with create_cross_account_role);
   - two instances that create the same account singleton (SINGLETONS: the
     GitHub OIDC provider, the Auto Scaling service-linked role, the
-    multi-region CloudTrail trail, AWS Config's global-resource recording);
+    multi-region CloudTrail trail, CloudTrail's global-service-event
+    recording, AWS Config's global-resource recording);
     stage fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
@@ -115,6 +116,9 @@ SINGLETONS = {
     ("iam", "github_oidc_create_provider", False): "GitHub OIDC provider",
     ("iam", "enable_autoscaling_service_linked_role", False): "Auto Scaling service-linked role",
     ("cloudtrail", "is_multi_region_trail", True): "multi-region CloudTrail trail",
+    # A second trail recording IAM/STS events would duplicate (and bill) the
+    # account's global-service events: a regional trail sets it false.
+    ("cloudtrail", "include_global_service_events", True): "CloudTrail global-service-event recording",
     ("awsconfig", "include_global_resource_types", True): "AWS Config global-resource recording",
 }
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per

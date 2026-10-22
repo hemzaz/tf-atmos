@@ -37,6 +37,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # into shell unchecked (literal: the $( ) is the point).
 # shellcheck disable=SC2016
 INJECTION='a@example.com,x$(touch${IFS}INJECTED)@example.com'
+# shellcheck disable=SC2016
+DR_INJECTION='ec1$(touch${IFS}INJECTED)'
 # Guard refusals: <golden>|<expected guard message>|<answer overrides...>.
 REFUSALS=(
     "fnx-ue2-prod|at least two critical_alerts|critical_alerts=oncall@example.com"
@@ -51,9 +53,17 @@ REFUSALS=(
     "fnx-ue1-staging|the EU regions are exactly the prod-eu account's|region=eu-west-1 region_code=ew1"
     "fnx-ue1-dev|account_singletons=yes, but the dev account already has a stack|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
     "fnx-ue1-staging|account_singletons=no, but the staging account has no other stack|account_singletons=no"
+    "fnx-ew1-prod|a prod primary is a prod stack|stage=staging account=staging region=us-east-1 region_code=ue1 dr_region=us-east-2 dr_region_code=ue2"
+    "fnx-ew1-prod|data_plane=yes (fnx-ue1-prod's data plane) is not in the template yet|data_plane=yes"
+    "fnx-ew1-prod|a non-EU prod primary (account prod) is not in the template yet|account=prod region=us-east-1 region_code=ue1 dr_region=us-east-2 dr_region_code=ue2"
+    "fnx-ew1-prod|dr_region must differ from region|dr_region=eu-west-1 dr_region_code=ew1"
+    "fnx-ew1-prod|dr_region us-east-2 and region eu-west-1 must both be EU (GDPR) or both not|dr_region=us-east-2 dr_region_code=ue2"
+    "fnx-ew1-prod|dr_region_code ew1 is not|dr_region_code=ew1"
+    "fnx-ew1-prod|the prod-eu account already has its prod primary (eu-west-1.yaml)|region=eu-central-1 region_code=ec1 az_ids=euc1-az1,euc1-az2,euc1-az3 dr_region=eu-west-1 dr_region_code=ew1"
     # Shell injection through an answer: refused by the field pattern, and the
     # command substitution never runs (no INJECTED file anywhere).
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
+    "fnx-ew1-prod|\"dr_region_code\":|dr_region_code=$DR_INJECTION"
 )
 
 scratch="$(mktemp -d)"

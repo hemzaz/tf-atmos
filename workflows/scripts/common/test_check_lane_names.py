@@ -173,10 +173,23 @@ class GroupTest(unittest.TestCase):
                                            include_global_resource_types=True),
             }),
         })
-        self.assertEqual(len(errors), 2, errors)
+        self.assertEqual(len(errors), 3, errors)
         self.assertIn("both create the AWS Config global-resource recording '(one per account)' in account dev",
                       errors[0])
+        self.assertIn("both create the CloudTrail global-service-event recording '(one per account)' in account dev",
+                      errors[2])
         self.assertIn("both create the multi-region CloudTrail trail '(one per account)' in account dev", errors[1])
+
+    def test_second_region_trail_recording_global_service_events_fails(self):
+        # A regional trail that still records IAM/STS events duplicates the account trail's.
+        errors = self.errors({
+            "fnx-ue1-dev": stack(**{"cloudtrail/main": instance("ue1", component="cloudtrail")}),
+            "fnx-uw2-dev": stack(**{"cloudtrail/main": instance(
+                "uw2", component="cloudtrail", region="us-west-2", is_multi_region_trail=False)}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both create the CloudTrail global-service-event recording '(one per account)' in account dev",
+                      errors[0])
 
     def test_trusted_oidc_provider_with_a_creator_passes(self):
         arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
@@ -196,6 +209,10 @@ class GroupTest(unittest.TestCase):
             "fnx-uw2-dev": stack(**{"iam/ci": instance(
                 "uw2", component="iam", region="us-west-2", github_oidc_create_provider=False,
                 github_oidc_provider_arn=arn, create_cross_account_role=False)}),
+            # Another account's creator does not satisfy account dev.
+            "fnx-ue1-prod": stack(**{"iam/ci": instance(
+                "ue1", component="iam", stage="prod", github_oidc_create_provider=True,
+                create_cross_account_role=False)}),
             "fnx-ue1-fixtures-a": stack(**{"iam/ci": instance(
                 "ue1-a", "a", component="iam", stage="fixtures", account="dev", github_oidc_create_provider=True,
                 create_cross_account_role=False)}),
