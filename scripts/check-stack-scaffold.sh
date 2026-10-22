@@ -37,6 +37,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # into shell unchecked (literal: the $( ) is the point).
 # shellcheck disable=SC2016
 INJECTION='a@example.com,x$(touch${IFS}INJECTED)@example.com'
+# shellcheck disable=SC2016
+DR_INJECTION='ec1$(touch${IFS}INJECTED)'
 # Guard refusals: <golden>|<expected guard message>|<answer overrides...>.
 REFUSALS=(
     "fnx-ue2-prod|at least two critical_alerts|critical_alerts=oncall@example.com"
@@ -51,9 +53,17 @@ REFUSALS=(
     "fnx-ue1-staging|the EU regions are exactly the prod-eu account's|region=eu-west-1 region_code=ew1"
     "fnx-ue1-dev|account_singletons=yes, but the dev account already has a stack|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
     "fnx-ue1-staging|account_singletons=no, but the staging account has no other stack|account_singletons=no"
+    "fnx-ew1-prod|a prod primary is a prod stack|stage=staging account=staging region=us-east-1 region_code=ue1 dr_region=us-east-2 dr_region_code=ue2"
+    "fnx-ew1-prod|data_plane=yes (fnx-ue1-prod's data plane) is not in the template yet|data_plane=yes"
+    "fnx-ew1-prod|a non-EU prod primary (account prod) is not in the template yet|account=prod region=us-east-1 region_code=ue1 dr_region=us-east-2 dr_region_code=ue2"
+    "fnx-ew1-prod|dr_region must differ from region|dr_region=eu-west-1 dr_region_code=ew1"
+    "fnx-ew1-prod|dr_region us-east-2 and region eu-west-1 must both be EU (GDPR) or both not|dr_region=us-east-2 dr_region_code=ue2"
+    "fnx-ew1-prod|dr_region_code ew1 is not|dr_region_code=ew1"
+    "fnx-ew1-prod|the prod-eu account already has its prod primary (eu-west-1.yaml)|region=eu-central-1 region_code=ec1 az_ids=euc1-az1,euc1-az2,euc1-az3 dr_region=eu-west-1 dr_region_code=ew1"
     # Shell injection through an answer: refused by the field pattern, and the
     # command substitution never runs (no INJECTED file anywhere).
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
+    "fnx-ew1-prod|\"dr_region_code\":|dr_region_code=$DR_INJECTION"
 )
 
 scratch="$(mktemp -d)"
@@ -120,6 +130,20 @@ generate() {
     atmos scaffold generate stack . --force --defaults "${sets[@]}"
 }
 
+# logged <log> <message>: the log says message. Atmos renders its errors for a
+# terminal, wrapped and (in CI) coloured mid-word, so compare both with the
+# ANSI escapes removed and every whitespace run, newlines included, as one
+# space.
+flatten() {
+    sed $'s/\x1b\\[[0-9;]*[A-Za-z]//g' | tr -s '[:space:]' ' '
+}
+logged() {
+    local text message
+    text="$(flatten < "$1")"
+    message="$(printf '%s' "$2" | flatten)"
+    [[ "$text" == *"$message"* ]]
+}
+
 # golden <env>: regenerate its stack; returns 1 on any difference.
 golden() {
     local env="$1" stack kind rc=0
@@ -144,7 +168,7 @@ golden() {
         cat "$out/$stack.guard.log" >&2
         return 1
     fi
-    if ! grep -q "exists; remove it first" "$out/$stack.guard.log" \
+    if ! logged "$out/$stack.guard.log" "exists; remove it first" \
         || ! cmp -s "$file" "$out/$stack.committed.yaml"; then
         echo "ERROR $stack: the run over an existing $file failed, but not by the guard, or changed it:" >&2
         cat "$out/$stack.guard.log" >&2
@@ -192,7 +216,7 @@ refusal() {
     if generate > "$log" 2>&1; then
         echo "ERROR refusal ($stack with $3): generated, but the guard should refuse: $message" >&2
         rc=1
-    elif ! grep -qF "$message" "$log"; then
+    elif ! logged "$log" "$message"; then
         echo "ERROR refusal ($stack with $3): failed, but not with the guard's \"$message\":" >&2
         cat "$log" >&2
         rc=1

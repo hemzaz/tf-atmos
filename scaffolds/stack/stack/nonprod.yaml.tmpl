@@ -308,6 +308,10 @@ components:
     iam/[[ if eq $flavor "dev" ]]dev[[ else ]]main[[ end ]]:
       vars:
         enable_autoscaling_service_linked_role: false
+    # Deliberate: this regional trail is a second, billed copy of this
+    # region's management events (the other stack's multi-region trail
+    # already delivers them), kept so security-monitoring/main's CIS metric
+    # filters run on a trail in this region.
     cloudtrail/main:
       vars:
         is_multi_region_trail: false
