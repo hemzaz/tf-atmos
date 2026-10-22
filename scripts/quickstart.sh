@@ -448,16 +448,22 @@ check_stack_exists() {
     fi
 }
 
-# Create the stack with the stack scaffold (scaffolds/stack), which prompts for
-# its answers; tenant $TENANT, stage $STAGE and region $REGION must match them.
-# It runs from the repository root with target `.`, as its hooks expect.
+# Create the stack with the stack scaffold (scaffolds/stack, through
+# scripts/scaffold-stack.sh), which prompts for its answers; tenant $TENANT,
+# stage $STAGE and region $REGION must match them. When they do not, the
+# scaffold has written (and wired) a different stack: name it, so the operator
+# keeps or deletes it knowingly.
 create_stack_from_template() {
+    local before after new
     log_info "Creating stack configuration (answer tenant=$TENANT, stage=$STAGE, region=$REGION)..."
 
-    (cd "$PROJECT_ROOT" && atmos scaffold generate stack . --force)
+    before="$(atmos list stacks 2>/dev/null || true)"
+    bash "$SCRIPT_DIR/scaffold-stack.sh"
+    after="$(atmos list stacks 2>/dev/null || true)"
 
-    if ! atmos list stacks 2>/dev/null | grep -qx "$STACK_NAME"; then
-        log_error "The scaffold did not create $STACK_NAME: check the answers and generate again."
+    if ! grep -qx "$STACK_NAME" <<< "$after"; then
+        new="$(comm -13 <(sort <<< "$before") <(sort <<< "$after") | tr '\n' ' ')"
+        log_error "The scaffold did not create $STACK_NAME.${new:+ It created and wired: ${new}(stacks/orgs/<tenant>/<stage>/<region>.yaml and its stacks/orgs/fnx/root/*.yaml lines; keep or remove them).} Generate again with tenant=$TENANT, stage=$STAGE, region=$REGION."
         exit 1
     fi
 }

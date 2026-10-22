@@ -371,25 +371,27 @@ install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned
 # REGION and the default CIDRs go first, so the file's answers win over them;
 # onboard-custom's VPC_CIDR and VPC_CIDR_SERVICES go last and win over the file.
 # Lanes (NAME) are not scaffolded: copy a templates/stacks sample.
+# scripts/scaffold-stack.sh reads the file line by line, refuses any line it
+# cannot pass as one --set word (naming it), and runs the scaffold; make never
+# pastes the file's contents into a shell. sq single-quotes a make value.
 ANSWERS ?=
 VPC_CIDR_SERVICES ?=
-SCAFFOLD_STACK = atmos scaffold generate stack . --force
-SCAFFOLD_SET = --defaults --set tenant=$(TENANT) --set stage=$(STAGE) --set region=$(REGION) --set region_code=$(ENVIRONMENT)
-SCAFFOLD_ANSWERS = $(if $(wildcard $(ANSWERS)),$(foreach a,$(shell sed -n 's/^\([a-z_][a-z_]*=[^ ]*\)$$/\1/p' '$(ANSWERS)'),--set '$(a)'))
+sq = '$(subst ','\'',$(1))'
+SCAFFOLD_STACK = bash scripts/scaffold-stack.sh
+SCAFFOLD_SET = --set $(call sq,tenant=$(TENANT)) --set $(call sq,stage=$(STAGE)) --set $(call sq,region=$(REGION)) --set $(call sq,region_code=$(ENVIRONMENT))
 
 onboard: ## Generate a stage stack with the stack scaffold (ANSWERS=<key=value file>; without it, prompts)
-	@$(if $(ANSWERS),test -f '$(ANSWERS)' || { echo "$(RED)Error: ANSWERS=$(ANSWERS) not found$(NC)"; exit 1; },true)
-	@echo "$(BLUE)Generating a stack with the stack scaffold$(if $(ANSWERS), from $(ANSWERS))...$(NC)"
-	$(SCAFFOLD_STACK)$(if $(ANSWERS), $(SCAFFOLD_SET) --set vpc_cidr_main=10.0.0.0/16 --set vpc_cidr_services=10.1.0.0/16 $(SCAFFOLD_ANSWERS))
+	@echo "$(BLUE)Generating a stack with the stack scaffold...$(NC)"
+	$(SCAFFOLD_STACK)$(if $(ANSWERS), $(SCAFFOLD_SET) --set vpc_cidr_main=10.0.0.0/16 --set vpc_cidr_services=10.1.0.0/16 --answers $(call sq,$(ANSWERS)))
 
 onboard-custom: ## Like onboard, with your CIDRs (usage: make onboard-custom ANSWERS=my.env VPC_CIDR=10.22.0.0/16 [VPC_CIDR_SERVICES=10.23.0.0/16])
-	@if [ -z "$(VPC_CIDR)" ] || [ -z "$(ANSWERS)" ] || [ ! -f '$(ANSWERS)' ]; then \
-		echo "$(RED)Error: VPC_CIDR and an existing ANSWERS file are required$(NC)"; \
+	@if [ -z $(call sq,$(VPC_CIDR)) ] || [ -z $(call sq,$(ANSWERS)) ]; then \
+		echo "$(RED)Error: ANSWERS and VPC_CIDR are required$(NC)"; \
 		echo "Usage: make onboard-custom ANSWERS=my.env VPC_CIDR=10.22.0.0/16 [VPC_CIDR_SERVICES=10.23.0.0/16]"; \
 		exit 1; \
 	fi
-	@echo "$(BLUE)Generating a stack from $(ANSWERS) with vpc/main $(VPC_CIDR)...$(NC)"
-	$(SCAFFOLD_STACK) $(SCAFFOLD_SET) $(SCAFFOLD_ANSWERS) --set vpc_cidr_main=$(VPC_CIDR)$(if $(VPC_CIDR_SERVICES), --set vpc_cidr_services=$(VPC_CIDR_SERVICES))
+	@echo "$(BLUE)Generating a stack with the stack scaffold and your CIDRs...$(NC)"
+	$(SCAFFOLD_STACK) $(SCAFFOLD_SET) --answers $(call sq,$(ANSWERS)) --set $(call sq,vpc_cidr_main=$(VPC_CIDR))$(if $(VPC_CIDR_SERVICES), --set $(call sq,vpc_cidr_services=$(VPC_CIDR_SERVICES)))
 
 list-stacks: ## List all available stacks
 	@echo "$(WHITE)Available Stacks:$(NC)"

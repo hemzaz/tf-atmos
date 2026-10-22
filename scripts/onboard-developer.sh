@@ -581,7 +581,7 @@ make apply                    # Apply changes (with confirmation)
 ### 🌐 Environment Management
 \`\`\`bash
 make list-stacks             # List available environments
-make onboard                 # Quick environment onboarding
+make onboard ANSWERS=my.env  # Generate a stage stack (scaffolds/stack)
 \`\`\`
 
 ## 🛠️ Atmos CLI

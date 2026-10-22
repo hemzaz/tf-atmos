@@ -301,6 +301,12 @@ workflows:
       - name: stack-scaffold
         type: shell
         command: bash scripts/check-stack-scaffold.sh
+      # scripts/scaffold-stack.sh, the answers reader behind make onboard,
+      # quickstart.sh and manifest-generator.sh, passes good answers as the
+      # exact argv and refuses hostile lines loudly without running them.
+      - name: scaffold-stack-reader
+        type: shell
+        command: bash scripts/test-scaffold-stack.sh
       # iam/ci's lambda uploader role names its stage's s3/lambda-artifacts
       # bucket and kms/main alias instead of reading their state (it applies
       # first); this fails when either stops matching, and when an enabled

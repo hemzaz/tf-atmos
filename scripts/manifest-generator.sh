@@ -122,29 +122,18 @@ EOF
 
 generate_stack_template() {
     local answers="$1"
-    local line
-    local sets=()
 
     # Stack scaffolding lives in one place: the stack scaffold (scaffolds/stack;
-    # docs/OPERATIONS.md, Adding a stack), run from the repository root with
-    # target `.`. <answers> is a key=value file (a scaffolds/stack-golden/*.env
-    # is one) for a non-interactive run; `-` prompts for every answer. Lanes
-    # are not scaffolded: copy a templates/stacks sample.
-    if [[ "$answers" != "-" ]]; then
-        if [[ ! -f "$answers" ]]; then
-            echo -e "${RED}❌ Answers file not found: ${answers}${NC}"
-            exit 1
-        fi
-        answers="$(cd "$(dirname "$answers")" && pwd)/$(basename "$answers")"
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            case "$line" in ''|'#'*) continue ;; esac
-            sets+=(--set "$line")
-        done < "$answers"
-        sets=(--defaults "${sets[@]}")
-    fi
-
+    # docs/OPERATIONS.md, Adding a stack), run by scripts/scaffold-stack.sh.
+    # <answers> is a key=value file (a scaffolds/stack-golden/*.env is one) for
+    # a non-interactive run; `-` prompts for every answer. Lanes are not
+    # scaffolded: copy a templates/stacks sample.
     echo -e "${CYAN}🏗️  Generating a stack with atmos scaffold generate stack${NC}"
-    (cd "$PROJECT_ROOT" && atmos scaffold generate stack . --force ${sets[@]+"${sets[@]}"})
+    if [[ "$answers" == "-" ]]; then
+        bash "$SCRIPT_DIR/scaffold-stack.sh"
+    else
+        bash "$SCRIPT_DIR/scaffold-stack.sh" --answers "$answers"
+    fi
 }
 
 generate_component_template() {
