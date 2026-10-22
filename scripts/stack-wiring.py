@@ -16,7 +16,8 @@ check-state-keys.py and check-ci-state-roles.py require there:
     (read, or prod_read for prod) and <stack>-ci-apply to the write role's
     (write, prod_write), in its account (settings.account_map).
 The edit is textual: it inserts lines after each list's last item and leaves
-every other byte, anchors and comments included, as it was. A value already in
+every other byte, anchors, comments and the final newline (or its absence)
+included, as it was. A value already in
 its list is skipped, so a second run changes nothing. When a marker is missing
 (the access_roles block, the role, the anchored list, the write role's alias),
 or a value sits in some other list, it changes nothing and prints the edit to
@@ -24,11 +25,15 @@ make by hand. NS delegation needs the deployed zone's name servers, so it only
 prints that step.
 
 --root is the repository to edit (the tests' copies); by default this script's
-own, so a scratch copy's hook edits that copy. Every argument is validated here
-too, whatever the scaffold's fields already checked. Exit 0 when the stack is
+own, so a scratch copy's hook edits that copy. A concurrent run waits on a lock.
+Every argument is validated here too, whatever the scaffold's fields already
+checked; the stack's region code must be its region mixin's environment. Exit 0 when the stack is
 wired (now or already), 1 otherwise.
 """
 import argparse
+import contextlib
+import fcntl
+import hashlib
 import os
 import pathlib
 import re
@@ -198,7 +203,8 @@ def plan(text: str, stage: str, account: str, stack: str) -> tuple[list[tuple[in
 
 def apply(text: str, inserts: list[tuple[int, list[str]]]) -> str:
     lines = text.splitlines(keepends=True)
-    if lines and not lines[-1].endswith("\n"):
+    # The last line gets its newline only when something is inserted after it.
+    if lines and not lines[-1].endswith("\n") and any(after == len(lines) - 1 for after, _ in inserts):
         lines[-1] += "\r\n" if "\r\n" in text else "\n"
     for after, new in sorted(inserts, reverse=True):
         lines[after + 1:after + 1] = new
@@ -218,30 +224,51 @@ def manual(path: str, stage: str, account: str, stack: str) -> str:
     ])
 
 
+def lock_path(path: pathlib.Path) -> pathlib.Path:
+    """The lock file for a root file: in the temp directory, so the repository gets no stray file."""
+    return pathlib.Path(tempfile.gettempdir()) / f"stack-wiring-{hashlib.sha256(str(path).encode()).hexdigest()}.lock"
+
+
+@contextlib.contextmanager
+def exclusive(path: pathlib.Path):
+    """Hold an exclusive lock over the read-modify-write of path (a concurrent run waits)."""
+    with open(lock_path(path), "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
 def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str, stack: str) -> list[str]:
     """Edit the owning backend's file; the changes made (empty: already wired). Refused if unsafe."""
     account = validate(tenant, stage, account, region, stack)
     backend_region, _ = BACKENDS[account == "prod-eu"]
     rel = f"stacks/orgs/{tenant}/root/{backend_region}.yaml"
-    path = root / rel
+    mixin = root / "stacks" / "mixins" / "region" / f"{region}.yaml"
+    if not mixin.is_file():
+        fail(f"no region mixin {mixin}")
+    code = re.search(r"^ *environment: *([a-z0-9]*) *$", mixin.read_text(encoding="utf-8"), re.M)
+    if not code or stack != f"{tenant}-{code.group(1)}-{stage}":
+        fail(f"stack {stack!r} is not {tenant}-<{mixin.name}'s environment, {code and code.group(1)}>-{stage}")
+    # A symlinked root file is edited through the link, which stays a link.
+    path = (root / rel).resolve()
     if not path.is_file():
         fail(f"no {rel}, the backend owning {stack}'s state")
-    # Bytes as they are: no newline translation.
-    text = path.read_bytes().decode("utf-8")
-    try:
-        inserts, done = plan(text, stage, account, stack)
-    except Refused as error:
-        raise Refused(f"{rel}: {error}\n{manual(rel, stage, account, stack)}") from None
-    if inserts:
-        handle, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    with exclusive(path):
+        # Bytes as they are: no newline translation.
+        text = path.read_bytes().decode("utf-8")
         try:
-            with os.fdopen(handle, "w", encoding="utf-8", newline="") as out:
-                out.write(apply(text, inserts))
-            os.chmod(tmp, path.stat().st_mode & 0o7777)
-            os.replace(tmp, path)
-        except BaseException:
-            os.unlink(tmp)
-            raise
+            inserts, done = plan(text, stage, account, stack)
+        except Refused as error:
+            raise Refused(f"{rel}: {error}\n{manual(rel, stage, account, stack)}") from None
+        if inserts:
+            handle, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+            try:
+                with os.fdopen(handle, "w", encoding="utf-8", newline="") as out:
+                    out.write(apply(text, inserts))
+                os.chmod(tmp, path.stat().st_mode & 0o7777)
+                os.replace(tmp, path)
+            except BaseException:
+                os.unlink(tmp)
+                raise
     return [f"{rel}: {line}" for line in done]
 
 

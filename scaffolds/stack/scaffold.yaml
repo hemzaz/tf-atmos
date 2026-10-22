@@ -295,7 +295,8 @@ spec:
       with:
         command: |
           set -eu
-          root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          root="$PWD"
+          [ -d "$root/stacks/orgs/{{ .Answers.tenant }}/root" ] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           stack_file="$root/stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/{{ .Answers.region }}.yaml"
           mixin="$root/stacks/mixins/region/{{ .Answers.region }}.yaml"
           fail() { echo "scaffold stack: $*" >&2; exit 1; }
@@ -434,7 +435,8 @@ spec:
       with:
         command: |
           set -eu
-          root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          root="$PWD"
+          [ -d "$root/stacks/orgs/{{ .Answers.tenant }}/root" ] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           cd "$root"
           file="stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/{{ .Answers.region }}.yaml"
           if ! atmos validate stacks \
@@ -461,7 +463,8 @@ spec:
       with:
         command: |
           set -eu
-          root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          root="$PWD"
+          [ -d "$root/stacks/orgs/{{ .Answers.tenant }}/root" ] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           python3 "$root/scripts/stack-wiring.py" "{{ .Answers.tenant }}" "{{ .Answers.stage }}" \
             "{{ .Answers.account }}" "{{ .Answers.region }}" \
             "{{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }}"

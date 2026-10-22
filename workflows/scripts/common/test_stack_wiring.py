@@ -10,6 +10,8 @@ import io
 import pathlib
 import shutil
 import tempfile
+import threading
+import time
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
@@ -40,6 +42,7 @@ class Copy(unittest.TestCase):
         for rel in (US, EU):
             (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(REPO / rel, self.root / rel)
+        shutil.copytree(REPO / "stacks" / "mixins" / "region", self.root / "stacks" / "mixins" / "region")
         self.committed = {rel: (REPO / rel).read_text() for rel in (US, EU)}
 
     def text(self, rel: str) -> str:
@@ -100,6 +103,7 @@ class Wire(Copy):
         })
 
     def test_prod_eu_stack_goes_to_the_eu_backend(self) -> None:
+        (self.root / "stacks/mixins/region/eu-north-1.yaml").write_text("vars:\n  environment: en1\n")
         self.wire("fnx", "prod", "prod-eu", "eu-north-1", "fnx-en1-prod")
         self.assertEqual(self.text(US), self.committed[US])
         self.assert_only_added(EU, {
@@ -145,6 +149,33 @@ class Wire(Copy):
         self.assertNotIn(b"\r\r", data)
         self.assertEqual(data.count(b"\n"), data.count(b"\r\n"))
         self.assertIn(b'- "*/fnx-uw2-dev-*"\r\n', data)
+
+
+    def test_final_newline_state_is_kept_unless_inserting_at_the_end(self) -> None:
+        # The last line is a comment after the last list item, so nothing goes after it.
+        (self.root / US).write_bytes(self.committed[US].rstrip("\n").encode())
+        self.wire("fnx", "dev", "", "us-west-2", "fnx-uw2-dev")
+        self.assertFalse(self.text(US).endswith("\n"))
+        self.assertIn('- "*/fnx-uw2-dev-*"\n', self.text(US))
+
+    def test_a_symlinked_root_file_stays_a_link_and_its_target_is_edited(self) -> None:
+        target = self.root / "real.yaml"
+        (self.root / US).rename(target)
+        (self.root / US).symlink_to(target)
+        self.wire("fnx", "dev", "", "us-west-2", "fnx-uw2-dev")
+        self.assertTrue((self.root / US).is_symlink())
+        self.assertIn('- "*/fnx-uw2-dev-*"', target.read_text())
+
+    def test_a_concurrent_run_waits_for_the_lock(self) -> None:
+        path = (self.root / US).resolve()
+        runner = threading.Thread(target=self.wire, args=("fnx", "dev", "", "us-west-2", "fnx-uw2-dev"))
+        with wiring.exclusive(path):
+            runner.start()
+            time.sleep(0.5)
+            self.assertTrue(runner.is_alive())
+            self.assertEqual(self.text(US), self.committed[US])
+        runner.join(10)
+        self.assertIn('- "*/fnx-uw2-dev-*"', self.text(US))
 
 
 class Refuse(Copy):
@@ -217,6 +248,7 @@ class Refuse(Copy):
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-dev\n"), "stack"),
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-staging"), "stack"),
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-dev/../x"), "stack"),
+            (("fnx", "dev", "", "us-west-2", "fnx-ew1-dev"), "environment"),
         ]
         for args, message in cases:
             with self.subTest(args=args):
