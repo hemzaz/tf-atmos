@@ -117,8 +117,10 @@ spec:
         message: A 10.x.0.0/16 CIDR.
 
     # nonprod: whether this stack creates its account's singletons (iam/ci's
-    # GitHub OIDC provider, the Auto Scaling service-linked role): yes for the
-    # account's first stack, no for another region of it (the guard checks).
+    # GitHub OIDC provider, the Auto Scaling service-linked role, the
+    # multi-region CloudTrail trail, AWS Config's global-resource recording):
+    # yes for the account's first stack, no for another region of it (the
+    # guard checks; no gives a regional trail and Config without IAM).
     - name: account_singletons
       type: select
       label: Create the account's singletons (yes = the account's first stack)
@@ -275,8 +277,10 @@ spec:
             [ "{{ .Answers.vpc_cidr_services }}" != "{{ .Answers.vpc_cidr_main }}" ] \
               || fail "vpc_cidr_services and vpc_cidr_main must differ (network/vpc-peering joins them)"
             # The account's singletons (iam/ci's GitHub OIDC provider, the Auto
-            # Scaling service-linked role) are created by exactly one of its
-            # stacks (check-lane-names.py): account_singletons=yes for the
+            # Scaling service-linked role, the multi-region trail, Config's
+            # global-resource recording) are created by exactly one of its
+            # stacks (check-lane-names.py, which also fails a stack trusting
+            # a provider no stack creates): account_singletons=yes for the
             # account's (= the stage's) first stack, no for every other.
             others=""
             for other in "$root/stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}"/*.yaml; do
@@ -285,10 +289,10 @@ spec:
             done
             if [ "{{ .Answers.account_singletons }}" = "yes" ]; then
               [ -z "$others" ] \
-                || fail "account_singletons=yes, but the {{ .Answers.stage }} account already has a stack ($others) that creates its singletons (GitHub OIDC provider, Auto Scaling service-linked role): answer no"
+                || fail "account_singletons=yes, but the {{ .Answers.stage }} account already has a stack ($others) that creates its singletons (GitHub OIDC provider, Auto Scaling service-linked role, multi-region trail, Config global recording): answer no"
             else
               [ -n "$others" ] \
-                || fail "account_singletons=no, but the {{ .Answers.stage }} account has no other stack to create its singletons (GitHub OIDC provider, Auto Scaling service-linked role): answer yes"
+                || fail "account_singletons=no, but the {{ .Answers.stage }} account has no other stack to create its singletons (GitHub OIDC provider, Auto Scaling service-linked role, multi-region trail, Config global recording): answer yes"
             fi
           {{- end }}
           {{- if eq .Answers.profile "standby" }}

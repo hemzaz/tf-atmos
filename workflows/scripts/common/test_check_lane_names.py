@@ -146,6 +146,64 @@ class GroupTest(unittest.TestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("both create the GitHub OIDC provider '(one per account)' in account prod", errors[0])
 
+    def test_second_region_with_regional_trail_and_config_passes(self):
+        # A second nonprod stack of an account (scaffold account_singletons=no).
+        self.assertEqual(self.errors({
+            "fnx-ue1-dev": stack(**{
+                "cloudtrail/main": instance("ue1", component="cloudtrail"),
+                "awsconfig/main": instance("ue1", component="awsconfig"),
+            }),
+            "fnx-uw2-dev": stack(**{
+                "cloudtrail/main": instance("uw2", component="cloudtrail", region="us-west-2",
+                                            is_multi_region_trail=False, include_global_service_events=False),
+                "awsconfig/main": instance("uw2", component="awsconfig", region="us-west-2",
+                                           include_global_resource_types=False),
+            }),
+        }), [])
+
+    def test_second_region_multi_region_trail_and_global_config_fail(self):
+        errors = self.errors({
+            "fnx-ue1-dev": stack(**{
+                "cloudtrail/main": instance("ue1", component="cloudtrail", is_multi_region_trail=True),
+                "awsconfig/main": instance("ue1", component="awsconfig"),
+            }),
+            "fnx-uw2-dev": stack(**{
+                "cloudtrail/main": instance("uw2", component="cloudtrail", region="us-west-2"),
+                "awsconfig/main": instance("uw2", component="awsconfig", region="us-west-2",
+                                           include_global_resource_types=True),
+            }),
+        })
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("both create the AWS Config global-resource recording '(one per account)' in account dev",
+                      errors[0])
+        self.assertIn("both create the multi-region CloudTrail trail '(one per account)' in account dev", errors[1])
+
+    def test_trusted_oidc_provider_with_a_creator_passes(self):
+        arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+        self.assertEqual(self.errors({
+            "fnx-ue1-dev": stack(**{"iam/ci": instance(
+                "ue1", component="iam", github_oidc_create_provider=True, create_cross_account_role=False)}),
+            "fnx-uw2-dev": stack(**{"iam/ci": instance(
+                "uw2", component="iam", region="us-west-2", github_oidc_create_provider=False,
+                github_oidc_provider_arn=arn, create_cross_account_role=False)}),
+        }), [])
+
+    def test_trusted_oidc_provider_without_a_creator_fails(self):
+        # The account's creating stack was deleted: the second stack trusts a provider nobody creates.
+        arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+        errors = self.errors({
+            "fnx-ue1-dev": stack(**{"iam/dev": instance("ue1", component="iam", create_cross_account_role=False)}),
+            "fnx-uw2-dev": stack(**{"iam/ci": instance(
+                "uw2", component="iam", region="us-west-2", github_oidc_create_provider=False,
+                github_oidc_provider_arn=arn, create_cross_account_role=False)}),
+            "fnx-ue1-fixtures-a": stack(**{"iam/ci": instance(
+                "ue1-a", "a", component="iam", stage="fixtures", account="dev", github_oidc_create_provider=True,
+                create_cross_account_role=False)}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("fnx-uw2-dev: iam/ci trusts the account's GitHub OIDC provider", errors[0])
+        self.assertIn("no stack of account dev creates it", errors[0])
+
     def test_dr_region_reusing_an_iam_name_fails(self):
         errors = self.errors({
             "fnx-ue1-prod": stack(**{"iam/ci": instance(

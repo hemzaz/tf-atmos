@@ -23,8 +23,9 @@ it cannot be checked. Within a group this fails:
     counts only while its instance creates the resource (iam policy_name
     with create_cross_account_role);
   - two instances that create the same account singleton (SINGLETONS: the
-    GitHub OIDC provider, the Auto Scaling service-linked role); stage
-    fixtures, never deployed and each standalone, are exempt;
+    GitHub OIDC provider, the Auto Scaling service-linked role, the
+    multi-region CloudTrail trail, AWS Config's global-resource recording);
+    stage fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
 Account-wide names (IAM, the account singletons) are also compared between
@@ -42,7 +43,10 @@ differ in name, and an incidental difference (availability_zones, db_name)
 does not separate them. Instances sharing no primary key compare all their
 name inputs (NAME_INPUT: *_name, *_prefix, domains, zones, ...) instead.
 Across every stack (any account or region): an S3 bucket name or Cognito
-domain prefix (GLOBAL_KEYS, at any depth of vars) set twice.
+domain prefix (GLOBAL_KEYS, at any depth of vars) set twice. Per account: an
+iam instance that trusts the GitHub OIDC provider (github_oidc_provider_arn,
+not creating it) while no stack of the account creates one, which deleting the
+creating stack would leave.
 Exits 1 on any collision.
 """
 import collections
@@ -110,6 +114,8 @@ RAW_NAMES = {
 SINGLETONS = {
     ("iam", "github_oidc_create_provider", False): "GitHub OIDC provider",
     ("iam", "enable_autoscaling_service_linked_role", False): "Auto Scaling service-linked role",
+    ("cloudtrail", "is_multi_region_trail", True): "multi-region CloudTrail trail",
+    ("awsconfig", "include_global_resource_types", True): "AWS Config global-resource recording",
 }
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
 # region (IAM is global within an account).
@@ -326,8 +332,34 @@ def check_global(stacks: dict) -> list[str]:
     return errors
 
 
+def check_trusted_providers(stacks: dict) -> list[str]:
+    """iam instances that trust an existing GitHub OIDC provider (github_oidc_provider_arn,
+    github_oidc_create_provider false) in an account where no stack creates one."""
+    creators, trusting = set(), []
+    for stack_name in sorted(stacks):
+        for name, instance in instances_of(stacks[stack_name]):
+            settings, variables = instance.get("settings") or {}, instance.get("vars") or {}
+            account = (settings.get("environment") or {}).get("account")
+            stage = (settings.get("context") or {}).get("stage")
+            if instance.get("component") != "iam" or not account or stage == fixtures.FIXTURE_STAGE:
+                continue
+            if variables.get("github_oidc_create_provider", False) is True:
+                creators.add(account)
+            elif variables.get("github_oidc_provider_arn"):
+                trusting.append((account, f"{stack_name}: {name}"))
+    return [
+        f"{where} trusts the account's GitHub OIDC provider (github_oidc_provider_arn) but no stack of account "
+        f"{account} creates it: one stack per account sets github_oidc_create_provider: true"
+        for account, where in trusting
+        if account not in creators
+    ]
+
+
 def check(stacks: dict) -> list[str]:
-    return check_groups(stacks) + check_account(stacks) + check_instances(stacks) + check_global(stacks)
+    return (
+        check_groups(stacks) + check_account(stacks) + check_instances(stacks) + check_global(stacks)
+        + check_trusted_providers(stacks)
+    )
 
 
 def main() -> int:
@@ -339,7 +371,7 @@ def main() -> int:
         return 1
     print(
         "no two stacks of one account and region share a tags.Environment, no two instances there create "
-        "the same name or singleton, no two regions of an account share a tags.Environment in IAM/S3 names, no two "
+        "the same name or singleton, every trusted GitHub OIDC provider has a creator, no two regions of an account share a tags.Environment in IAM/S3 names, no two "
         "instances of a component in one stack set the same name, and no S3 bucket or Cognito domain name is "
         "set twice"
     )

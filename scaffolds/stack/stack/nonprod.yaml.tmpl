@@ -296,8 +296,11 @@ components:
     # The account's singletons belong to its other stack (the guard checked
     # there is one): this stack's iam/ci trusts that stack's GitHub OIDC
     # provider instead of creating one, and its iam instance leaves the Auto
-    # Scaling service-linked role alone (check-lane-names.py allows each once
-    # per account), as the prod standbys' -standby files do.
+    # Scaling service-linked role alone, as the prod standbys' -standby files
+    # do. Its trail records this region only (that stack's trail is
+    # multi-region and records the global services) and awsconfig/main
+    # records no global resources (IAM), as awsconfig/main-standby does.
+    # check-lane-names.py allows each singleton once per account.
     iam/ci:
       vars:
         github_oidc_create_provider: false
@@ -305,8 +308,14 @@ components:
     iam/[[ if eq $flavor "dev" ]]dev[[ else ]]main[[ end ]]:
       vars:
         enable_autoscaling_service_linked_role: false
-
-[[- end ]]
+    cloudtrail/main:
+      vars:
+        is_multi_region_trail: false
+        include_global_service_events: false
+    awsconfig/main:
+      vars:
+        include_global_resource_types: false
+[[ end ]]
     # KMS - customer-managed key for Secrets Manager and other encrypted
     # services
     kms/main:
