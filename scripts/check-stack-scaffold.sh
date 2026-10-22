@@ -130,6 +130,20 @@ generate() {
     atmos scaffold generate stack . --force --defaults "${sets[@]}"
 }
 
+# logged <log> <message>: the log says message. Atmos renders its errors for a
+# terminal, wrapped and (in CI) coloured mid-word, so compare both with the
+# ANSI escapes removed and every whitespace run, newlines included, as one
+# space.
+flatten() {
+    sed $'s/\x1b\\[[0-9;]*[A-Za-z]//g' | tr -s '[:space:]' ' '
+}
+logged() {
+    local text message
+    text="$(flatten < "$1")"
+    message="$(printf '%s' "$2" | flatten)"
+    [[ "$text" == *"$message"* ]]
+}
+
 # golden <env>: regenerate its stack; returns 1 on any difference.
 golden() {
     local env="$1" stack kind rc=0
@@ -154,7 +168,7 @@ golden() {
         cat "$out/$stack.guard.log" >&2
         return 1
     fi
-    if ! grep -q "exists; remove it first" "$out/$stack.guard.log" \
+    if ! logged "$out/$stack.guard.log" "exists; remove it first" \
         || ! cmp -s "$file" "$out/$stack.committed.yaml"; then
         echo "ERROR $stack: the run over an existing $file failed, but not by the guard, or changed it:" >&2
         cat "$out/$stack.guard.log" >&2
@@ -202,7 +216,7 @@ refusal() {
     if generate > "$log" 2>&1; then
         echo "ERROR refusal ($stack with $3): generated, but the guard should refuse: $message" >&2
         rc=1
-    elif ! grep -qF "$message" "$log"; then
+    elif ! logged "$log" "$message"; then
         echo "ERROR refusal ($stack with $3): failed, but not with the guard's \"$message\":" >&2
         cat "$log" >&2
         rc=1
