@@ -35,8 +35,8 @@ spec:
     # standby: a prod DR warm standby (reference stacks fnx-ue2-prod,
     # fnx-ec1-prod), every instance from the catalog's -standby files.
     # prod-primary: an account's prod primary, owner of its singletons, with
-    # a DR warm standby in dr_region (reference stacks fnx-ew1-prod, the EU
-    # core subset; fnx-ue1-prod, the data plane, comes in a later PR).
+    # a DR warm standby in dr_region (reference stacks fnx-ue1-prod, the data
+    # plane, and fnx-ew1-prod, the EU core subset).
     # The defaults are the cheapest stack, a dev one.
     - name: profile
       type: select
@@ -49,8 +49,10 @@ spec:
 
     # prod-primary: whether the stack runs fnx-ue1-prod's data plane (the
     # services VPC, eks/data, rds/data, the ECS cluster, the data API and
-    # Lambdas). Only "no" (fnx-ew1-prod's core subset) is in the template
-    # yet; the guard refuses "yes".
+    # Lambdas): yes for the prod account's us-east-1 primary, no for the
+    # prod-eu account's EU primary (fnx-ew1-prod's core subset; owner
+    # decision B5: no data plane in the EU). The guard refuses the other
+    # combinations, which no reference stack pins.
     - name: data_plane
       type: select
       label: Run the data plane (yes = fnx-ue1-prod's, no = fnx-ew1-prod's core subset)
@@ -147,13 +149,14 @@ spec:
         - "yes"
         - "no"
 
-    # nonprod: vpc/services' /16, cut like vpc/main's (no database subnets).
+    # nonprod, prod-primary with the data plane: vpc/services' /16, cut like
+    # vpc/main's (nonprod: no database subnets).
     - name: vpc_cidr_services
       type: input
       label: vpc/services CIDR (/16)
       required: true
       placeholder: 10.23.0.0/16
-      when: "answers.profile == 'nonprod'"
+      when: "answers.profile == 'nonprod' || (answers.profile == 'prod-primary' && answers.data_plane == 'yes')"
       validation:
         pattern: "^10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.0\\.0/16$"
         message: A 10.x.0.0/16 CIDR.
@@ -378,13 +381,25 @@ spec:
           # Only rendered for a prod primary, so a field its `when` hides
           # never reaches the shell.
             [ "{{ .Answers.stage }}" = "prod" ] || fail "a prod primary is a prod stack (stage prod)"
-            # The template has fnx-ew1-prod's branch only: the EU core subset,
-            # in the prod-eu account. fnx-ue1-prod's (the data plane, account
-            # prod) comes with its golden.
-            [ "{{ .Answers.data_plane }}" = "no" ] \
-              || fail "prod-primary with data_plane=yes (fnx-ue1-prod's data plane) is not in the template yet"
-            [ "$gdpr" = yes ] \
-              || fail "a non-EU prod primary (account $account) is not in the template yet: only the prod-eu account's EU primary"
+            # The data plane runs in the prod account's primary only
+            # (fnx-ue1-prod); the prod-eu account's EU primary has the core
+            # subset (fnx-ew1-prod; owner decision B5). The other two
+            # combinations have no reference stack.
+            {{- if eq .Answers.data_plane "yes" }}
+              [ "$gdpr" = no ] \
+                || fail "data_plane=yes in the prod-eu account: the EU primary has no data plane (owner decision B5), answer no"
+              # Its health check alarm notifies <region code>-main-alarms in
+              # us-east-1, where Route 53's alarms live (a CloudWatch alarm only
+              # notifies a topic in its own region): only a us-east-1 primary
+              # owns that topic.
+              [ "{{ .Answers.region }}" = "us-east-1" ] \
+                || fail "a data-plane prod primary must be in us-east-1 (its health check alarm notifies its own topic there)"
+              [ "{{ .Answers.vpc_cidr_services }}" != "{{ .Answers.vpc_cidr_main }}" ] \
+                || fail "vpc_cidr_services and vpc_cidr_main must differ (network/vpc-peering joins them)"
+            {{- else }}
+              [ "$gdpr" = yes ] \
+                || fail "data_plane=no in account $account: only the prod-eu account's EU primary has no data plane, answer yes"
+            {{- end }}
             [ "{{ .Answers.dr_region }}" != "{{ .Answers.region }}" ] \
               || fail "dr_region must differ from region ({{ .Answers.region }}): it is the warm standby's"
             [ "$(eu "{{ .Answers.dr_region }}")" = "$gdpr" ] \
@@ -400,7 +415,8 @@ spec:
             for other in "$root/stacks/orgs/{{ .Answers.tenant }}/prod"/*.yaml; do
               case "${other##*/}" in _defaults.yaml) continue ;; esac
               [ -e "$other" ] || continue
-              if grep -q "^ *account: *$account *\$" "$other" && ! grep -q '^ *standby_of:' "$other"; then
+              # The value plain or quoted (account: prod, account: "prod").
+              if grep -Eq "^ *account: *[\"']?$account[\"']? *\$" "$other" && ! grep -q '^ *standby_of:' "$other"; then
                 fail "the $account account already has its prod primary (${other##*/}), which creates its singletons"
               fi
             done
