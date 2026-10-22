@@ -10,7 +10,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 
 | Input | Where |
 |-------|-------|
-| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`, `prod-eu` (the EU prod account, `fnx-ew1-prod` and its DR stack `fnx-ec1-prod`; GDPR keeps it apart from `prod`). Each stage's `settings.environment.account_id` (`fnx-ew1-prod`'s and `fnx-ec1-prod`'s from `prod-eu`), `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and `fnx-ew1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. `scripts/new-environment.sh` adds a new account here (`AWS_ACCOUNT_ID`). The emulator and fixture stacks keep the emulator's `000000000000` |
+| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`, `prod-eu` (the EU prod account, `fnx-ew1-prod` and its DR stack `fnx-ec1-prod`; GDPR keeps it apart from `prod`). Each stage's `settings.environment.account_id` (`fnx-ew1-prod`'s and `fnx-ec1-prod`'s from `prod-eu`), `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and `fnx-ew1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. A new account is added here by hand (the stack scaffold covers existing accounts only). The emulator and fixture stacks keep the emulator's `000000000000` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
@@ -115,14 +115,15 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU:
-  `root/eu-west-1.yaml`). Add a new stack's
-  `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles there (iam/ci's `ci_role_name_prefix`),
-  and any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
+  `root/eu-west-1.yaml`). A new stack's
+  `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles go there (iam/ci's `ci_role_name_prefix`):
+  the stack scaffold adds them ([Adding a stack](#adding-a-stack)), by hand otherwise; so does
+  any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
   and `validate-all`) fails a CI role that its stage's read or write role, of the backend owning its
   state bucket, does not trust, or that may assume another role (`ci_backend_*_role_arn`).
 - Each stack's state is an exact pattern pair on its stage's roles, `*/<stack>/*` and
-  `*/<stack>-*` (`stacks/orgs/fnx/root/us-east-1.yaml`; EU: `root/eu-west-1.yaml`): add a new stack's pair before its first
-  `init`. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against
+  `*/<stack>-*` (`stacks/orgs/fnx/root/us-east-1.yaml`; EU: `root/eu-west-1.yaml`): a new stack's pair goes
+  there before its first `init`; the stack scaffold adds it, by hand otherwise. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against
   every state key, requiring exactly its stage's roles to match it, and every backend region
   equal to `backend/main`'s.
   `s3:ListBucket` is bucket-wide, so every role sees key names across stages, never contents.
@@ -220,6 +221,29 @@ already comes from the account map (Account IDs, above), so a new or changed acc
 script change. `AWS_PROD_PLAN_ROLE_ARN` is gone; delete it from the repository.
 For CI across several accounts from one OIDC provider, see
 [examples/github-oidc-hub-spoke](../examples/github-oidc-hub-spoke/README.md).
+
+## Adding a stack
+
+A stage stack (`stacks/orgs/<tenant>/<stage>/<region>.yaml`, for an existing stage and account) comes
+from the stack scaffold, `scaffolds/stack`. Pick its profile: `nonprod` (a dev or staging stack),
+`prod-primary` (an account's prod primary, which creates its singletons) or `standby` (a prod
+primary's DR warm standby). Its prompts say what each answer sets. From the repository root:
+
+```bash
+atmos scaffold generate stack . --force        # prompts for the answers
+make onboard ANSWERS=my-stack.env              # the same, from a key=value file (copy a scaffolds/stack-golden/*.env)
+```
+
+The `guard` hook refuses a stack that already exists and answers that disagree with the files they
+name (stage defaults, region mixin, account, the DR pair, the account's singletons). After writing
+it, `verify` resolves the stack and `wire` (`scripts/stack-wiring.py`) adds its state pattern pair and
+CI role ARNs to the backend that owns its state (see [State backend](#state-backend)). Still by hand:
+
+- a new region first needs its `stacks/mixins/region/<region>.yaml`;
+- apply `backend/main` in `fnx-ue1-root` (`fnx-ew1-root` for `prod-eu`) after the wiring, before
+  the stack's first `init`;
+- its CI roles are created by `atmos workflow full -f bootstrap` and its domain is delegated before
+  `certificates`, both in [Deploying a stack](#deploying-a-stack).
 
 ## Deploying a stack
 

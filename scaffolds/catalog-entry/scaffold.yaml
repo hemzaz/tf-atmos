@@ -64,8 +64,9 @@ spec:
       target: "stacks/catalog/{{ .Config.component_name }}/disabled.yaml"
 
   hooks:
-    # Hook commands run in the INVOCATION directory, not the generated output
-    # directory, and no target-dir variable is exposed to them - so the step
+    # Hook commands run in the invocation directory on Atmos 1.229 (CI) and in
+    # the target directory on 1.233, and no target-dir variable is exposed to
+    # them; `.` from the repo root makes the two the same, and the step still
     # resolves the repo root itself instead of assuming the cwd.
     verify:
       events:

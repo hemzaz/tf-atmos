@@ -429,31 +429,37 @@ check_stack_exists() {
     echo -e "${YELLOW}NOT FOUND${NC}"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo "[DRY RUN] Would offer to create it with scripts/new-environment.sh"
+        echo "[DRY RUN] Would offer to create it with: atmos scaffold generate stack . --force"
         return 0
     fi
 
-    echo "Would you like to create it with scripts/new-environment.sh? [y/N]"
+    if [[ -n "$NAME" ]]; then
+        log_error "Lane stacks are not scaffolded: copy a templates/stacks sample (README.md)."
+        exit 1
+    fi
+
+    echo "Would you like to create it with the stack scaffold (atmos scaffold generate stack)? [y/N]"
     read -r response
     if [[ "$response" =~ ^[Yy]$ ]]; then
         create_stack_from_template
     else
-        log_error "Stack configuration is required. Create it with scripts/new-environment.sh."
+        log_error "Stack configuration is required. Create it with: atmos scaffold generate stack . --force (docs/OPERATIONS.md, Adding a stack)."
         exit 1
     fi
 }
 
-# Create the stack with the shared generator (current layout, settings.context naming)
+# Create the stack with the stack scaffold (scaffolds/stack), which prompts for
+# its answers; tenant $TENANT, stage $STAGE and region $REGION must match them.
+# It runs from the repository root with target `.`, as its hooks expect.
 create_stack_from_template() {
-    log_info "Creating stack configuration..."
+    log_info "Creating stack configuration (answer tenant=$TENANT, stage=$STAGE, region=$REGION)..."
 
-    "$SCRIPT_DIR/new-environment.sh" \
-        --tenant "$TENANT" \
-        --stage "$STAGE" \
-        ${NAME:+--name "$NAME"} \
-        --region "$REGION" \
-        --skip-backend \
-        --no-workspace
+    (cd "$PROJECT_ROOT" && atmos scaffold generate stack . --force)
+
+    if ! atmos list stacks 2>/dev/null | grep -qx "$STACK_NAME"; then
+        log_error "The scaffold did not create $STACK_NAME: check the answers and generate again."
+        exit 1
+    fi
 }
 
 # Setup backend infrastructure

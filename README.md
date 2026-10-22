@@ -18,7 +18,7 @@ stacks/orgs/fnx/         org defaults (_defaults.yaml: tags, Terraform version, 
 stacks/catalog/          abstract component defaults; templates/ holds opt-in stack templates
 stacks/mixins/           tenant, stage and region mixins
 workflows/               Atmos workflows (atmos list workflows); scripts/ holds the checks they run
-scripts/                 helpers: plan-sweep.sh, new-environment.sh, certificates/, dr/
+scripts/                 helpers: plan-sweep.sh, certificates/, dr/
 scaffolds/               templates for `atmos scaffold generate`
 templates/, examples/    copy-in component template, stack/config samples, the OIDC hub/spoke example
 .github/workflows/       CI/CD (below)
@@ -95,6 +95,10 @@ real AWS (`workflows/localemu.yaml`).
 **Add a component:** `atmos scaffold generate component . --force` (run from the repo root; it
 also writes the catalog entry). `atmos scaffold generate catalog-entry . --force` adds catalog
 defaults for an existing component.
+
+**Add a stack:** `atmos scaffold generate stack . --force` (run from the repo root) writes a stage
+stack and wires it into the state backend; see
+[Adding a stack](./docs/OPERATIONS.md#adding-a-stack).
 
 **Add an instance:** write it as `stacks/catalog/<c>/<i>[-<flavor>].yaml`, with
 `metadata.component` (and `inherits` for the catalog base), import it from the stack file, which

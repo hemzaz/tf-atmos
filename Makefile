@@ -247,7 +247,7 @@ shell-functions: ## Generate shell functions for .bashrc/.zshrc
 	@echo "  make apply STACK=fnx-ue1-staging      # Apply to staging"
 	@echo
 	@echo "$(WHITE)Development:$(NC)"
-	@echo "  make onboard                         # Quick environment onboarding"
+	@echo "  make onboard ANSWERS=my.env          # Generate a stage stack (scaffolds/stack)"
 
 info: ## Show detailed system and stack information
 	@echo "$(WHITE)System Information:$(NC)"
@@ -364,19 +364,32 @@ install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned
 # Environment Management
 # =============================================================================
 
-onboard: ## Quick environment onboarding with defaults (scaffold stack + bootstrap backend)
-	@echo "$(BLUE)Onboarding environment $(STACK)...$(NC)"
-	@echo "Using default VPC CIDR: 10.0.0.0/16"
-	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) $(if $(NAME),--name $(NAME)) --region $(REGION) --vpc-cidr 10.0.0.0/16 --no-workspace
+# Stage stacks come from the stack scaffold (scaffolds/stack; docs/OPERATIONS.md,
+# "Adding a stack"), run from the repository root with target `.`. ANSWERS is a
+# key=value file of its answers (copy a scaffolds/stack-golden/*.env and edit
+# it); `make onboard` without one prompts for every answer. TENANT, STAGE,
+# REGION and the default CIDRs go first, so the file's answers win over them;
+# onboard-custom's VPC_CIDR and VPC_CIDR_SERVICES go last and win over the file.
+# Lanes (NAME) are not scaffolded: copy a templates/stacks sample.
+ANSWERS ?=
+VPC_CIDR_SERVICES ?=
+SCAFFOLD_STACK = atmos scaffold generate stack . --force
+SCAFFOLD_SET = --defaults --set tenant=$(TENANT) --set stage=$(STAGE) --set region=$(REGION) --set region_code=$(ENVIRONMENT)
+SCAFFOLD_ANSWERS = $(if $(wildcard $(ANSWERS)),$(foreach a,$(shell sed -n 's/^\([a-z_][a-z_]*=[^ ]*\)$$/\1/p' '$(ANSWERS)'),--set '$(a)'))
 
-onboard-custom: ## Custom environment onboarding (usage: make onboard-custom VPC_CIDR=10.1.0.0/16)
-	@if [ -z "$(VPC_CIDR)" ]; then \
-		echo "$(RED)Error: VPC_CIDR variable is required$(NC)"; \
-		echo "Usage: make onboard-custom VPC_CIDR=10.1.0.0/16"; \
+onboard: ## Generate a stage stack with the stack scaffold (ANSWERS=<key=value file>; without it, prompts)
+	@$(if $(ANSWERS),test -f '$(ANSWERS)' || { echo "$(RED)Error: ANSWERS=$(ANSWERS) not found$(NC)"; exit 1; },true)
+	@echo "$(BLUE)Generating a stack with the stack scaffold$(if $(ANSWERS), from $(ANSWERS))...$(NC)"
+	$(SCAFFOLD_STACK)$(if $(ANSWERS), $(SCAFFOLD_SET) --set vpc_cidr_main=10.0.0.0/16 --set vpc_cidr_services=10.1.0.0/16 $(SCAFFOLD_ANSWERS))
+
+onboard-custom: ## Like onboard, with your CIDRs (usage: make onboard-custom ANSWERS=my.env VPC_CIDR=10.22.0.0/16 [VPC_CIDR_SERVICES=10.23.0.0/16])
+	@if [ -z "$(VPC_CIDR)" ] || [ -z "$(ANSWERS)" ] || [ ! -f '$(ANSWERS)' ]; then \
+		echo "$(RED)Error: VPC_CIDR and an existing ANSWERS file are required$(NC)"; \
+		echo "Usage: make onboard-custom ANSWERS=my.env VPC_CIDR=10.22.0.0/16 [VPC_CIDR_SERVICES=10.23.0.0/16]"; \
 		exit 1; \
 	fi
-	@echo "$(BLUE)Onboarding environment $(STACK) with VPC CIDR $(VPC_CIDR)...$(NC)"
-	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) $(if $(NAME),--name $(NAME)) --region $(REGION) --vpc-cidr $(VPC_CIDR) --no-workspace
+	@echo "$(BLUE)Generating a stack from $(ANSWERS) with vpc/main $(VPC_CIDR)...$(NC)"
+	$(SCAFFOLD_STACK) $(SCAFFOLD_SET) $(SCAFFOLD_ANSWERS) --set vpc_cidr_main=$(VPC_CIDR)$(if $(VPC_CIDR_SERVICES), --set vpc_cidr_services=$(VPC_CIDR_SERVICES))
 
 list-stacks: ## List all available stacks
 	@echo "$(WHITE)Available Stacks:$(NC)"
