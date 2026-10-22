@@ -14,11 +14,16 @@
 #   - delete the stack file, generate it again with the hooks (guard, then
 #     verify: atmos validate stacks), check the run wrote that file and nothing
 #     else, yamllint it (relaxed, the lint gate's config) and snapshot it again:
-#     both snapshots must be identical to the committed stack's.
+#     both snapshots must be identical to the committed stack's, and its
+#     import: list must be the committed one in the same order (resolved
+#     config does not depend on the order, so the snapshots cannot pin it).
 # The regenerated file sits at the committed file's path, so no normalising
 # is needed (atmos_manifest and atmos_stack_file are equal by construction).
 # Then each REFUSALS case (a golden with some answers changed) must be refused
-# by the guard with its message, writing nothing. Last, a us-west-2 stack of
+# by the guard with its message, writing nothing; so must a second prod-eu
+# primary with eu-west-1.yaml's account: line quoted, and a hostile value in a
+# field the profile hides must generate the golden unchanged, running nothing.
+# Last, a us-west-2 stack of
 # each nonprod flavor with account_singletons=no is generated beside its
 # account's committed stack, and check-lane-names over every stack must pass.
 #
@@ -39,6 +44,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INJECTION='a@example.com,x$(touch${IFS}INJECTED)@example.com'
 # shellcheck disable=SC2016
 DR_INJECTION='ec1$(touch${IFS}INJECTED)'
+# shellcheck disable=SC2016
+CIDR_INJECTION='10.21.0.0/16$(touch${IFS}INJECTED)'
 # Guard refusals: <golden>|<expected guard message>|<answer overrides...>.
 REFUSALS=(
     "fnx-ue2-prod|at least two critical_alerts|critical_alerts=oncall@example.com"
@@ -54,8 +61,10 @@ REFUSALS=(
     "fnx-ue1-dev|account_singletons=yes, but the dev account already has a stack|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
     "fnx-ue1-staging|account_singletons=no, but the staging account has no other stack|account_singletons=no"
     "fnx-ew1-prod|a prod primary is a prod stack|stage=staging account=staging region=us-east-1 region_code=ue1 dr_region=us-east-2 dr_region_code=ue2"
-    "fnx-ew1-prod|data_plane=yes (fnx-ue1-prod's data plane) is not in the template yet|data_plane=yes"
-    "fnx-ew1-prod|a non-EU prod primary (account prod) is not in the template yet|account=prod region=us-east-1 region_code=ue1 dr_region=us-east-2 dr_region_code=ue2"
+    "fnx-ew1-prod|data_plane=yes in the prod-eu account: the EU primary has no data plane|data_plane=yes vpc_cidr_services=10.31.0.0/16"
+    "fnx-ue1-prod|data_plane=no in account prod: only the prod-eu account's EU primary has no data plane|data_plane=no"
+    "fnx-ue1-prod|a data-plane prod primary must be in us-east-1|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
+    "fnx-ue1-prod|vpc_cidr_services and vpc_cidr_main must differ|vpc_cidr_services=10.20.0.0/16"
     "fnx-ew1-prod|dr_region must differ from region|dr_region=eu-west-1 dr_region_code=ew1"
     "fnx-ew1-prod|dr_region us-east-2 and region eu-west-1 must both be EU (GDPR) or both not|dr_region=us-east-2 dr_region_code=ue2"
     "fnx-ew1-prod|dr_region_code ew1 is not|dr_region_code=ew1"
@@ -64,6 +73,7 @@ REFUSALS=(
     # command substitution never runs (no INJECTED file anywhere).
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
     "fnx-ew1-prod|\"dr_region_code\":|dr_region_code=$DR_INJECTION"
+    "fnx-ue1-prod|\"vpc_cidr_services\":|vpc_cidr_services=$CIDR_INJECTION"
 )
 
 scratch="$(mktemp -d)"
@@ -102,16 +112,18 @@ files_list() {
     find . -type f ! -path './.atmos/*' ! -path "./${out##*/}/*" | LC_ALL=C sort
 }
 
-# load <env> [key=value...]: the golden's answers with the overrides applied,
-# as the --set array `sets`, plus tenant, stage, region, code and file.
+# load <env> [key=value...]: the golden's answers with the overrides applied
+# (an override of a key the golden lacks is added), as the --set array
+# `sets`, plus tenant, stage, region, code and file.
 load() {
-    local env="$1" line key override
+    local env="$1" line key override seen=" "
     shift
     sets=()
     tenant="" stage="" region="" code=""
     while IFS= read -r line || [[ -n "$line" ]]; do
         case "$line" in ''|'#'*) continue ;; esac
         key="${line%%=*}"
+        seen="$seen$key "
         for override in "$@"; do
             [[ "${override%%=*}" == "$key" ]] && line="$override"
         done
@@ -123,6 +135,9 @@ load() {
             region_code) code="${line#*=}" ;;
         esac
     done < "$env"
+    for override in "$@"; do
+        [[ "$seen" == *" ${override%%=*} "* ]] || sets+=(--set "$override")
+    done
     file="stacks/orgs/$tenant/$stage/$region.yaml"
 }
 
@@ -141,7 +156,23 @@ logged() {
     local text message
     text="$(flatten < "$1")"
     message="$(printf '%s' "$2" | flatten)"
+    # An empty (or all-space) message would match any log.
+    [[ -n "${message// /}" ]] || return 1
     [[ "$text" == *"$message"* ]]
+}
+if logged "$REPO_ROOT/scripts/check-stack-scaffold.sh" "" || logged "$REPO_ROOT/scripts/check-stack-scaffold.sh" "   "; then
+    echo "ERROR logged: an empty message matches any log, so a refusal case without one would pass" >&2
+    exit 1
+fi
+
+# imports <file>: its import: list, one entry per line, in file order. The
+# goldens compare resolved config, which does not depend on import order, so
+# this pins the order (a reordered list resolves identically today but may
+# not after a catalog edit).
+imports() {
+    awk '/^import:/ { f = 1; next }
+        f && /^[^ #-]/ { exit }
+        f && /^ *- / { sub(/^ *- */, ""); sub(/ *#.*$/, ""); gsub(/["\047]/, ""); print }' "$1"
 }
 
 # golden <env>: regenerate its stack; returns 1 on any difference.
@@ -190,6 +221,17 @@ golden() {
         rc=1
     fi
     yamllint -d relaxed "$file" || rc=1
+    imports "$out/$stack.committed.yaml" > "$out/$stack.imports.committed"
+    imports "$file" > "$out/$stack.imports.generated"
+    if [[ ! -s "$out/$stack.imports.committed" ]] \
+        || ! cmp -s "$out/$stack.imports.committed" "$out/$stack.imports.generated"; then
+        echo "DIFFERENT $stack (import order): the generated import: list is not the committed one, in order" >&2
+        diff -u --label "committed $file" --label "generated from $env" \
+            "$out/$stack.imports.committed" "$out/$stack.imports.generated" >&2 || true
+        rc=1
+    else
+        echo "import order: $(wc -l < "$out/$stack.imports.committed" | tr -d ' ') imports, as committed"
+    fi
     snapshot "$stack" "$out/$stack.after.json" || return 1
     snapshot "$stack" "$out/$stack.after.raw.json" --process-templates=false || return 1
     for kind in "" .raw; do
@@ -263,6 +305,50 @@ for case in "${REFUSALS[@]}"; do
     refusal "$stack" "$message" "$overrides" || failed="$failed refusal:$stack"
 done
 
+# The one-primary-per-account loop reads an account: line plain or quoted:
+# with eu-west-1.yaml's written `account: "prod-eu"`, a second prod-eu
+# primary is still refused.
+echo "== quoted account (one primary per account)"
+ew1="stacks/orgs/fnx/prod/eu-west-1.yaml"
+cp "$ew1" "$out/quoted.committed.yaml"
+sed 's/^\( *account: *\)prod-eu *$/\1"prod-eu"/' "$out/quoted.committed.yaml" > "$ew1"
+if ! grep -q '^ *account: *"prod-eu"$' "$ew1"; then
+    echo "ERROR quoted account: could not quote $ew1's account: line" >&2
+    failed="$failed quoted-account"
+else
+    refusal fnx-ew1-prod "the prod-eu account already has its prod primary (eu-west-1.yaml)" \
+        "region=eu-central-1 region_code=ec1 az_ids=euc1-az1,euc1-az2,euc1-az3 dr_region=eu-west-1 dr_region_code=ew1" \
+        || failed="$failed quoted-account"
+fi
+cp "$out/quoted.committed.yaml" "$ew1"
+
+# A hostile value in a field the profile's `when` hides (vpc_cidr_services
+# without the data plane) is never interpolated: the stack generates as its
+# golden does, and nothing runs.
+echo "== hidden-field injection (fnx-ew1-prod, vpc_cidr_services)"
+load scaffolds/stack-golden/fnx-ew1-prod.env "vpc_cidr_services=$CIDR_INJECTION"
+cp "$file" "$out/hidden.committed.yaml"
+snapshot fnx-ew1-prod "$out/hidden.before.json"
+rm "$file"
+files_list > "$out/hidden.before"
+if ! generate > "$out/hidden.log" 2>&1; then
+    echo "ERROR hidden-field injection: generating fnx-ew1-prod with a hidden hostile vpc_cidr_services failed:" >&2
+    cat "$out/hidden.log" >&2
+    failed="$failed hidden-injection"
+elif [[ -n "$(find . -name INJECTED)" ]] || [[ -e "$REPO_ROOT/INJECTED" ]]; then
+    echo "ERROR hidden-field injection: the hidden answer was executed by the shell (INJECTED exists)" >&2
+    failed="$failed hidden-injection"
+elif ! snapshot fnx-ew1-prod "$out/hidden.after.json" || ! cmp -s "$out/hidden.before.json" "$out/hidden.after.json"; then
+    echo "ERROR hidden-field injection: the hidden answer changed fnx-ew1-prod" >&2
+    failed="$failed hidden-injection"
+else
+    echo "hidden field: vpc_cidr_services=$CIDR_INJECTION ignored, nothing executed, fnx-ew1-prod unchanged"
+fi
+files_list > "$out/hidden.after"
+LC_ALL=C comm -13 "$out/hidden.before" "$out/hidden.after" | while IFS= read -r f; do rm -f "$f"; done
+find . -name INJECTED -exec rm -f {} +
+cp "$out/hidden.committed.yaml" "$file"
+
 # A second-region stack of each nonprod flavor (account_singletons=no, the
 # branch no golden renders), generated with the hooks beside the account's
 # committed stack: check-lane-names over every stack must pass, so the
@@ -303,4 +389,4 @@ if [[ -n "$failed" ]]; then
     echo "stack scaffold check failed for:$(echo "$failed" | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd ' ' -)" >&2
     exit 1
 fi
-echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw); the guard refuses all ${#REFUSALS[@]} bad answer sets; the ${#SECOND_REGION[@]} second-region stacks leave the account singletons"
+echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order); the guard refuses all ${#REFUSALS[@]} bad answer sets; the ${#SECOND_REGION[@]} second-region stacks leave the account singletons"
