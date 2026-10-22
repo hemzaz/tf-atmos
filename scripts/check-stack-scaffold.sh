@@ -18,7 +18,9 @@
 # The regenerated file sits at the committed file's path, so no normalising
 # is needed (atmos_manifest and atmos_stack_file are equal by construction).
 # Then each REFUSALS case (a golden with some answers changed) must be refused
-# by the guard with its message, writing nothing.
+# by the guard with its message, writing nothing. Last, a us-west-2 stack of
+# each nonprod flavor with account_singletons=no is generated beside its
+# account's committed stack, and check-lane-names over every stack must pass.
 #
 # A residue edit to a reference stack must update its template or .env in the
 # same PR, or this fails.
@@ -44,6 +46,11 @@ REFUSALS=(
     "fnx-ue2-prod|must differ from its primary's|primary_region=us-east-2 standby_of=fnx-ue2-prod"
     "fnx-ec1-prod|is itself a standby|region=eu-west-1 region_code=ew1 primary_region=eu-central-1 standby_of=fnx-ec1-prod"
     "fnx-ue2-prod|does not belong to stage prod|account=dev"
+    "fnx-ue1-dev|a nonprod stack is a dev or staging stack|stage=prod account=prod"
+    "fnx-ue1-dev|vpc_cidr_services and vpc_cidr_main must differ|vpc_cidr_services=10.0.0.0/16"
+    "fnx-ue1-staging|the EU regions are exactly the prod-eu account's|region=eu-west-1 region_code=ew1"
+    "fnx-ue1-dev|account_singletons=yes, but the dev account already has a stack|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3"
+    "fnx-ue1-staging|account_singletons=no, but the staging account has no other stack|account_singletons=no"
     # Shell injection through an answer: refused by the field pattern, and the
     # command substitution never runs (no INJECTED file anywhere).
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
@@ -64,6 +71,12 @@ fi
 cd "$scratch"
 out="$(mktemp -d "$scratch/.check-stack-scaffold.XXXXXX")"
 atmos scaffold validate scaffolds/stack/scaffold.yaml
+# The INJECTION refusal pins critical_alerts' field pattern; this pins the
+# guard's second defence, the urlquery encoding of the answer it reads.
+if ! grep -qF 'case "{{ urlquery .Answers.critical_alerts }}" in' scaffolds/stack/scaffold.yaml; then
+    echo "ERROR scaffolds/stack/scaffold.yaml: the guard no longer reads critical_alerts through urlquery" >&2
+    exit 1
+fi
 
 # snapshot <stack> <out.json> [describe flags...]: the stack, keys sorted.
 snapshot() {
@@ -226,8 +239,44 @@ for case in "${REFUSALS[@]}"; do
     refusal "$stack" "$message" "$overrides" || failed="$failed refusal:$stack"
 done
 
+# A second-region stack of each nonprod flavor (account_singletons=no, the
+# branch no golden renders), generated with the hooks beside the account's
+# committed stack: check-lane-names over every stack must pass, so the
+# singletons it leaves to that stack (GitHub OIDC provider, Auto Scaling SLR,
+# multi-region trail, Config global recording) are really left.
+echo "== second-region stacks (account_singletons=no)"
+SECOND_REGION=(
+    "fnx-ue1-dev|stacks/orgs/fnx/dev/us-west-2.yaml"
+    "fnx-ue1-staging|stacks/orgs/fnx/staging/us-west-2.yaml"
+)
+files_list > "$out/second.before"
+second_ok=1
+for case in "${SECOND_REGION[@]}"; do
+    IFS='|' read -r stack expected <<< "$case"
+    load "scaffolds/stack-golden/$stack.env" account_singletons=no region=us-west-2 region_code=uw2 \
+        az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.2.0.0/16 vpc_cidr_services=10.3.0.0/16
+    if [[ "$file" != "$expected" ]] || ! generate > "$out/second.log" 2>&1; then
+        echo "ERROR second region ($stack, account_singletons=no): generating $expected failed:" >&2
+        cat "$out/second.log" >&2
+        second_ok=0
+    fi
+done
+if [[ "$second_ok" -eq 1 ]]; then
+    atmos describe stacks --process-functions=false --format json > "$out/second.json"
+    if python3 workflows/scripts/common/check-lane-names.py < "$out/second.json" > "$out/second.lanes" 2>&1; then
+        echo "lane names: OK with fnx-uw2-dev and fnx-uw2-staging beside their accounts' ue1 stacks"
+    else
+        echo "ERROR second region: a stack generated with account_singletons=no collides with its account's other stack:" >&2
+        cat "$out/second.lanes" >&2
+        second_ok=0
+    fi
+fi
+[[ "$second_ok" -eq 1 ]] || failed="$failed second-region"
+files_list > "$out/second.after"
+LC_ALL=C comm -13 "$out/second.before" "$out/second.after" | while IFS= read -r f; do rm -f "$f"; done
+
 if [[ -n "$failed" ]]; then
-    echo "stack scaffold check failed for: $(echo "$failed" | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd ' ' -)" >&2
+    echo "stack scaffold check failed for:$(echo "$failed" | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd ' ' -)" >&2
     exit 1
 fi
-echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw); the guard refuses all ${#REFUSALS[@]} bad answer sets"
+echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw); the guard refuses all ${#REFUSALS[@]} bad answer sets; the ${#SECOND_REGION[@]} second-region stacks leave the account singletons"
