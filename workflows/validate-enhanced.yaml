@@ -138,6 +138,13 @@ workflows:
       - name: plan-sweep-samples
         type: shell
         command: bash scripts/check-stack-samples.sh --sweep
+      # The stack scaffold's fresh stacks (scripts/check-stack-scaffold.sh:
+      # two second-region nonprod stacks and a prod primary + standby pair),
+      # generated and wired by its hooks in a scratch copy, through the same
+      # sweep. Lint's stack-scaffold step runs the rest of that script.
+      - name: plan-sweep-scaffold
+        type: shell
+        command: bash scripts/check-stack-scaffold.sh --sweep
 
   # Runs `terraform test` (tests/*.tftest.hcl) for every component that has a
   # tests/ directory. The CI job (.github/workflows/terraform-ci.yml,

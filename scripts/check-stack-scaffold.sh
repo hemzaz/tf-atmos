@@ -12,31 +12,54 @@
 #   - `atmos scaffold generate stack . --force --defaults --set ...` with the
 #     stack file still there must fail (the guard hook) and leave it unchanged;
 #   - delete the stack file, generate it again with the hooks (guard, then
-#     verify: atmos validate stacks), check the run wrote that file and nothing
-#     else, yamllint it (relaxed, the lint gate's config) and snapshot it again:
-#     both snapshots must be identical to the committed stack's, and its
-#     import: list must be the committed one in the same order (resolved
-#     config does not depend on the order, so the snapshots cannot pin it).
+#     verify: atmos validate stacks, then wire: scripts/stack-wiring.py),
+#     check the run wrote that file and nothing else, left the root backend
+#     files as they were (the reference stack is already wired), yamllint it
+#     (relaxed, the lint gate's config) and snapshot it again: both snapshots
+#     must be identical to the committed stack's, and its import: list must
+#     be the committed one in the same order (today's resolved config does
+#     not depend on the order, no two imports setting the same key, so the
+#     snapshots cannot pin it).
 # The regenerated file sits at the committed file's path, so no normalising
 # is needed (atmos_manifest and atmos_stack_file are equal by construction).
 # Then each REFUSALS case (a golden with some answers changed) must be refused
 # by the guard with its message, writing nothing; so must a second prod-eu
-# primary with eu-west-1.yaml's account: line quoted, and a hostile value in a
-# field the profile hides must generate the golden unchanged, running nothing.
-# Last, a us-west-2 stack of
-# each nonprod flavor with account_singletons=no is generated beside its
-# account's committed stack, and check-lane-names over every stack must pass.
+# primary with eu-west-1.yaml's account: line quoted, a second prod primary
+# beside a hand-written one whose account: line is plain or quoted, and, with
+# the hooks skipped, a prod primary whose data_plane does not match its
+# account (the template's own fail). A hostile value in a field the profile
+# hides must generate the golden unchanged, running nothing.
+# Last, the fresh-stack end to end: brand-new stacks generated with the hooks
+# (a us-west-2 stack of each nonprod flavor with account_singletons=no beside
+# its account's committed stack, and a prod primary + standby pair,
+# fnx-ue1-prod with its DR in us-west-2 and the new standby fnx-uw2-prod, in
+# place of the committed ue1/ue2 pair: no other prod primary is generatable,
+# one per account), so the wire hook adds each to the root backend. The root
+# file may differ only by the added lines, a second wiring run must add
+# nothing, and every stack check (as check-stack-samples.sh runs them, plus
+# dr-pair --lint) must pass over the result.
+#
+# The hooks edit the copy they run in (git's top level, else the working
+# directory): the scratch copy is checked not to sit inside a git work tree,
+# and the real repository's root backend files must be unchanged at the end.
 #
 # A residue edit to a reference stack must update its template or .env in the
 # same PR, or this fails.
 #
-# Usage: scripts/check-stack-scaffold.sh
-# Needs atmos, python3 and yamllint. Exit 0 when every golden regenerates
-# identically and every refusal is refused, 1 otherwise.
+# Usage: scripts/check-stack-scaffold.sh [--sweep]
+# --sweep (validate-enhanced) runs only the fresh-stack end to end, then
+# scripts/plan-sweep.sh on the fresh stacks (lint runs the rest).
+# Needs atmos, python3 and yamllint (and, for --sweep, plan-sweep's tools).
+# Exit 0 when every golden regenerates identically, every refusal is refused
+# and the fresh stacks pass, 1 otherwise.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SWEEP="false"
+[[ "${1:-}" == "--sweep" ]] && SWEEP="true"
+# The backends the wire hook edits; the real ones must never change.
+ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.yaml)
 
 # A critical_alerts answer that runs a command if any hook interpolates it
 # into shell unchecked (literal: the $( ) is the point).
@@ -46,6 +69,16 @@ INJECTION='a@example.com,x$(touch${IFS}INJECTED)@example.com'
 DR_INJECTION='ec1$(touch${IFS}INJECTED)'
 # shellcheck disable=SC2016
 CIDR_INJECTION='10.21.0.0/16$(touch${IFS}INJECTED)'
+# shellcheck disable=SC2016
+TENANT_INJECTION='fnx$(touch${IFS}INJECTED)'
+# shellcheck disable=SC2016
+ACCOUNT_INJECTION='dev";touch${IFS}INJECTED;"'
+# shellcheck disable=SC2016
+CODE_INJECTION='ue1`touch${IFS}INJECTED`'
+# shellcheck disable=SC2016
+STAGE_INJECTION='dev$(touch${IFS}INJECTED)'
+# shellcheck disable=SC2016
+REGION_INJECTION='us-east-1;touch${IFS}INJECTED'
 # Guard refusals: <golden>|<expected guard message>|<answer overrides...>.
 REFUSALS=(
     "fnx-ue2-prod|at least two critical_alerts|critical_alerts=oncall@example.com"
@@ -74,10 +107,19 @@ REFUSALS=(
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
     "fnx-ew1-prod|\"dr_region_code\":|dr_region_code=$DR_INJECTION"
     "fnx-ue1-prod|\"vpc_cidr_services\":|vpc_cidr_services=$CIDR_INJECTION"
+    # Every answer the wire hook passes to scripts/stack-wiring.py is refused
+    # before any hook runs: the inputs by their patterns, the selects by their
+    # options.
+    "fnx-ue1-dev|\"tenant\":|tenant=$TENANT_INJECTION"
+    "fnx-ue1-dev|\"account\":|account=$ACCOUNT_INJECTION"
+    "fnx-ue1-dev|\"region_code\":|region_code=$CODE_INJECTION"
+    "fnx-ue1-dev|(valid values: dev, staging, prod)|stage=$STAGE_INJECTION"
+    "fnx-ue1-dev|(valid values: us-east-1, us-east-2, us-west-2, eu-west-1, eu-central-1)|region=$REGION_INJECTION"
 )
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+real_roots="$(cd "$REPO_ROOT" && cksum "${ROOT_FILES[@]}")"
 
 # The working tree minus ignored files (as check-stack-samples.sh); outside a
 # usable git work tree (the CI container's unsafe owner), every file but .git
@@ -90,6 +132,29 @@ else
 fi
 cd "$scratch"
 out="$(mktemp -d "$scratch/.check-stack-scaffold.XXXXXX")"
+# The hooks resolve the repository as git's top level, else the working
+# directory: inside some work tree, they would edit that one.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "ERROR the scratch copy $scratch is inside a git work tree; the scaffold hooks would edit $(git rev-parse --show-toplevel)" >&2
+    exit 1
+fi
+mkdir "$out/roots"
+for root_file in "${ROOT_FILES[@]}"; do
+    cp "$root_file" "$out/roots/${root_file##*/}"
+done
+# roots_unchanged <what>: the scratch copy's root backend files are as copied.
+roots_unchanged() {
+    local root_file rc=0
+    for root_file in "${ROOT_FILES[@]}"; do
+        if ! cmp -s "$root_file" "$out/roots/${root_file##*/}"; then
+            echo "ERROR $1: $root_file changed:" >&2
+            diff -u "$out/roots/${root_file##*/}" "$root_file" >&2 || true
+            rc=1
+        fi
+    done
+    return "$rc"
+}
+python3 -m unittest workflows/scripts/common/test_stack_wiring.py
 atmos scaffold validate scaffolds/stack/scaffold.yaml
 # The INJECTION refusal pins critical_alerts' field pattern; this pins the
 # guard's second defence, the urlquery encoding of the answer it reads.
@@ -141,8 +206,10 @@ load() {
     file="stacks/orgs/$tenant/$stage/$region.yaml"
 }
 
+# GEN_FLAGS: extra flags for the next generate calls (--skip-hooks).
+GEN_FLAGS=()
 generate() {
-    atmos scaffold generate stack . --force --defaults "${sets[@]}"
+    atmos scaffold generate stack . --force --defaults ${GEN_FLAGS[@]+"${GEN_FLAGS[@]}"} "${sets[@]}"
 }
 
 # logged <log> <message>: the log says message. Atmos renders its errors for a
@@ -166,9 +233,10 @@ if logged "$REPO_ROOT/scripts/check-stack-scaffold.sh" "" || logged "$REPO_ROOT/
 fi
 
 # imports <file>: its import: list, one entry per line, in file order. The
-# goldens compare resolved config, which does not depend on import order, so
-# this pins the order (a reordered list resolves identically today but may
-# not after a catalog edit).
+# goldens compare resolved config, which today does not depend on import order
+# (Atmos merges imports in order, later wins, but no two of a reference
+# stack's imports set the same key), so this pins the order (a reordered list
+# resolves identically today but may not after a catalog edit).
 imports() {
     awk '/^import:/ { f = 1; next }
         f && /^[^ #-]/ { exit }
@@ -220,6 +288,8 @@ golden() {
         LC_ALL=C comm -3 "$out/$stack.files.before" "$out/$stack.files.after" >&2
         rc=1
     fi
+    # The wire hook ran, and found the reference stack already wired.
+    roots_unchanged "$stack (wire hook on an already wired stack)" || rc=1
     yamllint -d relaxed "$file" || rc=1
     imports "$out/$stack.committed.yaml" > "$out/$stack.imports.committed"
     imports "$file" > "$out/$stack.imports.generated"
@@ -249,7 +319,7 @@ golden() {
 refusal() {
     local stack="$1" message="$2" overrides log rc
     read -r -a overrides <<< "$3"
-    load "scaffolds/stack-golden/$stack.env" "${overrides[@]}"
+    load "scaffolds/stack-golden/$stack.env" ${overrides[@]+"${overrides[@]}"}
     log="$out/refusal.log"
     # The target may be a real stack; remove it so only the case's own
     # answers can be refused.
@@ -275,6 +345,7 @@ refusal() {
         LC_ALL=C comm -3 "$out/refusal.before" "$out/refusal.after" >&2
         rc=1
     fi
+    roots_unchanged "refusal ($stack with $3)" || rc=1
     [[ "$rc" -ne 0 ]] || echo "guard: refused $stack with $3 ($message)"
     # Undo whatever the case did.
     LC_ALL=C comm -13 "$out/refusal.before" "$out/refusal.after" | while IFS= read -r f; do rm -f "$f"; done
@@ -284,6 +355,15 @@ refusal() {
 
 failed=""
 goldens=0
+refused=0
+
+# clean_since <before list>: remove every file a case wrote since the listing.
+clean_since() {
+    files_list > "$out/clean.after"
+    LC_ALL=C comm -13 "$1" "$out/clean.after" | while IFS= read -r f; do rm -f "$f"; done
+}
+
+if [[ "$SWEEP" == "false" ]]; then
 for env in scaffolds/stack-golden/*.env; do
     goldens=$((goldens + 1))
     stack="$(basename "$env" .env)"
@@ -291,8 +371,7 @@ for env in scaffolds/stack-golden/*.env; do
     golden "$env" || failed="$failed $stack"
     # Leave the committed file, and nothing a run wrote, for the next golden.
     [[ ! -f "$out/$stack.committed.yaml" ]] || cp "$out/$stack.committed.yaml" "$file"
-    files_list > "$out/files.after"
-    LC_ALL=C comm -13 "$out/files.before" "$out/files.after" | while IFS= read -r f; do rm -f "$f"; done
+    clean_since "$out/files.before"
 done
 if [[ "$goldens" -eq 0 ]]; then
     echo "ERROR no scaffolds/stack-golden/*.env" >&2
@@ -302,6 +381,7 @@ fi
 echo "== guard refusals"
 for case in "${REFUSALS[@]}"; do
     IFS='|' read -r stack message overrides <<< "$case"
+    refused=$((refused + 1))
     refusal "$stack" "$message" "$overrides" || failed="$failed refusal:$stack"
 done
 
@@ -316,11 +396,46 @@ if ! grep -q '^ *account: *"prod-eu"$' "$ew1"; then
     echo "ERROR quoted account: could not quote $ew1's account: line" >&2
     failed="$failed quoted-account"
 else
+    refused=$((refused + 1))
     refusal fnx-ew1-prod "the prod-eu account already has its prod primary (eu-west-1.yaml)" \
         "region=eu-central-1 region_code=ec1 az_ids=euc1-az1,euc1-az2,euc1-az3 dr_region=eu-west-1 dr_region_code=ew1" \
         || failed="$failed quoted-account"
 fi
 cp "$out/quoted.committed.yaml" "$ew1"
+
+# The same loop for the prod account, which no generatable tree reaches (its
+# only primary is us-east-1's data plane): a hand-written us-west-2 primary,
+# a copy of fnx-ue1-prod with its account: line plain, "quoted" and 'quoted',
+# refuses regenerating fnx-ue1-prod (refusal moves the committed file away).
+echo "== hand-written prod primary (one primary per account)"
+uw2="stacks/orgs/fnx/prod/us-west-2.yaml"
+for quote in "" '"' "'"; do
+    sed "s/^\( *account: *\)prod *\$/\1${quote}prod${quote}/" stacks/orgs/fnx/prod/us-east-1.yaml > "$uw2"
+    if ! grep -q "^ *account: *${quote}prod${quote}\$" "$uw2"; then
+        echo "ERROR hand-written primary: could not write $uw2's account: line as ${quote}prod${quote}" >&2
+        failed="$failed hand-written-primary"
+    else
+        refused=$((refused + 1))
+        refusal fnx-ue1-prod "the prod account already has its prod primary (us-west-2.yaml)" "" \
+            || failed="$failed hand-written-primary"
+    fi
+    rm -f "$uw2"
+done
+
+# With every hook skipped (no guard), the prod primary template still refuses
+# a data_plane its account does not run: its own fail, writing nothing (Atmos
+# 1.229 reports only that the template failed, not the fail's message).
+echo "== template refusals (--skip-hooks)"
+GEN_FLAGS=(--skip-hooks)
+for case in \
+    "fnx-ue1-prod|data_plane=no" \
+    "fnx-ew1-prod|data_plane=yes vpc_cidr_services=10.31.0.0/16"; do
+    IFS='|' read -r stack overrides <<< "$case"
+    refused=$((refused + 1))
+    refusal "$stack" "Failed to generate files: stack/prod-primary.yaml.tmpl" "$overrides" \
+        || failed="$failed template-refusal:$stack"
+done
+GEN_FLAGS=()
 
 # A hostile value in a field the profile's `when` hides (vpc_cidr_services
 # without the data plane) is never interpolated: the stack generates as its
@@ -331,7 +446,12 @@ cp "$file" "$out/hidden.committed.yaml"
 snapshot fnx-ew1-prod "$out/hidden.before.json"
 rm "$file"
 files_list > "$out/hidden.before"
-if ! generate > "$out/hidden.log" 2>&1; then
+# The golden has no vpc_cidr_services: load must have added the override, or
+# this case tests nothing.
+if [[ " ${sets[*]} " != *" vpc_cidr_services=$CIDR_INJECTION "* ]]; then
+    echo "ERROR hidden-field injection: the hostile vpc_cidr_services was not passed (sets: ${sets[*]})" >&2
+    failed="$failed hidden-injection"
+elif ! generate > "$out/hidden.log" 2>&1; then
     echo "ERROR hidden-field injection: generating fnx-ew1-prod with a hidden hostile vpc_cidr_services failed:" >&2
     cat "$out/hidden.log" >&2
     failed="$failed hidden-injection"
@@ -344,49 +464,128 @@ elif ! snapshot fnx-ew1-prod "$out/hidden.after.json" || ! cmp -s "$out/hidden.b
 else
     echo "hidden field: vpc_cidr_services=$CIDR_INJECTION ignored, nothing executed, fnx-ew1-prod unchanged"
 fi
-files_list > "$out/hidden.after"
-LC_ALL=C comm -13 "$out/hidden.before" "$out/hidden.after" | while IFS= read -r f; do rm -f "$f"; done
+clean_since "$out/hidden.before"
 find . -name INJECTED -exec rm -f {} +
 cp "$out/hidden.committed.yaml" "$file"
+roots_unchanged "hidden-field injection" || failed="$failed hidden-injection"
+fi
 
-# A second-region stack of each nonprod flavor (account_singletons=no, the
-# branch no golden renders), generated with the hooks beside the account's
-# committed stack: check-lane-names over every stack must pass, so the
-# singletons it leaves to that stack (GitHub OIDC provider, Auto Scaling SLR,
-# multi-region trail, Config global recording) are really left.
-echo "== second-region stacks (account_singletons=no)"
-SECOND_REGION=(
-    "fnx-ue1-dev|stacks/orgs/fnx/dev/us-west-2.yaml"
-    "fnx-ue1-staging|stacks/orgs/fnx/staging/us-west-2.yaml"
+# The fresh-stack end to end. Scratch-only setup for the prod pair: the
+# committed ue1/ue2 pair's files and their root backend lines go, so the pair
+# below is wired from an empty prod family. Each FRESH entry is
+# <golden>|<stack>|<answer overrides>, generated in order with the hooks.
+echo "== fresh stacks (generated and wired by the hooks)"
+FRESH=(
+    "fnx-ue1-dev|fnx-uw2-dev|account_singletons=no region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.2.0.0/16 vpc_cidr_services=10.3.0.0/16"
+    "fnx-ue1-staging|fnx-uw2-staging|account_singletons=no region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.2.0.0/16 vpc_cidr_services=10.3.0.0/16"
+    "fnx-ue1-prod|fnx-ue1-prod|dr_region=us-west-2 dr_region_code=uw2"
+    "fnx-ue2-prod|fnx-uw2-prod|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.26.0.0/16"
 )
-files_list > "$out/second.before"
-second_ok=1
-for case in "${SECOND_REGION[@]}"; do
-    IFS='|' read -r stack expected <<< "$case"
-    load "scaffolds/stack-golden/$stack.env" account_singletons=no region=us-west-2 region_code=uw2 \
-        az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.2.0.0/16 vpc_cidr_services=10.3.0.0/16
-    if [[ "$file" != "$expected" ]] || ! generate > "$out/second.log" 2>&1; then
-        echo "ERROR second region ($stack, account_singletons=no): generating $expected failed:" >&2
-        cat "$out/second.log" >&2
-        second_ok=0
+us_root="${ROOT_FILES[0]}"
+files_list > "$out/fresh.before"
+cp "$us_root" "$out/fresh.root.committed"
+fresh_ok=1
+rm stacks/orgs/fnx/prod/us-east-1.yaml stacks/orgs/fnx/prod/us-east-2.yaml
+grep -v -e 'fnx-ue1-prod' -e 'fnx-ue2-prod' "$out/fresh.root.committed" > "$us_root"
+cp "$us_root" "$out/fresh.root.base"
+fresh=()
+for case in "${FRESH[@]}"; do
+    IFS='|' read -r golden_stack stack overrides <<< "$case"
+    read -r -a override_list <<< "$overrides"
+    load "scaffolds/stack-golden/$golden_stack.env" "${override_list[@]}"
+    if [[ "$tenant-$code-$stage" != "$stack" ]] || ! generate > "$out/fresh.$stack.log" 2>&1; then
+        echo "ERROR fresh $stack: generating it failed:" >&2
+        cat "$out/fresh.$stack.log" >&2
+        fresh_ok=0
+    elif ! logged "$out/fresh.$stack.log" "stack-wiring: added"; then
+        echo "ERROR fresh $stack: the wire hook added nothing for it:" >&2
+        cat "$out/fresh.$stack.log" >&2
+        fresh_ok=0
     fi
+    fresh+=("$stack")
 done
-if [[ "$second_ok" -eq 1 ]]; then
-    atmos describe stacks --process-functions=false --format json > "$out/second.json"
-    if python3 workflows/scripts/common/check-lane-names.py < "$out/second.json" > "$out/second.lanes" 2>&1; then
-        echo "lane names: OK with fnx-uw2-dev and fnx-uw2-staging beside their accounts' ue1 stacks"
-    else
-        echo "ERROR second region: a stack generated with account_singletons=no collides with its account's other stack:" >&2
-        cat "$out/second.lanes" >&2
-        second_ok=0
+if [[ "$fresh_ok" -eq 1 ]]; then
+    # The hook only adds lines: four per stack (its pattern pair, its plan and
+    # apply role ARNs), everything else byte for byte.
+    diff "$out/fresh.root.base" "$us_root" > "$out/fresh.root.diff" || true
+    if grep -v -e '^> ' -e '^[0-9,]*a[0-9,]*$' "$out/fresh.root.diff" > /dev/null \
+        || [[ "$(grep -c '^> ' "$out/fresh.root.diff")" -ne $((4 * ${#fresh[@]})) ]]; then
+        echo "ERROR fresh: $us_root changed by more than the $((4 * ${#fresh[@]})) added lines:" >&2
+        cat "$out/fresh.root.diff" >&2
+        fresh_ok=0
+    fi
+    # Re-running the wiring adds nothing.
+    cp "$us_root" "$out/fresh.root.wired"
+    for case in "${FRESH[@]}"; do
+        IFS='|' read -r golden_stack stack overrides <<< "$case"
+        read -r -a override_list <<< "$overrides"
+        load "scaffolds/stack-golden/$golden_stack.env" "${override_list[@]}"
+        account="$(sed -n 's/^account=//p' "scaffolds/stack-golden/$golden_stack.env")"
+        python3 scripts/stack-wiring.py "$tenant" "$stage" "$account" "$region" "$stack" > "$out/fresh.rewire.log" 2>&1 \
+            || { cat "$out/fresh.rewire.log" >&2; fresh_ok=0; }
+    done
+    if ! cmp -s "$out/fresh.root.wired" "$us_root"; then
+        echo "ERROR fresh: a second wiring run changed $us_root:" >&2
+        diff -u "$out/fresh.root.wired" "$us_root" >&2 || true
+        fresh_ok=0
     fi
 fi
-[[ "$second_ok" -eq 1 ]] || failed="$failed second-region"
-files_list > "$out/second.after"
-LC_ALL=C comm -13 "$out/second.before" "$out/second.after" | while IFS= read -r f; do rm -f "$f"; done
+if [[ "$fresh_ok" -eq 1 ]]; then
+    atmos describe stacks --process-functions=false --format json > "$out/fresh.json"
+    atmos describe workflows --output all --format json > "$out/fresh.workflows.json"
+    for stack in "${fresh[@]}"; do
+        python3 -c 'import json,sys; sys.exit(sys.argv[2] not in json.load(open(sys.argv[1])))' "$out/fresh.json" "$stack" \
+            || { echo "ERROR fresh $stack: not among the resolved stacks" >&2; fresh_ok=0; }
+    done
+    # The stack checks check-stack-samples.sh runs, plus the DR pairing.
+    for check in \
+        "workflows/scripts/common/check-dependencies.py components/terraform" \
+        "workflows/scripts/common/check-lane-names.py" \
+        "workflows/scripts/common/check-prod-protection.py components/terraform" \
+        "workflows/scripts/common/check-cluster-api-ci.py components/terraform" \
+        "workflows/scripts/common/check-state-keys.py" \
+        "workflows/scripts/common/check-ci-state-roles.py" \
+        "workflows/scripts/common/check-data-residency.py" \
+        "workflows/scripts/common/dr-pair.py --lint" \
+        "scripts/check-inherited-state-reads.py"; do
+        read -r -a argv <<< "$check"
+        if ! python3 "${argv[@]}" < "$out/fresh.json" > "$out/fresh.check.log" 2>&1; then
+            echo "ERROR fresh: ${argv[0]##*/} fails with ${fresh[*]}:" >&2
+            cat "$out/fresh.check.log" >&2
+            fresh_ok=0
+        fi
+    done
+    if ! python3 workflows/scripts/common/check-deploy-layers.py "$out/fresh.json" "$out/fresh.workflows.json" \
+        > "$out/fresh.check.log" 2>&1; then
+        echo "ERROR fresh: check-deploy-layers.py fails with ${fresh[*]}:" >&2
+        cat "$out/fresh.check.log" >&2
+        fresh_ok=0
+    fi
+fi
+if [[ "$fresh_ok" -eq 1 ]]; then
+    echo "fresh: ${fresh[*]} generated, wired ($((4 * ${#fresh[@]})) lines added to $us_root, a second run adds none) and pass every stack check"
+fi
+if [[ "$fresh_ok" -eq 1 && "$SWEEP" == "true" ]]; then
+    # plan-sweep mirrors components/terraform with git ls-files.
+    git init -q .
+    bash scripts/plan-sweep.sh "${fresh[@]}" || fresh_ok=0
+fi
+[[ "$fresh_ok" -eq 1 ]] || failed="$failed fresh"
+clean_since "$out/fresh.before"
+
+# Nothing above may touch the real repository's root backend files.
+if [[ "$(cd "$REPO_ROOT" && cksum "${ROOT_FILES[@]}")" != "$real_roots" ]]; then
+    echo "ERROR the real repository's root backend files changed during the check:" >&2
+    (cd "$REPO_ROOT" && git diff -- "${ROOT_FILES[@]}" >&2) || true
+    failed="$failed real-root-files"
+fi
 
 if [[ -n "$failed" ]]; then
     echo "stack scaffold check failed for:$(echo "$failed" | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd ' ' -)" >&2
     exit 1
 fi
-echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order); the guard refuses all ${#REFUSALS[@]} bad answer sets; the ${#SECOND_REGION[@]} second-region stacks leave the account singletons"
+if [[ "$SWEEP" == "true" ]]; then
+    echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks and plan-sweep"
+else
+    echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order, the root backends untouched); $refused bad answer sets are refused; the ${#fresh[@]} fresh stacks (${fresh[*]}) are wired by the hook and pass every stack check"
+fi
