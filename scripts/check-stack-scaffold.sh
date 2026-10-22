@@ -132,8 +132,8 @@ else
 fi
 cd "$scratch"
 out="$(mktemp -d "$scratch/.check-stack-scaffold.XXXXXX")"
-# The hooks resolve the repository as git's top level, else the working
-# directory: inside some work tree, they would edit that one.
+# The hooks use the working directory when it holds the tenant's stacks, so a
+# nested copy is safe; the check still refuses to run inside a work tree.
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "ERROR the scratch copy $scratch is inside a git work tree; the scaffold hooks would edit $(git rev-parse --show-toplevel)" >&2
     exit 1
@@ -149,6 +149,8 @@ roots_unchanged() {
         if ! cmp -s "$root_file" "$out/roots/${root_file##*/}"; then
             echo "ERROR $1: $root_file changed:" >&2
             diff -u "$out/roots/${root_file##*/}" "$root_file" >&2 || true
+            # Restore it, so later cases do not report this one's change again.
+            cp "$out/roots/${root_file##*/}" "$root_file"
             rc=1
         fi
     done
@@ -277,9 +279,16 @@ golden() {
 
     rm "$file"
     files_list > "$out/$stack.files.before"
-    if ! generate; then
-        echo "ERROR $stack: atmos scaffold generate stack failed" >&2
+    if ! generate > "$out/$stack.generate.log" 2>&1; then
+        echo "ERROR $stack: atmos scaffold generate stack failed:" >&2
+        cat "$out/$stack.generate.log" >&2
         return 1
+    fi
+    # The wire hook ran (it found the reference stack already wired).
+    if ! logged "$out/$stack.generate.log" "is already wired"; then
+        echo "ERROR $stack: the wire hook did not report $stack as already wired:" >&2
+        cat "$out/$stack.generate.log" >&2
+        rc=1
     fi
     # The run writes the stack file and nothing else (bar its .atmos record).
     files_list > "$out/$stack.files.after"
@@ -288,7 +297,6 @@ golden() {
         LC_ALL=C comm -3 "$out/$stack.files.before" "$out/$stack.files.after" >&2
         rc=1
     fi
-    # The wire hook ran, and found the reference stack already wired.
     roots_unchanged "$stack (wire hook on an already wired stack)" || rc=1
     yamllint -d relaxed "$file" || rc=1
     imports "$out/$stack.committed.yaml" > "$out/$stack.imports.committed"
@@ -480,19 +488,25 @@ FRESH=(
     "fnx-ue1-staging|fnx-uw2-staging|account_singletons=no region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.2.0.0/16 vpc_cidr_services=10.3.0.0/16"
     "fnx-ue1-prod|fnx-ue1-prod|dr_region=us-west-2 dr_region_code=uw2"
     "fnx-ue2-prod|fnx-uw2-prod|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.26.0.0/16"
+    # The EU backend: the prod-eu standby is wired into eu-west-1.yaml.
+    "fnx-ec1-prod|fnx-ec1-prod|"
 )
 us_root="${ROOT_FILES[0]}"
+eu_root="${ROOT_FILES[1]}"
 files_list > "$out/fresh.before"
-cp "$us_root" "$out/fresh.root.committed"
+cp "$us_root" "$out/fresh.us.committed"
+cp "$eu_root" "$out/fresh.eu.committed"
 fresh_ok=1
-rm stacks/orgs/fnx/prod/us-east-1.yaml stacks/orgs/fnx/prod/us-east-2.yaml
-grep -v -e 'fnx-ue1-prod' -e 'fnx-ue2-prod' "$out/fresh.root.committed" > "$us_root"
-cp "$us_root" "$out/fresh.root.base"
+rm stacks/orgs/fnx/prod/us-east-1.yaml stacks/orgs/fnx/prod/us-east-2.yaml stacks/orgs/fnx/prod/eu-central-1.yaml
+grep -v -e 'fnx-ue1-prod' -e 'fnx-ue2-prod' "$out/fresh.us.committed" > "$us_root"
+grep -v -e 'fnx-ec1-prod' "$out/fresh.eu.committed" > "$eu_root"
+cp "$us_root" "$out/fresh.us.base"
+cp "$eu_root" "$out/fresh.eu.base"
 fresh=()
 for case in "${FRESH[@]}"; do
     IFS='|' read -r golden_stack stack overrides <<< "$case"
     read -r -a override_list <<< "$overrides"
-    load "scaffolds/stack-golden/$golden_stack.env" "${override_list[@]}"
+    load "scaffolds/stack-golden/$golden_stack.env" ${override_list[@]+"${override_list[@]}"}
     if [[ "$tenant-$code-$stage" != "$stack" ]] || ! generate > "$out/fresh.$stack.log" 2>&1; then
         echo "ERROR fresh $stack: generating it failed:" >&2
         cat "$out/fresh.$stack.log" >&2
@@ -507,26 +521,29 @@ done
 if [[ "$fresh_ok" -eq 1 ]]; then
     # The hook only adds lines: four per stack (its pattern pair, its plan and
     # apply role ARNs), everything else byte for byte.
-    diff "$out/fresh.root.base" "$us_root" > "$out/fresh.root.diff" || true
+    diff "$out/fresh.us.base" "$us_root" > "$out/fresh.root.diff" || true
+    diff "$out/fresh.eu.base" "$eu_root" >> "$out/fresh.root.diff" || true
     if grep -v -e '^> ' -e '^[0-9,]*a[0-9,]*$' "$out/fresh.root.diff" > /dev/null \
         || [[ "$(grep -c '^> ' "$out/fresh.root.diff")" -ne $((4 * ${#fresh[@]})) ]]; then
-        echo "ERROR fresh: $us_root changed by more than the $((4 * ${#fresh[@]})) added lines:" >&2
+        echo "ERROR fresh: $us_root and $eu_root changed by more than the $((4 * ${#fresh[@]})) added lines:" >&2
         cat "$out/fresh.root.diff" >&2
         fresh_ok=0
     fi
     # Re-running the wiring adds nothing.
-    cp "$us_root" "$out/fresh.root.wired"
+    cp "$us_root" "$out/fresh.us.wired"
+    cp "$eu_root" "$out/fresh.eu.wired"
     for case in "${FRESH[@]}"; do
         IFS='|' read -r golden_stack stack overrides <<< "$case"
         read -r -a override_list <<< "$overrides"
-        load "scaffolds/stack-golden/$golden_stack.env" "${override_list[@]}"
+        load "scaffolds/stack-golden/$golden_stack.env" ${override_list[@]+"${override_list[@]}"}
         account="$(sed -n 's/^account=//p' "scaffolds/stack-golden/$golden_stack.env")"
         python3 scripts/stack-wiring.py "$tenant" "$stage" "$account" "$region" "$stack" > "$out/fresh.rewire.log" 2>&1 \
             || { cat "$out/fresh.rewire.log" >&2; fresh_ok=0; }
     done
-    if ! cmp -s "$out/fresh.root.wired" "$us_root"; then
-        echo "ERROR fresh: a second wiring run changed $us_root:" >&2
-        diff -u "$out/fresh.root.wired" "$us_root" >&2 || true
+    if ! cmp -s "$out/fresh.us.wired" "$us_root" || ! cmp -s "$out/fresh.eu.wired" "$eu_root"; then
+        echo "ERROR fresh: a second wiring run changed $us_root or $eu_root:" >&2
+        diff -u "$out/fresh.us.wired" "$us_root" >&2 || true
+        diff -u "$out/fresh.eu.wired" "$eu_root" >&2 || true
         fresh_ok=0
     fi
 fi
@@ -563,7 +580,7 @@ if [[ "$fresh_ok" -eq 1 ]]; then
     fi
 fi
 if [[ "$fresh_ok" -eq 1 ]]; then
-    echo "fresh: ${fresh[*]} generated, wired ($((4 * ${#fresh[@]})) lines added to $us_root, a second run adds none) and pass every stack check"
+    echo "fresh: ${fresh[*]} generated, wired ($((4 * ${#fresh[@]})) lines added to the root backends, a second run adds none) and pass every stack check"
 fi
 if [[ "$fresh_ok" -eq 1 && "$SWEEP" == "true" ]]; then
     # plan-sweep mirrors components/terraform with git ls-files.
