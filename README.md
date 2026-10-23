@@ -18,7 +18,7 @@ stacks/orgs/fnx/         org defaults (_defaults.yaml: tags, Terraform version, 
 stacks/catalog/          abstract component defaults; templates/ holds opt-in stack templates
 stacks/mixins/           tenant, stage and region mixins
 workflows/               Atmos workflows (atmos list workflows); scripts/ holds the checks they run
-scripts/                 helpers: plan-sweep.sh, certificates/, dr/
+scripts/                 helpers: plan-sweep.sh (atmos sweep), lint checks, stack scaffold reader, certificates/
 scaffolds/               templates for `atmos scaffold generate`
 templates/, examples/    copy-in component template, stack/config samples, the OIDC hub/spoke example
 .github/workflows/       CI/CD (below)

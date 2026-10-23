@@ -2,8 +2,8 @@
 #
 # scaffold-stack.sh - run the stack scaffold (scaffolds/stack) from the
 # repository root with target `.`, as its hooks expect (docs/OPERATIONS.md,
-# Adding a stack). make onboard/onboard-custom, quickstart.sh and
-# manifest-generator.sh all generate stacks through this one reader.
+# Adding a stack). make onboard/onboard-custom generate stacks through this
+# one reader.
 #
 # Usage: scripts/scaffold-stack.sh [--set key=value | --answers FILE]...
 #   No arguments: the scaffold prompts for every answer.
