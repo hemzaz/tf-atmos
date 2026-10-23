@@ -296,8 +296,9 @@ components:
           - from_port: 22
             to_port: 22
             protocol: "tcp"
-            cidr_blocks: ["10.0.0.0/16"]
-            description: "SSH access from company VPN"
+            # A literal for now (owner decision); it becomes an input once a real VPN range exists.
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal networks"
         allowed_egress_rules:
           - from_port: 443
             to_port: 443

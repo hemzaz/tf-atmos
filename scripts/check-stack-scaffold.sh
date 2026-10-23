@@ -166,6 +166,12 @@ if ! grep -qF 'case "{{ urlquery .Answers.critical_alerts }}" in' scaffolds/stac
     echo "ERROR scaffolds/stack/scaffold.yaml: the guard no longer reads critical_alerts through urlquery" >&2
     exit 1
 fi
+# The wire hook's backstop: a target that is not the repository root has no
+# stack file, so the hook refuses to wire it.
+if ! grep -qF '[ -f "$stack_file" ] || {' scaffolds/stack/scaffold.yaml; then
+    echo "ERROR scaffolds/stack/scaffold.yaml: the wire hook no longer checks that the stack file exists" >&2
+    exit 1
+fi
 
 # snapshot <stack> <out.json> [describe flags...]: the stack, keys sorted.
 snapshot() {
