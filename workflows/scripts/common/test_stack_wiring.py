@@ -192,7 +192,10 @@ class Wire(Copy):
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env["runner"])
         self.addCleanup(runner.kill)
         self.addCleanup(runner.stdout.close)
-        time.sleep(1)
+        # Give the runner 2s to (wrongly) finish or write; stop early if it does.
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and runner.poll() is None and self.text(US) == self.committed[US]:
+            time.sleep(0.05)
         self.assertIsNone(runner.poll(), "the second run did not wait for the lock")
         self.assertEqual(self.text(US), self.committed[US])
         holder.stdin.close()

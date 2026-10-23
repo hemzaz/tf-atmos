@@ -29,7 +29,7 @@
 # the hooks skipped, a prod primary whose data_plane does not match its
 # account (the template's own fail). A hostile value in a field the profile
 # hides must generate the golden unchanged, running nothing. A generate into a
-# target other than the root must be refused (by the wire hook on 1.229, the
+# target other than the root must be refused (by the verify hook on 1.229, the
 # guard on 1.233), changing nothing outside the target.
 # Last, the fresh-stack end to end: brand-new stacks generated with the hooks
 # (a us-west-2 stack of each nonprod flavor with account_singletons=no beside
@@ -481,25 +481,33 @@ cp "$out/hidden.committed.yaml" "$file"
 roots_unchanged "hidden-field injection" || failed="$failed hidden-injection"
 
 # A target other than the repository root. On 1.229 the guard runs in the
-# invocation directory (the root) and passes, the file lands in the target,
-# and the wire hook must refuse before it edits the root's backend; on 1.233
-# the hooks run in the target, where the guard finds no stage defaults.
-# Either way nothing outside the target changes.
+# invocation directory (the root) and passes and the file lands in the target;
+# then verify, the first after-generate hook, must refuse (the wire hook's own
+# check stays a second defence: Atmos runs no hook after a failed one), and
+# nothing may claim the stack resolves or wire it. On 1.233 the hooks run in
+# the target, where the guard finds no stage defaults. Either way nothing
+# outside the target changes. Not counted among the bad answer sets.
 echo "== non-root target (fnx-uw2-dev into $out/nonroot)"
 load scaffolds/stack-golden/fnx-ue1-dev.env account_singletons=no region=us-west-2 region_code=uw2 \
     az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.2.0.0/16 vpc_cidr_services=10.3.0.0/16
-refused=$((refused + 1))
+atmos_version="$(atmos version 2>&1 | flatten)"
 files_list > "$out/nonroot.before"
 if atmos scaffold generate stack "$out/nonroot" --force --defaults "${sets[@]}" > "$out/nonroot.log" 2>&1; then
     echo "ERROR non-root target: generated, but a target other than the root must be refused" >&2
     cat "$out/nonroot.log" >&2
     failed="$failed non-root-target"
-elif logged "$out/nonroot.log" "/$file does not exist, so the target is not the repository root"; then
-    echo "non-root target: refused by the wire hook"
-elif logged "$out/nonroot.log" "no stacks/orgs/$tenant/$stage/_defaults.yaml: a new tenant or stage is out of scope"; then
+elif logged "$out/nonroot.log" "resolves" || logged "$out/nonroot.log" "stack-wiring:"; then
+    echo "ERROR non-root target: a hook verified or wired a stack the root does not have:" >&2
+    cat "$out/nonroot.log" >&2
+    failed="$failed non-root-target"
+elif logged "$out/nonroot.log" "scaffold stack: not verifying:" \
+    && logged "$out/nonroot.log" "/$file does not exist, so the target is not the repository root"; then
+    echo "non-root target: refused by the verify hook"
+elif [[ "$atmos_version" != *"Atmos 1.229."* ]] \
+    && logged "$out/nonroot.log" "no stacks/orgs/$tenant/$stage/_defaults.yaml: a new tenant or stage is out of scope"; then
     echo "non-root target: refused by the guard (the hooks run in the target)"
 else
-    echo "ERROR non-root target: failed, but not by the wire hook or the guard:" >&2
+    echo "ERROR non-root target: failed, but not by the verify hook (or, after 1.229, the guard; this is $atmos_version):" >&2
     cat "$out/nonroot.log" >&2
     failed="$failed non-root-target"
 fi

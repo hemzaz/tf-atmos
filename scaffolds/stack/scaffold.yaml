@@ -439,9 +439,16 @@ spec:
           [ -d "$root/stacks/orgs/{{ .Answers.tenant }}/root" ] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           cd "$root"
           file="stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/{{ .Answers.region }}.yaml"
+          # As in the wire hook: the stack must be the file just generated.
+          [ -f "$file" ] || {
+            echo "scaffold stack: not verifying: $root/$file does not exist, so the target is not the repository root ($root); generate from the root with: atmos scaffold generate stack . --force" >&2
+            exit 1
+          }
+          # describe stacks -s <a stack that does not exist> prints {} and exits 0.
           if ! atmos validate stacks \
             || ! atmos describe stacks -s "{{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }}" \
-              --process-functions=false --format json > /dev/null; then
+              --process-functions=false --format json \
+              | python3 -c 'import json, sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then
             echo "scaffold stack: the generated $file does not resolve; remove it, fix the answers and generate again" >&2
             exit 1
           fi
