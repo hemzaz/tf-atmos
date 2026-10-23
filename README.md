@@ -35,7 +35,7 @@ within a stage (fixtures, emulator lanes, the `templates/stacks` samples). A lan
 stage stack in the same account and region: its names carry the lane (below), and
 `check-lane-names.py` (lint) fails two stacks or instances of one account and region that create the same name (and IAM/S3 names across the regions of one account). The
 `templates/stacks` samples are such lanes: `scripts/check-stack-samples.sh` copies them in and runs
-the stack checks (lint) and plan-sweep (validate-enhanced) over them. Only files under `stacks/orgs/` are stack manifests;
+the stack checks (lint) and the plan sweep (`atmos sweep --samples`) over them. Only files under `stacks/orgs/` are stack manifests;
 each real stack is one file, `<stage>/<region>.yaml`, that imports its catalog instances and keeps
 its per-stack values, grouped by domain (globals, networking, security, compute, services). EU personal data lives only in EU
 stacks, tagged `Compliance: "pci-sox-gdpr"` (US prod is `"pci-sox"`): `check-data-residency.py`
@@ -79,14 +79,14 @@ atmos workflow tflint-init -f lint                  # once
 atmos workflow lint -f lint                         # fmt, yamllint, state-key check, TFLint
 atmos workflow security-scan -f lint                # Trivy + Checkov gate (any HIGH/CRITICAL not suppressed inline)
 atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
-bash scripts/plan-sweep.sh fnx-ue1-dev              # plan with resolved variables, no AWS account needed
+atmos sweep -s fnx-ue1-dev                          # plan with resolved variables, no AWS account needed (--help)
 atmos workflow providers-lock -f providers          # after a required_providers change: rewrite the committed locks
 atmos workflow sandbox -f sandbox                   # apply against Floci, then destroy (Docker only)
 atmos workflow localemu -f localemu                 # the same against LocalEmu (Python 3.13)
 atmos terraform plan vpc/main -s fnx-ue1-dev # needs AWS credentials
 ```
 
-`terraform validate` never evaluates `variable` validation blocks; plan-sweep and the emulator
+`terraform validate` never evaluates `variable` validation blocks; `atmos sweep` and the emulator
 lanes do. Run the emulator lanes through their workflows: by hand, sandbox commands need
 `--identity local-aws`, and LocalEmu commands need `--identity local-emu` plus
 `LOCALEMU_ACCESS_KEY_ID`, `LOCALEMU_SECRET_ACCESS_KEY` and `AWS_ENDPOINT_URL`, or the apply reaches
@@ -144,7 +144,7 @@ until the repository variable `AWS_PLAN_ROLE_ARN` is set.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, actionlint (when `.github/workflows/` changes), plan-sweep, Trivy/Checkov gate (any HIGH/CRITICAL not suppressed inline; no baselines); PR only: plan of affected non-prod instances, each with its stack's read-only `iam/ci` plan role (PR comment), except the in-cluster components (a notice: `in-vpc.yml` plans them on master only). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan. A `changes` job skips the jobs whose paths did not change; `CI gate`, the check master's protection requires, runs on every PR and fails if any job, the emulator lane included, failed |
+| `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, actionlint (when `.github/workflows/` changes), plan sweep (`atmos sweep --all`), Trivy/Checkov gate (any HIGH/CRITICAL not suppressed inline; no baselines); PR only: plan of affected non-prod instances, each with its stack's read-only `iam/ci` plan role (PR comment), except the in-cluster components (a notice: `in-vpc.yml` plans them on master only). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan. A `changes` job skips the jobs whose paths did not change; `CI gate`, the check master's protection requires, runs on every PR and fails if any job, the emulator lane included, failed |
 | `emulator.yml` | called by `terraform-ci.yml`, manual | LocalEmu lane: applies and destroys real resources |
 | `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag; the [in-cluster components](./docs/OPERATIONS.md#in-cluster-components) deploy on the stack's in-VPC runners (`in-vpc.yml`). No manual approval ([details](./docs/OPERATIONS.md#state-backend)) |
 | `drift-detection.yml` | hourly, manual | Read-only plan of every stack, the in-cluster components on the in-VPC runners; drift fails the job |

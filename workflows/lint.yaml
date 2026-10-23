@@ -289,8 +289,8 @@ workflows:
           atmos describe stacks --process-functions=false --include-empty-stacks --format json > "$stacks_json"
           python3 scripts/check-inherited-state-reads.py < "$stacks_json"
       # The templates/stacks samples, copied in as the lanes their headers name,
-      # resolve and pass the stack checks beside the real stacks (plan-sweep
-      # covers them in validate-enhanced's plan-sweep workflow).
+      # resolve and pass the stack checks beside the real stacks (the plan
+      # sweep covers them: `atmos sweep --samples`).
       - name: stack-samples
         type: shell
         command: bash scripts/check-stack-samples.sh
