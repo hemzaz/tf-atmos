@@ -36,8 +36,6 @@ import:
   - catalog/stepfunctions/defaults
   # s3/lambda-artifacts: the bucket holding the Lambda packages (<function>.zip)
   - catalog/s3/lambda-artifacts
-  # Optional environment profile from templates/configs (import it last):
-  # - mixins/profiles/development
 
 vars:
   tags:

@@ -30,8 +30,6 @@ import:
   - catalog/secretsmanager/defaults
   - catalog/monitoring/defaults
   - catalog/rds/prod
-  # Optional environment profile from templates/configs (import it last):
-  # - mixins/profiles/production
 
 vars:
   tags:

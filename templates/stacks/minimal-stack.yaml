@@ -20,8 +20,6 @@ import:
   - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/securitygroup/defaults
-  # Optional environment profile from templates/configs (import it last):
-  # - mixins/profiles/development
 
 vars:
   tags:

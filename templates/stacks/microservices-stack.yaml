@@ -27,8 +27,6 @@ import:
   - catalog/eks-addons/defaults
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
-  # Optional environment profile from templates/configs (import it last):
-  # - mixins/profiles/development
 
 vars:
   tags:
