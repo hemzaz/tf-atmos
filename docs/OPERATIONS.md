@@ -484,8 +484,8 @@ Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for all three; ea
 stack files and the security, compute and services catalogs (advisory until branch protection
 requires code-owner review).
 
-- **Providers.** Every root module commits a `.terraform.lock.hcl` for `linux_amd64` (CI and
-  the amd64 devops container), `darwin_arm64` and `darwin_amd64` (developer Macs), plus a
+- **Providers.** Every root module commits a `.terraform.lock.hcl` for `linux_amd64` (CI),
+  `darwin_arm64` and `darwin_amd64` (developer Macs), plus a
   `linux_arm64` hash nothing currently needs (kept to avoid re-locking every root), and
   every CI init runs with `-lockfile=readonly` (`TF_CLI_ARGS_init`, plus explicit flags in
   validate-all, plan-sweep and terraform-test), so an unlocked provider fails init.

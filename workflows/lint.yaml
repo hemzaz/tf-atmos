@@ -18,8 +18,8 @@
 # trivy command a second time.
 #
 # Scanner pins: checkov 3.3.21 (3.3.22 has no GitHub release, so the toolchain
-# cannot install it) and trivy v0.75.0. Keep .pre-commit-config.yaml,
-# Dockerfile.devops, .atmos.env and templates/workflows/ on the same versions.
+# cannot install it) and trivy v0.75.0. Keep .pre-commit-config.yaml on the
+# same versions.
 #
 # tflint and trivy publish GitHub release tags with a `v` prefix (v0.64.0,
 # v0.75.0) and sign each release with a GitHub Attestation tied to that exact
