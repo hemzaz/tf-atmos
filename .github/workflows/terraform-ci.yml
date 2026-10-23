@@ -253,13 +253,20 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
           # The guard refuses a stack list that is not plain names, and Atmos
-          # must pass its exit status 2 through (a finding is 1).
+          # must pass its exit status 2 through (a finding is 1). Its stderr
+          # must be the guard's refusal, not another exit-2 cause (no git
+          # checkout, a missing tool).
           rc=0
-          atmos sweep -s 'x;id' || rc=$?
-          if [ "$rc" != 2 ]; then
-            echo "::error::atmos sweep -s 'x;id' exited $rc, want 2 (guard refusal)"
+          guard_err=$(mktemp)
+          atmos sweep -s 'x;id' 2> "$guard_err" || rc=$?
+          cat "$guard_err" >&2
+          if [ "$rc" != 2 ] || ! grep -qF "atmos sweep: refusing -s 'x;id'" "$guard_err"; then
+            echo "::error::atmos sweep -s 'x;id' exited $rc without the guard's refusal, want 2 and 'refusing -s'"
             exit 1
           fi
+          # From a subdirectory: the command must find its scripts from anywhere
+          # in the repository (it moves to the root first).
+          cd stacks
           atmos sweep --all
 
   security-scan:

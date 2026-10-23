@@ -14,30 +14,6 @@ get_repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || pwd
 }
 
-# Load tool versions from .atmos.env
-load_env_file() {
-  local repo_root="${1:-$(get_repo_root)}"
-  local env_file="${repo_root}/.atmos.env"
-
-  if [[ -f "${env_file}" ]]; then
-    echo -e "${BLUE}Loading tool versions from .atmos.env...${RESET}"
-    # shellcheck source=../.atmos.env
-    source "${env_file}"
-    return 0
-  else
-    echo -e "${YELLOW}No .atmos.env file found at ${env_file}. Using default versions.${RESET}"
-    # Set default versions if not already set
-  TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.16.3}"
-  ATMOS_VERSION="${ATMOS_VERSION:-1.229.0}"
-  KUBECTL_VERSION="${KUBECTL_VERSION:-1.37.0}"
-  HELM_VERSION="${HELM_VERSION:-4.3.0}"
-  TFLINT_VERSION="${TFLINT_VERSION:-0.64.0}"
-  CHECKOV_VERSION="${CHECKOV_VERSION:-3.3.21}"
-  COPIER_VERSION="${COPIER_VERSION:-9.18.2}"
-    return 1
-  fi
-}
-
 # Verify Copier installation with proper version check
 verify_copier_installation() {
   local required_version="${1:-${COPIER_VERSION:-9.18.2}}"
