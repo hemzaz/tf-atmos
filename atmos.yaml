@@ -101,9 +101,12 @@ ci:
     enabled: true
     behavior: upsert
 
-# Scaffold templates (EXPERIMENTAL in Atmos). Both generate with the repository
-# root as the target, so a single run can place files under both
-# components/terraform/ and stacks/catalog/:
+# Scaffold templates (EXPERIMENTAL in Atmos). All three generate with the
+# repository root as the target, run from the root, so a single run can place
+# files under both components/terraform/ and stacks/catalog/ (stacks/orgs/ for
+# stack), and their hooks run at the root: Atmos 1.229 runs hooks in the
+# invocation directory, 1.233 in the target directory, and `.` makes them equal.
+# The root is non-empty, so --force is required:
 #   atmos scaffold generate component . --force
 scaffold:
   base_path: "./scaffolds"

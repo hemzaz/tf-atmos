@@ -429,31 +429,46 @@ check_stack_exists() {
     echo -e "${YELLOW}NOT FOUND${NC}"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo "[DRY RUN] Would offer to create it with scripts/new-environment.sh"
+        echo "[DRY RUN] Would offer to create it with: atmos scaffold generate stack . --force"
         return 0
     fi
 
-    echo "Would you like to create it with scripts/new-environment.sh? [y/N]"
+    if [[ -n "$NAME" ]]; then
+        log_error "Lane stacks are not scaffolded: copy a templates/stacks sample (README.md)."
+        exit 1
+    fi
+
+    echo "Would you like to create it with the stack scaffold (atmos scaffold generate stack)? [y/N]"
     read -r response
     if [[ "$response" =~ ^[Yy]$ ]]; then
         create_stack_from_template
     else
-        log_error "Stack configuration is required. Create it with scripts/new-environment.sh."
+        log_error "Stack configuration is required. Create it with: atmos scaffold generate stack . --force (docs/OPERATIONS.md, Adding a stack)."
         exit 1
     fi
 }
 
-# Create the stack with the shared generator (current layout, settings.context naming)
+# Create the stack with the stack scaffold (scaffolds/stack, through
+# scripts/scaffold-stack.sh), which prompts for its answers; tenant $TENANT,
+# stage $STAGE and region $REGION must match them. When they do not, the
+# scaffold has written (and wired) a different stack: name it, so the operator
+# keeps or deletes it knowingly.
 create_stack_from_template() {
-    log_info "Creating stack configuration..."
+    local before after new="" listed=true
+    log_info "Creating stack configuration (answer tenant=$TENANT, stage=$STAGE, region=$REGION)..."
 
-    "$SCRIPT_DIR/new-environment.sh" \
-        --tenant "$TENANT" \
-        --stage "$STAGE" \
-        ${NAME:+--name "$NAME"} \
-        --region "$REGION" \
-        --skip-backend \
-        --no-workspace
+    before="$(atmos list stacks 2>/dev/null)" || listed=false
+    bash "$SCRIPT_DIR/scaffold-stack.sh"
+    after="$(atmos list stacks 2>/dev/null || true)"
+
+    if ! grep -qx "$STACK_NAME" <<< "$after"; then
+        # Without the stack list from before the run, every stack would look new.
+        if [[ "$listed" == "true" ]]; then
+            new="$(comm -13 <(sort <<< "$before") <(sort <<< "$after") | tr '\n' ' ')"
+        fi
+        log_error "The scaffold did not create $STACK_NAME.${new:+ It created and wired: ${new}(stacks/orgs/<tenant>/<stage>/<region>.yaml and its stacks/orgs/fnx/root/*.yaml lines; keep or remove them).} Generate again with tenant=$TENANT, stage=$STAGE, region=$REGION."
+        exit 1
+    fi
 }
 
 # Setup backend infrastructure

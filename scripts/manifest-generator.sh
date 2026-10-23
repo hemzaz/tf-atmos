@@ -8,7 +8,7 @@
 # Usage:
 #   ./scripts/manifest-generator.sh stack fnx-ue1-dev      # Generate stack manifest
 #   ./scripts/manifest-generator.sh component vpc/main               # Generate component manifest
-#   ./scripts/manifest-generator.sh template new-stack           # Generate new stack template
+#   ./scripts/manifest-generator.sh template stack my-stack.env  # Generate a stack (stack scaffold)
 #   ./scripts/manifest-generator.sh resource s3-bucket          # Generate resource template
 
 set -euo pipefail
@@ -24,7 +24,6 @@ WHITE='\033[1;37m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 print_usage() {
     echo -e "${CYAN}🛠️  Manifest Generator Usage${NC}"
@@ -40,7 +39,7 @@ print_usage() {
     echo -e "${WHITE}Examples:${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh stack fnx-ue1-dev${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh component vpc/main${NC}"
-    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack perf fnx dev us-east-1  # <lane name, or - for none> [tenant] [stage] [region]${NC}"
+    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack my-stack.env  # <key=value answers file, or - to be prompted>${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh resource aws_s3_bucket${NC}"
 }
 
@@ -121,20 +120,19 @@ EOF
 }
 
 generate_stack_template() {
-    local name="$1"
-    local tenant="${2:-fnx}"
-    local stage="${3:-dev}"
-    local region="${4:-us-east-1}"
-    [[ "$name" == "-" ]] && name=""
+    local answers="$1"
 
-    # Stack scaffolding lives in one place: new-environment.sh emits the current
-    # layout (stacks/orgs/<tenant>/<stage>/<region>.yaml, or <region>/<name>.yaml
-    # for a lane; naming context in settings.context). Backend bootstrap and init
-    # are left to the user.
-    echo -e "${CYAN}🏗️  Generating stack $("$(dirname "${BASH_SOURCE[0]}")/stack-name.sh" stack "$tenant" "$region" "$stage" ${name:+"$name"}) via new-environment.sh${NC}"
-    "$(dirname "${BASH_SOURCE[0]}")/new-environment.sh" \
-        --tenant "$tenant" --stage "$stage" ${name:+--name "$name"} --region "$region" \
-        --skip-backend --no-workspace
+    # Stack scaffolding lives in one place: the stack scaffold (scaffolds/stack;
+    # docs/OPERATIONS.md, Adding a stack), run by scripts/scaffold-stack.sh.
+    # <answers> is a key=value file (a scaffolds/stack-golden/*.env is one) for
+    # a non-interactive run; `-` prompts for every answer. Lanes are not
+    # scaffolded: copy a templates/stacks sample.
+    echo -e "${CYAN}🏗️  Generating a stack with atmos scaffold generate stack${NC}"
+    if [[ "$answers" == "-" ]]; then
+        bash "$SCRIPT_DIR/scaffold-stack.sh"
+    else
+        bash "$SCRIPT_DIR/scaffold-stack.sh" --answers "$answers"
+    fi
 }
 
 generate_component_template() {
@@ -536,8 +534,8 @@ list_templates() {
     echo ""
 
     echo -e "${WHITE}Quick Examples:${NC}"
-    echo -e "  ${GREEN}# Create the prod stack in us-east-2 (fnx-ue2-prod)${NC}"
-    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack - fnx prod us-east-2${NC}"
+    echo -e "  ${GREEN}# Create a stage stack with the stack scaffold (prompts for its answers)${NC}"
+    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack -${NC}"
     echo -e ""
     echo -e "  ${GREEN}# Generate web service component${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh template component api-gateway${NC}"
@@ -576,7 +574,7 @@ main() {
             fi
             case "$2" in
                 "stack")
-                    generate_stack_template "$3" "${4:-}" "${5:-}" "${6:-}"
+                    generate_stack_template "$3"
                     ;;
                 "component")
                     generate_component_template "$3"

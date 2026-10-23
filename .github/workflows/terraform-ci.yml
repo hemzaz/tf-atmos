@@ -157,6 +157,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
         run: atmos workflow tflint-init -f lint
+      # The Atmos image has no make; lint's scaffold-stack-reader step runs the
+      # Makefile's onboard recipes with hostile values and fails without it in
+      # CI. Distro package, as for shellcheck in actionlint (Debian; apk fallback).
+      - name: Install make
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends make
+          else
+            apk add --no-cache make
+          fi
       - name: Lint (fmt, yamllint, tflint, HCL parse guard)
         run: atmos workflow lint -f lint
       - name: Validate config, stacks and root modules

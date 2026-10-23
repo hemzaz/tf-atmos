@@ -20,8 +20,11 @@ STAGE ?= $(or $(ACCOUNT),dev)
 REGION ?= us-east-1
 NAME ?=
 
+# sq single-quotes a make value for the shell, so a value is never shell syntax.
+sq = '$(subst ','\'',$(1))'
+
 # Derived values (STACK can also be passed directly: make plan STACK=fnx-ue1-prod)
-ENVIRONMENT ?= $(shell ./scripts/stack-name.sh region-code $(REGION))
+ENVIRONMENT ?= $(shell ./scripts/stack-name.sh region-code $(call sq,$(REGION)))
 ifeq ($(origin STACK)$(strip $(ENVIRONMENT)),undefined)
 $(error No region code for REGION=$(REGION): add stacks/mixins/region/$(REGION).yaml, or pass STACK=<stack>)
 endif
@@ -247,7 +250,7 @@ shell-functions: ## Generate shell functions for .bashrc/.zshrc
 	@echo "  make apply STACK=fnx-ue1-staging      # Apply to staging"
 	@echo
 	@echo "$(WHITE)Development:$(NC)"
-	@echo "  make onboard                         # Quick environment onboarding"
+	@echo "  make onboard ANSWERS=my.env          # Generate a stage stack (scaffolds/stack)"
 
 info: ## Show detailed system and stack information
 	@echo "$(WHITE)System Information:$(NC)"
@@ -364,19 +367,34 @@ install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned
 # Environment Management
 # =============================================================================
 
-onboard: ## Quick environment onboarding with defaults (scaffold stack + bootstrap backend)
-	@echo "$(BLUE)Onboarding environment $(STACK)...$(NC)"
-	@echo "Using default VPC CIDR: 10.0.0.0/16"
-	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) $(if $(NAME),--name $(NAME)) --region $(REGION) --vpc-cidr 10.0.0.0/16 --no-workspace
+# Stage stacks come from the stack scaffold (scaffolds/stack; docs/OPERATIONS.md,
+# "Adding a stack"), run from the repository root with target `.`. ANSWERS is a
+# key=value file of its answers (copy a scaffolds/stack-golden/*.env and edit
+# it); `make onboard` without one prompts for every answer. TENANT, STAGE,
+# REGION and the default CIDRs go first, so the file's answers win over them;
+# onboard-custom's VPC_CIDR and VPC_CIDR_SERVICES go last and win over the file.
+# Lanes (NAME) are not scaffolded: copy a templates/stacks sample.
+# scripts/scaffold-stack.sh reads the file line by line, refuses any line it
+# cannot pass as one --set word (naming it), and runs the scaffold; make never
+# pastes the file's contents into a shell; every make value goes through sq.
+# scripts/test-scaffold-stack.sh runs these recipes with hostile values.
+ANSWERS ?=
+VPC_CIDR_SERVICES ?=
+SCAFFOLD_STACK = bash scripts/scaffold-stack.sh
+SCAFFOLD_SET = --set $(call sq,tenant=$(TENANT)) --set $(call sq,stage=$(STAGE)) --set $(call sq,region=$(REGION)) --set $(call sq,region_code=$(ENVIRONMENT))
 
-onboard-custom: ## Custom environment onboarding (usage: make onboard-custom VPC_CIDR=10.1.0.0/16)
-	@if [ -z "$(VPC_CIDR)" ]; then \
-		echo "$(RED)Error: VPC_CIDR variable is required$(NC)"; \
-		echo "Usage: make onboard-custom VPC_CIDR=10.1.0.0/16"; \
+onboard: ## Generate a stage stack with the stack scaffold (ANSWERS=<key=value file>; without it, prompts)
+	@echo "$(BLUE)Generating a stack with the stack scaffold...$(NC)"
+	$(SCAFFOLD_STACK)$(if $(ANSWERS), $(SCAFFOLD_SET) --set vpc_cidr_main=10.0.0.0/16 --set vpc_cidr_services=10.1.0.0/16 --answers $(call sq,$(ANSWERS)))
+
+onboard-custom: ## Like onboard, with your CIDRs (usage: make onboard-custom ANSWERS=my.env VPC_CIDR=10.22.0.0/16 [VPC_CIDR_SERVICES=10.23.0.0/16])
+	@if [ -z $(call sq,$(VPC_CIDR)) ] || [ -z $(call sq,$(ANSWERS)) ]; then \
+		echo "$(RED)Error: ANSWERS and VPC_CIDR are required$(NC)"; \
+		echo "Usage: make onboard-custom ANSWERS=my.env VPC_CIDR=10.22.0.0/16 [VPC_CIDR_SERVICES=10.23.0.0/16]"; \
 		exit 1; \
 	fi
-	@echo "$(BLUE)Onboarding environment $(STACK) with VPC CIDR $(VPC_CIDR)...$(NC)"
-	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) $(if $(NAME),--name $(NAME)) --region $(REGION) --vpc-cidr $(VPC_CIDR) --no-workspace
+	@echo "$(BLUE)Generating a stack with the stack scaffold and your CIDRs...$(NC)"
+	$(SCAFFOLD_STACK) $(SCAFFOLD_SET) --answers $(call sq,$(ANSWERS)) --set $(call sq,vpc_cidr_main=$(VPC_CIDR))$(if $(VPC_CIDR_SERVICES), --set $(call sq,vpc_cidr_services=$(VPC_CIDR_SERVICES)))
 
 list-stacks: ## List all available stacks
 	@echo "$(WHITE)Available Stacks:$(NC)"
