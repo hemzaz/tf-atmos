@@ -123,7 +123,7 @@ workflows:
         command: tflint --init --config .tflint.hcl
       # Every stack but the template fixtures in one run, as before the fixtures
       # existed (atmos.yaml's excluded_paths plus the fixtures directory; keep
-      # the first two in step with it). Then each fixture stack on its own, so
+      # the first in step with it). Then each fixture stack on its own, so
       # one in KNOWN_BROKEN_FIXTURES (workflows/scripts/common/fixtures.py,
       # check "tflint") is reported without failing the run: `atmos terraform
       # lint` has no flag to exclude a stack.
@@ -134,7 +134,7 @@ workflows:
           broken=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("tflint")))')
           stacks=$(atmos list stacks | grep '^fnx-ue1-fixtures-' || true)
           [ -n "$stacks" ] || { echo "no fnx-ue1-fixtures-* stacks listed; refusing to skip them"; exit 1; }
-          ATMOS_STACKS_EXCLUDED_PATHS='**/_defaults.yaml,**/components/**,orgs/fnx/fixtures/**' atmos terraform lint
+          ATMOS_STACKS_EXCLUDED_PATHS='**/_defaults.yaml,orgs/fnx/fixtures/**' atmos terraform lint
           failed=""
           for stack in $stacks; do
             if atmos terraform lint -s "$stack"; then continue; fi

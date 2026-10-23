@@ -32,7 +32,6 @@ stacks:
     - "orgs/**/*.yaml"
   excluded_paths:
     - "**/_defaults.yaml"
-    - "**/components/**"
   # Cloud Posse's null-label id order, {tenant}-{environment}-{stage}, where
   # environment is the region code (mixins/region/*) and stage the account
   # tier: fnx-ue1-dev, fnx-ue1-staging, fnx-ue1-prod. A lane in a stage
