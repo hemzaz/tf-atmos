@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check or add one entry of settings.account_map.full_account_map in an org _defaults.yaml.
 
-Used by scripts/new-environment.sh. The account map is the only place account
-IDs are written (stacks/orgs/fnx/_defaults.yaml), so a new stage's account goes
-there, not into the stage's _defaults.yaml.
+Kept for hand edits of the account map until C3. The account map is the only
+place account IDs are written (stacks/orgs/fnx/_defaults.yaml), so a new stage's
+account goes there, not into the stage's _defaults.yaml.
 
     account_map_entry.py check <org_defaults.yaml> <account> [<id>]
     account_map_entry.py add   <org_defaults.yaml> <account> [<id>]
