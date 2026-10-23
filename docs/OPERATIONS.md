@@ -408,10 +408,10 @@ same PR.
 
 Each `stacks/catalog/templates/<t>.yaml` has a never-deployed stack `fnx-ue1-fixtures-<name>`
 (`stacks/orgs/fnx/fixtures/us-east-1/<name>.yaml`; short names, since templates put the environment
-into length-limited AWS names), so lint, validate-all and plan-sweep check templates no real stack
+into length-limited AWS names), so lint, validate-all and `atmos sweep` check templates no real stack
 imports. A fixture listed in `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) has
 the listed checks' failures printed as `KNOWN-BROKEN` without failing (`ALL` lists every check); a
-template port PR removes its entry, which makes the fixture strict. plan-sweep skips a fixture whose
+template port PR removes its entry, which makes the fixture strict. `atmos sweep` skips a fixture whose
 entry is `ALL` with one `SKIP` line, even when you name it on the command line (check-dependencies
 still reports it); to sweep it, narrow the entry to the checks that still fail.
 
@@ -488,7 +488,7 @@ requires code-owner review).
   `darwin_arm64` and `darwin_amd64` (developer Macs), plus a
   `linux_arm64` hash nothing currently needs (kept to avoid re-locking every root), and
   every CI init runs with `-lockfile=readonly` (`TF_CLI_ARGS_init`, plus explicit flags in
-  validate-all, plan-sweep and terraform-test), so an unlocked provider fails init.
+  validate-all, `atmos sweep` and terraform-test), so an unlocked provider fails init.
   `atmos.yaml` sets `init.upgrade: never` for the same reason. After a `required_providers`
   change, or to take newer releases within the constraints:
   `atmos workflow providers-lock -f providers` (`UPGRADE=false` keeps the locked versions; a
@@ -503,7 +503,7 @@ requires code-owner review).
   Then, with that Atmos version installed, re-pin the stack manifest schema
   (`atmos stack schema schemas/atmos/atmos-manifest.json`) and commit it; the lint step
   `manifest-schema` fails in CI until the pin matches the image's Atmos.
-  Raise `version.constraint` in `atmos.yaml` and `.atmos.env` when the new version is required.
+  Raise `version.constraint` in `atmos.yaml` when the new version is required.
 - **Actions.** `uses:` refs are commit SHAs with a version comment; Dependabot moves both.
 
 Drift fix: codify an intended manual change in the stack, then `atmos terraform deploy`; otherwise

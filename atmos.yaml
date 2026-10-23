@@ -10,7 +10,7 @@ version:
   constraint:
     require: ">=1.229.0"
     enforcement: fatal
-    message: "This repository requires Atmos >= 1.229.0 (see .atmos.env)."
+    message: "This repository requires Atmos >= 1.229.0 (CI runs the ghcr.io/cloudposse/atmos image pinned in .github/atmos-image/Dockerfile)."
 
 components:
   terraform:
@@ -89,7 +89,8 @@ commands:
       account. With no flag: every real stack and template fixture. -s: only
       these stacks. --samples: the templates/stacks samples. --scaffold: fresh
       stacks from the stack scaffold. --all: all three, in that order (CI).
-      Exit status: 1 on a finding, 2 on a usage error or a missing or broken tool.
+      Exit status: 1 on a finding, 2 on a usage error or a missing or broken tool;
+      Atmos's own flag and argument errors (e.g. an unknown flag) exit 1.
     verbose: false
     flags:
       - name: stack
@@ -117,7 +118,9 @@ commands:
         mikefarah/yq: "v4.53.6"
     # Flag values reach the step only as environment variables, never as
     # templated shell text, and the guard below refuses any stack list outside
-    # [a-z0-9-] names separated by commas before anything runs.
+    # [a-z0-9-] names separated by commas before any script runs (the toolchain
+    # installs first). The step runs in the invocation directory, so it first
+    # moves to the repository root: from a subdirectory the scripts are not found.
     env:
       - key: SWEEP_STACKS
         value: "{{ .Flags.stack }}"
@@ -130,6 +133,8 @@ commands:
     steps:
       - |
         set -eu
+        root=$(git rev-parse --show-toplevel) || exit 2
+        cd "$root" || exit 2
         modes=0
         if [ -n "$SWEEP_STACKS" ]; then modes=$((modes + 1)); fi
         for m in "$SWEEP_SAMPLES" "$SWEEP_SCAFFOLD" "$SWEEP_ALL"; do

@@ -260,6 +260,9 @@ jobs:
             echo "::error::atmos sweep -s 'x;id' exited $rc, want 2 (guard refusal)"
             exit 1
           fi
+          # From a subdirectory: the command must find its scripts from anywhere
+          # in the repository (it moves to the root first).
+          cd stacks
           atmos sweep --all
 
   security-scan:
