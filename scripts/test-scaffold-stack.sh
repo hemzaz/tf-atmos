@@ -10,9 +10,10 @@
 #     an unknown field, a bad key) fail loudly, naming the line, without
 #     running Atmos or any command in them (no PWNED marker anywhere);
 #   - make onboard with a hostile ANSWERS file runs nothing either;
-#   - make help, plan, plan-component and setup-aws-backend-dry-run with
-#     hostile STACK, ENVIRONMENT, REGION, COMPONENT or BACKEND_STACK echo and
-#     pass the value as one literal word and run nothing in it.
+#   - make help, plan, plan-component, setup-aws-backend-dry-run and
+#     bootstrap-environment with a hostile STACK, TENANT, STAGE, ENVIRONMENT,
+#     NAME, REGION, COMPONENT or BACKEND_STACK echo and pass the value as one
+#     literal word and run nothing in it, as shell or as make syntax.
 # Exit 0 when every case passes, 1 otherwise.
 
 set -euo pipefail
@@ -165,16 +166,22 @@ else
             make_case "hostile $var #$n" refused "${args[@]}"
         done
     done
-    # The other recipes echo and pass STACK (also derived from ENVIRONMENT),
-    # REGION (STACK= set, so make does not stop on its missing region code),
-    # COMPONENT and BACKEND_STACK. help is the default goal and plan an -s
-    # recipe: each must succeed, run nothing, and hand atmos the value whole.
-    for tc in "help STACK" "help ENVIRONMENT" "help REGION" \
-        "plan STACK" "plan ENVIRONMENT" "plan REGION" \
-        "plan-component COMPONENT" "setup-aws-backend-dry-run BACKEND_STACK"; do
+    # The other recipes echo and pass STACK (also derived from TENANT, STAGE,
+    # ENVIRONMENT and NAME), REGION (STACK= set, so make does not stop on its
+    # missing region code), COMPONENT and BACKEND_STACK. help is the default
+    # goal, plan an -s recipe, and bootstrap-environment runs three atmos
+    # workflows: each must succeed, run nothing, and hand atmos the value
+    # whole. The $$(shell ...) payload is make syntax: it runs only if a recipe
+    # hands the value to a second make (STACK=... on a $(MAKE) line).
+    for tc in "help STACK" "help TENANT" "help STAGE" "help ENVIRONMENT" "help NAME" "help REGION" \
+        "plan STACK" "plan TENANT" "plan STAGE" "plan ENVIRONMENT" "plan NAME" "plan REGION" \
+        "plan-component COMPONENT" "setup-aws-backend-dry-run BACKEND_STACK" \
+        "bootstrap-environment STACK"; do
         target="${tc% *}" var="${tc#* }"
         for payload in "x;touch $M/$target-$var-semi" "x';touch $M/$target-$var-quote;'" \
-            "x\$\$(touch $M/$target-$var-subst)" "x \$\$(touch $M/$target-$var-space)"; do
+            "x\$\$(touch $M/$target-$var-subst)" "x \$\$(touch $M/$target-$var-space)" \
+            "x\`touch $M/$target-$var-tick\`" "x\"; touch $M/$target-$var-dquote; \"" \
+            "x\$\$(shell touch $M/$target-$var-make)"; do
             n=$((n + 1))
             args=("$target" "$var=$payload")
             [[ "$var" != "REGION" ]] || args+=(STACK=fnx-ue1-dev)
@@ -184,7 +191,10 @@ else
             literal="${payload//\$\$/\$}"
             case "$var" in
                 STACK | COMPONENT | BACKEND_STACK) want_word="$literal" ;;
+                TENANT) want_word="$literal-ue1-dev" ;;
+                STAGE) want_word="fnx-ue1-$literal" ;;
                 ENVIRONMENT) want_word="fnx-$literal-dev" ;;
+                NAME) want_word="fnx-ue1-dev-$literal" ;;
                 REGION) want_word="fnx-ue1-dev" ;;
             esac
             if [[ "$target" != "help" ]] && ! grep -qxF -- "$want_word" "$tmp/argv"; then

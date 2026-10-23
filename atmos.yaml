@@ -133,7 +133,10 @@ commands:
     steps:
       - |
         set -eu
-        root=$(git rev-parse --show-toplevel) || exit 2
+        if ! root=$(git rev-parse --show-toplevel); then
+          echo "atmos sweep: not inside a git checkout (git rev-parse failed); run it in the repository." >&2
+          exit 2
+        fi
         cd "$root" || exit 2
         modes=0
         if [ -n "$SWEEP_STACKS" ]; then modes=$((modes + 1)); fi

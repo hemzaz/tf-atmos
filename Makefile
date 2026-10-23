@@ -34,7 +34,11 @@ sq = '$(subst ','\'',$(1))'
 # Derived values (STACK can also be passed directly: make plan STACK=fnx-ue1-prod)
 ENVIRONMENT ?= $(shell ./scripts/stack-name.sh region-code $(call sq,$(REGION)))
 ifeq ($(origin STACK)$(strip $(ENVIRONMENT)),undefined)
+ifeq ($(origin ENVIRONMENT),file)
 $(error No region code for REGION=$(REGION): add stacks/mixins/region/$(REGION).yaml, or pass STACK=<stack>)
+else
+$(error ENVIRONMENT is empty: unset it to derive the region code from REGION, or pass STACK=<stack>)
+endif
 endif
 STACK ?= $(TENANT)-$(ENVIRONMENT)-$(STAGE)$(if $(NAME),-$(NAME))
 
@@ -63,7 +67,7 @@ help: ## Show this help message
 	@echo "  STACK:       $(GREEN)"$(call sq,$(STACK))"$(NC)"
 	@echo
 	@echo "$(WHITE)Available Commands:$(NC)"
-	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(CYAN)%-15s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST) | sort
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST) | sort
 	@echo
 	@echo "$(WHITE)Quick Examples:$(NC)"
 	@echo "  $(GREEN)make validate STAGE=prod$(NC)"
@@ -198,16 +202,18 @@ validate-aws-setup: ## Validate the existing state backend
 	@echo "$(BLUE)Validating the state backend in "$(call sq,$(BACKEND_STACK))"...$(NC)"
 	@atmos workflow verify -f bootstrap -s $(call sq,$(BACKEND_STACK))
 
+# Steps 2 and 3 call atmos directly: a nested $(MAKE) ... STACK=<value> would
+# make the child re-expand the value as make syntax ($(shell ...) would run).
 bootstrap-environment: ## Complete environment bootstrap (IAM + VPCs, backend check, validation)
 	@echo "$(BLUE)Bootstrapping complete environment: "$(call sq,$(STACK))"$(NC)"
 	@echo "Step 1/3: IAM (CI roles) and networking (needs the state backend: make setup-aws-backend-cold-start)..."
 	@atmos workflow full -f bootstrap -s $(call sq,$(STACK))
 	@echo
 	@echo "Step 2/3: Validating backend setup..."
-	@$(MAKE) --no-print-directory validate-aws-setup
+	@atmos workflow verify -f bootstrap -s $(call sq,$(BACKEND_STACK))
 	@echo
 	@echo "Step 3/3: Running configuration validation..."
-	@$(MAKE) --no-print-directory validate STACK=$(call sq,$(STACK))
+	@atmos workflow validate -f validate -s $(call sq,$(STACK))
 	@echo
 	@echo "$(GREEN)✅ Environment bootstrap completed successfully!$(NC)"
 	@echo "Next steps:"
