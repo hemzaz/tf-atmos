@@ -44,8 +44,9 @@
 # credentials objected", never "this component works".
 #
 # Usage:
-#   bash scripts/plan-sweep.sh                       # every real stack and template fixture (ci-stacks.py --plan-sweep)
-#   bash scripts/plan-sweep.sh fnx-ue1-prod   # only these stacks
+#   atmos sweep                    # every real stack and template fixture (ci-stacks.py --plan-sweep)
+#   atmos sweep -s fnx-ue1-prod    # only these stacks (comma-separated); the script takes them as argv
+# `atmos sweep` (atmos.yaml `commands:`) pins terraform and yq; see its --help.
 #
 # A template fixture listed for plan-sweep in KNOWN_BROKEN_FIXTURES
 # (workflows/scripts/common/fixtures.py) is swept and reported, but its

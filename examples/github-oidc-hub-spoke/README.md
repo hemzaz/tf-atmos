@@ -32,5 +32,5 @@ list it in the instance's `metadata.inherits`.
    the spoke's `iam/ci`, so both the account and `ci_role_name_prefix` come from the hub.
 6. Enable `ci_apply_role_enabled` only after steps 1-5 work.
 
-Check without AWS: `bash scripts/plan-sweep.sh <stack>`. `InvalidClientTokenId` is expected;
+Check without AWS: `atmos sweep -s <stack>`. `InvalidClientTokenId` is expected;
 `INCONCLUSIVE` means not checked, not passed.

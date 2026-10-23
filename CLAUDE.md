@@ -9,7 +9,7 @@ Terraform/Atmos IaC for the `fnx` tenant. Layout, stacks, quickstart and convent
 ```bash
 atmos describe component <component> -s <stack> --process-functions=false   # resolved config, offline
 atmos workflow lint -f lint && atmos workflow validate-all -f validate-enhanced  # the gate before committing
-bash scripts/plan-sweep.sh [<stack>...]    # proves variable validations without AWS
+atmos sweep -s <stack>[,<stack>...]        # proves variable validations without AWS (--all: what CI runs)
 atmos workflow security-scan -f lint       # local Trivy + Checkov gate (new HIGH/CRITICAL only)
 bash scripts/stack-snapshot.sh compare "$(git merge-base origin/master HEAD)"   # C1 proof: resolved stacks byte-identical
 bash scripts/check-stack-scaffold.sh       # stack scaffold golden: run after editing a reference stack's residue
@@ -24,7 +24,7 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 - validate-all runs `terraform init`/`validate` serially over every root module: set
   `TF_PLUGIN_CACHE_DIR` first.
 - `terraform validate` skips `variable` validation blocks. Prove a validation change with
-  plan-sweep or an emulator lane, including a deliberately bad value.
+  `atmos sweep` or an emulator lane, including a deliberately bad value.
 - A new `!terraform.state` read needs the target in the reader's `dependencies.components`
   (`check-dependencies.py`) and in an earlier layer of `workflows/deploy-full-stack.yaml`
   (`check-deploy-layers.py`).

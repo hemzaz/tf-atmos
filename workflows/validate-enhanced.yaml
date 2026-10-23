@@ -4,6 +4,8 @@
 #   atmos workflow validate-all -f validate-enhanced
 #   atmos workflow validate-stack -f validate-enhanced -s <stack>
 #   atmos workflow terraform-test -f validate-enhanced
+#
+# The plan sweep is the `atmos sweep` custom command (atmos.yaml `commands:`).
 workflows:
   validate-all:
     description: Validate atmos.yaml, all stack manifests, YAML, formatting and every Terraform root module
@@ -108,43 +110,6 @@ workflows:
         type: atmos
         command: describe stacks --process-functions=false --format json
         output: none
-
-  # The rung between `terraform validate` and the emulator lanes: bind each
-  # stack's RESOLVED variables to its component and plan. `terraform validate`
-  # never binds values, so it exits 0 on a component whose every variable
-  # validation fails; tflint does not read them either. See the header of
-  # scripts/plan-sweep.sh for what a PASS here does and does not mean.
-  #
-  # No AWS credentials. Terraform evaluates variable validations before the
-  # provider authenticates, so the expected outcome is a plan that reaches
-  # InvalidClientTokenId with nothing having objected on the way.
-  plan-sweep:
-    description: Plan every stack/component pair against its resolved variables
-    dependencies:
-      tools:
-        terraform: "1.16.3"
-        # The sweep evaluates each !terraform.state expression with yq, as
-        # Atmos does internally; the atmos image ships no yq at all. It must be
-        # mikefarah v4 -- the script refuses anything else rather than guess.
-        mikefarah/yq: "v4.53.6"
-    steps:
-      - name: plan-sweep
-        # shell, not type: atmos -- the script drives atmos itself, once
-        # per pair.
-        type: shell
-        command: bash scripts/plan-sweep.sh
-      # The templates/stacks samples, copied in as the lanes their headers
-      # name (scripts/check-stack-samples.sh), through the same sweep.
-      - name: plan-sweep-samples
-        type: shell
-        command: bash scripts/check-stack-samples.sh --sweep
-      # The stack scaffold's fresh stacks (scripts/check-stack-scaffold.sh:
-      # two second-region nonprod stacks and a prod primary + standby pair),
-      # generated and wired by its hooks in a scratch copy, through the same
-      # sweep. Lint's stack-scaffold step runs the rest of that script.
-      - name: plan-sweep-scaffold
-        type: shell
-        command: bash scripts/check-stack-scaffold.sh --sweep
 
   # Runs `terraform test` (tests/*.tftest.hcl) for every component that has a
   # tests/ directory. The CI job (.github/workflows/terraform-ci.yml,

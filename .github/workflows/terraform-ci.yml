@@ -98,7 +98,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # terraform: the former `paths:` filter of this workflow.
+      # terraform: the former `paths:` filter of this workflow, plus the Makefile
+      # (lint's scaffold-stack-reader runs its recipes), templates/ (stack-samples
+      # and the sweep check templates/stacks) and scaffolds/ (stack-scaffold).
       # emulator: the former `paths:` filter of emulator.yml, plus this file,
       # which now calls it.
       # workflows: any workflow file, for actionlint (the workflows are not in
@@ -110,7 +112,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -eu
-          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|schemas/.*|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
+          terraform_re='^(atmos\.yaml|Makefile|components/.*|stacks/.*|workflows/.*|scripts/.*|schemas/.*|templates/.*|scaffolds/.*|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
           emulator_re='^(atmos\.yaml|components/terraform/.*|stacks/.*|workflows/.*|\.github/workflows/(emulator|terraform-ci)\.yml)$'
           workflows_re='^(\.github/workflows/.*\.ya?ml|\.github/atmos-image/.*|scripts/sync-atmos-image\.sh)$'
           if [ -n "${BASE_SHA//0/}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
@@ -250,7 +252,15 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          atmos workflow plan-sweep -f validate-enhanced
+          # The guard refuses a stack list that is not plain names, and Atmos
+          # must pass its exit status 2 through (a finding is 1).
+          rc=0
+          atmos sweep -s 'x;id' || rc=$?
+          if [ "$rc" != 2 ]; then
+            echo "::error::atmos sweep -s 'x;id' exited $rc, want 2 (guard refusal)"
+            exit 1
+          fi
+          atmos sweep --all
 
   security-scan:
     name: Security scan

@@ -78,6 +78,90 @@ auth:
 workflows:
   base_path: workflows
 
+# `atmos sweep`: bind each stack's RESOLVED variables to its component and plan,
+# with no AWS account (scripts/plan-sweep.sh; its header says what a PASS means).
+# `terraform validate` never binds values, so it passes a component whose
+# variable validations all fail. CI's Plan sweep job runs `atmos sweep --all`.
+commands:
+  - name: sweep
+    description: >-
+      Plan stack/component pairs against their resolved variables, with no AWS
+      account. With no flag: every real stack and template fixture. -s: only
+      these stacks. --samples: the templates/stacks samples. --scaffold: fresh
+      stacks from the stack scaffold. --all: all three, in that order (CI).
+      Exit status: 1 on a finding, 2 on a usage error or a missing or broken tool.
+    verbose: false
+    flags:
+      - name: stack
+        shorthand: s
+        description: "Comma-separated stacks to sweep (default: every stack)"
+        default: ""
+      - name: samples
+        type: bool
+        default: false
+        description: Sweep the templates/stacks samples (scripts/check-stack-samples.sh --sweep)
+      - name: scaffold
+        type: bool
+        default: false
+        description: Sweep fresh scaffold stacks (scripts/check-stack-scaffold.sh --sweep)
+      - name: all
+        type: bool
+        default: false
+        description: Sweep every stack, then the samples, then the scaffold stacks
+    # validate-enhanced.yaml pins the same terraform. The sweep evaluates
+    # each !terraform.state expression with yq, as Atmos does internally; it must
+    # be mikefarah v4 (the script refuses anything else) and the image ships none.
+    dependencies:
+      tools:
+        terraform: "1.16.3"
+        mikefarah/yq: "v4.53.6"
+    # Flag values reach the step only as environment variables, never as
+    # templated shell text, and the guard below refuses any stack list outside
+    # [a-z0-9-] names separated by commas before anything runs.
+    env:
+      - key: SWEEP_STACKS
+        value: "{{ .Flags.stack }}"
+      - key: SWEEP_SAMPLES
+        value: "{{ .Flags.samples }}"
+      - key: SWEEP_SCAFFOLD
+        value: "{{ .Flags.scaffold }}"
+      - key: SWEEP_ALL
+        value: "{{ .Flags.all }}"
+    steps:
+      - |
+        set -eu
+        modes=0
+        if [ -n "$SWEEP_STACKS" ]; then modes=$((modes + 1)); fi
+        for m in "$SWEEP_SAMPLES" "$SWEEP_SCAFFOLD" "$SWEEP_ALL"; do
+          if [ "$m" = true ]; then modes=$((modes + 1)); fi
+        done
+        if [ "$modes" -gt 1 ]; then
+          echo "atmos sweep: -s, --samples, --scaffold and --all are exclusive; pass one." >&2
+          exit 2
+        fi
+        case ",$SWEEP_STACKS," in
+          *[!a-z0-9,-]* | *,,* | *,-*)
+            if [ -n "$SWEEP_STACKS" ]; then
+              printf 'atmos sweep: refusing -s %s: want stack names ([a-z0-9-]) separated by commas.\n' "'$SWEEP_STACKS'" >&2
+              exit 2
+            fi
+            ;;
+        esac
+        if [ "$SWEEP_SAMPLES" = true ]; then
+          bash scripts/check-stack-samples.sh --sweep
+        elif [ "$SWEEP_SCAFFOLD" = true ]; then
+          bash scripts/check-stack-scaffold.sh --sweep
+        elif [ "$SWEEP_ALL" = true ]; then
+          bash scripts/plan-sweep.sh
+          bash scripts/check-stack-samples.sh --sweep
+          bash scripts/check-stack-scaffold.sh --sweep
+        else
+          IFS=,
+          set -f
+          # shellcheck disable=SC2086 # split on commas only; globbing is off
+          bash scripts/plan-sweep.sh $SWEEP_STACKS
+        fi
+
 logs:
   file: "/dev/stderr"
   level: Info
