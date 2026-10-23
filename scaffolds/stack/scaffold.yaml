@@ -455,6 +455,10 @@ spec:
     # admits no shell metacharacter (tenant, account, region_code), and the
     # script validates them again. It prints the NS delegation step, which
     # needs the deployed zone and stays manual.
+    # A target other than the root would get the stack while this wires the
+    # root's backend: on 1.229 the guard runs in the invocation directory and
+    # cannot see the target (no variable names it), so this refuses unless the
+    # stack it wires is the file just generated, under the root it edits.
     wire:
       events:
         - after.scaffold.generate
@@ -465,6 +469,11 @@ spec:
           set -eu
           root="$PWD"
           [ -d "$root/stacks/orgs/{{ .Answers.tenant }}/root" ] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          stack_file="$root/stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/{{ .Answers.region }}.yaml"
+          [ -f "$stack_file" ] || {
+            echo "scaffold stack: not wiring: $stack_file does not exist, so the target is not the repository root ($root); generate from the root with: atmos scaffold generate stack . --force" >&2
+            exit 1
+          }
           python3 "$root/scripts/stack-wiring.py" "{{ .Answers.tenant }}" "{{ .Answers.stage }}" \
             "{{ .Answers.account }}" "{{ .Answers.region }}" \
             "{{ .Answers.tenant }}-{{ .Answers.region_code }}-{{ .Answers.stage }}"

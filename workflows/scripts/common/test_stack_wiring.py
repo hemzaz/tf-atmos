@@ -8,9 +8,11 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
-import threading
 import time
 import unittest
 
@@ -167,14 +169,36 @@ class Wire(Copy):
         self.assertIn('- "*/fnx-uw2-dev-*"', target.read_text())
 
     def test_a_concurrent_run_waits_for_the_lock(self) -> None:
-        path = (self.root / US).resolve()
-        runner = threading.Thread(target=self.wire, args=("fnx", "dev", "", "us-west-2", "fnx-uw2-dev"))
-        with wiring.exclusive(path):
-            runner.start()
-            time.sleep(0.5)
-            self.assertTrue(runner.is_alive())
-            self.assertEqual(self.text(US), self.committed[US])
-        runner.join(10)
+        # Two processes, each with its own TMPDIR: one holds the lock, the other
+        # (a real run of the script) must wait for it.
+        script = REPO / "scripts" / "stack-wiring.py"
+        env = {name: dict(os.environ, TMPDIR=tempfile.mkdtemp(dir=self.root)) for name in ("holder", "runner")}
+        holder = subprocess.Popen(
+            [sys.executable, "-c",
+             "import importlib.util, pathlib, sys\n"
+             "spec = importlib.util.spec_from_file_location('stack_wiring', sys.argv[1])\n"
+             "wiring = importlib.util.module_from_spec(spec)\n"
+             "spec.loader.exec_module(wiring)\n"
+             "with wiring.exclusive(pathlib.Path(sys.argv[2]).resolve()):\n"
+             "    print('locked', flush=True)\n"
+             "    sys.stdin.read()\n",
+             str(script), str(self.root / US)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env["holder"])
+        self.addCleanup(holder.kill)
+        self.addCleanup(holder.stdout.close)
+        self.assertEqual(holder.stdout.readline(), "locked\n")
+        runner = subprocess.Popen(
+            [sys.executable, str(script), "--root", str(self.root), "fnx", "dev", "", "us-west-2", "fnx-uw2-dev"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env["runner"])
+        self.addCleanup(runner.kill)
+        self.addCleanup(runner.stdout.close)
+        time.sleep(1)
+        self.assertIsNone(runner.poll(), "the second run did not wait for the lock")
+        self.assertEqual(self.text(US), self.committed[US])
+        holder.stdin.close()
+        self.assertEqual(holder.wait(10), 0)
+        output, _ = runner.communicate(timeout=30)
+        self.assertEqual(runner.returncode, 0, output)
         self.assertIn('- "*/fnx-uw2-dev-*"', self.text(US))
 
 

@@ -16,16 +16,18 @@ check-state-keys.py and check-ci-state-roles.py require there:
     (read, or prod_read for prod) and <stack>-ci-apply to the write role's
     (write, prod_write), in its account (settings.account_map).
 The edit is textual: it inserts lines after each list's last item and leaves
-every other byte, anchors, comments and the final newline (or its absence)
-included, as it was. A value already in
-its list is skipped, so a second run changes nothing. When a marker is missing
+every other byte, anchors and comments included, as it was. A file without a
+final newline keeps it missing, unless a line goes after its last line, which
+then gets one. A value already in its list is skipped, so a second run changes
+nothing. When a marker is missing
 (the access_roles block, the role, the anchored list, the write role's alias),
 or a value sits in some other list, it changes nothing and prints the edit to
 make by hand. NS delegation needs the deployed zone's name servers, so it only
 prints that step.
 
 --root is the repository to edit (the tests' copies); by default this script's
-own, so a scratch copy's hook edits that copy. A concurrent run waits on a lock.
+own, so a scratch copy's hook edits that copy. A concurrent run waits on a lock
+on the backend file's directory.
 Every argument is validated here too, whatever the scaffold's fields already
 checked; the stack's region code must be its region mixin's environment. Exit 0 when the stack is
 wired (now or already), 1 otherwise.
@@ -33,7 +35,6 @@ wired (now or already), 1 otherwise.
 import argparse
 import contextlib
 import fcntl
-import hashlib
 import os
 import pathlib
 import re
@@ -224,17 +225,20 @@ def manual(path: str, stage: str, account: str, stack: str) -> str:
     ])
 
 
-def lock_path(path: pathlib.Path) -> pathlib.Path:
-    """The lock file for a root file: in the temp directory, so the repository gets no stray file."""
-    return pathlib.Path(tempfile.gettempdir()) / f"stack-wiring-{hashlib.sha256(str(path).encode()).hexdigest()}.lock"
-
-
 @contextlib.contextmanager
 def exclusive(path: pathlib.Path):
-    """Hold an exclusive lock over the read-modify-write of path (a concurrent run waits)."""
-    with open(lock_path(path), "a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+    """Hold an exclusive lock over the read-modify-write of path (a concurrent run waits).
+
+    The lock is on path's directory: the write replaces path's inode but not
+    the directory's, and every run, whatever its TMPDIR, locks the same one,
+    without creating a file.
+    """
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
         yield
+    finally:
+        os.close(fd)
 
 
 def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str, stack: str) -> list[str]:
