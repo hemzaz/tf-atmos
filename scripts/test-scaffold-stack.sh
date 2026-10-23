@@ -110,21 +110,62 @@ else
     pass "hostile --set refused"
 fi
 
-# make onboard with a hostile ANSWERS file: the reader refuses it, no shell
-# ever sees the line.
-# shellcheck disable=SC2016
-printf '%s\n' "tenant=fnx';touch\${IFS}PWNED6;'" > "$tmp/work/hostile.env"
-rm -f "$tmp/argv"
+# The Makefile recipes (onboard, onboard-custom): a hostile ANSWERS file or
+# make variable never runs as shell. Each payload would create a marker under
+# $M if a recipe pasted it into the shell unquoted (x;touch), with its quotes
+# unescaped (x';touch;'), or let $(...) expand; the reader refuses it instead
+# (REGION never gets that far: no region code, make stops). CI must run this
+# (lint installs make), so a missing make fails there and skips only locally.
+M="$tmp/m"
+mkdir "$M"
+golden_q="$tmp/work/it's a golden.env"
+cp "$golden" "$golden_q"
+
+# make_case <name> refused|ok <make args...>
+make_case() {
+    local name="$1" want="$2"
+    shift 2
+    rm -f "$tmp/argv"
+    if (cd "$tmp/work" && make -s -C "$REPO_ROOT" "$@") > "$tmp/out" 2>&1; then
+        if [[ "$want" == "refused" ]]; then bad "make $name: accepted"; return; fi
+        if ! grep -qx 'budget_monthly_limit=500' "$tmp/argv"; then bad "make $name: the answers did not reach atmos"; return; fi
+    else
+        if [[ "$want" == "ok" ]]; then bad "make $name: failed: $(tail -2 "$tmp/out")"; return; fi
+        if [[ -e "$tmp/argv" ]]; then bad "make $name: atmos ran"; return; fi
+    fi
+    pass "make $name ($want)"
+}
+
 if ! command -v make > /dev/null 2>&1; then
-    echo "skip: no make on PATH (the make onboard case)"
-elif (cd "$tmp/work" && make -s -C "$REPO_ROOT" onboard ANSWERS="$tmp/work/hostile.env") > "$tmp/out" 2>&1; then
-    bad "make onboard accepted a hostile ANSWERS file"
-elif [[ -e "$tmp/argv" ]]; then
-    bad "make onboard ran atmos on a hostile ANSWERS file"
+    if [[ "${CI:-}" == "true" ]]; then
+        bad "no make on PATH in CI: the Makefile recipes go untested (lint installs make)"
+    else
+        echo "skip: no make on PATH (the Makefile recipe cases)"
+    fi
 else
-    pass "make onboard refused a hostile ANSWERS file"
+    # shellcheck disable=SC2016
+    printf '%s\n' "tenant=fnx';touch\${IFS}$M/file;'" > "$tmp/work/hostile.env"
+    make_case "onboard, hostile ANSWERS file" refused onboard ANSWERS="$tmp/work/hostile.env"
+    make_case "onboard, ANSWERS path with ' and spaces" ok onboard ANSWERS="$golden_q"
+    make_case "onboard-custom, ANSWERS path with ' and spaces" ok onboard-custom ANSWERS="$golden_q" VPC_CIDR=10.22.0.0/16
+    n=0
+    for var in TENANT STAGE ANSWERS VPC_CIDR VPC_CIDR_SERVICES REGION; do
+        for payload in "x;touch $M/$var-semi" "x';touch $M/$var-quote;'" "x\$\$(touch $M/$var-subst)" "x \$\$(touch $M/$var-space)"; do
+            n=$((n + 1))
+            case "$var" in
+                ANSWERS) args=(onboard "ANSWERS=$tmp/work/$payload") ;;
+                VPC_CIDR) args=(onboard-custom "ANSWERS=$golden" "VPC_CIDR=$payload") ;;
+                VPC_CIDR_SERVICES) args=(onboard-custom "ANSWERS=$golden" VPC_CIDR=10.22.0.0/16 "VPC_CIDR_SERVICES=$payload") ;;
+                *) args=(onboard "ANSWERS=$golden" "$var=$payload") ;;
+            esac
+            make_case "hostile $var #$n" refused "${args[@]}"
+        done
+    done
 fi
 
+for marker in "$M"/*; do
+    [[ ! -e "$marker" ]] || bad "a hostile value ran: $marker exists"
+done
 for dir in "$tmp/work" "$tmp/work/a dir" "$REPO_ROOT"; do
     for marker in "$dir"/PWNED*; do
         [[ ! -e "$marker" ]] || bad "a PWNED marker exists: $marker"

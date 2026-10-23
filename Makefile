@@ -20,8 +20,11 @@ STAGE ?= $(or $(ACCOUNT),dev)
 REGION ?= us-east-1
 NAME ?=
 
+# sq single-quotes a make value for the shell, so a value is never shell syntax.
+sq = '$(subst ','\'',$(1))'
+
 # Derived values (STACK can also be passed directly: make plan STACK=fnx-ue1-prod)
-ENVIRONMENT ?= $(shell ./scripts/stack-name.sh region-code $(REGION))
+ENVIRONMENT ?= $(shell ./scripts/stack-name.sh region-code $(call sq,$(REGION)))
 ifeq ($(origin STACK)$(strip $(ENVIRONMENT)),undefined)
 $(error No region code for REGION=$(REGION): add stacks/mixins/region/$(REGION).yaml, or pass STACK=<stack>)
 endif
@@ -373,10 +376,10 @@ install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned
 # Lanes (NAME) are not scaffolded: copy a templates/stacks sample.
 # scripts/scaffold-stack.sh reads the file line by line, refuses any line it
 # cannot pass as one --set word (naming it), and runs the scaffold; make never
-# pastes the file's contents into a shell. sq single-quotes a make value.
+# pastes the file's contents into a shell; every make value goes through sq.
+# scripts/test-scaffold-stack.sh runs these recipes with hostile values.
 ANSWERS ?=
 VPC_CIDR_SERVICES ?=
-sq = '$(subst ','\'',$(1))'
 SCAFFOLD_STACK = bash scripts/scaffold-stack.sh
 SCAFFOLD_SET = --set $(call sq,tenant=$(TENANT)) --set $(call sq,stage=$(STAGE)) --set $(call sq,region=$(REGION)) --set $(call sq,region_code=$(ENVIRONMENT))
 

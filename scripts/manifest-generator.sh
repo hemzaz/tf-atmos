@@ -24,7 +24,6 @@ WHITE='\033[1;37m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 print_usage() {
     echo -e "${CYAN}🛠️  Manifest Generator Usage${NC}"

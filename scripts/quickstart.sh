@@ -454,15 +454,18 @@ check_stack_exists() {
 # scaffold has written (and wired) a different stack: name it, so the operator
 # keeps or deletes it knowingly.
 create_stack_from_template() {
-    local before after new
+    local before after new="" listed=true
     log_info "Creating stack configuration (answer tenant=$TENANT, stage=$STAGE, region=$REGION)..."
 
-    before="$(atmos list stacks 2>/dev/null || true)"
+    before="$(atmos list stacks 2>/dev/null)" || listed=false
     bash "$SCRIPT_DIR/scaffold-stack.sh"
     after="$(atmos list stacks 2>/dev/null || true)"
 
     if ! grep -qx "$STACK_NAME" <<< "$after"; then
-        new="$(comm -13 <(sort <<< "$before") <(sort <<< "$after") | tr '\n' ' ')"
+        # Without the stack list from before the run, every stack would look new.
+        if [[ "$listed" == "true" ]]; then
+            new="$(comm -13 <(sort <<< "$before") <(sort <<< "$after") | tr '\n' ' ')"
+        fi
         log_error "The scaffold did not create $STACK_NAME.${new:+ It created and wired: ${new}(stacks/orgs/<tenant>/<stage>/<region>.yaml and its stacks/orgs/fnx/root/*.yaml lines; keep or remove them).} Generate again with tenant=$TENANT, stage=$STAGE, region=$REGION."
         exit 1
     fi
