@@ -28,7 +28,9 @@
 # beside a hand-written one whose account: line is plain or quoted, and, with
 # the hooks skipped, a prod primary whose data_plane does not match its
 # account (the template's own fail). A hostile value in a field the profile
-# hides must generate the golden unchanged, running nothing.
+# hides must generate the golden unchanged, running nothing. A generate into a
+# target other than the root must be refused (by the verify hook on 1.229, the
+# guard on 1.233), changing nothing outside the target.
 # Last, the fresh-stack end to end: brand-new stacks generated with the hooks
 # (a us-west-2 stack of each nonprod flavor with account_singletons=no beside
 # its account's committed stack, and a prod primary + standby pair,
@@ -47,7 +49,7 @@
 # same PR, or this fails.
 #
 # Usage: scripts/check-stack-scaffold.sh [--sweep]
-# --sweep (validate-enhanced) runs only the fresh-stack end to end, then
+# --sweep (atmos sweep --scaffold) runs only the fresh-stack end to end, then
 # scripts/plan-sweep.sh on the fresh stacks (lint runs the rest).
 # Needs atmos, python3 and yamllint (and, for --sweep, plan-sweep's tools).
 # Exit 0 when every golden regenerates identically, every refusal is refused
@@ -431,8 +433,9 @@ for quote in "" '"' "'"; do
 done
 
 # With every hook skipped (no guard), the prod primary template still refuses
-# a data_plane its account does not run: its own fail, writing nothing (Atmos
-# 1.229 reports only that the template failed, not the fail's message).
+# a data_plane its account does not run: its own fail, writing nothing. Atmos
+# 1.229 and 1.233 both report only that the template failed, hiding the fail's
+# own text, so the generic "Failed to generate files" message is matched.
 echo "== template refusals (--skip-hooks)"
 GEN_FLAGS=(--skip-hooks)
 for case in \
@@ -476,6 +479,46 @@ clean_since "$out/hidden.before"
 find . -name INJECTED -exec rm -f {} +
 cp "$out/hidden.committed.yaml" "$file"
 roots_unchanged "hidden-field injection" || failed="$failed hidden-injection"
+
+# A target other than the repository root. On 1.229 the guard runs in the
+# invocation directory (the root) and passes and the file lands in the target;
+# then verify, the first after-generate hook, must refuse (the wire hook's own
+# check stays a second defence: Atmos runs no hook after a failed one), and
+# nothing may claim the stack resolves or wire it. On 1.233 the hooks run in
+# the target, where the guard finds no stage defaults. Either way nothing
+# outside the target changes. Not counted among the bad answer sets.
+echo "== non-root target (fnx-uw2-dev into $out/nonroot)"
+load scaffolds/stack-golden/fnx-ue1-dev.env account_singletons=no region=us-west-2 region_code=uw2 \
+    az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.2.0.0/16 vpc_cidr_services=10.3.0.0/16
+atmos_version="$(atmos version 2>&1 | flatten)"
+files_list > "$out/nonroot.before"
+if atmos scaffold generate stack "$out/nonroot" --force --defaults "${sets[@]}" > "$out/nonroot.log" 2>&1; then
+    echo "ERROR non-root target: generated, but a target other than the root must be refused" >&2
+    cat "$out/nonroot.log" >&2
+    failed="$failed non-root-target"
+elif logged "$out/nonroot.log" "resolves" || logged "$out/nonroot.log" "stack-wiring:"; then
+    echo "ERROR non-root target: a hook verified or wired a stack the root does not have:" >&2
+    cat "$out/nonroot.log" >&2
+    failed="$failed non-root-target"
+elif logged "$out/nonroot.log" "scaffold stack: not verifying:" \
+    && logged "$out/nonroot.log" "/$file does not exist, so the target is not the repository root"; then
+    echo "non-root target: refused by the verify hook"
+elif [[ "$atmos_version" != *"Atmos 1.229."* ]] \
+    && logged "$out/nonroot.log" "no stacks/orgs/$tenant/$stage/_defaults.yaml: a new tenant or stage is out of scope"; then
+    echo "non-root target: refused by the guard (the hooks run in the target)"
+else
+    echo "ERROR non-root target: failed, but not by the verify hook (or, after 1.229, the guard; this is $atmos_version):" >&2
+    cat "$out/nonroot.log" >&2
+    failed="$failed non-root-target"
+fi
+files_list > "$out/nonroot.after"
+if ! cmp -s "$out/nonroot.before" "$out/nonroot.after"; then
+    echo "ERROR non-root target: files outside the target changed:" >&2
+    LC_ALL=C comm -3 "$out/nonroot.before" "$out/nonroot.after" >&2
+    failed="$failed non-root-target"
+fi
+roots_unchanged "non-root target" || failed="$failed non-root-target"
+rm -rf "$out/nonroot"
 fi
 
 # The fresh-stack end to end. Scratch-only setup for the prod pair: the
@@ -498,8 +541,9 @@ cp "$us_root" "$out/fresh.us.committed"
 cp "$eu_root" "$out/fresh.eu.committed"
 fresh_ok=1
 rm stacks/orgs/fnx/prod/us-east-1.yaml stacks/orgs/fnx/prod/us-east-2.yaml stacks/orgs/fnx/prod/eu-central-1.yaml
-grep -v -e 'fnx-ue1-prod' -e 'fnx-ue2-prod' "$out/fresh.us.committed" > "$us_root"
-grep -v -e 'fnx-ec1-prod' "$out/fresh.eu.committed" > "$eu_root"
+# Only the pair's list items go; the comments naming them stay.
+grep -v -E '^ *- .*(fnx-ue1-prod|fnx-ue2-prod)' "$out/fresh.us.committed" > "$us_root"
+grep -v -E '^ *- .*fnx-ec1-prod' "$out/fresh.eu.committed" > "$eu_root"
 cp "$us_root" "$out/fresh.us.base"
 cp "$eu_root" "$out/fresh.eu.base"
 fresh=()
