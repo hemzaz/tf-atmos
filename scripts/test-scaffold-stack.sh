@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # test-scaffold-stack.sh - tests for scripts/scaffold-stack.sh, the one answers
-# reader behind make onboard, quickstart.sh and manifest-generator.sh (lint step
-# scaffold-stack-reader). A stub `atmos` first on PATH records its argv, one
+# reader behind make onboard/onboard-custom (lint step scaffold-stack-reader). A stub `atmos` first on PATH records its argv, one
 # word per line, so no real scaffold runs. Checked:
 #   - good answers (a golden file plus --set before and after it) reach Atmos
 #     as the exact argv, in order, and no arguments mean the interactive run;
