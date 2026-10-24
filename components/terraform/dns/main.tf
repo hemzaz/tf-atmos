@@ -22,7 +22,16 @@ locals {
   # Get the normalized record list: var.records plus one NS record per zone
   # with a parent_zone, delegating it from that parent (Cloud Posse
   # dns-delegated's pattern, for a subzone whose parent is in this instance).
-  normalized_records = merge(local.explicit_records, local.delegation_records)
+  normalized_records = merge(local.explicit_records, local.delegation_records, local.dnssec_delegation_records)
+
+  # With dnssec_enabled, a parent_zone subzone's DS record next to its NS
+  # record in the parent zone, so the chain of trust continues below the apex.
+  dnssec_delegation_records = {
+    for k, zone in var.zones : "delegation_ds_${k}" => merge(local.delegation_records["delegation_${k}"], {
+      type    = "DS"
+      records = [try(aws_route53_key_signing_key.zones[k].ds_record, aws_route53_key_signing_key.dns_account_zones[k].ds_record)]
+    }) if zone.parent_zone != null && var.dnssec_enabled
+  }
 
   # ttl: Cloud Posse dns-delegated hardcodes 30 on root_ns; here it is var.delegation_ttl (default 30).
   delegation_records = {
@@ -85,7 +94,6 @@ resource "aws_route53_delegation_set" "dns_account_delegation_sets" {
 
 # Root zone - conditionally create if requested
 resource "aws_route53_zone" "root_zone" {
-  #checkov:skip=CKV2_AWS_38:TODO(owner): DNSSEC is not modelled for any zone (it needs an asymmetric KMS key in us-east-1 and a DS record at the registrar); no stack creates this zone (create_root_zone: false)
   #checkov:skip=CKV2_AWS_39:No stack creates this zone (create_root_zone: false); the zones a stack does create get query logging through zones.<key>.enable_query_logging
   count = var.create_root_zone ? 1 : 0
 
@@ -330,4 +338,158 @@ resource "aws_route53_zone_association" "vpc_associations" {
     aws_route53_zone.dns_account_zones,
     data.aws_route53_zone.existing_zones
   ]
+}
+
+# --- DNSSEC signing (dnssec_enabled) -----------------------------------------
+# Cloud Posse dns-delegated's dnssec.tf shape: one asymmetric ECC_NIST_P256
+# SIGN_VERIFY key in us-east-1 (Route 53 only uses KSK keys there; the
+# resource `region` argument, as query-logging.tf's keys), a policy admitting
+# dnssec-route53.amazonaws.com for this account's hosted zones, then per public
+# zone a key-signing key and SIGNING. dns-delegated defaults it off too.
+# Signing is safe without a DS record in the parent (resolvers treat the zone
+# as unsigned); the chain of trust starts when the owner adds the ds_records
+# output at the registrar or parent zone. Private zones cannot be signed.
+
+locals {
+  dnssec_key_region = "us-east-1"
+
+  dnssec_root_zone = var.dnssec_enabled && var.create_root_zone
+  dnssec_local_zones = var.dnssec_enabled ? {
+    for k, z in var.zones : k => z if length(z.vpc_associations) == 0 && !contains(local.dns_account_zone_keys, k)
+  } : {}
+  dnssec_dns_account_zones = var.dnssec_enabled ? { for k in local.dns_account_zone_keys : k => var.zones[k] } : {}
+
+  # One key per account that has a signed zone.
+  dnssec_key_accounts = merge(
+    local.dnssec_root_zone || length(local.dnssec_local_zones) > 0 ? { local = data.aws_caller_identity.current.account_id } : {},
+    length(local.dnssec_dns_account_zones) > 0 ? { dns_account = one(data.aws_caller_identity.dnssec_dns_account[*].account_id) } : {},
+  )
+
+  # AWS's key policy for DNSSEC signing (Route 53 developer guide), as
+  # dns-delegated's. A key policy cannot name its own ARN; "*" is this key.
+  dnssec_key_policies = {
+    for acct, id in local.dnssec_key_accounts : acct => jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid       = "EnableAccountAdministration"
+          Effect    = "Allow"
+          Principal = { AWS = "arn:${data.aws_partition.current.partition}:iam::${id}:root" }
+          Action    = "kms:*"
+          Resource  = "*"
+        },
+        {
+          Sid       = "AllowRoute53DNSSECService"
+          Effect    = "Allow"
+          Principal = { Service = "dnssec-route53.amazonaws.com" }
+          Action    = ["kms:DescribeKey", "kms:GetPublicKey", "kms:Sign", "kms:Verify"]
+          Resource  = "*"
+          Condition = {
+            StringEquals = { "aws:SourceAccount" = id }
+            ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:route53:::hostedzone/*" }
+          }
+        },
+        {
+          Sid       = "AllowRoute53DNSSECToCreateGrant"
+          Effect    = "Allow"
+          Principal = { Service = "dnssec-route53.amazonaws.com" }
+          Action    = "kms:CreateGrant"
+          Resource  = "*"
+          Condition = { Bool = { "kms:GrantIsForAWSResource" = "true" } }
+        },
+      ]
+    })
+  }
+
+  # KSK names allow only [A-Za-z0-9_] (3-128 characters).
+  dnssec_ksk_names = {
+    for k, name in merge(
+      { for k, z in merge(local.dnssec_local_zones, local.dnssec_dns_account_zones) : k => z.name },
+      local.dnssec_root_zone ? { "@root" = var.root_domain } : {},
+    ) : k => substr("ksk_${replace(replace(trimsuffix(lower(name), "."), ".", "_"), "-", "_")}", 0, 128)
+  }
+}
+
+data "aws_caller_identity" "dnssec_dns_account" {
+  provider = aws.dns_account
+  count    = length(local.dnssec_dns_account_zones) > 0 ? 1 : 0
+}
+
+resource "aws_kms_key" "dnssec" {
+  count  = contains(keys(local.dnssec_key_accounts), "local") ? 1 : 0
+  region = local.dnssec_key_region
+
+  description              = "Route 53 DNSSEC key-signing key (${var.root_domain})"
+  customer_master_key_spec = "ECC_NIST_P256"
+  key_usage                = "SIGN_VERIFY"
+  deletion_window_in_days  = 30
+  enable_key_rotation      = false
+  policy                   = local.dnssec_key_policies["local"]
+
+  tags = merge(var.tags, { Name = "route53-dnssec-${var.root_domain}" })
+}
+
+resource "aws_kms_key" "dns_account_dnssec" {
+  provider = aws.dns_account
+  count    = contains(keys(local.dnssec_key_accounts), "dns_account") ? 1 : 0
+  region   = local.dnssec_key_region
+
+  description              = "Route 53 DNSSEC key-signing key (${var.root_domain})"
+  customer_master_key_spec = "ECC_NIST_P256"
+  key_usage                = "SIGN_VERIFY"
+  deletion_window_in_days  = 30
+  enable_key_rotation      = false
+  policy                   = local.dnssec_key_policies["dns_account"]
+
+  tags = merge(var.tags, { Name = "route53-dnssec-${var.root_domain}" })
+}
+
+resource "aws_route53_key_signing_key" "root_zone" {
+  count = local.dnssec_root_zone ? 1 : 0
+
+  hosted_zone_id             = aws_route53_zone.root_zone[0].zone_id
+  key_management_service_arn = aws_kms_key.dnssec[0].arn
+  name                       = local.dnssec_ksk_names["@root"]
+}
+
+resource "aws_route53_hosted_zone_dnssec" "root_zone" {
+  count = local.dnssec_root_zone ? 1 : 0
+
+  hosted_zone_id = aws_route53_zone.root_zone[0].zone_id
+
+  depends_on = [aws_route53_key_signing_key.root_zone]
+}
+
+resource "aws_route53_key_signing_key" "zones" {
+  for_each = local.dnssec_local_zones
+
+  hosted_zone_id             = aws_route53_zone.zones[each.key].zone_id
+  key_management_service_arn = aws_kms_key.dnssec[0].arn
+  name                       = local.dnssec_ksk_names[each.key]
+}
+
+resource "aws_route53_hosted_zone_dnssec" "zones" {
+  for_each = local.dnssec_local_zones
+
+  hosted_zone_id = aws_route53_zone.zones[each.key].zone_id
+
+  depends_on = [aws_route53_key_signing_key.zones]
+}
+
+resource "aws_route53_key_signing_key" "dns_account_zones" {
+  provider = aws.dns_account
+  for_each = local.dnssec_dns_account_zones
+
+  hosted_zone_id             = aws_route53_zone.dns_account_zones[each.key].zone_id
+  key_management_service_arn = aws_kms_key.dns_account_dnssec[0].arn
+  name                       = local.dnssec_ksk_names[each.key]
+}
+
+resource "aws_route53_hosted_zone_dnssec" "dns_account_zones" {
+  provider = aws.dns_account
+  for_each = local.dnssec_dns_account_zones
+
+  hosted_zone_id = aws_route53_zone.dns_account_zones[each.key].zone_id
+
+  depends_on = [aws_route53_key_signing_key.dns_account_zones]
 }

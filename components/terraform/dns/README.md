@@ -53,6 +53,17 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
 - `query_log_retention_in_days` defaults to 7 (prod: 90). A zone's `query_logging_config` may
   set `retention_days`, a us-east-1 `kms_key_id` (no own key is then created for it) or a
   us-east-1 `cloudwatch_log_group_arn` (no log group is created; the policy still names it).
+- `dnssec_enabled` (Cloud Posse `dns-delegated`'s input, default off) signs every public zone
+  the instance creates: per account one us-east-1 `ECC_NIST_P256`/`SIGN_VERIFY` KMS key (Route 53
+  only signs with us-east-1 keys; resource `region` argument; policy: account root plus
+  `dnssec-route53.amazonaws.com` scoped to this account's hosted zones), per zone a key-signing
+  key and `SIGNING`. Signing alone changes nothing for resolvers; the chain of trust starts when
+  the owner publishes the zone's `ds_records` output at the registrar (apex) or parent zone. A
+  `parent_zone` subzone gets its DS record (`delegation_ds_<key>`) beside its NS record in the
+  parent; a zone delegated from another instance needs a `DS` record there reading this
+  instance's `ds_records`. Before turning it off or deleting
+  the key, remove the DS record and wait out its TTL, or the zone stops resolving for validating
+  resolvers. The key is in us-east-1, so a GDPR-scoped (EU) stack keeps it off.
 - Records in a DNS-account zone can only reference health checks from the main account.
 - `workflows/scripts/common/check-domains.py` (run by `validate-all`) requires every record name
   to sit in its zone and not inside a more specific public zone of the stack, and every nested

@@ -99,6 +99,13 @@ variable "zones" {
   }
 }
 
+variable "dnssec_enabled" {
+  type        = bool
+  description = "Whether to sign every public zone this instance creates (the root zone and zones without vpc_associations) with DNSSEC: a us-east-1 ECC_NIST_P256 KMS key per account and a key-signing key per zone, as Cloud Posse dns-delegated's dnssec_enabled (default false there too). The chain of trust needs each zone's ds_records output added at its registrar or parent zone. The key lives in us-east-1, so a GDPR-scoped (EU) stack keeps it off."
+  default     = false
+  nullable    = false
+}
+
 variable "query_logging_name" {
   type        = string
   description = "Suffix of the account-wide Route53 query logging resource policy and KMS key alias names (route53-query-logging-<suffix>, alias/route53-query-logs-<suffix>). Null derives it from the alphabetically first query-logged zone name, which renames and replaces both when a zone that sorts earlier is added: set it once the zones are settled to pin the names. Resource policies and aliases are per account, so instances sharing an account (network/main, network/services) need different values."

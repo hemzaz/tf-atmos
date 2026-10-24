@@ -72,6 +72,19 @@ output "query_log_kms_key_arns" {
   value       = concat(aws_kms_key.query_logs[*].arn, aws_kms_key.dns_account_query_logs[*].arn)
 }
 
+output "ds_records" {
+  description = "Map of DNSSEC-signed zones (keyed as zone_ids: the zone key, the root zone by root_domain) to the DS record the registrar or parent zone must publish to complete the chain of trust; empty with dnssec_enabled off"
+  value = merge(
+    { for k, ksk in aws_route53_key_signing_key.root_zone : var.root_domain => ksk.ds_record },
+    { for k, ksk in merge(aws_route53_key_signing_key.zones, aws_route53_key_signing_key.dns_account_zones) : k => ksk.ds_record },
+  )
+}
+
+output "dnssec_kms_key_arns" {
+  description = "ARNs of the us-east-1 DNSSEC signing keys this component created (main and DNS account); empty with dnssec_enabled off"
+  value       = concat(aws_kms_key.dnssec[*].arn, aws_kms_key.dns_account_dnssec[*].arn)
+}
+
 output "private_zone_vpc_associations" {
   description = "Map of private zone VPC associations"
   value = {
