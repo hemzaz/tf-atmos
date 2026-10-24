@@ -31,6 +31,9 @@ Redis credentials, and optional Prometheus `ServiceMonitor`s.
   reject `:latest`. The stacks take them from `settings.environment.backend_service_images`, which
   the release pipeline owns.
 - Only `platform_api` runs the `db-migrate` init container.
+- Every container runs with `read_only_root_filesystem`; the only writable path is the pod's
+  `/tmp` `emptyDir` (1Gi, shared by the init container). A service image must write scratch
+  files, caches and `TMPDIR` under `/tmp` (the release pipeline's contract), or it fails at start.
 - Uses `data.aws_eks_cluster_auth` for the provider token (no `aws` CLI in the CI image), so apply
   needs real AWS credentials and, with private endpoints, network access to the cluster.
 - `enable_prometheus_monitoring` stays `false` until a stack installs the Prometheus Operator: the
