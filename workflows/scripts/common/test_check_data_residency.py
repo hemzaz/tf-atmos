@@ -199,6 +199,25 @@ class DataResidencyTest(unittest.TestCase):
         us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
         self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"network/main": us})}), [])
 
+    def test_dns_dnssec_fails_in_eu_only(self):
+        def dns(value):
+            spec = instance(dnssec_enabled=value, zones={"main": {"name": "d"}})
+            spec["metadata"] = {"component": "dns"}
+            return spec
+
+        for off in (None, False, "false"):
+            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": dns(off)})}), [], off)
+        for on in (True, "true", 1):
+            self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": dns(on)})}), [
+                "fnx-ew1-prod: network/main sets dnssec_enabled: Route 53 signs only with a KMS key in "
+                "us-east-1, outside the EU",
+            ], on)
+        us = dns(True)
+        us["vars"].update(region="us-east-1", tags={"Compliance": US})
+        us["settings"]["tfstate"] = {"region": "us-east-1"}
+        us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
+        self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"network/main": us})}), [])
+
     def test_dns_query_logging_quoted_and_numeric_values_count_as_on(self):
         on = "fnx-ew1-prod: network/main zone main sets enable_query_logging"
         for value in ("true", "True", 1):
