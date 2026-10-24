@@ -160,15 +160,22 @@ roots_unchanged() {
 }
 python3 -m unittest workflows/scripts/common/test_stack_wiring.py
 atmos scaffold validate scaffolds/stack/scaffold.yaml
+# scaffold_code: scaffold.yaml without its comment lines, so a comment quoting
+# a pinned line cannot satisfy its pin. The pins are anchored whole lines in
+# bracket expressions (no backslash escapes), the same for GNU and BSD grep.
+scaffold_code() {
+    grep -v '^[[:space:]]*#' scaffolds/stack/scaffold.yaml
+}
 # The INJECTION refusal pins critical_alerts' field pattern; this pins the
 # guard's second defence, the urlquery encoding of the answer it reads.
-if ! grep -qF 'case "{{ urlquery .Answers.critical_alerts }}" in' scaffolds/stack/scaffold.yaml; then
+if ! scaffold_code | grep -E '^[[:space:]]*case "[{][{] urlquery [.]Answers[.]critical_alerts [}][}]" in$' >/dev/null; then
     echo "ERROR scaffolds/stack/scaffold.yaml: the guard no longer reads critical_alerts through urlquery" >&2
     exit 1
 fi
 # The wire hook's backstop: a target that is not the repository root has no
-# stack file, so the hook refuses to wire it.
-if ! grep -qF '[ -f "$stack_file" ] || {' scaffolds/stack/scaffold.yaml; then
+# stack file, so the hook refuses to wire it (scripts/test-scaffold-stack.sh
+# runs the hook body itself).
+if ! scaffold_code | grep -E '^[[:space:]]*[[] -f "[$]stack_file" []] [|][|] [{]$' >/dev/null; then
     echo "ERROR scaffolds/stack/scaffold.yaml: the wire hook no longer checks that the stack file exists" >&2
     exit 1
 fi
