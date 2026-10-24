@@ -717,6 +717,12 @@ variable "enable_waf" {
   default     = false
 }
 
+variable "waf_logging_enabled" {
+  type        = bool
+  description = "Whether the web ACL (enable_waf) logs to its own aws-waf-logs-<Environment>-<api_name> log group, encrypted with kms_key_id and kept log_retention_days, with the Authorization and Cookie headers redacted"
+  default     = true
+}
+
 variable "waf_rate_limit" {
   type        = number
   description = "The maximum number of requests per 5 minutes from a single IP"
