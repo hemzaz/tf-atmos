@@ -22,6 +22,9 @@ components:
         root_domain: "{{ .settings.environment.domain_name }}"
         create_root_zone: false
         multi_account_dns_delegation: false
+        # The GDPR-scoped EU primary (fnx-ew1-prod) keeps nothing in us-east-1
+        # (owner decision B5), and DNSSEC's signing key must live there.
+        dnssec_enabled: false
         zones:
           main:
             name: "{{ .settings.environment.domain_name }}"

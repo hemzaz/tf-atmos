@@ -47,6 +47,15 @@ components:
             type: "NS"
             ttl: 30 # Cloud Posse dns-delegated's NS TTL
             records: !terraform.state network/services .zone_name_servers.services
+          # services.<domain>'s DNSSEC DS record (dnssec_enabled), continuing
+          # the chain of trust below the apex.
+          services_ds:
+            zone_name: "main"
+            name: "services.{{ .settings.environment.domain_name }}"
+            type: "DS"
+            ttl: 30
+            records:
+              - !terraform.state network/services .ds_records.services
           db_internal:
             zone_name: "internal"
             name: "db.internal.{{ .settings.environment.domain_name }}"
