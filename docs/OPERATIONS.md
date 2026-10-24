@@ -477,9 +477,9 @@ are set in the stack file.
 
 Destroying the backend is irreversible: it deletes the bucket and every stack's state in it.
 
-### Pinned versions: providers, the Atmos image, actions
+### Pinned versions: providers, the Atmos image, actions, toolchain tools
 
-Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for all three; each must pass
+Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for the first three; each must pass
 `CI gate`. `.github/CODEOWNERS` requests the owner's review on `.github/`, `iam`, `backend`, the
 stack files and the security, compute and services catalogs (advisory until branch protection
 requires code-owner review).
@@ -505,6 +505,14 @@ requires code-owner review).
   `manifest-schema` fails in CI until the pin matches the image's Atmos.
   Raise `version.constraint` in `atmos.yaml` when the new version is required.
 - **Actions.** `uses:` refs are commit SHAs with a version comment; Dependabot moves both.
+- **Toolchain tools** (terraform, tflint, trivy, checkov, yq, aws-cli, jq, ...). Atmos gives each
+  workflow and custom command only its own `dependencies.tools` (no repo-wide default it inherits;
+  `.tool-versions` is a regenerated dev-shell file, not committed), so a pin repeats in every
+  workflow, stack default, `terraform-ci.yml` install, `.pre-commit-config.yaml` and doc that names
+  it. To bump one, change any copy, run `python3 scripts/check-tool-pins.py`: it lists every copy
+  still on the old version (the lint step `tool-pins` fails until they agree). Then run
+  `atmos workflow lint -f lint` and `atmos workflow validate-all -f validate-enhanced`. Neither
+  Dependabot nor Renovate (not configured here) reads `dependencies.tools`, so bumps are by hand.
 
 Drift fix: codify an intended manual change in the stack, then `atmos terraform deploy`; otherwise
 re-apply; import resources created outside Terraform.
