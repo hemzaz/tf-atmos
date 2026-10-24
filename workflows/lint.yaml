@@ -74,8 +74,7 @@ workflows:
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
               python3 scripts/check-hcl-unary-newline.py components/terraform
-          # Atmos has no repo-wide dependencies.tools default, so each tool pin repeats
-          # across workflows, stack defaults, CI, pre-commit and docs: one version per tool.
+          # Each tool pin repeats (no repo-wide dependencies.tools): one version per tool.
           - name: tool-pins
             type: shell
             command: |

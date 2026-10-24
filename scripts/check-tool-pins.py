@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
 """Fail when one toolchain tool is pinned to two different versions.
 
-Atmos (1.229 and 1.233) gives each workflow and custom command only its own
-`dependencies.tools`: there is no atmos.yaml-wide default they inherit, and the
-only shared base (`.tool-versions`) is a regenerated developer-shell file this repo
-does not commit. So a pin such as `terraform: "1.16.3"` repeats in every workflow
-that runs terraform, and a bump that misses one copy runs two versions.
+Atmos (1.229, 1.233) gives each workflow and custom command only its own
+`dependencies.tools` (no atmos.yaml-wide default; `.tool-versions` is not committed),
+so a pin repeats in every workflow that needs the tool.
 
-Every `dependencies.tools` entry under atmos.yaml, workflows/ and stacks/ names a
-tool. Each later mention of that tool next to a version (`tool: "x.y.z"`,
-`tool@x.y.z`, `tool==x.y.z`, `Tool x.y.z` in prose) in the files below must carry
-the same version. A leading `v` and an owner prefix (`hashicorp/terraform`) are
-ignored, so `tflint: "v0.64.0"` and `tflint@0.64.0` agree.
+Each `dependencies.tools` entry under atmos.yaml, workflows/ and stacks/ declares a
+tool (block or flow style; anything but an exact `x.y.z` pin fails). Every mention of
+a declared tool with a version in MENTION_GLOBS must match: `tool: "x.y.z"` (any
+quotes), `tool@`, `tool==`, `tool=`, `tool-x.y.z`, `TOOL_VERSION: x.y.z` (`TF_VERSION`
+for terraform), and prose such as `Terraform 1.5.7`, which counts as a pin. A leading
+`v` and an owner prefix (`hashicorp/`) are ignored.
+Out of scope: constraints and two-part versions (`~> 1.16`), `.tf` files, nested docs.
 
-Usage: check-tool-pins.py [ROOT]   (default: the current directory)
-Exit 0 when every tool has one version, 1 on a mismatch. Pure stdlib (runs in the
-CI image).
+Usage: check-tool-pins.py [ROOT]. Exit 0 when each tool has one version, else 1. Stdlib only.
 """
 
 import pathlib
 import re
 import sys
 
-# Files holding a tool pin or a copy of one. YAML globs are searched for
-# `dependencies.tools` blocks (the declarations) and for mentions.
 DECLARING_GLOBS = ("atmos.yaml", "workflows/*.yaml", "stacks/**/*.yaml")
 MENTION_GLOBS = DECLARING_GLOBS + (
     ".github/workflows/*.yml",
@@ -31,28 +27,42 @@ MENTION_GLOBS = DECLARING_GLOBS + (
     "README.md",
     "docs/*.md",
     "scripts/*.sh",
+    "workflows/scripts/**/*.sh",
+    "Makefile",
 )
 
-# Names a mention uses for a declared tool: pre-commit installs the Python
-# yamllint, the workflows the go-yamllint (wasm) build of the same release.
-ALIASES = {"yamllint": "go-yamllint"}
+# pre-commit's yamllint is the release go-yamllint (wasm) builds; `tf` only as TF_VERSION.
+ALIASES = {"yamllint": "go-yamllint", "tf": "terraform"}
 
 VERSION = r"v?\d+\.\d+\.\d+"
+Q = "[\"']?"
 DEPS_LINE = re.compile(r"^(\s*)dependencies:\s*$")
-TOOLS_LINE = re.compile(r"^(\s*)tools:\s*$")
-ENTRY_LINE = re.compile(rf'^(\s*)([\w./-]+):\s*"?({VERSION})"?\s*(#.*)?$')
+TOOLS_LINE = re.compile(r"^(\s*)tools:\s*(#.*)?$")
+FLOW_LINE = re.compile(r"^(\s*)tools:\s*\{(.*)\}\s*(#.*)?$")
+ENTRY_LINE = re.compile(rf"^(\s*)([\w./-]+):\s*{Q}({VERSION}){Q}\s*(#.*)?$")
+FLOW_ENTRY = re.compile(rf"^\s*{Q}([\w./-]+){Q}\s*:\s*{Q}({VERSION}){Q}\s*$")
+
+
+class PinError(Exception):
+    pass
 
 
 def short(tool):
     return tool.rsplit("/", 1)[-1].lower()
 
 
-def norm(version):
-    return version[1:] if version.startswith("v") else version
+def flow_entries(body, number):
+    for item in filter(str.strip, body.split(",")):
+        entry = FLOW_ENTRY.match(item)
+        if not entry:
+            raise PinError(f"{number}: flow-style tools entry {item.strip()!r} is not tool: x.y.z")
+        yield short(entry.group(1)), entry.group(2).removeprefix("v"), number
 
 
 def declarations(lines):
-    """(tool, version, line number) for each entry of a dependencies.tools block."""
+    """(tool, version, line number) for each entry of a dependencies.tools block.
+
+    Raises PinError on an entry that is not an exact x.y.z pin."""
     deps_indent = tools_indent = None
     for number, line in enumerate(lines, 1):
         if not line.strip() or line.lstrip().startswith("#"):
@@ -60,8 +70,10 @@ def declarations(lines):
         indent = len(line) - len(line.lstrip())
         if tools_indent is not None:
             entry = ENTRY_LINE.match(line)
-            if indent > tools_indent and entry:
-                yield short(entry.group(2)), norm(entry.group(3)), number
+            if indent > tools_indent:
+                if not entry:
+                    raise PinError(f"{number}: tools entry {line.strip()!r} is not an exact x.y.z pin")
+                yield short(entry.group(2)), entry.group(3).removeprefix("v"), number
                 continue
             tools_indent = None
         if deps_indent is not None and indent <= deps_indent:
@@ -70,15 +82,22 @@ def declarations(lines):
         if match:
             deps_indent = len(match.group(1))
             continue
-        match = TOOLS_LINE.match(line)
-        if match and deps_indent is not None and len(match.group(1)) > deps_indent:
-            tools_indent = len(match.group(1))
+        if deps_indent is None or indent <= deps_indent or not line.lstrip().startswith("tools:"):
+            continue
+        match = FLOW_LINE.match(line)
+        if match:
+            yield from flow_entries(match.group(2), number)
+        elif TOOLS_LINE.match(line):
+            tools_indent = indent
+        else:
+            raise PinError(f"{number}: unreadable tools line {line.strip()!r}")
 
 
 def mention_pattern(names):
     alternatives = "|".join(sorted((re.escape(n) for n in names), key=len, reverse=True))
     return re.compile(
-        rf'(?<![\w-])(?:[\w.-]+/)?({alternatives})"?(?:\s*(?:==|@|:)\s*|\s+)"?({VERSION})\b',
+        rf"(?<![\w-])(?:[\w.-]+/)?({alternatives}|tf(?=_version))(?:_version)?{Q}"
+        rf"(?:\s*(?:==|=|@|:)\s*|\s+|-){Q}({VERSION})\b",
         re.IGNORECASE,
     )
 
@@ -89,7 +108,12 @@ def collect(root):
         return [p for g in globs for p in sorted(root.glob(g)) if p.is_file()]
 
     files = {p: p.read_text(encoding="utf-8").splitlines() for p in paths(MENTION_GLOBS)}
-    declared = {tool for p in paths(DECLARING_GLOBS) for tool, _, _ in declarations(files[p])}
+    declared = set()
+    for path in paths(DECLARING_GLOBS):
+        try:
+            declared |= {tool for tool, _, _ in declarations(files[path])}
+        except PinError as err:
+            raise PinError(f"{path.relative_to(root)}:{err}") from None
     names = declared | {alias for alias, tool in ALIASES.items() if tool in declared}
     pins = {}
     if not names:
@@ -101,13 +125,17 @@ def collect(root):
                 tool = short(match.group(1))
                 tool = ALIASES.get(tool, tool)
                 location = f"{path.relative_to(root)}:{number}"
-                pins.setdefault(tool, {}).setdefault(norm(match.group(2)), []).append(location)
+                pins.setdefault(tool, {}).setdefault(match.group(2).removeprefix("v"), []).append(location)
     return pins
 
 
 def main(argv):
     root = pathlib.Path(argv[1] if len(argv) > 1 else ".").resolve()
-    pins = collect(root)
+    try:
+        pins = collect(root)
+    except PinError as err:
+        print(f"check-tool-pins: {err}", file=sys.stderr)
+        return 1
     if not pins:
         print(f"check-tool-pins: no dependencies.tools under {root}", file=sys.stderr)
         return 1

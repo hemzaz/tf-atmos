@@ -509,10 +509,9 @@ requires code-owner review).
   workflow and custom command only its own `dependencies.tools` (no repo-wide default it inherits;
   `.tool-versions` is a regenerated dev-shell file, not committed), so a pin repeats in every
   workflow, stack default, `terraform-ci.yml` install, `.pre-commit-config.yaml` and doc that names
-  it. To bump one, change any copy, run `python3 scripts/check-tool-pins.py`: it lists every copy
-  still on the old version (the lint step `tool-pins` fails until they agree). Then run
-  `atmos workflow lint -f lint` and `atmos workflow validate-all -f validate-enhanced`. Neither
-  Dependabot nor Renovate (not configured here) reads `dependencies.tools`, so bumps are by hand.
+  it. To bump one, change any copy and run `python3 scripts/check-tool-pins.py`: it lists every copy
+  still on the old version (lint step `tool-pins`), then run lint and validate-all. Neither
+  Dependabot nor Renovate (not configured) reads `dependencies.tools`, so bumps are by hand.
 
 Drift fix: codify an intended manual change in the stack, then `atmos terraform deploy`; otherwise
 re-apply; import resources created outside Terraform.
