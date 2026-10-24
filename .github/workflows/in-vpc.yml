@@ -61,7 +61,7 @@ on:
         required: true
         type: string
       mode:
-        description: "plan, deploy, or drift (plan with a detailed exit code that fails on changes)"
+        description: "plan, deploy, or drift (plan each instance and upload the result for drift-detection.yml's issues job)"
         required: true
         type: string
       base:
@@ -188,34 +188,45 @@ jobs:
             plan|drift)
               # Read-only by intent: no state lock (as the hosted plans), though
               # the apply role's state role could take one.
-              drifted=() failed=()
+              mkdir -p drift-logs
+              clean=() drifted=() failed=() n=0
               while IFS= read -r component; do
                 [ -n "$component" ] || continue
-                rc=0
+                rc=0 n=$((n + 1))
                 atmos terraform plan "$component" -s "$STACK" --skip-planfile --hide no-changes \
-                  -- -detailed-exitcode -lock=false </dev/null || rc=$?
+                  -- -detailed-exitcode -lock=false </dev/null 2>&1 | tee "drift-logs/$n.log" || rc=$?
                 case "$rc" in
-                  0) ;;
-                  2) drifted+=("$component") ;;
+                  0) clean+=("$component") ;;
+                  2) drifted+=("$component=drift-logs/$n.log") ;;
                   *) failed+=("$component"); echo "::error title=Plan failed::$STACK $component (exit $rc)" ;;
                 esac
               done <<<"$components"
+              # drift: the result for drift-detection.yml's issues job, which
+              # owns the drift signal (drifted instances do not fail this job).
+              if [ "$MODE" = drift ]; then
+                python3 workflows/scripts/common/drift-issues.py record --out "drift-result/$STACK--$LABEL.json" \
+                  --stack "$STACK" --clean "${clean[@]}" --drifted "${drifted[@]}" --failed "${failed[@]}" || exit 1
+                for item in "${drifted[@]}"; do echo "::warning title=Drift::$STACK ${item%%=*} has drifted"; done
+              fi
               if [ "${#failed[@]}" -gt 0 ]; then
                 echo "::error::$STACK: plan failed for ${failed[*]}"
                 exit 1
               fi
-              if [ "$MODE" = drift ] && [ "${#drifted[@]}" -gt 0 ]; then
-                for component in "${drifted[@]}"; do echo "::warning title=Drift::$STACK $component has drifted"; done
-                echo "::error::$STACK: drift in ${drifted[*]}"
-                exit 2
-              fi
-              [ "${#drifted[@]}" -eq 0 ] || echo "$STACK: changes planned for ${drifted[*]}"
+              [ "${#drifted[@]}" -eq 0 ] || echo "$STACK: changes planned for ${drifted[*]%%=*}"
               ;;
             *)
               echo "::error::unknown mode '$MODE'"
               exit 1
               ;;
           esac
+      - name: Upload the drift result
+        if: always() && inputs.mode == 'drift'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drift-${{ inputs.stack }}--${{ inputs.label }}
+          path: drift-result/
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Upload the in-VPC deploy marker
         if: inputs.mode == 'deploy' && inputs.base != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

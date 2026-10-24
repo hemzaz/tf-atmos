@@ -465,7 +465,7 @@ are set in the stack file.
 
 | Task | Command |
 |------|---------|
-| Drift (hourly in CI, [in-cluster components](#in-cluster-components) on the in-VPC runners) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
+| Drift (hourly in CI, [in-cluster components](#in-cluster-components) on the in-VPC runners; opens `drift` issues, below) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
 | Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-scan-report -f lint` lists every finding without failing. No baselines: fix a finding or suppress it inline with a reason (`#checkov:skip=<ID>:<reason>` in the block, `#trivy:ignore:<ID> <reason>` above it) |
 | Security Hub findings | `atmos workflow security-audit -f security-hardening -s <stack>` |
 | Compliance | `atmos workflow check -f compliance-check -s <stack>`; `report` writes `compliance-report.md` |
@@ -512,6 +512,14 @@ requires code-owner review).
   it. To bump one, change any copy and run `python3 scripts/check-tool-pins.py`: it lists every copy
   still on the old version (lint step `tool-pins`), then run lint and validate-all. Neither
   Dependabot nor Renovate (not configured) reads `dependencies.tools`, so bumps are by hand.
+
+Drift in CI is an issue, not a red run: `drift-detection.yml` opens one issue per drifted
+`(stack, component)`, titled ``Drift Detected in `<stack>-<component>` `` and labelled `drift`
+(Cloud Posse's drift-action shape), updates it with the latest plan summary and run link while the
+drift lasts, and closes it (label `drift-recovered`) once a run plans the pair clean or no longer
+plans it. A failed plan or a leg with no result fails the run and leaves the pair's issue as it is.
+Upgrade path: Atmos Pro drift detection (`settings.pro.drift_detection`), which replaced Cloud
+Posse's deprecated drift actions and adds drift history and remediation.
 
 Drift fix: codify an intended manual change in the stack, then `atmos terraform deploy`; otherwise
 re-apply; import resources created outside Terraform.

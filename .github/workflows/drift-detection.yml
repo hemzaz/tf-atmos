@@ -2,8 +2,12 @@
 # stack, except instances with settings.github.actions_enabled: false (skipped
 # with a ::notice::). The in-cluster components (settings.github.runner:
 # in-vpc), which a hosted runner cannot reach, are planned on the stack's
-# self-hosted runners in the VPC (in-vpc.yml, docs/OPERATIONS.md). Stacks with
-# drift fail the job and show the changes in the job summary (Atmos Native CI).
+# self-hosted runners in the VPC (in-vpc.yml, docs/OPERATIONS.md). Each leg
+# uploads its result (drift-issues.py record); the final `issues` job opens or
+# updates one issue per drifted (stack, component), labelled drift, and closes
+# it once a run plans the pair clean (drift-issues.py sync). The issue is the
+# drift signal, as with Cloud Posse's drift action: drift alone leaves the run
+# green; a plan that failed, or a leg with no result, fails it.
 #
 # Upgrade path: Atmos Pro drift detection (settings.pro.drift_detection +
 # `atmos terraform plan <component> -s <stack> --upload-status`) adds drift
@@ -133,9 +137,9 @@ jobs:
       # for prod stacks), hence -lock=false: it cannot write a .tflock object.
       # One plan per instance (ci-components.py) instead of a stack-wide
       # `plan -s`, which cannot skip the actions_enabled: false instances.
-      # Every instance is planned (keep going); the step fails with exit 1 if
-      # any plan errored, else with 2 if any drifted (terraform's
-      # -detailed-exitcode meanings), and annotates each.
+      # Every instance is planned (keep going); terraform's -detailed-exitcode
+      # sorts each into clean (0), drifted (2) or failed. The step records the
+      # result for the issues job and fails only if a plan failed.
       - name: Plan (detailed exit code)
         shell: bash
         env:
@@ -144,27 +148,33 @@ jobs:
         run: |
           set -uo pipefail
           components="$(python3 workflows/scripts/common/ci-components.py --stack "$STACK")" || exit 1
-          drifted=() failed=()
+          mkdir -p drift-logs
+          clean=() drifted=() failed=() n=0
           while IFS= read -r component; do
             [ -n "$component" ] || continue
-            rc=0
+            rc=0 n=$((n + 1))
             atmos terraform plan "$component" -s "$STACK" --skip-planfile --hide no-changes \
-              -- -detailed-exitcode -lock=false </dev/null || rc=$?
+              -- -detailed-exitcode -lock=false </dev/null 2>&1 | tee "drift-logs/$n.log" || rc=$?
             case "$rc" in
-              0) ;;
-              2) drifted+=("$component"); echo "::warning title=Drift::$STACK $component has drifted" ;;
+              0) clean+=("$component") ;;
+              2) drifted+=("$component=drift-logs/$n.log"); echo "::warning title=Drift::$STACK $component has drifted" ;;
               *) failed+=("$component"); echo "::error title=Plan failed::$STACK $component (exit $rc)" ;;
             esac
           done <<<"$components"
+          python3 workflows/scripts/common/drift-issues.py record --out "drift-result/$STACK.json" --stack "$STACK" \
+            --clean "${clean[@]}" --drifted "${drifted[@]}" --failed "${failed[@]}" || exit 1
           if [ "${#failed[@]}" -gt 0 ]; then
             echo "::error::$STACK: plan failed for ${failed[*]}"
             exit 1
           fi
-          if [ "${#drifted[@]}" -gt 0 ]; then
-            echo "::error::$STACK: drift in ${drifted[*]}"
-            exit 2
-          fi
-          echo "$STACK: no drift"
+          echo "$STACK: ${#drifted[@]} drifted (see the Drift issues job)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: drift-${{ matrix.stack }}
+          path: drift-result/
+          if-no-files-found: ignore
+          retention-days: 1
 
   drift-in-vpc:
     name: Drift in-VPC ${{ matrix.stack }} (${{ matrix.label }})
@@ -190,3 +200,32 @@ jobs:
       asg: ${{ matrix.asg }}
       region: ${{ matrix.region }}
       mode: drift
+
+  issues:
+    name: Drift issues
+    needs: [stacks, detect-drift, drift-in-vpc]
+    # After every leg, passed or failed; skipped with `stacks` (AWS not
+    # configured, i.e. vars.AWS_PLAN_ROLE_ARN unset, or not the default branch).
+    if: always() && needs.stacks.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A leg that uploaded nothing is reported by sync as an error, so a
+      # download that finds no artifact at all must not stop the job here.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          pattern: drift-*
+          path: drift-result
+          merge-multiple: true
+      - name: Open, update and close drift issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MATRIX: ${{ needs.stacks.outputs.matrix }}
+          IN_VPC: ${{ needs.stacks.outputs.in_vpc }}
+        run: python3 workflows/scripts/common/drift-issues.py sync --results drift-result
