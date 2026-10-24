@@ -502,7 +502,10 @@ def element_binding(coll, ctx):
 def shape_of(expr, ctx):
     """The shape of an HCL expression; UNKNOWN whenever it cannot be read."""
     e = expr.strip()
-    if not e or ctx.depth > 6:
+    # A recursion bound, not a language limit. 8: elasticache's member_clusters
+    # (a ternary, sort(), a local holding a ternary object, one(concat(splat)))
+    # nests 7 deep.
+    if not e or ctx.depth > 8:
         return UNKNOWN
     while e.startswith('(') and whole(e, 0):
         e = e[1:-1].strip()
@@ -635,9 +638,17 @@ def ref_shape(e, ctx):
     m = re.match(r'^var\.(' + IDENT + r')$', e)
     if m:
         return type_shape(comp.var_types.get(m.group(1), ''))
-    m = re.match(r'^local\.(' + IDENT + r')$', e)
+    m = re.match(r'^local\.(' + IDENT + r')((?:\.' + IDENT + r'|' + INDEX + r')*)$', e)
     if m:
-        return shape_of(comp.locals.get(m.group(1), ''), ctx.deeper())
+        # `local.x.attr` walks local x's shape: elasticache's outputs read
+        # `local.replication_group.port` off one object local.
+        s = shape_of(comp.locals.get(m.group(1), ''), ctx.deeper())
+        for attr, index in re.findall(r'\.(' + IDENT + r')|(' + INDEX + r')', m.group(2)):
+            if attr and s[0] == 'object':
+                s = s[1].get(attr, UNKNOWN)
+            else:
+                s = elem(s)   # a map key or an index; UNKNOWN on anything else
+        return s
     m = re.match(r'^module\.(' + IDENT + r')\.(' + IDENT + r')$', e)
     if m:
         # A module with a LOCAL source is just another directory in this

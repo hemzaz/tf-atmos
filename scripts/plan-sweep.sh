@@ -54,7 +54,7 @@
 # and do not fail the run. A fixture whose entry is ALL is not swept at all
 # (fixtures.unswept(); one "SKIP (known broken, all checks)" line, not failing).
 #
-# Exit status: 1 if any pair FAILs, ERRORs or is SKIPped, or if nothing was
+# Exit status: 1 if any pair FAILs, ERRORs, is UNATTRIBUTABLE or is SKIPped, or if nothing was
 # planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
 # the diagnostic parser or the varfile builder fails its self-test; else 0.
 # A broken !terraform reference is a FAIL: a stack, instance or output that is
@@ -64,12 +64,12 @@
 # An env TF_VAR_* object or list that is not JSON is a FAIL too: the varfile
 # builder folds only JSON into the varfile.
 # A pair where the builder dropped a value it could not synthesize is
-# UNATTRIBUTABLE when it fails (the failure may be ours), and that does not fail
-# the run. Unless every INVALID diagnostic ("Invalid value for [input] variable")
+# UNATTRIBUTABLE when it fails (the failure may be ours), and that fails the
+# run too (D1, owner Q5): every reference is synthesizable today, so a new drop
+# is a gap in plan_sweep_varfile.py to close, not a pair to leave unchecked. Unless every INVALID diagnostic ("Invalid value for [input] variable")
 # names a variable the builder dropped nothing from: that is the component
 # rejecting the stack's own value, so the pair FAILs as it would with no drop.
-# INCONCLUSIVE and UNATTRIBUTABLE do not fail the run, but neither is ever
-# reported as a pass. A PASS says how the plan ended:
+# INCONCLUSIVE does not fail the run, but is never reported as a pass. A PASS says how the plan ended:
 # "full plan", or "stopped at an expected refusal" once everything before it
 # held -- the unissued key refused by AWS, or the synthetic EKS host that does
 # not resolve.
@@ -1011,6 +1011,10 @@ if [ "$swept" -eq 0 ]; then
 fi
 if [ "$fail" -gt 0 ] || [ "$errored" -gt 0 ]; then
   printf '\n%s\n' "FAILING pairs cannot plan in their own stack."
+  status=1
+fi
+if [ "$unattributable" -gt 0 ]; then
+  printf '\n%s\n' "UNATTRIBUTABLE pairs failed with values the varfile builder could not synthesize: add the rule to scripts/plan_sweep_varfile.py."
   status=1
 fi
 if [ "$skip" -gt 0 ]; then

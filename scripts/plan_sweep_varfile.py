@@ -100,7 +100,8 @@ SYNTH = [
     (r'^eks_cluster_identity_oidc_issuer$', 'https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^eks_cluster_identity_oidc_issuer_arn$', 'arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^ssh_key_pair$',               'example-keypair'),
-    (r'^security_group_id$',          'sg-0123456789abcdef0'),
+    # elasticache's client_security_group_id: the SG a cache client attaches.
+    (r'^(client_)?security_group_id$', 'sg-0123456789abcdef0'),
     (r'^oidc_provider_url$',          'oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     # The backend's access role outputs (no stack reads them today: iam/ci
@@ -213,8 +214,18 @@ SYNTH = [
     (r'^service_name$',               'example-service'),
     (r'^instance_identifier$',        'example-db'),
     (r'^instance_name$',              'example'),
-    (r'^(instance|primary_endpoint)_address$', 'example.abcdefghijkl.us-east-1.rds.amazonaws.com'),
+    (r'^(instance|primary_endpoint|configuration_endpoint)_address$', 'example.abcdefghijkl.us-east-1.rds.amazonaws.com'),
+    # rds's instance_endpoint is host:port (eks-backend-services's
+    # database_endpoint validates ^[^:]+:[0-9]+$), unlike instance_address.
+    (r'^instance_endpoint$',       'example.abcdefghijkl.us-east-1.rds.amazonaws.com:5432'),
     (r'^(password|auth_token)_secret_arn$', 'arn:aws:secretsmanager:us-east-1:123456789012:secret:example-secret-AbCdEf'),
+    # secretsmanager's secret_arns map, per secret key (redis-auth-rotation's
+    # secretsmanager_source_arn / rotation_secret_arn, which must be equal).
+    (r'^secret_arns?$',               'arn:aws:secretsmanager:us-east-1:123456789012:secret:example-secret-AbCdEf'),
+    # elasticache's own group id (not a global datastore's, above).
+    (r'^replication_group_id$',       'example-cache'),
+    # external-secrets's ClusterSecretStore: the name the component creates.
+    (r'^default_cluster_secret_store_name$', 'aws-secretsmanager'),
     # Output names read by stacks/catalog/templates/serverless-api.yaml: the
     # cognito pool and its clients, the assets bucket's OAC origin name,
     # apigateway's REST stage and real name, and lambda's invoke ARN.
@@ -1154,6 +1165,13 @@ def self_test(components_dir, tmp):
         'fake/main': {'component': os.path.join(tmp, 'fake'), 'vars': {}},
         # An instance's outputs are in its own region (B1d).
         'lambda/ue2': {'component': 'lambda', 'vars': {'region': 'us-east-2'}},
+        # D1: eks-backend-services/main's and redis-auth-rotation's producers.
+        'rds/main': {'component': 'rds', 'vars': {}},
+        'elasticache/main': {'component': 'elasticache', 'vars': {}},
+        'external-secrets/main': {'component': 'external-secrets', 'vars': {}},
+        # The reader that makes `redis` a key of the synthetic secret_arns map.
+        'secretsmanager/main': {'component': 'secretsmanager', 'vars': {
+            'x': '!terraform.state secretsmanager/main .secret_arns.redis'}},
     }}}}
     os.makedirs(os.path.join(tmp, 'fake'), exist_ok=True)
     with open(os.path.join(tmp, 'fake', 'main.tf'), 'w') as fh:
@@ -1498,6 +1516,35 @@ def self_test(components_dir, tmp):
     check('non-JSON object TF_VAR_* is a defect, a plain one folds',
           (top, len(b.defects), 'TF_VAR_secret_data is not JSON' in ''.join(b.defects)),
           ({'p': 'plain'}, 1, True))
+    # D1: each read is output-shaped (never dropped), and its value passes the
+    # consuming variable's validation (eks-backend-services, lambda).
+    secret_re = r'^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$'
+    for args, var, valid in [
+        ('external-secrets/main .default_cluster_secret_store_name', 'cluster_secret_store_name',
+         lambda v: isinstance(v, str) and v.strip() != ''),
+        ('rds/main .instance_endpoint', 'database_endpoint',
+         lambda v: isinstance(v, str) and re.match(r'^[^:]+:[0-9]+$', v)),
+        ('elasticache/main .primary_endpoint_address', 'redis_host',
+         lambda v: isinstance(v, str) and v.strip() != ''),
+        ('elasticache/main .configuration_endpoint_address', 'REDIS_HOST',
+         lambda v: isinstance(v, str) and v.strip() != ''),
+        ('elasticache/main .port', 'redis_port', lambda v: isinstance(v, int) and v > 0),
+        ('elasticache/main .replication_group_id', 'REPLICATION_GROUP_ID',
+         lambda v: isinstance(v, str) and v != ''),
+        ('elasticache/main .member_clusters', 'elasticache_clusters',
+         lambda v: isinstance(v, list) and len(v) > 0),
+        ("elasticache/main '.client_security_group_id | [.]'", 'additional_security_group_ids',
+         lambda v: isinstance(v, list) and all(re.match(r'^sg-[a-f0-9]+$', x) for x in v)),
+        ('secretsmanager/main .secret_arns.redis', 'rotation_secret_arn',
+         lambda v: isinstance(v, str) and re.match(secret_re, v)),
+    ]:
+        kind, got = resolve_ref('!terraform.state ' + args, var, res)
+        check('D1 %s is shaped and valid for %s' % (args, var),
+              (kind, bool(valid(got))), ('shaped', True))
+    check('local.x.attr walks the local (elasticache replication_group)',
+          [shape_of(e, Ctx(res.component(os.path.join(tmp, 'fake'))))
+           for e in ('local.objs.a.name', 'local.objs.a.missing', 'local.k8s.port')],
+          [SCALAR, UNKNOWN, UNKNOWN])
     return failures
 
 
