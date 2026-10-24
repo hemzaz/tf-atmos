@@ -233,6 +233,8 @@ SYNTH = [
     (r'^user_pool_arn$',              'arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_EXAMPLE1'),
     (r'^client_ids$',                 'example0client0id0000000000'),
     (r'^bucket_regional_domain_name$', 'example-bucket-123456789012.s3.us-east-1.amazonaws.com'),
+    # apigateway's REST stage name: monitoring's api_gateway_stages alarms.
+    (r'^(rest_api_)?stage_names?$',   'v1'),
     (r'^rest_api_stage_arn$',         'arn:aws:apigateway:us-east-1::/restapis/a1b2c3d4e5/stages/example'),
     (r'^api_name$',                   'example-api'),
     (r'^function_invoke_arn$',        'arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:example-function/invocations'),
@@ -1105,6 +1107,7 @@ locals {
   mixed = { a = "x", b = 1 }
   zones = merge(aws_route53_zone.a, aws_route53_zone.b)
   k8s   = kubernetes_service.s
+  lst   = [{ name = "x" }]
 }
 module "here" {
   source = "./"
@@ -1170,6 +1173,8 @@ def self_test(components_dir, tmp):
         'elasticache/main': {'component': 'elasticache', 'vars': {}},
         'external-secrets/main': {'component': 'external-secrets', 'vars': {}},
         # The reader that makes `redis` a key of the synthetic secret_arns map.
+        'inspector2/main': {'component': 'inspector2', 'vars': {}},
+        'apigateway/main': {'component': 'apigateway', 'vars': {}},
         'secretsmanager/main': {'component': 'secretsmanager', 'vars': {
             'x': '!terraform.state secretsmanager/main .secret_arns.redis'}},
     }}}}
@@ -1535,6 +1540,13 @@ def self_test(components_dir, tmp):
          lambda v: isinstance(v, list) and len(v) > 0),
         ("elasticache/main '.client_security_group_id | [.]'", 'additional_security_group_ids',
          lambda v: isinstance(v, list) and all(re.match(r'^sg-[a-f0-9]+$', x) for x in v)),
+        # security-monitoring's ^[0-9]{12}$ and monitoring's list(string).
+        # Atmos re-reads yq's output as YAML, so the ID arrives as a number;
+        # Terraform converts it back to the string the regex sees.
+        ('inspector2/main .account_id', 'inspector2_account_id',
+         lambda v: re.match(r'^[0-9]{12}$', str(v))),
+        ("apigateway/main '.rest_api_stage_name | [.]'", 'api_gateway_stages',
+         lambda v: isinstance(v, list) and len(v) == 1 and isinstance(v[0], str) and v[0] != ''),
         ('secretsmanager/main .secret_arns.redis', 'rotation_secret_arn',
          lambda v: isinstance(v, str) and re.match(secret_re, v)),
     ]:
@@ -1543,8 +1555,9 @@ def self_test(components_dir, tmp):
               (kind, bool(valid(got))), ('shaped', True))
     check('local.x.attr walks the local (elasticache replication_group)',
           [shape_of(e, Ctx(res.component(os.path.join(tmp, 'fake'))))
-           for e in ('local.objs.a.name', 'local.objs.a.missing', 'local.k8s.port')],
-          [SCALAR, UNKNOWN, UNKNOWN])
+           for e in ('local.objs.a.name', 'local.objs.a.missing', 'local.k8s.port',
+                     'local.lst.name', 'local.lst[0].name')],
+          [SCALAR, UNKNOWN, UNKNOWN, UNKNOWN, SCALAR])
     return failures
 
 

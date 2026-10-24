@@ -54,8 +54,8 @@
 # and do not fail the run. A fixture whose entry is ALL is not swept at all
 # (fixtures.unswept(); one "SKIP (known broken, all checks)" line, not failing).
 #
-# Exit status: 1 if any pair FAILs, ERRORs, is UNATTRIBUTABLE or is SKIPped, or if nothing was
-# planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
+# Exit status: 1 if any pair FAILs, ERRORs, is UNATTRIBUTABLE or is SKIPped,
+# or if nothing was planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
 # the diagnostic parser or the varfile builder fails its self-test; else 0.
 # A broken !terraform reference is a FAIL: a stack, instance or output that is
 # not there, arguments Atmos cannot parse, an expression yq rejects. An output
@@ -66,11 +66,11 @@
 # A pair where the builder dropped a value it could not synthesize is
 # UNATTRIBUTABLE when it fails (the failure may be ours), and that fails the
 # run too (D1, owner Q5): every reference is synthesizable today, so a new drop
-# is a gap in plan_sweep_varfile.py to close, not a pair to leave unchecked. Unless every INVALID diagnostic ("Invalid value for [input] variable")
-# names a variable the builder dropped nothing from: that is the component
+# is a gap in plan_sweep_varfile.py to close, not a pair to leave unchecked.
+# Unless every INVALID diagnostic ("Invalid value for [input] variable") names a variable the builder dropped nothing from: that is the component
 # rejecting the stack's own value, so the pair FAILs as it would with no drop.
-# INCONCLUSIVE does not fail the run, but is never reported as a pass. A PASS says how the plan ended:
-# "full plan", or "stopped at an expected refusal" once everything before it
+# INCONCLUSIVE does not fail the run, but is never reported as a pass.
+# A PASS says how the plan ended: "full plan", or "stopped at an expected refusal" once everything before it
 # held -- the unissued key refused by AWS, or the synthetic EKS host that does
 # not resolve.
 set -u

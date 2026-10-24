@@ -293,6 +293,8 @@ LIST_SCALAR_ATTRS = {
     'member_clusters',
     # aws_route53_zone: the zone's delegation name servers (dns zone_name_servers).
     'name_servers',
+    # aws_inspector2_enabler: the accounts Inspector is enabled in.
+    'account_ids',
 }
 FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
 IDENT = r'[A-Za-z_][A-Za-z0-9_-]*'
@@ -644,10 +646,12 @@ def ref_shape(e, ctx):
         # `local.replication_group.port` off one object local.
         s = shape_of(comp.locals.get(m.group(1), ''), ctx.deeper())
         for attr, index in re.findall(r'\.(' + IDENT + r')|(' + INDEX + r')', m.group(2)):
-            if attr and s[0] == 'object':
-                s = s[1].get(attr, UNKNOWN)
+            if attr:
+                # An object's attribute or a map's key; a list has no attributes.
+                s = s[1].get(attr, UNKNOWN) if s[0] == 'object' else \
+                    elem(s) if s[0] == 'map' else UNKNOWN
             else:
-                s = elem(s)   # a map key or an index; UNKNOWN on anything else
+                s = elem(s)
         return s
     m = re.match(r'^module\.(' + IDENT + r')\.(' + IDENT + r')$', e)
     if m:
