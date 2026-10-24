@@ -193,6 +193,16 @@ class CheckDomainsTest(unittest.TestCase):
         stacks = self.two_instances(self.ns("!terraform.state network/services .zone_name_servers.services"))
         self.assert_result(stacks)
 
+    def test_ds_record_at_a_delegated_subzone_apex_passes(self):
+        # DNSSEC: the child's DS record lives in the parent, at the delegation point.
+        records = self.ns("!terraform.state network/services .zone_name_servers.services")
+        ds = {"zone_name": "main", "name": f"services.{DOMAIN}", "type": "DS", "records": ["1 13 2 AB"]}
+        self.assert_result(self.two_instances({**records, "services_ds": ds}))
+        a = {**ds, "type": "A"}
+        self.assert_result(
+            self.two_instances({**records, "services_a": a}), errors=["belongs to the more specific public zone"]
+        )
+
     def test_undelegated_subzone_fails(self):
         self.assert_result(
             self.two_instances(),

@@ -151,7 +151,11 @@ def parent_of(name: str, zones: list[Zone]) -> Optional[Zone]:
 
 
 def placement_error(name: str, zone: dict, zones: list[Zone], ns: bool = False) -> Optional[str]:
-    """Why name does not belong in zone, or None. ns: an NS record, which may delegate a subzone's apex."""
+    """Why name does not belong in zone, or None.
+
+    ns: an NS or DS record, which may sit at a subzone's apex in its parent (the delegation and,
+    with DNSSEC, its DS record).
+    """
     if not in_zone(name, zone["name"]):
         return f"{name} is not in its zone ({zone['name']})"
     if not is_public(zone):
@@ -175,7 +179,7 @@ def dns_errors(where: str, variables: dict, zones: list[Zone]) -> list[str]:
         if not isinstance(zone.get("name"), str):
             errors.append(f"{where} record {record_id}: zone_name {zone_key!r} is not a key of zones")
             continue
-        problem = placement_error(name, zone, zones, ns=str(record.get("type", "")).upper() == "NS")
+        problem = placement_error(name, zone, zones, ns=str(record.get("type", "")).upper() in ("NS", "DS"))
         if problem:
             errors.append(f"{where} record {record_id} (zone {zone_key}): {problem}")
     return errors
