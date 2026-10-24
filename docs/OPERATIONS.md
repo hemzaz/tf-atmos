@@ -528,12 +528,12 @@ release branch. The first release is `v2.0.0` (`release-as` in `release-please-c
 tags before it stop at v1.1.3). `release-as` is sticky: after v2.0.0 is tagged, remove it in a PR;
 until then the job fails with `release-as is stale`.
 
-Owner action: a release PR opened with `GITHUB_TOKEN` starts no workflow, so `CI gate` never
-reports and the PR cannot merge. Create a GitHub App with repository permissions Contents and Pull
-requests (read and write), install it on this repository, and set the repository variable
-`RELEASE_APP_CLIENT_ID` (the App's client ID) and secret `RELEASE_APP_PRIVATE_KEY` (a private key
-it issues). Without them the job falls back to `GITHUB_TOKEN` with a warning; then close and
-reopen the release PR to start CI.
+Owner action: release-please opens its PR with a GitHub App token only (a `GITHUB_TOKEN` PR starts
+no workflow, so `CI gate` would never report on it). Create a GitHub App with repository
+permissions Contents and Pull requests (read and write), install it on this repository, and set
+the repository variable `RELEASE_APP_CLIENT_ID` (the App's client ID) and secret
+`RELEASE_APP_PRIVATE_KEY` (a private key it issues). Until the variable is set, releases are off:
+the release job is skipped and the run summary says so.
 
 ## State restore and disaster recovery
 

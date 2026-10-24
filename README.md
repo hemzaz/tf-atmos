@@ -151,6 +151,7 @@ until the repository variable `AWS_PLAN_ROLE_ARN` is set.
 | `in-vpc.yml` | called by the three above | Starts an ephemeral self-hosted runner in the stack's VPC and runs the in-cluster components there, on the default branch only, with the stack's apply role (a PR gets a notice instead of their plan); the runners themselves refuse fork code |
 | `security-scan.yml` | nightly, manual | Report-only Trivy + Checkov |
 | `disaster-recovery.yml` | manual | Read-only DR checks (`dr-status`, `recover-state`, `recover-database`) |
+| `release.yml` | push to master, manual | release-please: keeps the release PR (next semver, `CHANGELOG.md`) open; merging it tags `vX.Y.Z` ([releases](./docs/OPERATIONS.md#releases)). Skipped until the release GitHub App is configured |
 
 ## License
 

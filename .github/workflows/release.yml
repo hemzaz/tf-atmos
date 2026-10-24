@@ -1,13 +1,13 @@
 # Semver releases from conventional commits (owner decision Q9), master only.
-# release-please keeps one release PR open (CHANGELOG.md + .release-please-manifest.json);
-# merging it tags vX.Y.Z and publishes the GitHub release. Config:
-# release-please-config.json. See docs/OPERATIONS.md#releases.
+# release-please keeps one release PR open (CHANGELOG.md, version.txt and
+# .release-please-manifest.json); merging it tags vX.Y.Z and publishes the
+# GitHub release. Config: release-please-config.json. See docs/OPERATIONS.md#releases.
 #
-# Token: a PR opened with GITHUB_TOKEN triggers no workflow, so the required
-# `CI gate` would never report on the release PR. With vars.RELEASE_APP_CLIENT_ID
-# and secrets.RELEASE_APP_PRIVATE_KEY set (a GitHub App with contents and
-# pull-requests write on this repository), the PR is opened with the App's token
-# and CI runs. Without them the job falls back to GITHUB_TOKEN and warns.
+# Token: release-please runs only with a GitHub App token (vars.RELEASE_APP_CLIENT_ID,
+# secrets.RELEASE_APP_PRIVATE_KEY; the App has contents and pull-requests write).
+# A PR opened with GITHUB_TOKEN triggers no workflow, so the required `CI gate`
+# would never report on it. Until the variable is set the release job is skipped
+# and `releases-off` says so in the run summary.
 name: Release
 
 on:
@@ -22,14 +22,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  releases-off:
+    name: Releases off
+    if: vars.RELEASE_APP_CLIENT_ID == ''
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Say why nothing is released
+        run: |
+          msg="Releases are off until the release GitHub App exists: set vars.RELEASE_APP_CLIENT_ID and secrets.RELEASE_APP_PRIVATE_KEY (docs/OPERATIONS.md#releases)."
+          echo "::notice title=Releases off::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
   release-please:
     name: Release Please
     # workflow_dispatch can name any branch: releases are cut from master only.
-    if: github.ref == 'refs/heads/master'
+    if: vars.RELEASE_APP_CLIENT_ID != '' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    # The App token writes; this job's GITHUB_TOKEN only checks out.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,19 +57,15 @@ jobs:
             exit 1
           fi
       - id: app-token
-        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - name: Warn about the GITHUB_TOKEN fallback
-        if: steps.app-token.outcome != 'success'
-        run: echo "::warning title=No release App token::vars.RELEASE_APP_CLIENT_ID is unset, so the release PR is opened with GITHUB_TOKEN and CI gate will not run on it. See docs/OPERATIONS.md#releases."
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          token: ${{ steps.app-token.outputs.token || github.token }}
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           target-branch: master
