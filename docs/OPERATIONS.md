@@ -514,6 +514,27 @@ Bastion SSH keys are generated per instance and stored in Secrets Manager at
 `scripts/certificates/export-ssh-key.sh -r us-east-1 -s ssh-key/<Environment>/bastion -o bastion.key`.
 The key is also in Terraform state.
 
+## Releases
+
+A release is a semver tag `vX.Y.Z` on master plus a GitHub release and a `CHANGELOG.md` entry,
+generated from conventional commits: `fix:` bumps the patch, `feat:` the minor, `!`/`BREAKING
+CHANGE:` the major. A tenant that consumes this repository pins a tag (vendoring, an Atmos remote
+import or a fork base), never `master`; read the changelog's breaking changes before moving the pin.
+Deploys do not use these tags: `terraform-cd.yml` deploys master per stack (`deployed/<stack>`).
+
+`release.yml` (push to master, manual) runs release-please, which keeps one release PR open with
+the next version and its changelog. Merge it like any PR to cut the release; master is the only
+release branch. The first release is `v2.0.0` (`release-as` in `release-please-config.json`,
+tags before it stop at v1.1.3). `release-as` is sticky: after v2.0.0 is tagged, remove it in a PR;
+until then the job fails with `release-as is stale`.
+
+Owner action: release-please opens its PR with a GitHub App token only (a `GITHUB_TOKEN` PR starts
+no workflow, so `CI gate` would never report on it). Create a GitHub App with repository
+permissions Contents and Pull requests (read and write), install it on this repository, and set
+the repository variable `RELEASE_APP_CLIENT_ID` (the App's client ID) and secret
+`RELEASE_APP_PRIVATE_KEY` (a private key it issues). Until the variable is set, releases are off:
+the release job is skipped and the run summary says so.
+
 ## State restore and disaster recovery
 
 The state bucket is versioned. List versions of a component's state:
