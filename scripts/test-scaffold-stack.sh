@@ -13,7 +13,11 @@
 #   - make help, plan, plan-component, setup-aws-backend-dry-run and
 #     bootstrap-environment with a hostile STACK, TENANT, STAGE, ENVIRONMENT,
 #     NAME, REGION, COMPONENT or BACKEND_STACK echo and pass the value as one
-#     literal word and run nothing in it, as shell or as make syntax.
+#     literal word and run nothing in it, as shell or as make syntax;
+#   - the stack scaffold's wire hook body (scaffolds/stack/scaffold.yaml,
+#     answers filled in, run with sh and no Atmos, so verify cannot refuse
+#     first) refuses, exit non-zero and running no wiring, a missing stack
+#     file and a target that is not the root, and wires the root's own file.
 # Exit 0 when every case passes, 1 otherwise.
 
 set -euo pipefail
@@ -203,6 +207,60 @@ else
         done
     done
 fi
+
+# The wire hook's backstop, run directly. Its command: block (the lines after
+# `command: |` under `wire:`, 10-space indent removed) with each
+# {{ .Answers.<key> }} replaced; any {{ left means a placeholder this misses.
+# Physical path: git names the work tree without symlinks (macOS /var).
+W="$(cd "$tmp" && pwd -P)/wire"
+mkdir -p "$W/repo/stacks/orgs/fnx/root" "$W/repo/scripts" "$W/repo/sub/stacks/orgs/fnx/dev"
+awk '/^    wire:$/ { w = 1; next }
+    w && /^        command: [|]$/ { c = 1; next }
+    c && $0 != "" && !/^          / { exit }
+    c { sub(/^          /, ""); print }' "$REPO_ROOT/scaffolds/stack/scaffold.yaml" \
+    | sed -e 's/{{ \.Answers\.tenant }}/fnx/g' -e 's/{{ \.Answers\.stage }}/dev/g' \
+        -e 's/{{ \.Answers\.account }}/dev/g' -e 's/{{ \.Answers\.region }}/us-west-2/g' \
+        -e 's/{{ \.Answers\.region_code }}/uw2/g' > "$W/hook.sh"
+if ! grep -q 'stack-wiring.py' "$W/hook.sh" || grep -q '{{' "$W/hook.sh"; then
+    bad "wire hook: extraction failed: $(cat "$W/hook.sh")"
+fi
+# The stub wiring records its argv; the root is a git work tree (its own), so
+# the hook's git fallback names it from sub/.
+printf '%s\n' 'import sys' "open('$W/wired', 'w').write(' '.join(sys.argv[1:]))" > "$W/repo/scripts/stack-wiring.py"
+git -C "$W/repo" init -q
+WIRE_FILE="stacks/orgs/fnx/dev/us-west-2.yaml"
+# wire_case <name> <dir> <ok|refused>: run the hook in <dir>.
+wire_case() {
+    local name="$1" dir="$2" want="$3" rc=0
+    rm -f "$W/wired"
+    (cd "$dir" && sh "$W/hook.sh") > "$tmp/out" 2>&1 || rc=$?
+    if [[ "$want" == "ok" ]]; then
+        if [[ $rc -ne 0 || "$(cat "$W/wired" 2>/dev/null)" != "fnx dev dev us-west-2 fnx-uw2-dev" ]]; then
+            bad "wire hook, $name: did not wire (exit $rc): $(cat "$tmp/out")"
+        else
+            pass "wire hook, $name: wired"
+        fi
+    elif [[ $rc -eq 0 ]]; then
+        bad "wire hook, $name: exit 0, the backstop did not refuse"
+    elif [[ -e "$W/wired" ]]; then
+        bad "wire hook, $name: refused but stack-wiring.py ran"
+    elif ! grep -qF "scaffold stack: not wiring: $W/repo/$WIRE_FILE does not exist" "$tmp/out"; then
+        bad "wire hook, $name: exit $rc without the backstop's message: $(cat "$tmp/out")"
+    else
+        pass "wire hook, $name: refused (exit $rc)"
+    fi
+}
+wire_case "missing stack file, from the root" "$W/repo" refused
+# The stack went to a target under the root (sub/): from the root (1.229) and
+# from the target (1.233), the root has no stack file.
+: > "$W/repo/sub/$WIRE_FILE"
+wire_case "target is not the root, run from the root" "$W/repo" refused
+wire_case "target is not the root, run from the target" "$W/repo/sub" refused
+# Control: the root's own stack file is wired, so the refusals above are the
+# backstop's, not a broken extraction.
+mkdir "$W/repo/stacks/orgs/fnx/dev"
+: > "$W/repo/$WIRE_FILE"
+wire_case "stack file at the root" "$W/repo" ok
 
 for marker in "$M"/*; do
     [[ ! -e "$marker" ]] || bad "a hostile value ran: $marker exists"
