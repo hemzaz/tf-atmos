@@ -30,6 +30,10 @@ components:
       vars:
         create_root_zone: false
         multi_account_dns_delegation: false
+        # DNSSEC-sign every public zone (us-east-1 KSK key). The chain of trust
+        # starts when the owner publishes the apex's ds_records at the
+        # registrar (docs/OPERATIONS.md). Off in GDPR-scoped (EU) stacks.
+        dnssec_enabled: true
         # Zones (and their zone_ids output keys), records and root_domain are set
         # per instance; a zone with vpc_associations is created as a private zone.
         zones: {}

@@ -277,6 +277,18 @@ merge per key with the catalog's). EU prod
 `fnx-ew1-prod`'s `network/main` `zone_name_servers.main`.
 `services.<d>` delegation is wired by the stacks themselves.
 
+**After `dns`: publish the DS record (owner step).** The US stacks sign their public zones with
+DNSSEC (`dnssec_enabled`, `stacks/catalog/network/defaults.yaml`; off in `fnx-ew1-prod`, whose
+key would sit in us-east-1). Signing alone changes nothing for resolvers; the chain of trust
+starts at the parent. For prod's apex, add the DS record from `network/main`'s
+`ds_records.main` (`atmos terraform output network/main -s fnx-ue1-prod`) at the registrar
+(key tag, algorithm 13, digest type 2, digest). For dev and staging add it as a `DS` record next
+to their NS record in prod's `network/main` `records`, as above. `services.<d>` and
+`data.services.<d>` DS records are wired by the stacks. Turning DNSSEC off is two deploys, or
+validating resolvers stop resolving the zone: set `dnssec_ds_enabled: false` on the instances and
+remove the registrar DS, deploy (`network/services`, then `network/main`), wait out the DS TTL,
+then set `dnssec_enabled: false` and deploy again.
+
 Other paths, once the instances they read have state:
 
 ```bash
