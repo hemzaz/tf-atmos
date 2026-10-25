@@ -65,6 +65,80 @@ run "waf_logs_to_an_encrypted_aws_waf_logs_group" {
   }
 }
 
+run "no_logging_filter_logs_every_request" {
+  command = plan
+
+  assert {
+    condition     = length(aws_wafv2_web_acl_logging_configuration.api_waf[0].logging_filter) == 0
+    error_message = "waf_logging_filter = null renders no logging_filter (every request is logged)."
+  }
+}
+
+run "logging_filter_keeps_only_block_and_count" {
+  command = plan
+
+  variables {
+    waf_redacted_headers = ["Authorization", "x-api-key"]
+    waf_logging_filter = {
+      default_behavior = "DROP"
+      filter = [{
+        behavior    = "KEEP"
+        requirement = "MEETS_ANY"
+        condition = [
+          { action_condition = { action = "BLOCK" } },
+          { action_condition = { action = "COUNT" } },
+        ]
+      }]
+    }
+  }
+
+  assert {
+    condition = (
+      aws_wafv2_web_acl_logging_configuration.api_waf[0].logging_filter[0].default_behavior == "DROP"
+      && one(aws_wafv2_web_acl_logging_configuration.api_waf[0].logging_filter[0].filter).behavior == "KEEP"
+      && one(aws_wafv2_web_acl_logging_configuration.api_waf[0].logging_filter[0].filter).requirement == "MEETS_ANY"
+      && toset([
+        for c in one(aws_wafv2_web_acl_logging_configuration.api_waf[0].logging_filter[0].filter).condition : one(c.action_condition).action
+      ]) == toset(["BLOCK", "COUNT"])
+    )
+    error_message = "The rendered logging_filter drops by default and keeps BLOCK and COUNT."
+  }
+
+  assert {
+    condition = toset([
+      for f in aws_wafv2_web_acl_logging_configuration.api_waf[0].redacted_fields : f.single_header[0].name
+    ]) == toset(["authorization", "x-api-key"])
+    error_message = "waf_redacted_headers render one lowercased single_header each."
+  }
+}
+
+run "logging_filter_rejects_bad_enums" {
+  command = plan
+
+  variables {
+    waf_logging_filter = {
+      default_behavior = "KEEP"
+      filter = [{
+        behavior    = "KEEP"
+        requirement = "MEETS_ANY"
+        condition   = [{ action_condition = { action = "DENY" } }]
+      }]
+    }
+  }
+
+  expect_failures = [var.waf_logging_filter]
+}
+
+run "log_retention_must_be_a_cloudwatch_value" {
+  command = plan
+
+  variables {
+    log_retention_days = 45
+  }
+
+  expect_failures = [var.log_retention_days]
+}
+
 run "waf_logging_can_be_turned_off" {
   command = plan
 

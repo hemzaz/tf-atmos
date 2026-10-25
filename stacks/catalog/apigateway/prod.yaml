@@ -105,6 +105,17 @@ components:
           allow_credentials: false
 
         enable_waf: true
+        # WAF logs keep only what a rule blocked or counted (COUNT: a rule
+        # group soaking in count mode); allowed requests are already in the
+        # access logs, and logging them too would bill every request twice.
+        waf_logging_filter:
+          default_behavior: DROP
+          filter:
+            - behavior: KEEP
+              requirement: MEETS_ANY
+              condition:
+                - action_condition: { action: BLOCK }
+                - action_condition: { action: COUNT }
         # The access-log and WAF log groups, on this stack's CMK.
         kms_key_id: !terraform.state kms/main .key_arn
 

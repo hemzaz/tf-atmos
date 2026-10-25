@@ -68,6 +68,15 @@ components:
         tracing_enabled: true
         enable_caching: false
         enable_waf: true
+        # As the primary's (prod.yaml): WAF logs keep BLOCK and COUNT only.
+        waf_logging_filter:
+          default_behavior: DROP
+          filter:
+            - behavior: KEEP
+              requirement: MEETS_ANY
+              condition:
+                - action_condition: { action: BLOCK }
+                - action_condition: { action: COUNT }
         # The access-log and WAF log groups, on the primary's CMK replica here.
         kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
         tags:

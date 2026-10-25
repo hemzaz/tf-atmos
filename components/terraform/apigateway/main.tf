@@ -866,16 +866,48 @@ resource "aws_wafv2_web_acl_logging_configuration" "api_waf" {
   resource_arn            = aws_wafv2_web_acl.api_waf[0].arn
   log_destination_configs = [aws_cloudwatch_log_group.waf[0].arn]
 
-  # Bearer tokens and session cookies stay out of the log group.
-  redacted_fields {
-    single_header {
-      name = "authorization"
+  # Bearer tokens and session cookies stay out of the log group (default).
+  dynamic "redacted_fields" {
+    for_each = toset([for h in var.waf_redacted_headers : lower(h)])
+    content {
+      single_header {
+        name = redacted_fields.value
+      }
     }
   }
 
-  redacted_fields {
-    single_header {
-      name = "cookie"
+  # Cloud Posse's logging_filter, rendered as the waf component does. Null:
+  # every request is logged.
+  dynamic "logging_filter" {
+    for_each = var.waf_logging_filter != null ? [var.waf_logging_filter] : []
+    content {
+      default_behavior = logging_filter.value.default_behavior
+
+      dynamic "filter" {
+        for_each = logging_filter.value.filter
+        content {
+          behavior    = filter.value.behavior
+          requirement = filter.value.requirement
+
+          dynamic "condition" {
+            for_each = filter.value.condition
+            content {
+              dynamic "action_condition" {
+                for_each = condition.value.action_condition != null ? [condition.value.action_condition] : []
+                content {
+                  action = action_condition.value.action
+                }
+              }
+              dynamic "label_name_condition" {
+                for_each = condition.value.label_name_condition != null ? [condition.value.label_name_condition] : []
+                content {
+                  label_name = label_name_condition.value.label_name
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
