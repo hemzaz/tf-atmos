@@ -12,6 +12,9 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   `acm/services .certificate_arns.services_wildcard` and `network/services .zone_ids.data`. Both,
   in the three AWS stacks, read `cognito/main .user_pool_arn` and `lambda/data-processor`
   (`.function_invoke_arn`, `.function_name`).
+- The WAF-enabled instances (prod `apigateway/main`, `apigateway/data`) read `kms/main .key_arn`
+  into `kms_key_id` (a DR standby: the primary's `.replica_keys["<region>"].key_arn`), which
+  encrypts the access-log and WAF log groups; `kms/main`'s `allow_cloudwatch_logs` admits them.
 - Both depend on `apigateway-account/main` (the account's CloudWatch Logs role; ordering only).
 - `fnx-ue1-prod`'s and `fnx-ew1-prod`'s `apigateway/main` inherit `apigateway/main-prod-defaults`
   (`stacks/catalog/apigateway/prod.yaml`) and are the PRIMARY halves of `api.<d>`'s failover

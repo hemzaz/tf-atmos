@@ -68,6 +68,8 @@ components:
         tracing_enabled: true
         enable_caching: false
         enable_waf: true
+        # The access-log and WAF log groups, on the primary's CMK replica here.
+        kms_key_id: !terraform.state kms/main {{ .settings.dr.standby_of }} '.replica_keys["{{ .vars.region }}"].key_arn'
         tags:
           Service: api-gateway
           Tier: edge
@@ -79,3 +81,5 @@ components:
             stack: "{{ .settings.dr.standby_of }}"
           - component: acm/main
           - component: cognito/main
+          - component: kms/main
+            stack: "{{ .settings.dr.standby_of }}"

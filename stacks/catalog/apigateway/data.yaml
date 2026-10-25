@@ -53,6 +53,8 @@ components:
         enable_logging: true
         create_dashboard: true
         enable_waf: true
+        # The access-log and WAF log groups, on this stack's CMK.
+        kms_key_id: !terraform.state kms/main .key_arn
 
         zone_id: !terraform.state network/services .zone_ids.data
       dependencies:
@@ -64,3 +66,4 @@ components:
           - component: acm/services
           - component: cognito/main
           - component: lambda/data-processor
+          - component: kms/main

@@ -105,6 +105,8 @@ components:
           allow_credentials: false
 
         enable_waf: true
+        # The access-log and WAF log groups, on this stack's CMK.
+        kms_key_id: !terraform.state kms/main .key_arn
 
         tags:
           Service: api-gateway
@@ -118,3 +120,4 @@ components:
           - component: network/main
           - component: acm/main
           - component: cognito/main
+          - component: kms/main
