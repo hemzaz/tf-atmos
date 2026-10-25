@@ -526,10 +526,18 @@ resource "kubernetes_deployment_v1" "backend_services" {
             }
 
             # The root filesystem is read-only; scratch space is the pod's
-            # /tmp emptyDir, as for the main container.
+            # /tmp emptyDir (and extra_writable_paths), as for the main container.
             volume_mount {
               name       = "tmp"
               mount_path = "/tmp"
+            }
+
+            dynamic "volume_mount" {
+              for_each = lookup(var.extra_writable_paths, each.key, [])
+              content {
+                name       = "writable-${volume_mount.key}"
+                mount_path = volume_mount.value
+              }
             }
           }
         }
@@ -641,11 +649,19 @@ resource "kubernetes_deployment_v1" "backend_services" {
             }
           }
 
-          # The only writable path: the root filesystem is read-only, so a
-          # service image writes scratch files (and TMPDIR) under /tmp only.
+          # The root filesystem is read-only: a service image writes under
+          # /tmp only, plus any extra_writable_paths of its service.
           volume_mount {
             name       = "tmp"
             mount_path = "/tmp"
+          }
+
+          dynamic "volume_mount" {
+            for_each = lookup(var.extra_writable_paths, each.key, [])
+            content {
+              name       = "writable-${volume_mount.key}"
+              mount_path = volume_mount.value
+            }
           }
         }
 
@@ -654,6 +670,16 @@ resource "kubernetes_deployment_v1" "backend_services" {
           name = "tmp"
           empty_dir {
             size_limit = "1Gi"
+          }
+        }
+
+        dynamic "volume" {
+          for_each = lookup(var.extra_writable_paths, each.key, [])
+          content {
+            name = "writable-${volume.key}"
+            empty_dir {
+              size_limit = "1Gi"
+            }
           }
         }
 

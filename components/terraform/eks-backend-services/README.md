@@ -32,8 +32,10 @@ Redis credentials, and optional Prometheus `ServiceMonitor`s.
   the release pipeline owns.
 - Only `platform_api` runs the `db-migrate` init container.
 - Every container runs with `read_only_root_filesystem`; the only writable path is the pod's
-  `/tmp` `emptyDir` (1Gi, shared by the init container). A service image must write scratch
-  files, caches and `TMPDIR` under `/tmp` (the release pipeline's contract), or it fails at start.
+  `/tmp` `emptyDir` (1Gi, shared by the init container). A service image must write only under
+  `/tmp` (plus any `extra_writable_paths`), or it fails at start. `extra_writable_paths`, per
+  service key, adds one 1Gi `emptyDir` per path to all of that service's containers (e.g. stock
+  nginx in `api_gateway`: `/var/cache/nginx`, `/var/run`, `/var/log/nginx`).
 - Uses `data.aws_eks_cluster_auth` for the provider token (no `aws` CLI in the CI image), so apply
   needs real AWS credentials and, with private endpoints, network access to the cluster.
 - `enable_prometheus_monitoring` stays `false` until a stack installs the Prometheus Operator: the
