@@ -16,6 +16,8 @@ deployable instance:
     the one dependency list);
   - if a dns instance, turns on enable_query_logging for no zone: Route 53 public
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
+    nor dnssec_enabled: its signing KMS key can only be in us-east-1 (owner decision B5:
+    no key there for an EU stack);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
     each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions;
   - sets none of GLOBAL_SERVICE_EMAIL_VARS: vars a global AWS service hosted in us-east-1
@@ -192,6 +194,11 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
     component = (instance.get("metadata") or {}).get("component") or name
     if component == "dns":
         errors += query_logging_errors(where, (instance.get("vars") or {}).get("zones"))
+        if flag_on((instance.get("vars") or {}).get("dnssec_enabled")):
+            errors.append(
+                f"{where} sets dnssec_enabled: Route 53 signs only with a KMS key in us-east-1, "
+                "outside the EU"
+            )
     if component == "security-monitoring" and flag_on((instance.get("vars") or {}).get("enable_alert_enrichment")):
         errors.append(
             f"{where} sets enable_alert_enrichment: its Lambda sends findings to Slack/PagerDuty, "
