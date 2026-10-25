@@ -94,7 +94,12 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   account-level API Gateway CloudWatch role, which `apigateway-account` sets: a stack with a REST
   instance that logs needs `apigateway-account/main`, in `dependencies.components` and an earlier
   deploy layer, or the stage fails to create.
-- `enable_waf`'s inline web ACL has no logging configuration (so nothing to redact); the `waf`
-  component is the one with logs.
+- `enable_waf`'s inline web ACL logs to `aws-waf-logs-<Environment>-<api_name>` unless
+  `waf_logging_enabled = false`, as the `waf` component does: encrypted with `kms_key_id`, kept
+  `log_retention_days`, `waf_redacted_headers` (default `Authorization`, `Cookie`) redacted.
+  `waf_logging_filter` (Cloud Posse `logging_filter`; null logs every request) narrows it: prod
+  `apigateway/main` keeps only BLOCK and COUNT, since allowed requests are in the access logs. Delivery uses the account's implicit
+  `AWSWAF-LOGS` resource policy (no policy of its own). A `kms_key_id` key must admit
+  `logs.<region>.amazonaws.com` (`kms/main`'s `allow_cloudwatch_logs`).
 - `enable_waf` and `tracing_enabled` default to `false`. WAF is on for `apigateway/data` in every
   stack and for prod's `apigateway/main`; X-Ray tracing is on in prod only.

@@ -216,6 +216,11 @@ variable "log_retention_days" {
   type        = number
   description = "Number of days to retain CloudWatch logs"
   default     = 7
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288 or 3653)."
+  }
 }
 
 variable "kms_key_id" {
@@ -715,6 +720,63 @@ variable "enable_waf" {
   type        = bool
   description = "Whether to enable AWS WAF for the API Gateway"
   default     = false
+}
+
+variable "waf_logging_enabled" {
+  type        = bool
+  description = "Whether the web ACL (enable_waf) logs to its own aws-waf-logs-<Environment>-<api_name> log group, encrypted with kms_key_id and kept log_retention_days, redacting waf_redacted_headers and filtered by waf_logging_filter"
+  default     = true
+}
+
+variable "waf_logging_filter" {
+  # Cloud Posse's logging_filter (cloudposse/terraform-aws-waf), as the waf
+  # component's.
+  type = object({
+    default_behavior = string
+    filter = list(object({
+      behavior    = string
+      requirement = string
+      condition = list(object({
+        action_condition = optional(object({
+          action = string
+        }), null)
+        label_name_condition = optional(object({
+          label_name = string
+        }), null)
+      }))
+    }))
+  })
+  description = "Which requests the web ACL keeps in its logs (by rule action or label); null logs every request, ALLOW included. Ignored unless enable_waf and waf_logging_enabled"
+  default     = null
+
+  validation {
+    condition = var.waf_logging_filter == null || (
+      contains(["KEEP", "DROP"], var.waf_logging_filter.default_behavior)
+      && length(var.waf_logging_filter.filter) > 0
+      && alltrue([
+        for f in var.waf_logging_filter.filter :
+        contains(["KEEP", "DROP"], f.behavior) && contains(["MEETS_ALL", "MEETS_ANY"], f.requirement) && length(f.condition) > 0
+        && alltrue([
+          for c in f.condition :
+          (c.action_condition == null) != (c.label_name_condition == null)
+          && (c.action_condition == null || contains(["ALLOW", "BLOCK", "COUNT", "CAPTCHA", "CHALLENGE", "EXCLUDED_AS_COUNT"], try(c.action_condition.action, "")))
+        ])
+      ])
+    )
+    error_message = "waf_logging_filter: default_behavior and filter[*].behavior must be KEEP or DROP, requirement MEETS_ALL or MEETS_ANY; each filter needs a condition, and each condition exactly one of action_condition (ALLOW, BLOCK, COUNT, CAPTCHA, CHALLENGE, EXCLUDED_AS_COUNT) or label_name_condition."
+  }
+}
+
+variable "waf_redacted_headers" {
+  type        = list(string)
+  description = "Request headers the web ACL's logs redact (one single_header redacted field each); the waf component's default"
+  default     = ["authorization", "cookie"]
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for h in var.waf_redacted_headers : can(regex("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$", h))])
+    error_message = "waf_redacted_headers must be HTTP header names."
+  }
 }
 
 variable "waf_rate_limit" {

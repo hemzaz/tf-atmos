@@ -706,7 +706,6 @@ resource "aws_cloudwatch_metric_alarm" "health_check" {
 
 # WAF for API Gateway protection
 resource "aws_wafv2_web_acl" "api_waf" {
-  #checkov:skip=CKV2_AWS_31:TODO(owner): no WAF logging; it needs an aws-waf-logs-* destination (new log group, cost). The waf component already models one (enable_logging)
   count = var.enable_waf ? 1 : 0
 
   name  = "${local.name_prefix}-waf"
@@ -843,6 +842,74 @@ resource "aws_wafv2_web_acl_association" "api_waf_association" {
 
   resource_arn = aws_api_gateway_stage.rest_stage[0].arn
   web_acl_arn  = aws_wafv2_web_acl.api_waf[0].arn
+}
+
+# WAF logging, the waf component's shape (Cloud Posse aws-waf): WAFv2 requires
+# the aws-waf-logs- prefix, and PutLoggingConfiguration grants WAF's log
+# delivery through the account's AWSWAF-LOGS resource policy (the waf
+# component's manage_log_resource_policy = false path, so this API adds no
+# resource policy to the region's 10).
+resource "aws_cloudwatch_log_group" "waf" {
+  #checkov:skip=CKV_AWS_338:Retention is an input (log_retention_days) and a per-stack cost decision, as on api_logs
+  count = var.enable_waf && var.waf_logging_enabled ? 1 : 0
+
+  name              = "aws-waf-logs-${local.name_prefix}"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_id
+
+  tags = local.tags
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "api_waf" {
+  count = var.enable_waf && var.waf_logging_enabled ? 1 : 0
+
+  resource_arn            = aws_wafv2_web_acl.api_waf[0].arn
+  log_destination_configs = [aws_cloudwatch_log_group.waf[0].arn]
+
+  # Bearer tokens and session cookies stay out of the log group (default).
+  dynamic "redacted_fields" {
+    for_each = toset([for h in var.waf_redacted_headers : lower(h)])
+    content {
+      single_header {
+        name = redacted_fields.value
+      }
+    }
+  }
+
+  # Cloud Posse's logging_filter, rendered as the waf component does. Null:
+  # every request is logged.
+  dynamic "logging_filter" {
+    for_each = var.waf_logging_filter != null ? [var.waf_logging_filter] : []
+    content {
+      default_behavior = logging_filter.value.default_behavior
+
+      dynamic "filter" {
+        for_each = logging_filter.value.filter
+        content {
+          behavior    = filter.value.behavior
+          requirement = filter.value.requirement
+
+          dynamic "condition" {
+            for_each = filter.value.condition
+            content {
+              dynamic "action_condition" {
+                for_each = condition.value.action_condition != null ? [condition.value.action_condition] : []
+                content {
+                  action = action_condition.value.action
+                }
+              }
+              dynamic "label_name_condition" {
+                for_each = condition.value.label_name_condition != null ? [condition.value.label_name_condition] : []
+                content {
+                  label_name = label_name_condition.value.label_name
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 # Stage-wide method settings (*/*): throttling, execution logging, metrics and
