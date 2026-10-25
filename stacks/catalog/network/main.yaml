@@ -40,8 +40,10 @@ components:
             type: "NS"
             ttl: 30 # Cloud Posse dns-delegated's NS TTL
             records: !terraform.state network/services .zone_name_servers.services
-          # services.<domain>'s DNSSEC DS record (dnssec_enabled), continuing
-          # the chain of trust below the apex.
+          # services.<domain>'s DNSSEC DS record, continuing the chain of trust
+          # below the apex. Coupled to network/services' dnssec_ds_enabled: its
+          # ds_records is empty while that is off, and the dns module then
+          # drops this record (all values null) instead of failing.
           services_ds:
             zone_name: "main"
             name: "services.{{ .settings.environment.domain_name }}"
