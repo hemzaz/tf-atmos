@@ -396,7 +396,6 @@ resource "kubernetes_config_map_v1" "backend_services_config" {
 resource "kubernetes_deployment_v1" "backend_services" {
   #checkov:skip=CKV_K8S_14:False positive; images come from the *_image variables, whose validation requires an explicit non-"latest" tag or a digest
   #checkov:skip=CKV_K8S_15:Tags are pinned and never "latest" (*_image validation), so IfNotPresent still pulls every new tag
-  #checkov:skip=CKV_K8S_22:TODO(owner): read_only_root_filesystem would break any image that writes outside the /tmp emptyDir; enable it once the four service images are confirmed to
   #checkov:skip=CKV_K8S_35:The services read DATABASE_URL and the Redis credentials from environment variables synced by External Secrets; mounting them as files is an application change
   #checkov:skip=CKV_K8S_43:The *_image variables accept a tag or a @sha256 digest; pinning digests is a release-pipeline choice, and "latest" is rejected
   for_each = local.backend_services
@@ -518,10 +517,26 @@ resource "kubernetes_deployment_v1" "backend_services" {
 
             security_context {
               allow_privilege_escalation = false
+              read_only_root_filesystem  = true
               run_as_non_root            = true
               run_as_user                = 1000
               capabilities {
                 drop = ["ALL"]
+              }
+            }
+
+            # The root filesystem is read-only; scratch space is the pod's
+            # /tmp emptyDir (and extra_writable_paths), as for the main container.
+            volume_mount {
+              name       = "tmp"
+              mount_path = "/tmp"
+            }
+
+            dynamic "volume_mount" {
+              for_each = lookup(var.extra_writable_paths, each.key, [])
+              content {
+                name       = "writable-${volume_mount.key}"
+                mount_path = volume_mount.value
               }
             }
           }
@@ -626,6 +641,7 @@ resource "kubernetes_deployment_v1" "backend_services" {
           # Security context
           security_context {
             allow_privilege_escalation = false
+            read_only_root_filesystem  = true
             run_as_non_root            = true
             run_as_user                = 1000
             capabilities {
@@ -633,10 +649,19 @@ resource "kubernetes_deployment_v1" "backend_services" {
             }
           }
 
-          # Volume mounts for temporary storage
+          # The root filesystem is read-only: a service image writes under
+          # /tmp only, plus any extra_writable_paths of its service.
           volume_mount {
             name       = "tmp"
             mount_path = "/tmp"
+          }
+
+          dynamic "volume_mount" {
+            for_each = lookup(var.extra_writable_paths, each.key, [])
+            content {
+              name       = "writable-${volume_mount.key}"
+              mount_path = volume_mount.value
+            }
           }
         }
 
@@ -645,6 +670,16 @@ resource "kubernetes_deployment_v1" "backend_services" {
           name = "tmp"
           empty_dir {
             size_limit = "1Gi"
+          }
+        }
+
+        dynamic "volume" {
+          for_each = lookup(var.extra_writable_paths, each.key, [])
+          content {
+            name = "writable-${volume.key}"
+            empty_dir {
+              size_limit = "1Gi"
+            }
           }
         }
 

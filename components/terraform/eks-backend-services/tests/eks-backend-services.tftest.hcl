@@ -242,6 +242,104 @@ run "api_gateway_runs_no_migration_init_container" {
   }
 }
 
+# Every container (the migration init container included) runs on a
+# read-only root filesystem, with the pod's /tmp emptyDir as its only
+# writable path (checkov CKV_K8S_22).
+run "containers_have_a_read_only_root_filesystem_and_a_writable_tmp" {
+  command = plan
+
+  variables {
+    enable_database_migrations = true
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for d in values(kubernetes_deployment_v1.backend_services) : [
+        for c in concat(d.spec[0].template[0].spec[0].container, d.spec[0].template[0].spec[0].init_container) :
+        c.security_context[0].read_only_root_filesystem == true
+        && contains([for m in c.volume_mount : m.mount_path if m.name == "tmp"], "/tmp")
+      ]
+    ]))
+    error_message = "Every container must set read_only_root_filesystem and mount the tmp emptyDir at /tmp."
+  }
+
+  assert {
+    condition     = length(kubernetes_deployment_v1.backend_services["platform_api"].spec[0].template[0].spec[0].init_container) == 1
+    error_message = "The check must cover platform_api's db-migrate init container."
+  }
+
+  assert {
+    condition = alltrue([
+      for d in values(kubernetes_deployment_v1.backend_services) :
+      anytrue([for v in d.spec[0].template[0].spec[0].volume : v.name == "tmp" && length(v.empty_dir) == 1])
+    ])
+    error_message = "Every pod must define the tmp emptyDir volume."
+  }
+}
+
+# A service whose image writes outside /tmp (stock nginx) gets one emptyDir
+# per extra path, in each of its containers, and stays read-only otherwise.
+run "extra_writable_paths_add_emptydir_mounts_and_keep_read_only" {
+  command = plan
+
+  variables {
+    enable_database_migrations = true
+    extra_writable_paths = {
+      api_gateway  = ["/var/cache/nginx", "/var/run", "/var/log/nginx"]
+      platform_api = ["/var/cache/app"]
+    }
+  }
+
+  assert {
+    condition = (
+      toset([for m in kubernetes_deployment_v1.backend_services["api_gateway"].spec[0].template[0].spec[0].container[0].volume_mount : m.mount_path])
+      == toset(["/tmp", "/var/cache/nginx", "/var/run", "/var/log/nginx"])
+      && length([for v in kubernetes_deployment_v1.backend_services["api_gateway"].spec[0].template[0].spec[0].volume : v if length(v.empty_dir) == 1]) == 4
+    )
+    error_message = "api_gateway must mount /tmp plus one emptyDir per extra writable path."
+  }
+
+  assert {
+    condition = alltrue([
+      for c in concat(
+        kubernetes_deployment_v1.backend_services["platform_api"].spec[0].template[0].spec[0].container,
+        kubernetes_deployment_v1.backend_services["platform_api"].spec[0].template[0].spec[0].init_container,
+      ) : contains([for m in c.volume_mount : m.mount_path], "/var/cache/app") && c.security_context[0].read_only_root_filesystem == true
+    ])
+    error_message = "platform_api's main and init containers both mount the extra path and stay read-only."
+  }
+
+  assert {
+    condition     = toset([for m in kubernetes_deployment_v1.backend_services["auth_service"].spec[0].template[0].spec[0].container[0].volume_mount : m.mount_path]) == toset(["/tmp"])
+    error_message = "A service without extra paths mounts only /tmp."
+  }
+}
+
+run "extra_writable_paths_reject_bad_paths" {
+  command = plan
+
+  variables {
+    extra_writable_paths = {
+      api_gateway = ["/", "/tmp", "var/run", "/var/../etc", "/var/run/"]
+    }
+  }
+
+  expect_failures = [var.extra_writable_paths]
+}
+
+run "extra_writable_paths_reject_unknown_services_and_duplicates" {
+  command = plan
+
+  variables {
+    extra_writable_paths = {
+      nginx       = ["/var/run"]
+      api_gateway = ["/var/run", "/var/run"]
+    }
+  }
+
+  expect_failures = [var.extra_writable_paths, var.extra_writable_paths]
+}
+
 # elasticache/main's transit_encryption_enabled is pinned to true for every
 # cache in this repo, so the cache only ever accepts TLS.
 run "redis_url_uses_the_tls_scheme" {

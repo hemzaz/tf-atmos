@@ -256,6 +256,38 @@ variable "service_configs" {
   }
 }
 
+# Every container runs on a read-only root filesystem with /tmp as its only
+# writable path. An image that must write elsewhere (stock nginx: its cache,
+# pid and log directories) lists those paths here, per service key, and gets
+# one emptyDir per path, mounted in all of that service's containers. A map
+# override, as Cloud Posse's per-service config maps, merged over {} so a
+# stack sets only the services it needs.
+variable "extra_writable_paths" {
+  type        = map(list(string))
+  description = "Per service key (api_gateway, platform_api, auth_service, job_processor), absolute paths besides /tmp that its containers may write; each gets its own emptyDir, with read_only_root_filesystem kept on"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for k in keys(var.extra_writable_paths) : contains(["api_gateway", "platform_api", "auth_service", "job_processor"], k)])
+    error_message = "extra_writable_paths keys must be service keys: api_gateway, platform_api, auth_service, job_processor."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for paths in values(var.extra_writable_paths) : [
+        for p in paths : can(regex("^(/[A-Za-z0-9._-]+)+$", p)) && !can(regex("(^|/)\\.\\.?(/|$)", p)) && p != "/tmp"
+      ]
+    ]))
+    error_message = "extra_writable_paths entries must be absolute paths below / (letters, digits, '.', '_', '-'; no '.' or '..' segment, no trailing '/'), and not /tmp, which is always writable."
+  }
+
+  validation {
+    condition     = alltrue([for paths in values(var.extra_writable_paths) : length(distinct(paths)) == length(paths)])
+    error_message = "extra_writable_paths must not list a path twice for one service."
+  }
+}
+
 # Logging and Monitoring
 variable "log_level" {
   type        = string
