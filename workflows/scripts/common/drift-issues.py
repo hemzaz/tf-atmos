@@ -26,6 +26,7 @@ LABELS = {"drift": "d93f0b", "drift-recovered": "0e8a16"}
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # Terraform's resource headers ("  # aws_x.y will be updated in-place") and totals.
 SUMMARY = re.compile(r"^\s*# \S+ (will|must) be |^(Plan|Changes to Outputs):")
+RUN_LINK = re.compile(r"^\* \[:building_construction: Action Workflow Logs\]\(.*\)$", re.M)
 METADATA = re.compile(r"```json\s+(\{.*?\})\s+```", re.S)
 MAX_SUMMARY_LINES = 60
 
@@ -68,23 +69,41 @@ def ensure_labels(gh):
         except urllib.error.HTTPError as err:
             if err.code != 404:
                 raise
-            gh.api("POST", "/labels", {"name": name, "color": color, "description": "Drift detection (drift-detection.yml)"})
+            try:
+                gh.api("POST", "/labels", {"name": name, "color": color, "description": "Drift detection (drift-detection.yml)"})
+            except urllib.error.HTTPError as err:
+                if err.code != 422:  # 422: another run created it first
+                    raise
 
 
 def open_issues(gh):
-    """{(stack, component): issue} of the open drift issues, keyed by their metadata block."""
-    issues, page = {}, 1
+    """({(stack, component): oldest open drift issue}, [newer duplicates]), keyed by the metadata block."""
+    issues, duplicates, page = {}, [], 1
     while True:
         batch = gh.api("GET", f"/issues?labels=drift&state=open&per_page=100&page={page}")
         for issue in batch:
-            match = METADATA.search(issue.get("body") or "")
-            if "pull_request" in issue or not issue["title"].startswith("Drift Detected in") or not match:
+            if "pull_request" in issue or not issue["title"].startswith("Drift Detected in"):
                 continue
-            meta = json.loads(match.group(1))
-            issues[(meta["stack"], meta["component"])] = issue
+            try:
+                meta = json.loads(METADATA.search(issue.get("body") or "").group(1))
+                pair = (meta["stack"], meta["component"])
+            except (AttributeError, ValueError, KeyError, TypeError):
+                print(f"::warning title=Drift issue skipped::#{issue['number']} has no readable metadata block")
+                continue
+            if pair in issues:
+                older, newer = sorted((issues[pair], issue), key=lambda i: i["number"])
+                issues[pair] = older
+                duplicates.append((pair, newer))
+            else:
+                issues[pair] = issue
         if len(batch) < 100:
-            return issues
+            return issues, duplicates
         page += 1
+
+
+def without_run_link(body):
+    """The body minus its run link: a new run with the same plan summary is not a change."""
+    return RUN_LINK.sub("", body or "")
 
 
 def issue_body(stack, component, summary, run_url):
@@ -92,7 +111,7 @@ def issue_body(stack, component, summary, run_url):
     return (f"`atmos terraform plan {component} -s {stack}` has changes: the deployed resources differ from "
             f"the stack.\n\n```text\n{summary}\n```\n\nFix: codify an intended manual change in the stack and "
             f"`atmos terraform deploy`; otherwise re-apply (docs/OPERATIONS.md, Day-2 tasks). This issue closes "
-            f"itself when a later run plans the instance clean.\n\n# Related\n"
+            f"itself when a later run plans the instance clean.\n\n# Related\n(the run that last changed this summary)\n"
             f"* [:building_construction: Action Workflow Logs]({run_url})\n\n```json\n{meta}\n```\n")
 
 
@@ -113,14 +132,18 @@ def sync(results_dir, expected, gh, run_url):
         if result["failed"]:
             complete[stack] = False
     ensure_labels(gh)
-    issues, report = open_issues(gh), []
+    (issues, duplicates), report = open_issues(gh), []
+    for (stack, component), issue in duplicates:
+        gh.api("POST", f"/issues/{issue['number']}/comments", {"body": f"Duplicate of #{issues[(stack, component)]['number']}."})
+        gh.api("PATCH", f"/issues/{issue['number']}", {"state": "closed", "state_reason": "not_planned"})
+        report.append(f"closed duplicate #{issue['number']}: {stack} {component}")
     for (stack, component), summary in sorted(drifted.items()):
         body, issue = issue_body(stack, component, summary, run_url), issues.get((stack, component))
         if issue is None:
             new = gh.api("POST", "/issues", {"title": f"Drift Detected in `{stack}-{component}`", "body": body,
                                              "labels": ["drift"]})
             report.append(f"opened #{new['number']}: {stack} {component}")
-        elif issue.get("body") != body:
+        elif without_run_link(issue.get("body")) != without_run_link(body):
             gh.api("PATCH", f"/issues/{issue['number']}", {"body": body})
             report.append(f"updated #{issue['number']}: {stack} {component}")
     for (stack, component), issue in sorted(issues.items()):

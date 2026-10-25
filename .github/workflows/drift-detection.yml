@@ -174,6 +174,7 @@ jobs:
           name: drift-${{ matrix.stack }}
           path: drift-result/
           if-no-files-found: ignore
+          overwrite: true
           retention-days: 1
 
   drift-in-vpc:
@@ -207,6 +208,11 @@ jobs:
     # After every leg, passed or failed; skipped with `stacks` (AWS not
     # configured, i.e. vars.AWS_PLAN_ROLE_ARN unset, or not the default branch).
     if: always() && needs.stacks.result == 'success'
+    # One sync at a time: an hourly run can outlast the hour (in-VPC legs
+    # queue), and two overlapping syncs would race on the same issues.
+    concurrency:
+      group: drift-issues
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read

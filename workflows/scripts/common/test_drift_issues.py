@@ -28,6 +28,8 @@ class FakeGitHub:
                 raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
             return {}
         if path == "/labels":
+            if body["name"] in self.labels:
+                raise urllib.error.HTTPError(path, 422, "Unprocessable Entity", {}, None)
             self.labels.add(body["name"])
             return {}
         if path.startswith("/issues?"):
@@ -53,9 +55,9 @@ class SyncTest(unittest.TestCase):
         self.gh, self.dir = FakeGitHub(), tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
 
-    def run_once(self, run_id, clean=(), drifted=(), failed=(), stack="fnx-ue1-dev", expected=None):
+    def run_once(self, run_id, clean=(), drifted=(), failed=(), stack="fnx-ue1-dev", expected=None, log_text=LOG):
         log = pathlib.Path(self.dir.name) / "plan.log"
-        log.write_text(LOG)
+        log.write_text(log_text)
         args = type("Args", (), {"out": f"{self.dir.name}/{stack}.json", "stack": stack, "clean": list(clean),
                                  "drifted": [f"{c}={log}" for c in drifted], "failed": list(failed)})
         drift_issues.record(args)
@@ -73,15 +75,40 @@ class SyncTest(unittest.TestCase):
         self.run_once(2, drifted=["vpc/main"])
         self.assertEqual([m for m in self.gh.mutations if m[1] == "/labels"], [("POST", "/labels")] * 2)
 
-    def test_repeated_drift_updates_the_same_issue_and_a_rerun_changes_nothing(self):
+    def test_a_new_run_with_the_same_summary_writes_nothing(self):
         self.run_once(1, drifted=["vpc/main"])
-        report, _ = self.run_once(2, drifted=["vpc/main"])
-        self.assertEqual(report, ["updated #1: fnx-ue1-dev vpc/main"])
-        self.assertEqual(len(self.gh.issues), 1)
-        self.assertIn(RUN.format(2), self.gh.issues[1]["body"])
         before = len(self.gh.mutations)
         self.assertEqual(self.run_once(2, drifted=["vpc/main"]), ([], []))
         self.assertEqual(len(self.gh.mutations), before)
+        self.assertIn(RUN.format(1), self.gh.issues[1]["body"])
+
+    def test_a_changed_summary_updates_the_same_issue(self):
+        self.run_once(1, drifted=["vpc/main"])
+        report, _ = self.run_once(2, drifted=["vpc/main"], log_text=LOG.replace("1 to change", "2 to change"))
+        self.assertEqual(report, ["updated #1: fnx-ue1-dev vpc/main"])
+        self.assertEqual(len(self.gh.issues), 1)
+        self.assertIn(RUN.format(2), self.gh.issues[1]["body"])
+
+    def test_a_label_another_run_just_created_is_not_an_error(self):
+        real = self.gh.api
+
+        def racing(method, path, body=None):
+            if method == "GET" and path.startswith("/labels/"):
+                self.gh.labels.add(path[len("/labels/"):])  # another run creates it between our GET and POST
+                raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
+            return real(method, path, body)
+
+        self.gh.api = racing
+        self.assertEqual(self.run_once(1, drifted=["vpc/main"]), (["opened #1: fnx-ue1-dev vpc/main"], []))
+
+    def test_an_unreadable_issue_is_skipped_and_a_duplicate_closed_keeping_the_oldest(self):
+        self.run_once(1, drifted=["vpc/main"])
+        self.gh.issues[2] = dict(self.gh.issues[1], number=2)
+        self.gh.issues[3] = {"number": 3, "title": "Drift Detected in `x`", "body": "edited", "labels": ["drift"],
+                             "state": "open"}
+        report, errors = self.run_once(2, drifted=["vpc/main"])
+        self.assertEqual((report, errors), (["closed duplicate #2: fnx-ue1-dev vpc/main"], []))
+        self.assertEqual([self.gh.issues[n]["state"] for n in (1, 2, 3)], ["open", "closed", "open"])
 
     def test_clean_closes_the_issue_with_a_comment_and_the_recovered_label(self):
         self.run_once(1, drifted=["vpc/main"])

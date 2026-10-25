@@ -226,6 +226,7 @@ jobs:
           name: drift-${{ inputs.stack }}--${{ inputs.label }}
           path: drift-result/
           if-no-files-found: ignore
+          overwrite: true
           retention-days: 1
       - name: Upload the in-VPC deploy marker
         if: inputs.mode == 'deploy' && inputs.base != ''
