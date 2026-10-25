@@ -73,8 +73,8 @@ output "query_log_kms_key_arns" {
 }
 
 output "ds_records" {
-  description = "Map of DNSSEC-signed zones (keyed as zone_ids: the zone key, the root zone by root_domain) to the DS record the registrar or parent zone must publish to complete the chain of trust; empty with dnssec_enabled off"
-  value = merge(
+  description = "Map of DNSSEC-signed zones (keyed as zone_ids: the zone key, the root zone by root_domain) to the DS record the registrar or parent zone must publish to complete the chain of trust; empty with dnssec_ds_enabled (default dnssec_enabled) off, so a reader's DS record drops"
+  value = !local.dnssec_ds_enabled ? {} : merge(
     { for k, ksk in aws_route53_key_signing_key.root_zone : var.root_domain => ksk.ds_record },
     { for k, ksk in merge(aws_route53_key_signing_key.zones, aws_route53_key_signing_key.dns_account_zones) : k => ksk.ds_record },
   )

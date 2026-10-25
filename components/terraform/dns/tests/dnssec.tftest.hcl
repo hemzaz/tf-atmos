@@ -99,7 +99,7 @@ run "subzone_ds_record_is_written_into_its_parent" {
   }
 
   assert {
-    condition     = output.ds_records == { main = "12345 13 2 ABCDEF0123456789", services = "12345 13 2 ABCDEF0123456789" }
+    condition     = output.ds_records == tomap({ main = "12345 13 2 ABCDEF0123456789", services = "12345 13 2 ABCDEF0123456789" })
     error_message = "ds_records maps each signed zone to the DS record its parent must publish."
   }
 }
@@ -135,6 +135,44 @@ run "root_zone_is_signed" {
   }
 }
 
+# Step one of turning DNSSEC off: DS records go, signing stays.
+run "ds_off_keeps_signing_and_drops_ds_records" {
+  command = plan
+
+  variables {
+    dnssec_ds_enabled = false
+    records = {
+      other_ds = { zone_name = "main", name = "other.fnx.example.com", type = "DS", records = [null] }
+    }
+  }
+
+  assert {
+    condition = (
+      toset(keys(aws_route53_hosted_zone_dnssec.zones)) == toset(["main", "services"])
+      && !contains(keys(aws_route53_record.records), "delegation_ds_services")
+      && contains(keys(aws_route53_record.records), "delegation_services")
+      && length(output.ds_records) == 0
+    )
+    error_message = "dnssec_ds_enabled = false keeps SIGNING and the NS delegation but drops the DS record and empties ds_records."
+  }
+
+  assert {
+    condition     = !contains(keys(aws_route53_record.records), "other_ds")
+    error_message = "A DS record whose values are all null (another instance's emptied ds_records) is dropped."
+  }
+}
+
+run "ds_requires_signing" {
+  command = plan
+
+  variables {
+    dnssec_enabled    = false
+    dnssec_ds_enabled = true
+  }
+
+  expect_failures = [var.dnssec_ds_enabled]
+}
+
 run "dnssec_off_creates_nothing" {
   command = plan
 
@@ -145,7 +183,7 @@ run "dnssec_off_creates_nothing" {
   assert {
     condition = (
       length(aws_kms_key.dnssec) == 0 && length(aws_route53_key_signing_key.zones) == 0
-      && !contains(keys(aws_route53_record.records), "delegation_ds_services") && output.ds_records == {}
+      && !contains(keys(aws_route53_record.records), "delegation_ds_services") && length(output.ds_records) == 0
     )
     error_message = "With dnssec_enabled off there is no key, KSK, signing or DS record."
   }

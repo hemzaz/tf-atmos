@@ -24,13 +24,17 @@ locals {
   # dns-delegated's pattern, for a subzone whose parent is in this instance).
   normalized_records = merge(local.explicit_records, local.delegation_records, local.dnssec_delegation_records)
 
-  # With dnssec_enabled, a parent_zone subzone's DS record next to its NS
-  # record in the parent zone, so the chain of trust continues below the apex.
+  # With DS records on (dnssec_ds_enabled, default dnssec_enabled), a
+  # parent_zone subzone's DS record next to its NS record in the parent zone,
+  # so the chain of trust continues below the apex. aws_route53_record.records
+  # depends on the zones' SIGNING, so a DS is never published for a zone that
+  # is not yet signing (validating resolvers would SERVFAIL it).
+  dnssec_ds_enabled = coalesce(var.dnssec_ds_enabled, var.dnssec_enabled)
   dnssec_delegation_records = {
     for k, zone in var.zones : "delegation_ds_${k}" => merge(local.delegation_records["delegation_${k}"], {
       type    = "DS"
       records = [try(aws_route53_key_signing_key.zones[k].ds_record, aws_route53_key_signing_key.dns_account_zones[k].ds_record)]
-    }) if zone.parent_zone != null && var.dnssec_enabled
+    }) if zone.parent_zone != null && local.dnssec_ds_enabled
   }
 
   # ttl: Cloud Posse dns-delegated hardcodes 30 on root_ns; here it is var.delegation_ttl (default 30).
@@ -72,6 +76,10 @@ locals {
       # Records follow their zone into the DNS account
       dns_account = contains(local.dns_account_zone_keys, record.zone_name)
     }
+    # A DS record with no value is dropped, not an error: it reads another
+    # instance's ds_records, which is empty while that instance's DNSSEC (or
+    # dnssec_ds_enabled) is off, e.g. step one of turning DNSSEC off.
+    if !(upper(record.type) == "DS" && length(compact(coalesce(record.records, []))) == 0)
   }
 }
 
@@ -176,6 +184,9 @@ resource "aws_route53_zone" "dns_account_zones" {
 resource "aws_route53_record" "records" {
   for_each = { for id, record in local.normalized_records : id => record if !record.dns_account }
 
+  # A DS record must follow its zone's SIGNING (see dnssec_delegation_records).
+  depends_on = [aws_route53_hosted_zone_dnssec.zones, aws_route53_hosted_zone_dnssec.dns_account_zones]
+
   zone_id = each.value.zone_id
   name    = each.value.name
   type    = each.value.type
@@ -232,6 +243,8 @@ resource "aws_route53_record" "records" {
 resource "aws_route53_record" "dns_account_records" {
   provider = aws.dns_account
   for_each = { for id, record in local.normalized_records : id => record if record.dns_account }
+
+  depends_on = [aws_route53_hosted_zone_dnssec.zones, aws_route53_hosted_zone_dnssec.dns_account_zones]
 
   zone_id = each.value.zone_id
   name    = each.value.name

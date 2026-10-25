@@ -106,6 +106,17 @@ variable "dnssec_enabled" {
   nullable    = false
 }
 
+variable "dnssec_ds_enabled" {
+  type        = bool
+  description = "Whether this instance publishes DS records for its signed zones: the automatic delegation_ds_<key> record of a parent_zone subzone and the ds_records output other instances read. Null follows dnssec_enabled. Turning DNSSEC off takes two applies: dnssec_ds_enabled = false (DS gone), wait out the DS TTL, then dnssec_enabled = false; signing off with a DS still published makes validating resolvers fail the zone."
+  default     = null
+
+  validation {
+    condition     = !(coalesce(var.dnssec_ds_enabled, false) && !var.dnssec_enabled)
+    error_message = "dnssec_ds_enabled needs dnssec_enabled: a DS record for an unsigned zone breaks it for validating resolvers."
+  }
+}
+
 variable "query_logging_name" {
   type        = string
   description = "Suffix of the account-wide Route53 query logging resource policy and KMS key alias names (route53-query-logging-<suffix>, alias/route53-query-logs-<suffix>). Null derives it from the alphabetically first query-logged zone name, which renames and replaces both when a zone that sorts earlier is added: set it once the zones are settled to pin the names. Resource policies and aliases are per account, so instances sharing an account (network/main, network/services) need different values."

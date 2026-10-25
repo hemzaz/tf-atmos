@@ -61,9 +61,13 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   the owner publishes the zone's `ds_records` output at the registrar (apex) or parent zone. A
   `parent_zone` subzone gets its DS record (`delegation_ds_<key>`) beside its NS record in the
   parent; a zone delegated from another instance needs a `DS` record there reading this
-  instance's `ds_records`. Before turning it off or deleting
-  the key, remove the DS record and wait out its TTL, or the zone stops resolving for validating
-  resolvers. The key is in us-east-1, so a GDPR-scoped (EU) stack keeps it off.
+  instance's `ds_records` (a `DS` record whose values are all null is dropped, so that read
+  empties out cleanly). Records apply after `SIGNING`, so a DS never precedes its signatures.
+- Turning DNSSEC off is two applies, or validating resolvers fail the zone: first
+  `dnssec_ds_enabled: false` (removes `delegation_ds_*`, empties `ds_records` so readers drop
+  theirs; remove the registrar DS by hand), wait out the DS TTL (registrar: often 1-2 days), then
+  `dnssec_enabled: false`. `dnssec_ds_enabled` (null = `dnssec_enabled`) cannot be on without
+  signing. The key is in us-east-1, so a GDPR-scoped (EU) stack keeps DNSSEC off.
 - Records in a DNS-account zone can only reference health checks from the main account.
 - `workflows/scripts/common/check-domains.py` (run by `validate-all`) requires every record name
   to sit in its zone and not inside a more specific public zone of the stack, and every nested
