@@ -13,6 +13,11 @@
 # component's own (its catalog sets vars.name). No namespace: no id here has
 # one. Tags come from the global vars.tags, which null-label merges in.
 #
+# tenant, environment and stage are also set as top-level vars: Cloud Posse
+# components read var.tenant / var.stage directly (aws-access-analyzer
+# account-verification.tf builds "<tenant>-<stage>" from them), and those stay
+# null when only the context carries them.
+#
 # An abstract inherited through metadata.inherits, not a global var:
 # hand-written components declare no `context` variable, and
 # check-dependencies.py fails a var a root module does not declare.
@@ -24,6 +29,9 @@ components:
       metadata:
         type: abstract
       vars:
+        tenant: "{{ .settings.context.tenant }}"
+        environment: "{{ .settings.prefix }}"
+        stage: "{{ .settings.context.stage }}"
         context:
           enabled: true
           namespace: null

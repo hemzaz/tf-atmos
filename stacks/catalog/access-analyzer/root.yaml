@@ -7,6 +7,12 @@
 # security account (<tenant>-security) and create the service-linked role the
 # delegated administrator's organization analyzers need. Global, so one stack
 # only: not fnx-ew1-root, which is the same management account.
+#
+# Disabled until E5, which enables it after E3 creates the security account
+# and enables Organizations trusted access for access-analyzer.amazonaws.com
+# (EnableAWSServiceAccess); the delegation cannot apply before both. Disabled,
+# it is also out of the backend cold start's preflight (bootstrap.yaml), which
+# would otherwise fail on the core-account placeholders in vars.account_map.
 # =============================================================================
 
 import:
@@ -17,6 +23,7 @@ components:
     access-analyzer/root:
       metadata:
         component: access-analyzer
+        enabled: false
         inherits:
           - access-analyzer/defaults
       vars:
