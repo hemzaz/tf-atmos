@@ -89,8 +89,9 @@ workflows:
           # change touches vendor.yaml, vendor.lock.yaml or a vendored dir, so an
           # unrelated PR's lint never depends on the network. The base is
           # VENDOR_BASE_SHA (terraform-ci.yml: the PR's base) or, locally, the
-          # merge base with origin/master; with no usable base (a shallow clone)
-          # only the offline checks run.
+          # merge base with origin/master. A base that cannot be resolved forces
+          # --repull when VENDOR_BASE_SHA is set or in CI (a stacked PR's base can
+          # be rebased away); only a local run falls back to the offline checks.
           - name: check-vendor
             type: shell
             command: |
@@ -105,8 +106,13 @@ workflows:
                 changed=$(git diff --no-renames --name-only "$base" -- vendor.yaml vendor.lock.yaml $list)
                 if [ -n "$changed" ]; then mode=--repull; fi
                 echo "check-vendor: vendored paths changed since $base: ${changed:-none}"
+              elif [ -n "${VENDOR_BASE_SHA:-}" ] || [ "${GITHUB_ACTIONS:-}" = true ]; then
+                # CI: an unresolvable base (e.g. a stacked PR's rebased base branch)
+                # cannot prove what changed, so re-pull rather than trust the receipt.
+                mode=--repull
+                echo "check-vendor: base commit ${base:-none} cannot be resolved (VENDOR_BASE_SHA set or CI); re-pulling every vendored component"
               else
-                echo "check-vendor: no usable base commit (${base:-none}); offline checks only"
+                echo "check-vendor: no usable base commit (${base:-none}); offline checks only (local run)"
               fi
               python3 scripts/check-vendor.py $mode
           # Each tool pin repeats (no repo-wide dependencies.tools): one version per tool.
