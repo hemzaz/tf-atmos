@@ -16,7 +16,9 @@ stacks the same way):
                    (workflow_dispatch inputs of terraform-cd.yml and
                    disaster-recovery.yml).
   --plan-sweep     scripts/plan-sweep.sh's default: every stack except the
-                   stages in PLAN_SWEEP_EXCLUDED_STAGES.
+                   stages in PLAN_SWEEP_EXCLUDED_STAGES and hosted-CI-disabled
+                   stacks whose instances are all abstract or disabled (a
+                   ::notice:: each; a CI stack like that is an error).
 
 stdout carries only stack names; every ::error:: goes to stderr, so a caller
 that captures stdout (subprocess.check_output) still shows the reason.
@@ -120,8 +122,38 @@ def ci_stacks(stacks: dict) -> list:
     return names
 
 
+def deployable(spec: dict) -> bool:
+    # The same rule as check-first-deploy-inputs.py's deployable(); kept local, not imported
+    # across the hyphenated script names.
+    metadata = (spec or {}).get("metadata") or {}
+    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+
+
+def nothing_to_plan(config: dict) -> bool:
+    """True when the stack has instances but every one is abstract or disabled."""
+    specs = instances(config).values()
+    return bool(specs) and not any(deployable(spec) for spec in specs)
+
+
 def plan_sweep_stacks(stacks: dict) -> list:
-    names = [name for name, config in stacks.items() if stage(config) not in PLAN_SWEEP_EXCLUDED_STAGES]
+    """Skips, with a ::notice:: on stderr, a hosted-CI-disabled stack with nothing to plan (a
+    core account's stack before its first component, fnx-ue1-security, fnx-ue1-audit: only the
+    region mixin's abstract vpc/defaults); its first instance brings it into the sweep with no
+    edit here. A CI stack with nothing to plan (every instance disabled by mistake) is a
+    ValueError, and a stack with no instances at all still fails in ordered()."""
+    names = []
+    for name, config in stacks.items():
+        if stage(config) in PLAN_SWEEP_EXCLUDED_STAGES:
+            continue
+        if nothing_to_plan(config):
+            if not ci_disabled(config):
+                raise ValueError(
+                    f"{name!r} has no deployable instance (all abstract or disabled) but hosted CI "
+                    "runs against it: enable an instance, or set settings.github.actions_enabled: false"
+                )
+            print(f"::notice::plan-sweep skips {name}: no deployable instances", file=sys.stderr)
+            continue
+        names.append(name)
     return ordered(stacks, names)
 
 
@@ -136,7 +168,7 @@ def check(stacks: dict, name: str) -> str:
 
 def describe_stacks() -> dict:
     return json.loads(subprocess.check_output(
-        ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json", "--sections", "settings"]))
+        ["atmos", "describe", "stacks", "--process-functions=false", "--format", "json", "--sections", "settings,metadata"]))
 
 
 def main() -> int:

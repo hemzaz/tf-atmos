@@ -51,6 +51,30 @@ class TodayTest(unittest.TestCase):
              "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp"],
         )
 
+    def test_plan_sweep_skips_a_stack_with_nothing_to_plan(self):
+        # A core-account stack before its first component: only the region
+        # mixin's abstract vpc/defaults (or a disabled instance) - nothing to plan.
+        empty = stack("security", False)
+        empty["components"]["terraform"]["c0"]["metadata"] = {"type": "abstract"}
+        disabled = stack("audit", False)
+        disabled["components"]["terraform"]["c0"]["metadata"] = {"enabled": False}
+        stacks = dict(TODAY, **{"fnx-ue1-security": empty, "fnx-ue1-audit": disabled})
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(ci_stacks.plan_sweep_stacks(stacks), ci_stacks.plan_sweep_stacks(TODAY))
+        self.assertEqual(ci_stacks.ci_stacks(stacks), ci_stacks.ci_stacks(TODAY))
+        # Its first deployable instance brings it into the sweep.
+        empty["components"]["terraform"]["c1"] = {"settings": {"context": {"stage": "security"},
+                                                               "github": {"actions_enabled": False}}}
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertIn("fnx-ue1-security", ci_stacks.plan_sweep_stacks(stacks))
+
+    def test_a_ci_stack_with_nothing_to_plan_still_fails(self):
+        # A workload stack whose instances were all disabled by mistake is not skipped.
+        broken = stack("dev", None)
+        broken["components"]["terraform"]["c0"]["metadata"] = {"enabled": False}
+        with self.assertRaisesRegex(ValueError, "'fnx-ue1-dev' has no deployable instance"):
+            ci_stacks.plan_sweep_stacks(dict(TODAY, **{"fnx-ue1-dev": broken}))
+
 
 def standby(stage_name, primary):
     """A describe-stacks entry of a DR standby (settings.dr.standby_of)."""
@@ -197,6 +221,14 @@ class MainStreamsTest(unittest.TestCase):
                 self.assertEqual((rc, out), (1, ""))
                 self.assertTrue(err.startswith("::error::"), err)
                 self.assertIn(fragment, err)
+
+    def test_a_skipped_stack_is_a_notice_on_stderr_only(self):
+        empty = stack("security", False)
+        empty["components"]["terraform"]["c0"]["metadata"] = {"type": "abstract"}
+        rc, out, err = self.run_main(dict(TODAY, **{"fnx-ue1-security": empty}), "--plan-sweep")
+        self.assertEqual((rc, out), (0, self.run_main(TODAY, "--plan-sweep")[1]))
+        self.assertNotIn("fnx-ue1-security", out)
+        self.assertEqual(err, "::notice::plan-sweep skips fnx-ue1-security: no deployable instances\n")
 
     def test_check_echoes_an_accepted_stack_on_stdout(self):
         self.assertEqual(self.run_main(TODAY, "--check", "fnx-ue1-prod"), (0, "fnx-ue1-prod\n", ""))
