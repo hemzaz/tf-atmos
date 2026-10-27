@@ -1,0 +1,96 @@
+---
+# =============================================================================
+# fnx-gbl-root - the management account's global stack
+# =============================================================================
+# The accounts layer (owner decision Q2: tf-atmos owns the organization, with
+# Cloud Posse components): the AWS Organization and its OUs (E3a), then the
+# accounts (E3b) and SCPs (E3c). Cloud Posse deploys these from core-gbl-root;
+# here the tenant stays fnx, so fnx-gbl-root (owner decision QE5).
+#
+# Its own stack, not fnx-ue1-root: deploying an org component needs real core
+# account IDs (check-first-deploy-inputs.py MAP_CONSUMERS is stack-scoped),
+# and fnx-ue1-root's backend cold start must not wait for them. Bootstrap
+# order: the backend cold start (fnx-ue1-root), then this stack, then the
+# backend's access_roles for the new accounts (E3e's deploy-accounts).
+#
+# State: fnx-ue1-root's US bucket, through the backend's root role
+# (stacks/orgs/fnx/_defaults.yaml routes stage root there): the
+# management-account administrator only. Out of every CI matrix
+# (root/_defaults: github.actions_enabled false); the provider guard allows the
+# management account only (settings.environment.account_id).
+#
+# Every instance is metadata.enabled: false until E3e adds the `accounts`
+# deploy layer before `backend` and the deploy-accounts workflow, and enables
+# them in the same PR as this stack's key pair ("*/fnx-gbl-root/*",
+# "*/fnx-gbl-root-*") on root_write in fnx-ue1-root's backend/main
+# (check-state-keys.py fails a pattern no enabled instance's state matches).
+# Disabled, no deploy workflow selects them (check-deploy-layers.py COVERAGE)
+# and the preflight does not yet demand the core account IDs.
+#
+# OUs, Cloud Posse's reference architecture (aws-organizational-unit README):
+#   core  the core accounts (root stays at the organization root; audit,
+#         security, network, identity, artifacts move here in E3b)
+#   plat  the platform (workload) accounts: dev, staging, prod
+#   eu    under plat, prod-eu only: E3c attaches the EU region allow-list
+#         (owner decision QE3) here, and plat's baseline SCPs still apply
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - mixins/region/global-region
+  - orgs/fnx/root/_defaults
+  - catalog/aws-organization/defaults
+  - catalog/aws-organizational-unit/defaults
+
+settings:
+  context:
+    tenant: fnx
+    stage: root
+
+components:
+  terraform:
+    aws-organization:
+      metadata:
+        component: aws-organization
+        enabled: false
+        inherits:
+          - aws-organization/defaults
+
+    aws-organizational-unit/core:
+      metadata:
+        component: aws-organizational-unit
+        enabled: false
+        inherits:
+          - aws-organizational-unit/defaults
+      dependencies:
+        components:
+          - component: aws-organization
+      vars:
+        name: core
+        parent_id: !terraform.state aws-organization organization_root_id
+
+    aws-organizational-unit/plat:
+      metadata:
+        component: aws-organizational-unit
+        enabled: false
+        inherits:
+          - aws-organizational-unit/defaults
+      dependencies:
+        components:
+          - component: aws-organization
+      vars:
+        name: plat
+        parent_id: !terraform.state aws-organization organization_root_id
+
+    aws-organizational-unit/eu:
+      metadata:
+        component: aws-organizational-unit
+        enabled: false
+        inherits:
+          - aws-organizational-unit/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/plat
+      vars:
+        name: eu
+        parent_id: !terraform.state aws-organizational-unit/plat organizational_unit_id

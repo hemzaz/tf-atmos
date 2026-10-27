@@ -19,3 +19,18 @@ spec:
       targets:
         - "components/terraform/access-analyzer"
       included_paths: ["**/*.tf", "**/*.md"]
+    # The AWS Organization and its OUs (single-resource pattern), applied from
+    # the management account's global stack fnx-gbl-root.
+    # stacks/catalog/aws-organization, stacks/catalog/aws-organizational-unit.
+    - component: aws-organization
+      source: "github.com/cloudposse-terraform-components/aws-organization.git//src?ref={{ .Version }}"
+      version: "v0.2.0"
+      targets:
+        - "components/terraform/aws-organization"
+      included_paths: ["**/*.tf", "**/*.md"]
+    - component: aws-organizational-unit
+      source: "github.com/cloudposse-terraform-components/aws-organizational-unit.git//src?ref={{ .Version }}"
+      version: "v0.1.0"
+      targets:
+        - "components/terraform/aws-organizational-unit"
+      included_paths: ["**/*.tf", "**/*.md"]

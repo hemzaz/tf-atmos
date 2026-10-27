@@ -506,7 +506,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/access-analyzer/(context|remote-state)\.tf$'
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-guard
         type: script
@@ -638,20 +638,22 @@ workflows:
           # terraform test helper modules (e.g.
           # eks/tests/unknown_subnet_ids, which links the component's own files)
           # are not deployed code.
-          # --skip-path '/access-analyzer/(context|remote-state)\.tf$' (every checkov
-          # run here, QE1b): two files of the vendored aws-access-analyzer, which
-          # cannot carry an inline skip (check-vendor.py fails an edited file) and
-          # whose only checkov findings are CKV_TF_1 on module "this"
+          # --skip-path '/(<vendored dir>|...)/(context|remote-state)\.tf$' (every
+          # checkov run here, QE1b): context.tf (and aws-access-analyzer's
+          # remote-state.tf) of the vendored components, which cannot carry an
+          # inline skip (check-vendor.py fails an edited file) and whose only
+          # checkov findings are CKV_TF_1 on module "this"
           # (cloudposse/label/null 0.25.0) and module "account_map"
           # (cloudposse/stack-config/yaml remote-state 1.8.1): registry modules
           # pinned to an exact version, Cloud Posse's own form. checkov has no
           # per-path check skip; the files hold only those module blocks and the
-          # null-label variables, so the skip drops CKV_TF_1/CKV_TF_2 on two
-          # module blocks and nothing else; main.tf stays scanned.
+          # null-label variables, so the skip drops CKV_TF_1/CKV_TF_2 on those
+          # module blocks and nothing else; main.tf stays scanned. A newly
+          # vendored dir is added to the alternation in all four commands.
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/access-analyzer/(context|remote-state)\.tf$'
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
               --output sarif --output-file-path reports --quiet
               --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL
 
@@ -673,7 +675,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/access-analyzer/(context|remote-state)\.tf$'
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-print
         type: script
@@ -721,7 +723,7 @@ workflows:
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/access-analyzer/(context|remote-state)\.tf$'
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
               --output sarif --output-file-path reports --soft-fail --quiet
       # checkov writes each inline `#checkov:skip=<ID>:<reason>` as a SARIF result
       # with `suppressions`, and GitHub code scanning lists those as open alerts
