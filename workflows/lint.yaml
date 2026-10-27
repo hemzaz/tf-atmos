@@ -75,21 +75,40 @@ workflows:
             command: |
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
-              vendored=" $(python3 scripts/check-vendor.py --list | tr '\n' ' ') "
+              # Its own line: set -e ignores a failure inside a pipeline's first stage.
+              list=$(python3 scripts/check-vendor.py --list)
+              vendored=" $(printf '%s\n' "$list" | tr '\n' ' ') "
               set --
               for dir in components/terraform/*/; do
                 case "$vendored" in *" ${dir%/} "*) continue ;; esac
                 set -- "$@" "${dir%/}"
               done
               python3 scripts/check-hcl-unary-newline.py "$@"
-          # Vendored dirs match a fresh pull of their vendor.yaml pin, unedited
-          # (--repull pulls from GitHub when vendor.yaml has sources).
+          # Vendored dirs match their vendor.lock.yaml receipt, unedited. --repull
+          # (a pull from GitHub, which also proves the pin) runs only when the
+          # change touches vendor.yaml, vendor.lock.yaml or a vendored dir, so an
+          # unrelated PR's lint never depends on the network. The base is
+          # VENDOR_BASE_SHA (terraform-ci.yml: the PR's base) or, locally, the
+          # merge base with origin/master; with no usable base (a shallow clone)
+          # only the offline checks run.
           - name: check-vendor
             type: shell
             command: |
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_vendor.py
-              python3 scripts/check-vendor.py --repull
+              list=$(python3 scripts/check-vendor.py --list)
+              base="${VENDOR_BASE_SHA:-}"
+              if [ -z "$base" ]; then base=$(git merge-base HEAD origin/master 2>/dev/null || true); fi
+              mode=""
+              if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+                # shellcheck disable=SC2086 # $list: one vendored dir per line, [a-z0-9/-] only
+                changed=$(git diff --no-renames --name-only "$base" -- vendor.yaml vendor.lock.yaml $list)
+                if [ -n "$changed" ]; then mode=--repull; fi
+                echo "check-vendor: vendored paths changed since $base: ${changed:-none}"
+              else
+                echo "check-vendor: no usable base commit (${base:-none}); offline checks only"
+              fi
+              python3 scripts/check-vendor.py $mode
           # Each tool pin repeats (no repo-wide dependencies.tools): one version per tool.
           - name: tool-pins
             type: shell
@@ -196,7 +215,8 @@ workflows:
           set -uo pipefail
           config="$PWD/.tflint.hcl"
           failed=""
-          vendored=" $(python3 scripts/check-vendor.py --list | tr '\n' ' ') "
+          list=$(python3 scripts/check-vendor.py --list) || exit 1
+          vendored=" $(printf '%s\n' "$list" | tr '\n' ' ') "
           for dir in components/terraform/*/; do
             component=$(basename "$dir")
             # _library holds shared sub-modules, not root modules; skip it and any

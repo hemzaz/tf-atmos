@@ -3,11 +3,14 @@
 
 Offline: each source pins an exact cloudposse-terraform-components tag via ?ref={{ .Version }}
 into one components/terraform/<name>; vendor.lock.yaml holds a receipt per target and no other;
-each receipt file is on disk with its sha256; only .terraform.lock.hcl and *_override.tf are
-added. Atmos 1.229's receipt omits the version (`atmos vendor verify` passes a changed pin), so
---repull pulls the manifest into a scratch dir and fails a file that differs from the receipt.
+each receipt file (a regular file at a relative path inside the target) is on disk with its
+sha256; nothing else is in the target (no extra file, symlink or empty directory) but
+.terraform.lock.hcl and *_override.tf. Atmos 1.229's receipt omits the version (`atmos vendor
+verify` passes a changed pin), so --repull pulls the manifest into a scratch dir and fails a file
+that differs from the receipt or a target the pull or the receipt lacks.
 Usage: check-vendor.py [--list | --repull]   (--list prints the vendored dirs). No vendor.yaml:
-exit 0. Exit 1 on a finding, 2 on a usage or tool error. YAML is read with yq (mikefarah v4).
+exit 0. Exit 1 on a finding, 2 on a usage or tool error or (--list) a bad vendor.yaml.
+YAML is read with yq (mikefarah v4).
 """
 
 import fnmatch
@@ -31,16 +34,17 @@ IGNORED = {".terraform", "backend.tf.json", "providers_override.tf.json"}
 # The scratch pull's atmos.yaml (JSON is YAML); vendor.yaml and vendor.lock.yaml are the defaults.
 PULL_CONFIG = {"base_path": ".", "components": {"terraform": {"base_path": "components/terraform"}},
                "stacks": {"base_path": "stacks", "included_paths": ["**/*.yaml"], "name_pattern": "{stage}"}}
+PULL_TIMEOUT = 600  # seconds for the whole re-pull
 
 
 class ToolError(Exception):
-    """A missing tool or an unreadable input: exit 2."""
+    """A missing tool, a timeout or an unreadable input: exit 2."""
 
 
 def load_yaml(path):
     try:
-        out = subprocess.run(["yq", "-o=json", ".", path], capture_output=True, text=True, check=False)
-    except OSError as exc:
+        out = subprocess.run(["yq", "-o=json", ".", path], capture_output=True, text=True, check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise ToolError(f"cannot run yq: {exc}") from exc
     if out.returncode != 0:
         raise ToolError(f"yq cannot read {path}: {out.stderr.strip()}")
@@ -55,8 +59,18 @@ def receipts(lock):
     return {a.get("target"): a for a in ((lock or {}).get("artifacts") or {}).values()}
 
 
-def files(receipt):
-    return {f["path"]: f.get("sha256") for f in (receipt or {}).get("files") or [] if f.get("type", "file") == "file"}
+def files(receipt, target, errs):
+    """The receipt's {path: sha256}; an unsafe path or a non-file entry is appended to errs instead."""
+    found = {}
+    for entry in (receipt or {}).get("files") or []:
+        path, kind = str(entry.get("path", "")), entry.get("type", "file")
+        if not path or os.path.isabs(path) or ".." in path.split("/") or os.path.normpath(path) != path:
+            errs.append(f"{target}: {LOCK} records unsafe path {path!r} (want a plain relative path)")
+        elif kind != "file":
+            errs.append(f"{target}/{path}: {LOCK} records a {kind!r}; vendored dirs hold regular files only")
+        else:
+            found[path] = entry.get("sha256")
+    return found
 
 
 def check_manifest(manifest):
@@ -83,12 +97,17 @@ def check_manifest(manifest):
 
 
 def on_disk(root, target):
-    """Committable files under root/target, relative to it."""
-    base, found = os.path.join(root, target), []
+    """(regular files, symlinks, directories) under root/target, relative to it; symlinks are not followed."""
+    base, regular, links, dirs = os.path.join(root, target), [], [], []
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in IGNORED]
-        found += [os.path.relpath(os.path.join(dirpath, f), base) for f in filenames if f not in IGNORED]
-    return sorted(found)
+        rel = os.path.relpath(dirpath, base)
+        names = [n for n in dirnames + filenames if n not in IGNORED]
+        dirnames[:] = [d for d in dirnames if d not in IGNORED and not os.path.islink(os.path.join(dirpath, d))]
+        for n in names:
+            path = os.path.normpath(os.path.join(rel, n))
+            full = os.path.join(dirpath, n)
+            (links if os.path.islink(full) else dirs if os.path.isdir(full) else regular).append(path)
+    return sorted(regular), sorted(links), sorted(dirs)
 
 
 def check_lock(manifest, lock, root):
@@ -100,24 +119,31 @@ def check_lock(manifest, lock, root):
         if target not in have:
             errs.append(f"{name}: no receipt in {LOCK} (atmos vendor pull -c {name})")
             continue
-        locked = files(have[target])
+        locked = files(have[target], target, errs)
         for rel, digest in sorted(locked.items()):
             path = os.path.join(root, target, rel)
-            if not os.path.isfile(path):
-                errs.append(f"{target}/{rel}: in {LOCK} but missing on disk")
+            if os.path.islink(path) or not os.path.isfile(path):
+                errs.append(f"{target}/{rel}: in {LOCK} but missing on disk or not a regular file")
             else:
                 with open(path, "rb") as fh:
                     if hashlib.sha256(fh.read()).hexdigest() != digest:
                         errs.append(f"{target}/{rel}: edited in place (sha256 differs from {LOCK}); use a *_override.tf")
-        for rel in on_disk(root, target):
-            if rel not in locked and not any(fnmatch.fnmatch(os.path.basename(rel), p) for p in HOUSE_FILES):
-                errs.append(f"{target}/{rel}: not from the vendor pull; only {', '.join(HOUSE_FILES)} may be added")
+        regular, links, dirs = on_disk(root, target)
+        kept = [r for r in regular if r in locked or any(fnmatch.fnmatch(os.path.basename(r), p) for p in HOUSE_FILES)]
+        errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)} may be added"
+                 for r in regular if r not in kept]
+        errs += [f"{target}/{r}: a symlink; {LOCK} records regular files only" for r in links]
+        errs += [f"{target}/{d}: a directory with no vendored or house file" for d in dirs
+                 if not any(k.startswith(d + "/") for k in kept)]
     return errs
 
 
 def repull(lock):
     """Findings where a fresh pull of the manifest differs from the committed receipt."""
-    with tempfile.TemporaryDirectory(prefix="check-vendor-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="check-vendor-") as scratch:
+        # realpath: on macOS $TMPDIR is under the /var symlink, and Atmos rejects a target it
+        # resolves outside the base path ("invalid vendor lock target").
+        tmp = os.path.realpath(scratch)
         shutil.copy(MANIFEST, os.path.join(tmp, MANIFEST))
         with open(os.path.join(tmp, "atmos.yaml"), "w") as fh:
             json.dump(PULL_CONFIG, fh)
@@ -125,15 +151,19 @@ def repull(lock):
         cmd = ["atmos", "vendor", "pull", "--everything", "--refresh-lock", "--base-path", tmp,
                "--config", os.path.join(tmp, "atmos.yaml")]
         try:
-            out = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        except OSError as exc:
+            # cwd=tmp: Atmos 1.229 resolves the lock target against the working directory.
+            out = subprocess.run(cmd, cwd=tmp, capture_output=True, text=True, check=False, timeout=PULL_TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired) as exc:
             raise ToolError(f"--repull cannot run atmos: {exc}") from exc
         if out.returncode != 0:
             raise ToolError(f"atmos vendor pull failed:\n{out.stdout}{out.stderr}")
         fresh, have = receipts(load_yaml(os.path.join(tmp, LOCK))), receipts(lock)
     errs = []
-    for target, art in sorted(fresh.items()):
-        pulled, locked = files(art), files(have.get(target))
+    for target in sorted(set(fresh) | set(have)):
+        if target not in fresh or target not in have:
+            errs.append(f"{target}: in {'the committed ' + LOCK if target in have else 'a fresh pull'} only")
+            continue
+        pulled, locked = files(fresh[target], target, errs), files(have[target], target, errs)
         errs += [f"{target}/{rel}: differs from a fresh pull of its pinned version"
                  for rel in sorted(set(pulled) | set(locked)) if pulled.get(rel) != locked.get(rel)]
     return errs
@@ -150,11 +180,14 @@ def main(argv):
         return 0
     try:
         manifest = load_yaml(MANIFEST)
+        errs = check_manifest(manifest)
         if "--list" in flags:
-            print("".join(f"{t}\n" for s in sources(manifest) for t in (s.get("targets") or [])[:1]), end="")
+            if errs:
+                raise ToolError(f"{MANIFEST} is invalid, so no vendored dirs are listed: " + "; ".join(errs))
+            print("".join(f"{s['targets'][0]}\n" for s in sources(manifest)), end="")
             return 0
         lock = load_yaml(LOCK) if os.path.exists(LOCK) else {}
-        errs = check_manifest(manifest) or check_lock(manifest, lock, ".")
+        errs = errs or check_lock(manifest, lock, ".")
         # Atmos refuses to pull a manifest with no sources, so there is nothing to re-pull.
         if not errs and "--repull" in flags and sources(manifest):
             errs = repull(lock)
