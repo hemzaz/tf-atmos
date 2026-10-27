@@ -194,7 +194,7 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm_security
         type: confirm
@@ -210,7 +210,8 @@ workflows:
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2" or .metadata.component == "waf"
+          or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
+          or .metadata.component == "waf"
           and .vars.scope == "CLOUDFRONT"'
       - name: plan-security-monitoring
         type: atmos
@@ -536,7 +537,7 @@ workflows:
           or .atmos_component == "lambda/cognito-user-migration"'
 
   deploy-security:
-    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, Inspector, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
+    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, Inspector, IAM Access Analyzer, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -546,7 +547,7 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm
         type: confirm
@@ -562,7 +563,8 @@ workflows:
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2" or .metadata.component == "waf"
+          or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
+          or .metadata.component == "waf"
           and .vars.scope == "CLOUDFRONT"'
 
   deploy-security-monitoring:

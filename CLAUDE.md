@@ -46,8 +46,12 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 - Stage `fixtures` (`fnx-ue1-fixtures-<name>`) puts each catalog template under the checks and is
   never deployed; `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) relaxes a
   template until its port PR removes the entry.
-- 43 of the 48 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,
-  `iam`, `kms`, `secretsmanager`); many use it in resource names.
+- 43 of the 48 hand-written root modules validate a non-empty `tags.Environment` (all but `backend`,
+  `dns`, `iam`, `kms`, `secretsmanager`); many use it in resource names.
+- A vendored component (`vendor.yaml`) names resources from the null-label `vars.context` of the
+  abstract `vendored` (`stacks/catalog/_base/vendored.yaml`; `environment` is `settings.prefix`),
+  which its catalog entry inherits, not `tags.Environment`, so that convention does not apply to it.
+  Never edit its files: house edits go in a `*_override.tf`.
 - checkov's HCL parser rejects a unary `!x`/`-x` that ends a line before a line starting with a binary
   operator (`&&`, `||`, ...) and skips the file: write `x == false` or `(!x)`. The lint step
   `hcl-unary-newline` (`scripts/check-hcl-unary-newline.py`) catches it.

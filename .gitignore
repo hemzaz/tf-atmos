@@ -190,3 +190,6 @@ reports/
 
 # Agent orchestration state
 .omc/
+
+# Atmos vendor pull lock sidecar (vendor.lock.yaml.lock)
+vendor.lock.yaml.lock

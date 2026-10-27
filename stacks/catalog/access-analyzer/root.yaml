@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# access-analyzer/root in the management account's stack (fnx-ue1-root)
+# =============================================================================
+# Cloud Posse aws-access-analyzer README, "Root Account Configuration (Step 1)":
+# from the organization management account, delegate Access Analyzer to the
+# security account (<tenant>-security) and create the service-linked role the
+# delegated administrator's organization analyzers need. Global, so one stack
+# only: not fnx-ew1-root, which is the same management account.
+# =============================================================================
+
+import:
+  - catalog/access-analyzer/defaults
+
+components:
+  terraform:
+    access-analyzer/root:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/defaults
+      vars:
+        organizations_delegated_administrator_enabled: true
+        service_linked_role_enabled: true
