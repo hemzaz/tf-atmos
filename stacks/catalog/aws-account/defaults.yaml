@@ -1,0 +1,70 @@
+---
+##################################################
+# Catalog Configuration for AWS member accounts
+##################################################
+# Vendored Cloud Posse aws-account v2.1.0 (vendor.yaml), the single-resource
+# pattern: one member account per instance, named by vars.name (null-label
+# `name`: Cloud Posse's <tenant>-<account>, the static_account_map key, e.g.
+# <tenant>-prod-eu). The instances are in the management account's global stack
+# fnx-gbl-root (stacks/orgs/fnx/root/global-region.yaml), each reading its OU's
+# id from that stack's state there: a read in this abstract would be resolved
+# for every inheriting instance (check-inherited-state-reads.py).
+#
+# Root, the management account, has no instance (Cloud Posse's reference
+# architecture leaves it out of the account layer): it is the account that
+# creates the organization, so it exists before this layer, is never created,
+# closed or moved by it, and stays at the organization root. Its id is the
+# bootstrap input settings.account_map.full_account_map.root.
+#
+# Create or import (owner decision QE2): set vars.import_account_id (12 digits)
+# on an instance to import an existing member account; null creates one.
+# Creating an account that already exists does not adopt it: AWS creates a
+# second account unless the email is taken (CreateAccount fails
+# EMAIL_ALREADY_EXISTS). Import every existing account first with its current
+# root email: a changed email forces a replacement, which the house
+# lifecycle_override.tf (prevent_destroy) refuses at plan. A changed name, or
+# parent_id (MoveAccount), is an in-place update.
+#
+# Emails: one root-user address per account, unique across all of AWS, never
+# reusable after the account closes. The aws+fnx-<account>@example.com values
+# are placeholders the first-deploy preflight (check-first-deploy-inputs.py,
+# example domain) fails; the owner sets real addresses (plus-addressing one
+# monitored mailbox, Cloud Posse's account_email_format) before E3e enables
+# the instances.
+#
+# The account map stays the reader contract (Cloud Posse's static-map path):
+# no reader takes remote state from this stack, because CI never reads root
+# state. After the first apply of each instance, a management-account
+# administrator copies its account_id output
+# (atmos terraform output aws-account/<account> -s fnx-gbl-root) into
+# settings.account_map.full_account_map.<account>
+# (stacks/orgs/fnx/_defaults.yaml): <account> is the instance suffix, the map
+# key. The preflight then checks the map as before. The map's root entry is
+# the bootstrap input itself (above), never an aws-account output.
+
+import:
+  - catalog/_base/vendored
+
+components:
+  terraform:
+    aws-account/defaults:
+      metadata:
+        component: aws-account
+        type: abstract
+        inherits:
+          - vendored
+      vars:
+        enabled: true
+        # Cloud Posse's defaults, stated: billing stays with Identity Center
+        # (no IAM users, E3c's SCPs deny them), and a destroy never closes an
+        # account (prevent_destroy refuses the destroy anyway; close_on_deletion
+        # false is the second guard should that override ever be dropped).
+        iam_user_access_to_billing: DENY
+        close_on_deletion: false
+        create_govcloud: false
+        # Null: Organizations creates OrganizationAccountAccessRole in each new
+        # account, trusting the management account, the first way in for
+        # E3d/E4 (the component ignores later changes to this name).
+        role_name: null
+        tags:
+          Component: "Account"

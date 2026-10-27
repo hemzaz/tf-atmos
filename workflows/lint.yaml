@@ -506,7 +506,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-guard
         type: script
@@ -653,7 +653,7 @@ workflows:
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
               --output sarif --output-file-path reports --quiet
               --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL
 
@@ -675,7 +675,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-print
         type: script
@@ -723,7 +723,7 @@ workflows:
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit)/(context|remote-state)\.tf$'
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
               --output sarif --output-file-path reports --soft-fail --quiet
       # checkov writes each inline `#checkov:skip=<ID>:<reason>` as a SARIF result
       # with `suppressions`, and GitHub code scanning lists those as open alerts

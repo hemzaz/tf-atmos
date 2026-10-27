@@ -34,3 +34,11 @@ spec:
       targets:
         - "components/terraform/aws-organizational-unit"
       included_paths: ["**/*.tf", "**/*.md"]
+    # One member account per instance (single-resource pattern), applied from
+    # fnx-gbl-root. stacks/catalog/aws-account.
+    - component: aws-account
+      source: "github.com/cloudposse-terraform-components/aws-account.git//src?ref={{ .Version }}"
+      version: "v2.1.0"
+      targets:
+        - "components/terraform/aws-account"
+      included_paths: ["**/*.tf", "**/*.md"]

@@ -25,11 +25,17 @@
 # "*/fnx-gbl-root-*") on root_write in fnx-ue1-root's backend/main
 # (check-state-keys.py fails a pattern no enabled instance's state matches).
 # Disabled, no deploy workflow selects them (check-deploy-layers.py COVERAGE)
-# and the preflight does not yet demand the core account IDs.
+# and the preflight does not yet demand the core account IDs or check their
+# vars (account emails, import ids): enabling them makes it do both.
+#
+# Order inside the layer (E3e): aws-organization, then the OUs (plat before
+# eu), then the accounts; each reader names its target in
+# dependencies.components, which check-dependencies.py and E3e's layer check
+# hold once the instances are enabled.
 #
 # OUs, Cloud Posse's reference architecture (aws-organizational-unit README):
 #   core  the core accounts (root stays at the organization root; audit,
-#         security, network, identity, artifacts move here in E3b)
+#         security, network, identity, artifacts: E3b's aws-account instances)
 #   plat  the platform (workload) accounts: dev, staging, prod
 #   eu    under plat, prod-eu only: E3c attaches the EU region allow-list
 #         (owner decision QE3) here, and plat's baseline SCPs still apply
@@ -41,6 +47,7 @@ import:
   - orgs/fnx/root/_defaults
   - catalog/aws-organization/defaults
   - catalog/aws-organizational-unit/defaults
+  - catalog/aws-account/defaults
 
 settings:
   context:
@@ -94,3 +101,133 @@ components:
       vars:
         name: eu
         parent_id: !terraform.state aws-organizational-unit/plat organizational_unit_id
+
+    # Member accounts (E3b): one per settings.account_map key but root (see
+    # catalog/aws-account). Core accounts in core, workload accounts in plat,
+    # prod-eu in eu (under plat) for E3c's EU region allow-list.
+
+    aws-account/audit:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/core
+      vars:
+        name: "{{ .settings.context.tenant }}-audit"
+        account_email: "aws+{{ .settings.context.tenant }}-audit@example.com"
+        parent_id: !terraform.state aws-organizational-unit/core organizational_unit_id
+
+    aws-account/security:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/core
+      vars:
+        name: "{{ .settings.context.tenant }}-security"
+        account_email: "aws+{{ .settings.context.tenant }}-security@example.com"
+        parent_id: !terraform.state aws-organizational-unit/core organizational_unit_id
+
+    aws-account/network:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/core
+      vars:
+        name: "{{ .settings.context.tenant }}-network"
+        account_email: "aws+{{ .settings.context.tenant }}-network@example.com"
+        parent_id: !terraform.state aws-organizational-unit/core organizational_unit_id
+
+    aws-account/identity:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/core
+      vars:
+        name: "{{ .settings.context.tenant }}-identity"
+        account_email: "aws+{{ .settings.context.tenant }}-identity@example.com"
+        parent_id: !terraform.state aws-organizational-unit/core organizational_unit_id
+
+    aws-account/artifacts:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/core
+      vars:
+        name: "{{ .settings.context.tenant }}-artifacts"
+        account_email: "aws+{{ .settings.context.tenant }}-artifacts@example.com"
+        parent_id: !terraform.state aws-organizational-unit/core organizational_unit_id
+
+    aws-account/dev:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/plat
+      vars:
+        name: "{{ .settings.context.tenant }}-dev"
+        account_email: "aws+{{ .settings.context.tenant }}-dev@example.com"
+        parent_id: !terraform.state aws-organizational-unit/plat organizational_unit_id
+
+    aws-account/staging:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/plat
+      vars:
+        name: "{{ .settings.context.tenant }}-staging"
+        account_email: "aws+{{ .settings.context.tenant }}-staging@example.com"
+        parent_id: !terraform.state aws-organizational-unit/plat organizational_unit_id
+
+    aws-account/prod:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/plat
+      vars:
+        name: "{{ .settings.context.tenant }}-prod"
+        account_email: "aws+{{ .settings.context.tenant }}-prod@example.com"
+        parent_id: !terraform.state aws-organizational-unit/plat organizational_unit_id
+
+    aws-account/prod-eu:
+      metadata:
+        component: aws-account
+        enabled: false
+        inherits:
+          - aws-account/defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/eu
+      vars:
+        name: "{{ .settings.context.tenant }}-prod-eu"
+        account_email: "aws+{{ .settings.context.tenant }}-prod-eu@example.com"
+        parent_id: !terraform.state aws-organizational-unit/eu organizational_unit_id
