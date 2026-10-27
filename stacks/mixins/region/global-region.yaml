@@ -1,0 +1,12 @@
+# Global: Cloud Posse's global-region mixin (owner decision QE5). A stack of
+# global-only components (the Organization, OUs, accounts, SCPs, later Identity
+# Center and teams) has environment `gbl` instead of a region code: its name is
+# <tenant>-gbl-<stage> (fnx-gbl-root), and settings.prefix and tags.Environment
+# are `gbl`. The provider still needs a region: us-east-1, the home region,
+# where the Organizations and IAM APIs live. No vpc catalog: nothing global
+# has a VPC.
+vars:
+  region: us-east-1
+settings:
+  context:
+    environment: gbl

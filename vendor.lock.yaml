@@ -49,3 +49,101 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+  048344d2c134549d53079e5b2d1373639c2f2e1df645dc63d96bb0c97476c475:
+    name: aws-organizational-unit
+    kind: remote
+    target: components/terraform/aws-organizational-unit
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-organizational-unit.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-organizational-unit.git//src
+      digest: sha256:219bbaa3ffcc47ecae6c46db0e3db83f4d7e1ef8e6fc4811d965c5c329cf8771
+    files:
+      - path: CHANGELOG.md
+        type: file
+        mode: 420
+        sha256: 8029c335c0eac327cafb3231c8e59e0136959110bd9d78a79617d2232b76199f
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 10a5ccf557e0fa11b7c2fd31de8edc548e09e2244104d32692983f4ea9481ba7
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: b9644bbd7706d9359fc27ad06c48aabd96a4d255815859c2906ce1b5a7d49d56
+      - path: imports.tf
+        type: file
+        mode: 420
+        sha256: ae87b152a756be11fbf3736a407c5c6b6f1d50b8522615edc6e79fc336802a69
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 13341528b602b1e5247ce08a552fb87b57b3591071a807c4f5abbaf77df94ca7
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 584ecf6fae3419df262b0f2d5de66f301d630053741d4ebd49e57c8423108208
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 556ca8428884d5398dee8948c00e94165ed7ad1aceec03fcef87a82cff766f48
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 0b53216519b9f17b1da622e77bb26a81e81ac1c01ff45ed69c1242d6c4134a72
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: f9ba4850b17a7652a9dded641857c398f36d317472f91531004b7d67b5a6504b
+    order: 3
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+  e35284ddeea3bcafae232da3e2e1f81a60feea13f1d57bdc05c47765976d60c7:
+    name: aws-organization
+    kind: remote
+    target: components/terraform/aws-organization
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-organization.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-organization.git//src
+      digest: sha256:47ae2ba40fadf527b7fb1d74c99ae1ec0b020983f413770d6abd7903ddc727ec
+    files:
+      - path: CHANGELOG.md
+        type: file
+        mode: 420
+        sha256: 2ebe3ded1ca7e7903756ecbc9ae0592eb3192384662aa0dd89ddcdb51baa2aee
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: d15d99609ff8137a04170d9e1e45b4e02d96d7f68c29e467958de9ccea9d44ea
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: b9644bbd7706d9359fc27ad06c48aabd96a4d255815859c2906ce1b5a7d49d56
+      - path: imports.tf
+        type: file
+        mode: 420
+        sha256: 1592e07e1abc1b094afd2bb41abfe7112795553404aa932ce3de991e3b3cfb27
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: ddae5bfb1bd144210e1c18e3da5267af56480d70751858c0ce1d7a947fb4bc19
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 1bbf7dc7e7226eab7e64284d830c530ad896c8b767470723c8512ded4a0e9e75
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 556ca8428884d5398dee8948c00e94165ed7ad1aceec03fcef87a82cff766f48
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 495ba7689c5825d682fcc570764dcbabcd8fed10d2a2c942d56e756d33e1fee8
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: f9ba4850b17a7652a9dded641857c398f36d317472f91531004b7d67b5a6504b
+    order: 2
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'

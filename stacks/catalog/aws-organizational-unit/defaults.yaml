@@ -1,0 +1,31 @@
+---
+##################################################
+# Catalog Configuration for AWS Organizations OUs
+##################################################
+# Vendored Cloud Posse aws-organizational-unit v0.1.0 (vendor.yaml): one OU per
+# instance, named by vars.name (null-label `name`, so lower case, letters,
+# digits and hyphens). The instances are in the management account's global
+# stack fnx-gbl-root (stacks/orgs/fnx/root/global-region.yaml), each reading
+# its parent's id from that stack's state there: a read in this abstract would
+# be resolved for every inheriting instance (check-inherited-state-reads.py).
+#
+# Create or import (owner decision QE2): set vars.import_resource_id
+# (ou-<root>-<suffix>) on an instance to import an existing OU; null creates
+# one. Destroy and replace (a changed parent_id moves nothing, it forces a new
+# OU) are refused by the house lifecycle_override.tf (prevent_destroy).
+
+import:
+  - catalog/_base/vendored
+
+components:
+  terraform:
+    aws-organizational-unit/defaults:
+      metadata:
+        component: aws-organizational-unit
+        type: abstract
+        inherits:
+          - vendored
+      vars:
+        enabled: true
+        tags:
+          Component: "OrganizationalUnit"

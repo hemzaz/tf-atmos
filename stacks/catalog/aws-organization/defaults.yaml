@@ -1,0 +1,68 @@
+---
+##################################################
+# Catalog Configuration for the AWS Organization
+##################################################
+# Vendored Cloud Posse aws-organization v0.2.0 (vendor.yaml), the
+# single-resource pattern: this component manages the Organization only; OUs,
+# accounts and SCPs are their own components (aws-organizational-unit here,
+# aws-account and aws-scp in E3b/E3c). Deployed once, from the management
+# account's global stack fnx-gbl-root (stacks/orgs/fnx/root/global-region.yaml).
+#
+# Create or import (owner decision QE2): the component's imports.tf imports
+# the Organization when vars.import_resource_id is set, and creates one
+# otherwise. Null (create) here; an existing organization's instance sets its
+# real id (o-<10+ chars>, `aws organizations describe-organization`). The
+# first-deploy preflight (check-first-deploy-inputs.py) fails the placeholder
+# o-xxxxxxxxxx. Creating where an organization already exists fails at apply
+# (AlreadyInOrganizationException) and changes nothing.
+#
+# Destroy and replace are refused by the house lifecycle_override.tf
+# (prevent_destroy).
+
+import:
+  - catalog/_base/vendored
+
+components:
+  terraform:
+    aws-organization/defaults:
+      metadata:
+        component: aws-organization
+        type: abstract
+        inherits:
+          - vendored
+      vars:
+        enabled: true
+        name: organization
+        # ALL, never CONSOLIDATED_BILLING: SCPs (E3c) and trusted access need
+        # it. An imported CONSOLIDATED_BILLING organization is upgraded in
+        # place (EnableAllFeatures), a handshake every invited member account
+        # must accept before it completes; ALL back to CONSOLIDATED_BILLING
+        # forces a new organization, which the prevent_destroy override
+        # refuses at plan.
+        feature_set: ALL
+        # Trusted access (EnableAWSServiceAccess) for the org-wide services
+        # Wave E delegates: CloudTrail, Config, GuardDuty, Security Hub,
+        # Inspector, Identity Center (sso) and IAM Access Analyzer (E0c's
+        # access-analyzer/root delegation needs access-analyzer.amazonaws.com).
+        # Enabling trusted access only lets the service act in the
+        # organization; each service is still enabled and delegated by its own
+        # component (E4, E5), after this instance. The component adds
+        # iam.amazonaws.com itself when organization_enabled_features is set.
+        aws_service_access_principals:
+          - cloudtrail.amazonaws.com
+          - config.amazonaws.com
+          - guardduty.amazonaws.com
+          - securityhub.amazonaws.com
+          - inspector2.amazonaws.com
+          - sso.amazonaws.com
+          - access-analyzer.amazonaws.com
+        # Service control policies are enabled on the root now, so E3c only
+        # adds and attaches policies; enabling the type attaches nothing but
+        # the AWS-managed FullAWSAccess.
+        enabled_policy_types:
+          - SERVICE_CONTROL_POLICY
+        # Centralized root access (RootCredentialsManagement, RootSessions):
+        # Cloud Posse's default, off. A later decision, not E3a's.
+        organization_enabled_features: []
+        tags:
+          Component: "Organization"

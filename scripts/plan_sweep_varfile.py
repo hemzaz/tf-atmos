@@ -125,6 +125,10 @@ SYNTH = [
     # instance's own attachments.
     (r'^security_groups$',            ['sg-0123456789abcdef0']),
     (r'^vpc_associations$',           ['vpc-0123456789abcdef0']),
+    # The OUs' parent_id (fnx-gbl-root): aws-organization's root id and
+    # aws-organizational-unit's own id, in AWS's id formats.
+    (r'^organization_root_id$',       'r-ab12'),
+    (r'^organizational_unit_id$',     'ou-ab12-cd34ef56'),
     # dns records[].records: a CNAME target, so it must be a hostname rather
     # than one of the id shapes above.
     (r'^records$',                    ['synthetic.example.com']),
