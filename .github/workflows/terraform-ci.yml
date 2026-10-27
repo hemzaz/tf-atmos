@@ -112,7 +112,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -eu
-          terraform_re='^(atmos\.yaml|Makefile|components/.*|stacks/.*|workflows/.*|scripts/.*|schemas/.*|templates/.*|scaffolds/.*|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
+          terraform_re='^(atmos\.yaml|vendor\.yaml|vendor\.lock\.yaml|Makefile|components/.*|stacks/.*|workflows/.*|scripts/.*|schemas/.*|templates/.*|scaffolds/.*|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
           emulator_re='^(atmos\.yaml|components/terraform/.*|stacks/.*|workflows/.*|\.github/workflows/(emulator|terraform-ci)\.yml)$'
           workflows_re='^(\.github/workflows/.*\.ya?ml|\.github/atmos-image/.*|scripts/sync-atmos-image\.sh)$'
           if [ -n "${BASE_SHA//0/}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
@@ -146,8 +146,10 @@ jobs:
     permissions:
       contents: read
     steps:
+      # fetch-depth: 0 -- lint's check-vendor diffs against the PR's base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       # Installing tflint needs a GitHub token: the aqua registry verifies its
       # release with `gh attestation verify` (GH_TOKEN), and `tflint --init`
@@ -169,8 +171,15 @@ jobs:
           else
             apk add --no-cache make
           fi
+      # check-vendor re-pulls the vendored components only when this change
+      # touches them (workflows/lint.yaml); git needs the safe.directory entry
+      # (the container runs as root on the runner user's workspace).
       - name: Lint (fmt, yamllint, tflint, HCL parse guard)
-        run: atmos workflow lint -f lint
+        env:
+          VENDOR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          atmos workflow lint -f lint
       - name: Validate config, stacks and root modules
         run: atmos workflow validate-all -f validate-enhanced
 
