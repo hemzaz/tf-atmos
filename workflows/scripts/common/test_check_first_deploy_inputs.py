@@ -419,6 +419,41 @@ class CoreAccountTest(unittest.TestCase):
                     f"{label} repository: settings.account_map.full_account_map.network"), out.getvalue()[:200])
 
 
+class StaticAccountMapTest(unittest.TestCase):
+    """A vendored component's vars.account_map, a hand copy of settings.static_account_map."""
+    STATIC = {"full_account_map": {f"fnx-{k}": v for k, v in ACCOUNTS.items()},
+              "root_account_account_name": "fnx-root", "identity_account_account_name": "fnx-identity",
+              "audit_account_account_name": "fnx-audit"}
+
+    def stacks(self, account_map, enabled=False):
+        stacks = CoreAccountTest.with_map()
+        root = stacks["fnx-ue1-root"]["components"]["terraform"]
+        spec = inst("root", env("root", MGMT), component="access-analyzer", enabled=enabled,
+                    account_map=account_map)
+        spec["settings"]["static_account_map"] = self.STATIC
+        root["access-analyzer/root"] = spec
+        return stacks
+
+    def test_an_equal_map_passes(self):
+        self.assertEqual(errors(self.stacks(self.STATIC), ["fnx-ue1-root"]), [])
+
+    def test_a_drifted_map_fails_on_a_disabled_instance(self):
+        full = dict(self.STATIC["full_account_map"])
+        full.popitem()
+        for account_map in ({**self.STATIC, "audit_account_account_name": "fnx-security"},
+                            {**self.STATIC, "full_account_map": full}):
+            with self.subTest(account_map=account_map):
+                found = errors(self.stacks(account_map), ["fnx-ue1-root"])
+                self.assertEqual([(f.stack, f.key, f.row) for f in found],
+                                 [("fnx-ue1-root", "access-analyzer/root vars.account_map", "Account IDs")])
+
+    def test_access_analyzer_needs_the_core_accounts_when_enabled(self):
+        self.assertIn("access-analyzer", preflight.MAP_CONSUMERS)
+        disabled, enabled = self.stacks(self.STATIC), self.stacks(self.STATIC, enabled=True)
+        self.assertFalse(preflight.needs_core_accounts(disabled["fnx-ue1-root"]))
+        self.assertTrue(preflight.needs_core_accounts(enabled["fnx-ue1-root"]))
+
+
 class OnlyStacksTest(unittest.TestCase):
     def test_only_limits_the_per_stack_checks(self):
         stacks = clean()

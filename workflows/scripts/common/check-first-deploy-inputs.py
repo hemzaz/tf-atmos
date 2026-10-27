@@ -18,6 +18,10 @@ Errors (fatal unless --warn):
     pipeline's placeholder (ghcr.io/fnx-platform/<service>:1.4.2)
   - a github-runners instance whose GitHub App ID or installation ID is the
     placeholder 0
+  - an instance's vars.account_map (a vendored Cloud Posse component's static
+    map) that differs from its settings.static_account_map, disabled and
+    abstract instances included: the vars copy is repeated by hand, so drift
+    is caught before the instance is enabled
   - a workload account equal to the management account
   - two stages sharing an account (one account per stage)
   - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
@@ -71,7 +75,7 @@ CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts"
 # turns org-wide. Deploying one needs real core account IDs.
 MAP_CONSUMERS = frozenset({
     "aws-organization", "aws-account", "aws-organizational-unit", "aws-scp", "aws-account-settings",
-    "aws-identity-center", "aws-teams", "aws-team-roles",
+    "aws-identity-center", "aws-teams", "aws-team-roles", "access-analyzer",
     "guardduty", "securityhub", "inspector2", "cloudtrail", "awsconfig",
 })
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
@@ -150,6 +154,21 @@ def placeholder(stack: str, key: str, text: str):
     return None
 
 
+def static_map_drift(stack: str, instance_name: str, spec: dict):
+    """The finding for an instance whose vars.account_map differs from its settings.static_account_map,
+    or None. Abstract and disabled instances too: the copy is checked before E5 enables one. Both sides
+    are as describe stacks --process-functions=false renders them (Go templates are rendered there)."""
+    variables = spec.get("vars") or {}
+    if "account_map" not in variables:
+        return None
+    static = (spec.get("settings") or {}).get("static_account_map")
+    if variables["account_map"] == static:
+        return None
+    return Finding("error", stack, f"{instance_name} vars.account_map",
+                   "differs from settings.static_account_map (stacks/orgs/fnx/_defaults.yaml): keep the copy equal",
+                   "Account IDs")
+
+
 def stack_findings(name: str, config: dict) -> list:
     findings, seen = [], set()
 
@@ -169,6 +188,7 @@ def stack_findings(name: str, config: dict) -> list:
     operator_roles = False
     for instance_name, spec in sorted(instances(config).items()):
         spec = spec or {}
+        add(static_map_drift(name, instance_name, spec))
         if not deployable(spec):
             continue
         variables = spec.get("vars") or {}
