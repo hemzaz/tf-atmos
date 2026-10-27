@@ -73,11 +73,11 @@ jobs:
 
       # 3.13 exactly. 3.12 lacks warnings.deprecated (PEP 702) and six LocalEmu
       # services die at runtime; on 3.14 localemu 1.2.0 cannot be installed.
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
 
-      - uses: cloudposse/github-action-setup-atmos@9e8d1e2db56fe851a85871d5993d63e182b66536 # v3.6.0
+      - uses: cloudposse/github-action-setup-atmos@ad511faf93143d80f9f73ebdbc00dbdcea6d6bb0 # v3.7.0
         with:
           # Same Atmos as the digest-pinned ghcr.io/cloudposse/atmos image in
           # terraform-ci.yml; scripts/sync-atmos-image.sh rewrites this tag when
