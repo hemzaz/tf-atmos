@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# Artifacts Account Defaults
+# =============================================================================
+# Cloud Posse's core "artifacts" account (owner decision Q1): the shared store
+# of build artifacts the other accounts pull from (container registries, ECR in
+# Cloud Posse's reference architecture, core-<region>-artifacts there). No
+# Wave E item places a component here yet; until one does its stacks hold no
+# instance.
+#
+# Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
+# the tenant stays fnx, the account is the stage, the region code the
+# environment (owner decision QE5), so the home-region stack is fnx-ue1-artifacts.
+# =============================================================================
+
+import:
+  - orgs/fnx/_defaults
+  - mixins/tenant/fnx
+
+settings:
+  environment:
+    account: artifacts
+    # From the account map (stacks/orgs/fnx/_defaults.yaml), keyed by `account`.
+    account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
+  context:
+    stage: artifacts
+  # Kept out of the CI plan/deploy/drift matrices (ci-stacks.py), like root:
+  # no CI role is trusted in a core account until E4 defines who applies it.
+  github:
+    actions_enabled: false
