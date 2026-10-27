@@ -22,10 +22,12 @@ Errors (fatal unless --warn):
   - two stages sharing an account (one account per stage)
   - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
     region; EU prod, account prod-eu) sharing an account with a non-GDPR one
-  - in settings.account_map (the one map, shared by every stack): a Cloud Posse
-    core account (CORE_ACCOUNTS) missing or on a placeholder ID, two core
-    accounts sharing an ID, or a core account equal to a workload account
-    (reported on "repository" whatever --stacks says: every stack reads the map)
+  - in settings.account_map (one map, the same on every stack): a value that is
+    not 12 digits, two core accounts (CORE_ACCOUNTS) sharing an ID, a workload
+    account or a target stack's account_id in a core account; and a missing or
+    placeholder core account when a target is a core stack or deploys a
+    MAP_CONSUMERS component (a notice otherwise: the backend bootstrap comes
+    before the accounts exist)
 The last four skip placeholder IDs, which are already an error.
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
@@ -64,6 +66,14 @@ PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
 # Cloud Posse's core accounts (owner decision Q1): settings.account_map keys. Every other key is a
 # workload account (a stage's, or prod-eu).
 CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts")
+# Components (metadata.component) that read the core accounts: the Cloud Posse org, identity and
+# security components Wave E brings in (E3-E5), and today's account-level security components that E5
+# turns org-wide. Deploying one needs real core account IDs.
+MAP_CONSUMERS = frozenset({
+    "aws-organization", "aws-account", "aws-organizational-unit", "aws-scp", "aws-account-settings",
+    "aws-identity-center", "aws-teams", "aws-team-roles",
+    "guardduty", "securityhub", "inspector2", "cloudtrail", "awsconfig",
+})
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
 # UUID's last group: the lookbehind is the whole 8-4-4-4 UUID prefix, so
 # names like "backups-2026-123456789012" or "logs-cafe-123456789012" still match.
@@ -252,23 +262,48 @@ def residency_account_findings(stacks: dict, targets: set) -> list:
     return findings
 
 
-def core_account_findings(stacks: dict) -> list:
-    """The core accounts of settings.account_map: present, real, distinct from each other and from
-    every workload account. The map is the same on every stack; the first one that has it is read."""
-    full = next((((spec or {}).get("settings") or {}).get("account_map", {}).get("full_account_map")
-                 for name in sorted(stacks) for spec in instances(stacks[name]).values()
-                 if ((spec or {}).get("settings") or {}).get("account_map")), None)
+def account_map(config: dict):
+    """The stack's settings.account_map.full_account_map (the same on every instance), or None."""
+    for spec in instances(config).values():
+        found = (((spec or {}).get("settings") or {}).get("account_map") or {}).get("full_account_map")
+        if found is not None:
+            return found
+    return None
+
+
+def needs_core_accounts(config: dict) -> bool:
+    """A core account's own stack, or one deploying a component that reads the core accounts."""
+    if environment(config).get("_stage") in set(CORE_ACCOUNTS) - MANAGEMENT_STAGES:
+        return True
+    return any(deployable(spec or {}) and ((spec or {}).get("metadata") or {}).get("component") in MAP_CONSUMERS
+               for spec in instances(config).values())
+
+
+def core_account_findings(stacks: dict, targets: set) -> list:
+    """settings.account_map: one map on every stack, 12-digit IDs, core accounts distinct from each
+    other and from every workload account (and no target stack in another role's core account). A
+    missing or placeholder core account is an error only when a target needs_core_accounts (the
+    bootstrap of fnx-ue1-root's backend precedes E3's accounts layer), else a notice."""
     key = "settings.account_map.full_account_map"
-    if not full:
+    maps = {name: account_map(config) for name, config in sorted(stacks.items())}
+    maps = {name: found for name, found in maps.items() if found is not None}
+    if not maps:
         return [Finding("error", "repository", key, "no account map in any deployable stack", "Account IDs")]
-    findings, owner = [], {}
+    first, full = next(iter(maps.items()))
+    findings = [Finding("error", name, key, f"differs from {first}'s: the account map is one map", "Account IDs")
+                for name, found in maps.items() if found != full]
+    for name, account in sorted(full.items()):
+        if not re.fullmatch(r"\d{12}", str(account)):
+            findings.append(Finding("error", "repository", f"{key}.{name}",
+                                    f"{account!r} is not a 12-digit account ID", "Account IDs"))
+    level = "error" if any(needs_core_accounts(stacks[name]) for name in targets) else "notice"
+    owner = {}
     for name in CORE_ACCOUNTS:
         account = str(full.get(name) or "")
-        if not account:
-            findings.append(Finding("error", "repository", f"{key}.{name}", "core account missing", "Account IDs"))
-        elif account in PLACEHOLDER_ACCOUNTS:
-            findings.append(Finding("error", "repository", f"{key}.{name}",
-                                    f"placeholder core account ID {account}", "Account IDs"))
+        if not account or account in PLACEHOLDER_ACCOUNTS:
+            findings.append(Finding(level, "repository", f"{key}.{name}",
+                                    f"placeholder core account ID {account}" if account else "core account missing",
+                                    "Account IDs"))
         elif account in owner:
             findings.append(Finding("error", "repository", f"{key}.{name}",
                                     f"{account} is also core account {owner[account]}: one account per core role",
@@ -280,6 +315,13 @@ def core_account_findings(stacks: dict) -> list:
             findings.append(Finding("error", "repository", f"{key}.{name}",
                                     f"workload account {account} is also core account {owner[str(account)]}",
                                     "Account IDs"))
+    for name in sorted(targets):
+        env = environment(stacks[name])
+        core = owner.get(str(env.get("account_id") or ""))
+        # root: account_findings already reports a workload stack in the management account.
+        if core and core != env.get("_stage") and core not in MANAGEMENT_STAGES:
+            findings.append(Finding("error", name, "settings.environment.account_id",
+                                    f"{env.get('account_id')} is core account {core}'s", "Account IDs"))
     return findings
 
 
@@ -312,7 +354,7 @@ def check(stacks: dict, only=None) -> list:
     for name in sorted(targets):
         findings.extend(stack_findings(name, deployable_stacks[name]))
     findings.extend(account_findings(deployable_stacks, targets))
-    findings.extend(core_account_findings(deployable_stacks))
+    findings.extend(core_account_findings(deployable_stacks, targets))
     return findings + notices()
 
 
@@ -334,7 +376,9 @@ def main() -> int:
     exempt = [s for s in only if environment(stacks[s]).get("_stage") in EXEMPT_STAGES]
     if exempt:
         print(f"NOTICE never deployed to a real account, not checked: {', '.join(exempt)}")
-    findings = sorted(check(stacks, only), key=lambda f: (f.level != "error", f.stack, f.row, f.key))
+    # Repository-wide errors (the account map) first, so --warn always shows them.
+    findings = sorted(check(stacks, only),
+                      key=lambda f: (f.level != "error", f.stack != "repository", f.stack, f.row, f.key))
     errors = [f for f in findings if f.level == "error"]
     # Fatal mode (and --all) prints every finding; --warn (lint, every run)
     # prints the first WARN_LIMIT errors and the per-row counts.

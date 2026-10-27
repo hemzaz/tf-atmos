@@ -144,6 +144,7 @@ settings:
       '{{ .settings.context.tenant }}-dev': '{{ .settings.account_map.full_account_map.dev }}'
       '{{ .settings.context.tenant }}-staging': '{{ .settings.account_map.full_account_map.staging }}'
       '{{ .settings.context.tenant }}-prod': '{{ .settings.account_map.full_account_map.prod }}'
+      # A CP component that split("-")s a key reads <tenant>-prod-eu as stage prod: check each consumer (E5).
       '{{ .settings.context.tenant }}-prod-eu': '{{ index .settings.account_map.full_account_map "prod-eu" }}'
     root_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.root_account_account_name }}'
     identity_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.identity_account_account_name }}'

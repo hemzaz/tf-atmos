@@ -48,9 +48,13 @@ the following, naming the stack, the key and the row above:
 - a placeholder (`0`) GitHub App ID or installation ID;
 - a workload account equal to the management account;
 - two stages sharing one account;
-- an EU (GDPR-scoped) stack sharing an account with a US one (`prod-eu` equal to `prod`).
-- a core account (`root`, `audit`, `security`, `network`, `identity`, `artifacts`) missing, a
-  placeholder, shared with another core account or with a workload account (on every run, `--stacks` or not).
+- an EU (GDPR-scoped) stack sharing an account with a US one (`prod-eu` equal to `prod`);
+- an account map entry that is not 12 digits, or a stack whose map differs from the others';
+- a core account (`root`, `audit`, `security`, `network`, `identity`, `artifacts`) shared with
+  another core account, a workload account or a stack's `account_id` in another role's core account;
+- a missing or placeholder core account, when a checked stack is a core account's own or deploys a
+  component that reads them (`MAP_CONSUMERS` in the script: the org, identity and security
+  components). Otherwise it is a notice, so the backend bootstrap can run before the accounts exist.
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
 packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval,

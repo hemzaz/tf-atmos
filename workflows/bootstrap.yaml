@@ -58,7 +58,11 @@ workflows:
       # access_roles, for a root stack) still holds a placeholder account ID,
       # organization ID, example domain or alert address, an empty EKS admin
       # role or a placeholder backend service image, or breaks the account model
-      # (workload account = management account; two stages in one account).
+      # (workload account = management account; two stages in one account;
+      # a core account shared or not 12 digits). A placeholder core account
+      # (audit, security, ...) is only a notice here unless the stack is a core
+      # stack or deploys an org/security component: backend-cold-start runs
+      # before the accounts layer creates those accounts.
       # docs/OPERATIONS.md#first-deploy-inputs. lint runs it warn-only.
       - &preflight-targets
         name: preflight_targets
