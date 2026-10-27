@@ -22,7 +22,11 @@ Errors (fatal unless --warn):
   - two stages sharing an account (one account per stage)
   - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
     region; EU prod, account prod-eu) sharing an account with a non-GDPR one
-The last three skip placeholder IDs, which are already an error.
+  - in settings.account_map (the one map, shared by every stack): a Cloud Posse
+    core account (CORE_ACCOUNTS) missing or on a placeholder ID, two core
+    accounts sharing an ID, or a core account equal to a workload account
+    (reported on "repository" whatever --stacks says: every stack reads the map)
+The last four skip placeholder IDs, which are already an error.
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
 protection, deploy tags, the GitHub App's private key and outside-collaborator
@@ -57,6 +61,9 @@ EXEMPT_STAGES = {"local", "fixtures"}
 MANAGEMENT_STAGES = {"root"}
 
 PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
+# Cloud Posse's core accounts (owner decision Q1): settings.account_map keys. Every other key is a
+# workload account (a stage's, or prod-eu).
+CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts")
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
 # UUID's last group: the lookbehind is the whole 8-4-4-4 UUID prefix, so
 # names like "backups-2026-123456789012" or "logs-cafe-123456789012" still match.
@@ -245,6 +252,37 @@ def residency_account_findings(stacks: dict, targets: set) -> list:
     return findings
 
 
+def core_account_findings(stacks: dict) -> list:
+    """The core accounts of settings.account_map: present, real, distinct from each other and from
+    every workload account. The map is the same on every stack; the first one that has it is read."""
+    full = next((((spec or {}).get("settings") or {}).get("account_map", {}).get("full_account_map")
+                 for name in sorted(stacks) for spec in instances(stacks[name]).values()
+                 if ((spec or {}).get("settings") or {}).get("account_map")), None)
+    key = "settings.account_map.full_account_map"
+    if not full:
+        return [Finding("error", "repository", key, "no account map in any deployable stack", "Account IDs")]
+    findings, owner = [], {}
+    for name in CORE_ACCOUNTS:
+        account = str(full.get(name) or "")
+        if not account:
+            findings.append(Finding("error", "repository", f"{key}.{name}", "core account missing", "Account IDs"))
+        elif account in PLACEHOLDER_ACCOUNTS:
+            findings.append(Finding("error", "repository", f"{key}.{name}",
+                                    f"placeholder core account ID {account}", "Account IDs"))
+        elif account in owner:
+            findings.append(Finding("error", "repository", f"{key}.{name}",
+                                    f"{account} is also core account {owner[account]}: one account per core role",
+                                    "Account IDs"))
+        else:
+            owner[account] = name
+    for name, account in sorted(full.items()):
+        if name not in CORE_ACCOUNTS and str(account) in owner:
+            findings.append(Finding("error", "repository", f"{key}.{name}",
+                                    f"workload account {account} is also core account {owner[str(account)]}",
+                                    "Account IDs"))
+    return findings
+
+
 def notices() -> list:
     return [
         Finding("notice", "repository", "", "every lambda/* instance stays metadata.enabled: false until the "
@@ -274,6 +312,7 @@ def check(stacks: dict, only=None) -> list:
     for name in sorted(targets):
         findings.extend(stack_findings(name, deployable_stacks[name]))
     findings.extend(account_findings(deployable_stacks, targets))
+    findings.extend(core_account_findings(deployable_stacks))
     return findings + notices()
 
 

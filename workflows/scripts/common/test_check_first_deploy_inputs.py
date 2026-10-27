@@ -15,6 +15,10 @@ preflight = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(preflight)
 
 MGMT = "111111111111"
+# settings.account_map: real-looking, distinct core and workload accounts (the clean() stacks' IDs).
+ACCOUNTS = {"root": MGMT, "audit": "555555555551", "security": "555555555552", "network": "555555555553",
+            "identity": "555555555554", "artifacts": "555555555555", "dev": "222222222222",
+            "staging": "333333333333", "prod": "444444444444", "prod-eu": "666666666666"}
 
 
 def env(stage, account, **extra):
@@ -23,11 +27,12 @@ def env(stage, account, **extra):
     return environment
 
 
-def inst(stage, environment, component="vpc", enabled=True, **variables):
+def inst(stage, environment, component="vpc", enabled=True, accounts=None, **variables):
     return {
         "component": component,
         "metadata": {"component": component, "enabled": enabled},
-        "settings": {"context": {"stage": stage}, "environment": environment},
+        "settings": {"context": {"stage": stage}, "environment": environment,
+                     "account_map": {"full_account_map": accounts or ACCOUNTS}},
         "vars": variables,
     }
 
@@ -323,6 +328,53 @@ class AccountModelTest(unittest.TestCase):
         found = errors(stacks)
         self.assertEqual({f.row for f in found}, {"Account IDs"})
         self.assertFalse(any("one account per stage" in f.detail for f in found))
+
+
+class CoreAccountTest(unittest.TestCase):
+    """settings.account_map's Cloud Posse core accounts (Q1): real, distinct, apart from workloads."""
+
+    @staticmethod
+    def with_map(**changes):
+        accounts = {k: v for k, v in {**ACCOUNTS, **changes}.items() if v is not None}
+        return {"fnx-ue1-dev": stack("dev", "222222222222", vpc_main={"accounts": accounts})}
+
+    def core_errors(self, **changes):
+        return [(f.stack, f.key.rsplit(".", 1)[-1], f.detail) for f in errors(self.with_map(**changes))]
+
+    def test_distinct_real_core_accounts_pass(self):
+        self.assertEqual(self.core_errors(), [])
+
+    def test_placeholder_core_accounts_fail_even_with_only(self):
+        found = errors(self.with_map(audit="123456789012", identity="000000000000"), ["fnx-ue1-dev"])
+        self.assertEqual(sorted(f.key.rsplit(".", 1)[-1] for f in found), ["audit", "identity"])
+        self.assertTrue(all(f.stack == "repository" and f.row == "Account IDs" for f in found))
+
+    def test_missing_core_account_fails(self):
+        self.assertEqual(self.core_errors(artifacts=None),
+                         [("repository", "artifacts", "core account missing")])
+
+    def test_two_core_accounts_sharing_an_id_fail(self):
+        found = self.core_errors(identity=MGMT)
+        self.assertEqual([(s, k) for s, k, _ in found], [("repository", "identity")])
+        self.assertIn("also core account root", found[0][2])
+
+    def test_workload_account_equal_to_a_core_account_fails(self):
+        found = self.core_errors(**{"prod-eu": "555555555552"})
+        self.assertEqual([(s, k) for s, k, _ in found], [("repository", "prod-eu")])
+        self.assertIn("also core account security", found[0][2])
+
+    def test_no_account_map_fails(self):
+        stacks = {"fnx-ue1-dev": stack("dev", "222222222222")}
+        stacks["fnx-ue1-dev"]["components"]["terraform"]["vpc/main"]["settings"].pop("account_map")
+        self.assertEqual([f.detail for f in errors(stacks)], ["no account map in any deployable stack"])
+
+    def test_bad_core_account_fails_main(self):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["check-first-deploy-inputs.py"]), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(self.with_map(network="555555555551")))), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(preflight.main(), 1)
+        self.assertIn("ERROR repository: settings.account_map.full_account_map.network", out.getvalue())
 
 
 class OnlyStacksTest(unittest.TestCase):
