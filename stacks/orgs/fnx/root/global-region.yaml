@@ -28,10 +28,12 @@
 # and the preflight does not yet demand the core account IDs or check their
 # vars (account emails, import ids): enabling them makes it do both.
 #
-# Order inside the layer (E3e): aws-organization, then the OUs (plat before
-# eu), then the accounts; each reader names its target in
-# dependencies.components, which check-dependencies.py and E3e's layer check
-# hold once the instances are enabled.
+# Deploy order (E3e): four phases, not one layer, because
+# check-deploy-layers.py fails a !terraform.state read of an instance in the
+# same or a later phase: 1. aws-organization; 2. the core and plat OUs;
+# 3. the eu OU (reads plat); 4. the accounts (read their OU). Each reader
+# already names its target in dependencies.components, which
+# check-dependencies.py holds once the instances are enabled.
 #
 # OUs, Cloud Posse's reference architecture (aws-organizational-unit README):
 #   core  the core accounts (root stays at the organization root; audit,
