@@ -18,13 +18,16 @@ stacks the same way):
   --plan-sweep     scripts/plan-sweep.sh's default: every stack except the
                    stages in PLAN_SWEEP_EXCLUDED_STAGES and hosted-CI-disabled
                    stacks whose instances are all abstract or disabled (a
-                   ::notice:: each; a CI stack like that is an error).
+                   ::notice:: each; a CI stack like that is an error). The
+                   root stage's management-account stacks are swept: the
+                   sweep needs no credentials, so hosted CI plans them though
+                   it never deploys them.
 
 stdout carries only stack names; every ::error:: goes to stderr, so a caller
 that captures stdout (subprocess.check_output) still shows the reason.
 
 Order: settings.context.stage by STAGE_ORDER (dev, staging, prod), other
-stages (plan-sweep's fixtures) after them; within a stage, a DR standby
+stages (plan-sweep's fixtures and root) after them, by name; within a stage, a DR standby
 (settings.dr.standby_of: <primary stack>, fnx-ue2-prod) right after the stack
 it stands by for, which it reads through !terraform.state; other ties by stack
 name. A selected stack without exactly one stage, or a standby whose primary is
@@ -38,10 +41,11 @@ import sys
 # Promotion order: CD deploys dev before staging before prod.
 STAGE_ORDER = ("dev", "staging", "prod")
 
-# Stages plan-sweep deliberately skips (everything else, the template
-# fixtures included, is swept):
+# Stages plan-sweep deliberately skips. Everything else is swept: the template
+# fixtures, and the root stage's management-account stacks (fnx-ue1-root,
+# fnx-ew1-root, fnx-gbl-root), which an operator deploys but the sweep plans
+# without credentials like any other.
 PLAN_SWEEP_EXCLUDED_STAGES = {
-    "root": "fnx-ue1-root and fnx-ew1-root hold only the state backends, bootstrapped by an operator",
     "local": "emulator-only stacks; the sandbox/LocalEmu lanes apply them for real",
 }
 
@@ -137,9 +141,10 @@ def nothing_to_plan(config: dict) -> bool:
 
 def plan_sweep_stacks(stacks: dict) -> list:
     """Skips, with a ::notice:: on stderr, a hosted-CI-disabled stack with nothing to plan (a
-    core account's stack before its first component, fnx-ue1-security, fnx-ue1-audit: only the
-    region mixin's abstract vpc/defaults); its first instance brings it into the sweep with no
-    edit here. A CI stack with nothing to plan (every instance disabled by mistake) is a
+    core account's stack before its first component, e.g. fnx-ue1-security: only the region
+    mixin's abstract vpc/defaults); its first instance brings it into the sweep with no edit
+    here. A hosted-CI-disabled stack with a deployable instance (fnx-ue1-root: backend/main) is
+    swept. A CI stack with nothing to plan (every instance disabled by mistake) is a
     ValueError, and a stack with no instances at all still fails in ordered()."""
     names = []
     for name, config in stacks.items():

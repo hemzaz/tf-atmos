@@ -43,13 +43,31 @@ class TodayTest(unittest.TestCase):
             ci_stacks.ci_stacks(TODAY), ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod"]
         )
 
-    def test_plan_sweep_equals_the_former_default(self):
-        # scripts/plan-sweep.sh: the three real stacks, then every fnx-ue1-fixtures-* stack
+    def test_plan_sweep_equals_the_default(self):
+        # scripts/plan-sweep.sh: the three real stacks, then the other stages by name (every
+        # fnx-ue1-fixtures-* stack and the root stack); never the local lanes.
         self.assertEqual(
             ci_stacks.plan_sweep_stacks(TODAY),
             ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod",
-             "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp"],
+             "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp", "fnx-ue1-root"],
         )
+
+    def test_plan_sweep_includes_every_root_stack(self):
+        # fnx-ue1-root and fnx-ew1-root: CI-disabled (actions_enabled: false) but deployable
+        # (backend/main), so swept. fnx-gbl-root (E3a, #440): every instance disabled until its
+        # accounts layer, so skipped with a notice like a core-account stack.
+        gbl = stack("root", False, False)
+        for spec in gbl["components"]["terraform"].values():
+            spec["metadata"] = {"enabled": False}
+        stacks = dict(TODAY, **{"fnx-ew1-root": stack("root", False), "fnx-gbl-root": gbl})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            swept = ci_stacks.plan_sweep_stacks(stacks)
+        self.assertEqual([n for n in swept if n.endswith("-root")], ["fnx-ew1-root", "fnx-ue1-root"])
+        self.assertEqual(err.getvalue(), "::notice::plan-sweep skips fnx-gbl-root: no deployable instances\n")
+        self.assertNotIn("root", ci_stacks.PLAN_SWEEP_EXCLUDED_STAGES)
+        self.assertIn("local", ci_stacks.PLAN_SWEEP_EXCLUDED_STAGES)
+        self.assertEqual(ci_stacks.ci_stacks(stacks), ci_stacks.ci_stacks(TODAY))
 
     def test_plan_sweep_skips_a_stack_with_nothing_to_plan(self):
         # A core-account stack before its first component: only the region
@@ -146,7 +164,7 @@ class NewStackTest(unittest.TestCase):
         self.assertEqual(
             ci_stacks.plan_sweep_stacks(stacks),
             ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod",
-             "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp", "fnx-ue1-qa"],
+             "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp", "fnx-ue1-qa", "fnx-ue1-root"],
         )
 
     def test_a_ci_disabled_stack_in_an_unordered_stage_is_fine(self):
