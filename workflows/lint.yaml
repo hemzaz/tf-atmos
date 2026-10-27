@@ -68,12 +68,28 @@ workflows:
           # checkov's HCL parser rejects a unary !x/-x that ends a line before a
           # leading && / || (terraform accepts it) and then skips the whole file;
           # security-scan's coverage guard only catches that later. Fails fast here.
+          # Vendored dirs (check-vendor.py --list) are skipped: their files cannot
+          # be rewritten, and the coverage guard still fails a file checkov skips.
           - name: hcl-unary-newline
             type: shell
             command: |
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
-              python3 scripts/check-hcl-unary-newline.py components/terraform
+              vendored=" $(python3 scripts/check-vendor.py --list | tr '\n' ' ') "
+              set --
+              for dir in components/terraform/*/; do
+                case "$vendored" in *" ${dir%/} "*) continue ;; esac
+                set -- "$@" "${dir%/}"
+              done
+              python3 scripts/check-hcl-unary-newline.py "$@"
+          # Vendored dirs match a fresh pull of their vendor.yaml pin, unedited
+          # (--repull pulls from GitHub when vendor.yaml has sources).
+          - name: check-vendor
+            type: shell
+            command: |
+              set -eu
+              python3 -m unittest workflows/scripts/common/test_check_vendor.py
+              python3 scripts/check-vendor.py --repull
           # Each tool pin repeats (no repo-wide dependencies.tools): one version per tool.
           - name: tool-pins
             type: shell
@@ -180,11 +196,15 @@ workflows:
           set -uo pipefail
           config="$PWD/.tflint.hcl"
           failed=""
+          vendored=" $(python3 scripts/check-vendor.py --list | tr '\n' ' ') "
           for dir in components/terraform/*/; do
             component=$(basename "$dir")
             # _library holds shared sub-modules, not root modules; skip it and any
             # directory that has no Terraform files of its own.
             [ "$component" = "_library" ] && continue
+            # A vendored component (vendor.yaml) is Cloud Posse's code, not held to
+            # this repo's tflint house rules; its files cannot be edited anyway.
+            case "$vendored" in *" ${dir%/} "*) continue ;; esac
             ls "$dir"*.tf >/dev/null 2>&1 || continue
             # --no-color so the Warning:/Error: prefixes below match.
             if ! output=$(tflint --no-color --config "$config" --chdir "$dir" 2>&1); then

@@ -78,6 +78,16 @@ auth:
 workflows:
   base_path: workflows
 
+# Vendored Cloud Posse components (QE1): `atmos vendor pull` copies each vendor.yaml
+# pin into components/terraform/<name> with a sha256 receipt in vendor.lock.yaml.
+# House edits go in a *_override.tf; lint step check-vendor fails any other edit.
+# `warn`: `strict` refuses a new source's first pull without --refresh-lock.
+vendor:
+  base_path: vendor.yaml
+  lock_file: vendor.lock.yaml
+  lock:
+    enforcement: warn
+
 # `atmos sweep`: bind each stack's RESOLVED variables to its component and plan,
 # with no AWS account (scripts/plan-sweep.sh; its header says what a PASS means).
 # `terraform validate` never binds values, so it passes a component whose
