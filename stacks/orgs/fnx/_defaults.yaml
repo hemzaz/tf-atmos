@@ -41,7 +41,14 @@ terraform:
   # else its read/write one. The plan-only CI jobs (terraform-ci.yml plan,
   # drift-detection.yml) set it and plan with -lock=false: the read-only roles
   # cannot write a .tflock object. Applies (terraform-cd.yml) leave it unset.
-  # A stage "root" stack always gets the root role: no CI role touches it.
+  # A stage "root" stack always gets the root role: no CI role touches it. So do
+  # the core-account stages (audit, security; E2), never the dev/staging roles
+  # the CI apply roles hold; TFSTATE_ACCESS=read selects the root role for them
+  # too, as for root. The root role trusts only the management-account
+  # administrator, but the provider guard needs credentials in the core account:
+  # the PR adding a core stack's first instance (E5) adds that account's operator
+  # role to root_write's allowed_principal_arns with the stack's pattern pair,
+  # unless E4's aws-teams role supplies it.
   #
   # TFSTATE_SOURCE=replica reads the bucket's cross-region replica instead
   # (<bucket>-replica in settings.tfstate.replica_region, backend/main's
@@ -57,7 +64,7 @@ terraform:
       encrypt: true
       use_lockfile: true
       assume_role:
-        role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}{{ if eq .settings.context.stage "root" }}-root{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
+        role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}{{ if has .settings.context.stage (list "root" "audit" "security") }}-root{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
 
   # Account guard: every stack's default AWS provider refuses to run in any
   # account but the stack's own (Atmos writes this into each component's
@@ -101,7 +108,8 @@ settings:
   # identity and artifacts; the workload accounts are each stage's
   # settings.environment.account; prod-eu is the EU prod account
   # (fnx-ew1-prod, GDPR: its own account, not prod's), whose stack overrides
-  # settings.environment.account. The core accounts have no stacks yet (E2).
+  # settings.environment.account. Core stacks so far: fnx-ue1-root, fnx-ue1-audit
+  # and fnx-ue1-security (stacks/orgs/fnx/<account>/).
   # The preflight fails a placeholder core account, two core accounts sharing
   # an ID and a core account equal to a workload one. Placeholder IDs: see
   # docs/OPERATIONS.md#first-deploy-inputs.

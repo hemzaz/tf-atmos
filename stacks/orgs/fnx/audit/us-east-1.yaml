@@ -1,0 +1,17 @@
+---
+# =============================================================================
+# fnx-ue1-audit - the audit account's home-region stack
+# =============================================================================
+# No instance yet: the US log-archive components (E5) land here. Its state
+# goes to fnx-ue1-root's bucket through the backend's root role
+# (stacks/orgs/fnx/_defaults.yaml), which trusts only the management-account
+# administrator, while the provider guard needs credentials in the audit
+# account. So the first instance's PR adds to fnx-ue1-root's root_write this
+# stack's pattern pair (check-state-keys.py) and the audit account's operator
+# role in allowed_principal_arns, unless E4's aws-teams role supplies it.
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - mixins/region/us-east-1
+  - orgs/fnx/audit/_defaults
