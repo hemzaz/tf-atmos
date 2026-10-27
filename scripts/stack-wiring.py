@@ -25,6 +25,13 @@ or a value sits in some other list, it changes nothing and prints the edit to
 make by hand. NS delegation needs the deployed zone's name servers, so it only
 prints that step.
 
+A core-account stack (stage audit, security, network, identity or artifacts,
+whose account is its stage) is validated and left unwired: its state goes
+through the backend's root role (stacks/orgs/<tenant>/_defaults.yaml routes
+those stages there, with root), which no CI role assumes, and its pattern pair
+joins root_write with its first instance (check-state-keys.py fails a pair no
+enabled instance matches).
+
 --root is the repository to edit (the tests' copies); by default this script's
 own, so a scratch copy's hook edits that copy. A concurrent run waits on a lock
 on the backend file's directory.
@@ -44,8 +51,12 @@ from typing import Optional
 
 TENANT = re.compile(r"[a-z][a-z0-9]{1,9}")
 REGION = re.compile(r"[a-z]{2}-[a-z]+-[0-9]")
-STAGES = ("dev", "staging", "prod")
-ACCOUNTS = ("dev", "staging", "prod", "prod-eu")
+PLATFORM_STAGES = ("dev", "staging", "prod")
+# The core-account stages: the backend's root-role routing list in
+# stacks/orgs/<tenant>/_defaults.yaml, minus root (a unit test pins the two).
+CORE_STAGES = ("audit", "security", "network", "identity", "artifacts")
+STAGES = PLATFORM_STAGES + CORE_STAGES
+ACCOUNTS = STAGES + ("prod-eu",)
 # Each owning backend's file and stack (the region code of its bucket's region).
 BACKENDS = {False: ("us-east-1", "ue1"), True: ("eu-west-1", "ew1")}
 
@@ -241,8 +252,9 @@ def exclusive(path: pathlib.Path):
         os.close(fd)
 
 
-def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str, stack: str) -> list[str]:
-    """Edit the owning backend's file; the changes made (empty: already wired). Refused if unsafe."""
+def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str, stack: str) -> Optional[list[str]]:
+    """Edit the owning backend's file; the changes made (empty: already wired, None: a core
+    stack, nothing to wire). Refused if unsafe."""
     account = validate(tenant, stage, account, region, stack)
     backend_region, _ = BACKENDS[account == "prod-eu"]
     rel = f"stacks/orgs/{tenant}/root/{backend_region}.yaml"
@@ -252,6 +264,8 @@ def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str,
     code = re.search(r"^ *environment: *([a-z0-9]*) *$", mixin.read_text(encoding="utf-8"), re.M)
     if not code or stack != f"{tenant}-{code.group(1)}-{stage}":
         fail(f"stack {stack!r} is not {tenant}-<{mixin.name}'s environment, {code and code.group(1)}>-{stage}")
+    if stage in CORE_STAGES:
+        return None
     # A symlinked root file is edited through the link, which stays a link.
     path = (root / rel).resolve()
     if not path.is_file():
@@ -303,6 +317,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     except Refused as error:
         print(f"stack-wiring: refused, nothing written: {error}", file=sys.stderr)
         return 1
+    if done is None:
+        print(f"stack-wiring: {args.stack} is a core-account stack: nothing to wire (its state goes"
+              " through the backend's root role, which no CI role assumes)")
+        print(f"Next for {args.stack}: its first instance's PR adds \"*/{args.stack}/*\" and"
+              f" \"*/{args.stack}-*\" to root_write in {args.tenant}-ue1-root's backend/main"
+              " (check-state-keys.py).")
+        return 0
     for line in done:
         print(f"stack-wiring: added {line}")
     if not done:

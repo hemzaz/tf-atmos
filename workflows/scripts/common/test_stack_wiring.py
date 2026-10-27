@@ -9,6 +9,7 @@ import importlib.util
 import io
 import pathlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -132,6 +133,23 @@ class Wire(Copy):
             self.assertEqual(self.wire(*args), [], args)
         self.assertEqual(self.text(US), self.committed[US])
         self.assertEqual(self.text(EU), self.committed[EU])
+
+    def test_core_stacks_are_validated_and_left_unwired(self) -> None:
+        for stage in wiring.CORE_STAGES:
+            for account in ("", stage):
+                for region, code in (("us-east-1", "ue1"), ("us-west-2", "uw2")):
+                    args = ("fnx", stage, account, region, f"fnx-{code}-{stage}")
+                    self.assertIsNone(self.wire(*args), args)
+        self.assertEqual(self.text(US), self.committed[US])
+        self.assertEqual(self.text(EU), self.committed[EU])
+
+    def test_core_stages_are_the_backend_root_role_routing(self) -> None:
+        # stacks/orgs/fnx/_defaults.yaml routes these stages (and root) to the
+        # backend's root role, which is why they get no CI role or pair here.
+        text = (REPO / "stacks/orgs/fnx/_defaults.yaml").read_text()
+        routed = re.search(r'has \.settings\.context\.stage \(list ((?:"[a-z-]+" ?)+)\)', text)
+        self.assertIsNotNone(routed)
+        self.assertEqual(tuple(re.findall(r'"([a-z-]+)"', routed.group(1))), ("root",) + wiring.CORE_STAGES)
 
     def test_a_family_with_no_stack_yet_gets_its_first(self) -> None:
         stripped = "".join(line for line in self.committed[EU].splitlines(keepends=True)
@@ -276,6 +294,13 @@ class Refuse(Copy):
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-staging"), "stack"),
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-dev/../x"), "stack"),
             (("fnx", "dev", "", "us-west-2", "fnx-ew1-dev"), "environment"),
+            # Core stages: the account is the stage's own, never in the EU.
+            (("fnx", "root", "", "us-east-1", "fnx-ue1-root"), "stage"),
+            (("fnx", "security", "audit", "us-east-1", "fnx-ue1-security"), "does not belong to stage"),
+            (("fnx", "security", "prod-eu", "eu-west-1", "fnx-ew1-security"), "does not belong to stage"),
+            (("fnx", "identity", "", "eu-west-1", "fnx-ew1-identity"), "the EU regions are exactly"),
+            (("fnx", "audit", "", "us-east-1", "fnx-ue1-security"), "stack"),
+            (("fnx", "network", "", "us-west-2", "fnx-ue1-network"), "environment"),
         ]
         for args, message in cases:
             with self.subTest(args=args):
@@ -293,6 +318,16 @@ class Refuse(Copy):
         self.assertIn("apply backend/main in fnx-ue1-root", out.getvalue())
         self.assertIn("zone_name_servers.main", out.getvalue())
         self.assertIn("refused, nothing written", err.getvalue())
+
+    def test_main_core_stack(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "security", "", "us-east-1",
+                                          "fnx-ue1-security"]), 0)
+        self.assertIn("fnx-ue1-security is a core-account stack: nothing to wire", out.getvalue())
+        self.assertIn('"*/fnx-ue1-security/*" and "*/fnx-ue1-security-*" to root_write', out.getvalue())
+        self.assertNotIn("zone_name_servers", out.getvalue())
+        self.assertEqual(self.text(US), self.committed[US])
 
 
 if __name__ == "__main__":
