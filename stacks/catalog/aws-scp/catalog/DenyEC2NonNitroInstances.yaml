@@ -1,0 +1,160 @@
+#
+## WARNING AND HISTORICAL NOTE
+#
+# When the DenyEC2NonNitroInstances policy was first introduced, it was primarily intended
+# to ensure that network traffic was encrypted in transit, which was seen to be a feature
+# that all Nitro instances supported and all non-Nitro instances did not. However, this
+# is not the case, as instance families such as `a1`, `t3`, and `t4g` are Nitro based but
+# do not support network traffic encryption in transit.
+#
+# As such, the DenyEC2NonNitroInstances policy is no longer a reliable way to ensure that
+# network traffic is encrypted in transit. It is recommended that you use the
+# DenyEC2InstancesWithoutEncryptionInTransit policy instead if that is your goal.
+
+# This policy denies instance families that aren't based on the Nitro system as documented in the following document:
+# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html#ec2-nitro-instances
+# The listing below *are* Nitro-based instances. They are collected from the following CLI query:
+#
+#      aws --region us-east-1 ec2 describe-instance-types \
+#        --filters Name=hypervisor,Values=nitro \
+#        --query "InstanceTypes[*].[InstanceType]" --output text | \
+#          cut -f 1 -d. | sort | uniq | awk '{print "        - " $0 ".*"}'
+#
+# However, that the command only lists instance types available in the specified region. To be
+# fully comprehensive, the command should be run in all regions where instances are launched.
+# As a shortcut, we only run the command in the default regions (those that do not require opt-in).
+# To date, it appears that the combination of us-east-1, us-east-2, us-west-2, and eu-west-1
+# regions combined appear to cover all instance types.
+#
+# In order to fit within the 5120-character limit for policies
+# (See https://docs.aws.amazon.com/organizations/latest/userguide/org_troubleshoot_policies.html )
+# only the instance family is checked, not the specific instance type. AWS support
+# has confirmed that this is in fact correct, and spot checking has failed to
+# find any instance families that have some sizes based on Nitro and some not.
+#
+sid: "DenyEC2NonNitroInstances"
+effect: "Deny"
+actions:
+  - "ec2:RunInstances"
+conditions:
+  - test: "StringNotLike"
+    variable: "ec2:InstanceType"
+    values:
+      # updated 2025-02-14
+      - a1.*
+      - c5.*
+      - c5a.*
+      - c5ad.*
+      - c5d.*
+      - c5n.*
+      - c6a.*
+      - c6g.*
+      - c6gd.*
+      - c6gn.*
+      - c6i.*
+      - c6id.*
+      - c6in.*
+      - c7a.*
+      - c7g.*
+      - c7gd.*
+      - c7gn.*
+      - c7i-flex.*
+      - c7i.*
+      - c8g.*
+      - d3.*
+      - d3en.*
+      - dl1.*
+      - dl2q.*
+      - f2.*
+      - g4ad.*
+      - g4dn.*
+      - g5.*
+      - g5g.*
+      - g6.*
+      - g6e.*
+      - gr6.*
+      - hpc6a.*
+      - hpc6id.*
+      - hpc7a.*
+      - hpc7g.*
+      - i3en.*
+      - i4g.*
+      - i4i.*
+      - i7ie.*
+      - i8g.*
+      - im4gn.*
+      - inf1.*
+      - inf2.*
+      - is4gen.*
+      - m5.*
+      - m5a.*
+      - m5ad.*
+      - m5d.*
+      - m5dn.*
+      - m5n.*
+      - m5zn.*
+      - m6a.*
+      - m6g.*
+      - m6gd.*
+      - m6i.*
+      - m6id.*
+      - m6idn.*
+      - m6in.*
+      - m7a.*
+      - m7g.*
+      - m7gd.*
+      - m7i-flex.*
+      - m7i.*
+      - m8g.*
+      - p3dn.*
+      - p4d.*
+      - p5.*
+      - p5e.*
+      - p5en.*
+      - r5.*
+      - r5a.*
+      - r5ad.*
+      - r5b.*
+      - r5d.*
+      - r5dn.*
+      - r5n.*
+      - r6a.*
+      - r6g.*
+      - r6gd.*
+      - r6i.*
+      - r6id.*
+      - r6idn.*
+      - r6in.*
+      - r7a.*
+      - r7g.*
+      - r7gd.*
+      - r7i.*
+      - r7iz.*
+      - r8g.*
+      - t3.*
+      - t3a.*
+      - t4g.*
+      - trn1.*
+      - trn1n.*
+      - trn2.*
+      - u-12tb1.*
+      - u-18tb1.*
+      - u-24tb1.*
+      - u-3tb1.*
+      - u-6tb1.*
+      - u-9tb1.*
+      - u7i-12tb.*
+      - u7i-6tb.*
+      - u7i-8tb.*
+      - u7in-16tb.*
+      - u7in-24tb.*
+      - u7in-32tb.*
+      - vt1.*
+      - x2gd.*
+      - x2idn.*
+      - x2iedn.*
+      - x2iezn.*
+      - x8g.*
+      - z1d.*
+resources:
+  - "arn:aws:ec2:*:*:instance/*"

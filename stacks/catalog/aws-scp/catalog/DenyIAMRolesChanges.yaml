@@ -1,0 +1,15 @@
+sid: "DenyIAMRolesChanges"
+effect: "Deny"
+actions:
+  - "iam:AttachRolePolicy"
+  - "iam:DeleteRole"
+  - "iam:DeleteRolePermissionsBoundary"
+  - "iam:DeleteRolePolicy"
+  - "iam:DetachRolePolicy"
+  - "iam:PutRolePermissionsBoundary"
+  - "iam:PutRolePolicy"
+  - "iam:UpdateAssumeRolePolicy"
+  - "iam:UpdateRole"
+  - "iam:UpdateRoleDescription"
+resources:
+  - "*"

@@ -1,0 +1,6 @@
+sid: "DenyS3BucketsPublicAccess"
+effect: "Deny"
+actions:
+  - "s3:PutBucketPublicAccessBlock"
+resources:
+  - "*"

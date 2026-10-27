@@ -1,0 +1,309 @@
+---
+##################################################
+# Catalog Configuration for Service Control Policies
+##################################################
+# Vendored Cloud Posse aws-scp v0.3.0 (vendor.yaml), the single-resource
+# pattern: one SCP per instance, attached to vars.target_ids. The instances are
+# in the management account's global stack fnx-gbl-root
+# (stacks/orgs/fnx/root/global-region.yaml), one per policy and OU, each
+# reading its OU's id from that stack's state there (a read in these abstracts
+# would be resolved for every inheriting instance,
+# check-inherited-state-reads.py). One OU per instance, not a target_ids list:
+# each attachment has its own state, and the sweep's synthetic OU id is the
+# same for every OU, which the component's unique-targets validation refuses.
+#
+# Owner decision QE3 (a), attached to OUs only, never the organization root
+# (SCPs never apply to the management account, and a root attachment would
+# reach every OU at once). scripts/check-scp-policies.py (lint) fails a root
+# target, a policy over the 5,120-character limit, an OU with more than four
+# of these (AWS's five per target includes FullAWSAccess, which every OU keeps:
+# these are deny lists, so FullAWSAccess is the Allow each level needs), a
+# region list missing a global service, and a stack in a region its OU denies.
+#
+#   policy             core  plat  eu   source
+#   baseline            x     x    (1)  Cloud Posse catalog (catalog/*.yaml)
+#   security-services   x     x    (1)  house: the catalog's have no exception
+#   region-plat               x    (1)  house: the catalog has no region policy
+#   region-eu                       x   house
+#   (1) eu is under plat: plat's policies apply to its accounts too.
+#
+# Create or import (owner decision QE2): set vars.import_policy_id
+# (p-<8+ chars>) and vars.import_target_ids on an instance to import an existing
+# policy and its attachment; null creates one. A changed policy is an in-place
+# update (UpdatePolicy), applied to every account under the OU at once.
+
+import:
+  - catalog/_base/vendored
+
+components:
+  terraform:
+    aws-scp/defaults:
+      metadata:
+        component: aws-scp
+        type: abstract
+        inherits:
+          - vendored
+      vars:
+        enabled: true
+        tags:
+          Component: "ServiceControlPolicy"
+
+    # Cloud Posse's catalog statements, !included unedited. Its identical
+    # DenyIAMRootAccount is not repeated.
+    aws-scp/baseline-defaults:
+      metadata:
+        component: aws-scp
+        type: abstract
+        inherits:
+          - aws-scp/defaults
+      vars:
+        policy_description: "Baseline: deny leaving the organization, root-user actions and IAM user or access-key creation"
+        policy_statements:
+          - !include stacks/catalog/aws-scp/catalog/DenyLeavingOrganization.yaml
+          - !include stacks/catalog/aws-scp/catalog/DenyRootAccountAccess.yaml
+          # Identity comes from Identity Center (E4). No component creates an
+          # IAM user or access key (CI uses GitHub OIDC roles).
+          - !include stacks/catalog/aws-scp/catalog/DenyIAMCreatingUsers.yaml
+
+    # House: Cloud Posse's DenyCloudTrailActions, DenyConfigRulesDelete and
+    # DenyDisablingGuardDuty have no principal exception, so they would deny the
+    # roles that configure these services (each account's own trail and Config
+    # under QE7 (c), E5's delegated administrators), and the catalog has nothing
+    # for Security Hub or Access Analyzer. One statement for the five services,
+    # from the catalog's CloudTrail and Config actions plus the disable and
+    # disassociate actions of the other three (not the catalog's whole GuardDuty
+    # list, which also denies routine finding triage).
+    #
+    # Excepted: each stack's CI apply role (iam/ci: <stack>-ci-apply, which
+    # deploys these components) and OrganizationAccountAccessRole (the
+    # management account's way in, the core stacks' operator until E4). E4
+    # adds its Terraform role or permission set here. Service-linked roles
+    # (org auto-enable) are outside SCPs.
+    aws-scp/security-services-defaults:
+      metadata:
+        component: aws-scp
+        type: abstract
+        inherits:
+          - aws-scp/defaults
+      vars:
+        policy_description: "Deny disabling CloudTrail, Config, GuardDuty, Security Hub and Access Analyzer, except to the deploy roles"
+        policy_statements:
+          - sid: "DenySecurityServicesTampering"
+            effect: "Deny"
+            actions:
+              - "cloudtrail:DeleteTrail"
+              - "cloudtrail:PutEventSelectors"
+              - "cloudtrail:StopLogging"
+              - "cloudtrail:UpdateTrail"
+              - "config:DeleteConfigRule"
+              - "config:DeleteConfigurationRecorder"
+              - "config:DeleteDeliveryChannel"
+              - "config:StopConfigurationRecorder"
+              - "config:DeleteRetentionConfiguration"
+              - "config:DeleteEvaluationResults"
+              - "config:DeleteConfigurationAggregator"
+              - "guardduty:DeleteDetector"
+              - "guardduty:UpdateDetector"
+              - "guardduty:DisassociateFromMasterAccount"
+              - "guardduty:DisassociateFromAdministratorAccount"
+              - "guardduty:DisassociateMembers"
+              - "guardduty:DeleteMembers"
+              - "guardduty:StopMonitoringMembers"
+              - "guardduty:DeletePublishingDestination"
+              - "guardduty:UpdatePublishingDestination"
+              - "securityhub:DisableSecurityHub"
+              - "securityhub:DisassociateFromMasterAccount"
+              - "securityhub:DisassociateFromAdministratorAccount"
+              - "securityhub:DisassociateMembers"
+              - "securityhub:DeleteMembers"
+              - "securityhub:BatchDisableStandards"
+              - "securityhub:DeleteFindingAggregator"
+              - "access-analyzer:DeleteAnalyzer"
+              - "access-analyzer:CreateArchiveRule"
+              - "access-analyzer:UpdateArchiveRule"
+            resources:
+              - "*"
+            conditions:
+              - test: "ArnNotLike"
+                variable: "aws:PrincipalArn"
+                values:
+                  - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
+                  - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+
+    # House region allow-lists. The NotAction list is AWS Control Tower's
+    # Region deny control (GRREGIONDENY, controlreference/primary-region-deny-policy):
+    # the global services, served from us-east-1, that aws:RequestedRegion
+    # must not deny (IAM, STS, Organizations, Route 53, CloudFront and its ACM
+    # certificates and WAF, Budgets, Cost Explorer, Support, Identity Center,
+    # KMS for Route 53 DNSSEC keys). No principal exception: the deploy roles
+    # work in these regions too, and a residency control must hold for them.
+    # Both policies share the list (the YAML anchor), and check-scp-policies.py
+    # fails it when a required global service is missing.
+    #
+    # plat: the US regions and the two EU regions, since eu sits under plat and
+    # needs an Allow (no Deny) at every level: a region plat denies, eu's
+    # accounts cannot use either.
+    aws-scp/region-plat-defaults:
+      metadata:
+        component: aws-scp
+        type: abstract
+        inherits:
+          - aws-scp/defaults
+      vars:
+        policy_description: "Deny regional services outside us-east-1, us-east-2, eu-west-1 and eu-central-1"
+        policy_statements:
+          - sid: "DenyOutsideAllowedRegions"
+            effect: "Deny"
+            not_actions: &global_services
+              - "a4b:*"
+              - "access-analyzer:*"
+              - "account:*"
+              - "acm:*"
+              - "activate:*"
+              - "artifact:*"
+              - "aws-marketplace-management:*"
+              - "aws-marketplace:*"
+              - "aws-portal:*"
+              - "billing:*"
+              - "billingconductor:*"
+              - "budgets:*"
+              - "ce:*"
+              - "chatbot:*"
+              - "chime:*"
+              - "cloudfront:*"
+              - "cloudtrail:LookupEvents"
+              - "compute-optimizer:*"
+              - "config:*"
+              - "consoleapp:*"
+              - "consolidatedbilling:*"
+              - "cur:*"
+              - "datapipeline:GetAccountLimits"
+              - "devicefarm:*"
+              - "directconnect:*"
+              - "ec2:DescribeRegions"
+              - "ec2:DescribeTransitGateways"
+              - "ec2:DescribeVpnGateways"
+              - "ecr-public:*"
+              - "fms:*"
+              - "freetier:*"
+              - "globalaccelerator:*"
+              - "health:*"
+              - "iam:*"
+              - "importexport:*"
+              - "invoicing:*"
+              - "iq:*"
+              - "kms:*"
+              - "license-manager:ListReceivedLicenses"
+              - "lightsail:Get*"
+              - "mobileanalytics:*"
+              - "networkmanager:*"
+              - "notifications-contacts:*"
+              - "notifications:*"
+              - "organizations:*"
+              - "payments:*"
+              - "pricing:*"
+              - "quicksight:DescribeAccountSubscription"
+              - "resource-explorer-2:*"
+              - "route53-recovery-cluster:*"
+              - "route53-recovery-control-config:*"
+              - "route53-recovery-readiness:*"
+              - "route53:*"
+              - "route53domains:*"
+              - "s3:CreateMultiRegionAccessPoint"
+              - "s3:DeleteMultiRegionAccessPoint"
+              - "s3:DescribeMultiRegionAccessPointOperation"
+              - "s3:GetAccountPublicAccessBlock"
+              - "s3:GetBucketLocation"
+              - "s3:GetBucketPolicyStatus"
+              - "s3:GetBucketPublicAccessBlock"
+              - "s3:GetMultiRegionAccessPoint"
+              - "s3:GetMultiRegionAccessPointPolicy"
+              - "s3:GetMultiRegionAccessPointPolicyStatus"
+              - "s3:GetStorageLensConfiguration"
+              - "s3:GetStorageLensDashboard"
+              - "s3:ListAllMyBuckets"
+              - "s3:ListMultiRegionAccessPoints"
+              - "s3:ListStorageLensConfigurations"
+              - "s3:PutAccountPublicAccessBlock"
+              - "s3:PutMultiRegionAccessPointPolicy"
+              - "savingsplans:*"
+              - "shield:*"
+              - "sso:*"
+              - "sts:*"
+              - "support:*"
+              - "supportapp:*"
+              - "supportplans:*"
+              - "sustainability:*"
+              - "tag:GetResources"
+              - "tax:*"
+              - "trustedadvisor:*"
+              - "vendor-insights:ListEntitledSecurityProfiles"
+              - "waf-regional:*"
+              - "waf:*"
+              - "wafv2:*"
+              # Not Control Tower's: region-eu's us-east-1 relay (below). The
+              # second statement of each policy denies them outside its regions.
+              - "cloudwatch:*"
+              - "events:*"
+            resources:
+              - "*"
+            conditions:
+              - test: "StringNotEquals"
+                variable: "aws:RequestedRegion"
+                values: &plat_regions
+                  - "us-east-1"
+                  - "us-east-2"
+                  - "eu-west-1"
+                  - "eu-central-1"
+          - sid: "DenyMonitoringOutsideAllowedRegions"
+            effect: "Deny"
+            actions: &relay_services
+              - "cloudwatch:*"
+              - "events:*"
+            resources:
+              - "*"
+            conditions:
+              - test: "StringNotEquals"
+                variable: "aws:RequestedRegion"
+                values: *plat_regions
+
+    # eu (prod-eu, GDPR, owner B5 decisions): eu-* only, so B5's data
+    # residency is an AWS control and not only a lint. The one us-east-1 need
+    # beyond the global services is B5's Route 53 health-check alarm relay
+    # (apigateway health-check-alarm-relay.tf): Route 53 publishes the metric
+    # only in us-east-1, so the alarm (cloudwatch) and the EventBridge rule and
+    # targets (events) live there, holding no data (no SNS topic, key or log
+    # group, B5 round 5). The first statement exempts cloudwatch and events
+    # (the shared list), the second allows them in eu-* and us-east-1 only.
+    # Effective regions are eu-west-1 and eu-central-1: region-plat still
+    # applies.
+    aws-scp/region-eu-defaults:
+      metadata:
+        component: aws-scp
+        type: abstract
+        inherits:
+          - aws-scp/defaults
+      vars:
+        policy_description: "Deny regional services outside eu-*, but the us-east-1 Route 53 health-check alarm relay"
+        policy_statements:
+          - sid: "DenyOutsideEU"
+            effect: "Deny"
+            not_actions: *global_services
+            resources:
+              - "*"
+            conditions:
+              - test: "StringNotLike"
+                variable: "aws:RequestedRegion"
+                values:
+                  - "eu-*"
+          - sid: "DenyMonitoringOutsideEUButRelay"
+            effect: "Deny"
+            actions: *relay_services
+            resources:
+              - "*"
+            conditions:
+              - test: "StringNotLike"
+                variable: "aws:RequestedRegion"
+                values:
+                  - "eu-*"
+                  - "us-east-1"

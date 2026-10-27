@@ -1,0 +1,11 @@
+sid: "DenyeSagemakerWithoutVpcDomain"
+effect: "Deny"
+actions:
+  - "sagemaker:CreateDomain"
+conditions:
+  - test: "StringEquals"
+    variable: "sagemaker:AppNetworkAccessType"
+    values:
+      - "PublicInternetOnly"
+resources:
+  - "*"

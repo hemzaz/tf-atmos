@@ -1,0 +1,11 @@
+sid: "DenySagemakerDirectInternetNotebook"
+effect: "Deny"
+actions:
+  - "sagemaker:CreateNotebookInstance"
+conditions:
+  - test: "StringNotEquals"
+    variable: "sagemaker:DirectInternetAccess"
+    values:
+      - "Disabled"
+resources:
+  - "*"

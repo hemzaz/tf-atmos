@@ -1,0 +1,11 @@
+sid: "DenyIAMRootAccount"
+effect: "Deny"
+actions:
+  - "*"
+conditions:
+  - test: "StringLike"
+    variable: "aws:PrincipalArn"
+    values:
+      - "arn:aws:iam::*:root"
+resources:
+  - "*"

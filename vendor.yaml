@@ -42,3 +42,19 @@ spec:
       targets:
         - "components/terraform/aws-account"
       included_paths: ["**/*.tf", "**/*.md"]
+    # One Service Control Policy per instance (single-resource pattern), applied
+    # from fnx-gbl-root, and Cloud Posse's SCP statement catalog, which lives
+    # outside src/ and is read with !include, never copied into a stack.
+    # stacks/catalog/aws-scp.
+    - component: aws-scp
+      source: "github.com/cloudposse-terraform-components/aws-scp.git//src?ref={{ .Version }}"
+      version: "v0.3.0"
+      targets:
+        - "components/terraform/aws-scp"
+      included_paths: ["**/*.tf", "**/*.md"]
+    - component: aws-scp-catalog
+      source: "github.com/cloudposse-terraform-components/aws-scp.git//catalog?ref={{ .Version }}"
+      version: "v0.3.0"
+      targets:
+        - "stacks/catalog/aws-scp/catalog"
+      included_paths: ["**/*.yaml"]

@@ -295,6 +295,20 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-data-residency.py < "$stacks_json"
+      # Service control policies (aws-scp in fnx-gbl-root) cannot be planned
+      # against AWS before they are applied: OU targets only (never the root),
+      # valid JSON within 5,120 characters, at most four per OU, global services
+      # exempt from every region deny, the deploy roles excepted from the
+      # security-service deny, and no stack in a region its account's OU denies
+      # (check-scp-policies.py).
+      - name: check-scp-policies
+        type: shell
+        command: |
+          set -eu
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 scripts/check-scp-policies.py < "$stacks_json"
       # A DR standby shares its primary's account and has no budget: the
       # primary's cost-optimization budget_additional_environment_tags lists
       # each standby's settings.prefix. A primary's settings.dr.region is its
@@ -506,7 +520,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account|aws-scp)/(context|remote-state)\.tf$'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-guard
         type: script
@@ -653,7 +667,7 @@ workflows:
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account|aws-scp)/(context|remote-state)\.tf$'
               --output sarif --output-file-path reports --quiet
               --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL
 
@@ -675,7 +689,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account|aws-scp)/(context|remote-state)\.tf$'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-print
         type: script
@@ -723,7 +737,7 @@ workflows:
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account)/(context|remote-state)\.tf$'
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account|aws-scp)/(context|remote-state)\.tf$'
               --output sarif --output-file-path reports --soft-fail --quiet
       # checkov writes each inline `#checkov:skip=<ID>:<reason>` as a SARIF result
       # with `suppressions`, and GitHub code scanning lists those as open alerts

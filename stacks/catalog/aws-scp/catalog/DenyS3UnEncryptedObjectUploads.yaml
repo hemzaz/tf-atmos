@@ -1,0 +1,11 @@
+sid: "DenyS3UnEncryptedObjectUploads"
+effect: "Deny"
+actions:
+  - "s3:PutObject"
+conditions:
+  - test: "Bool"
+    variable: "s3:x-amz-server-side-encryption"
+    values:
+      - "true"
+resources:
+  - "*"

@@ -147,6 +147,215 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+  d296b8afc0f9fe4b680c855754a11e5420b48ed303b24bca369dc0bfe8c3c5c4:
+    name: aws-scp
+    kind: remote
+    target: components/terraform/aws-scp
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-scp.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-scp.git//src
+      digest: sha256:7b49ce81f24e23d964af8a2a5e01d198815fecdde622b1187e498f27dd991735
+    files:
+      - path: CHANGELOG.md
+        type: file
+        mode: 420
+        sha256: 895bc2d9a2e29ff12d7fd1749862d152b76bb080b9b47908061788b65bca7f28
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 9472f5287954ce08946eb4e1d020d3b09608d0301a81103657b2cbe5832b9b28
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: b9644bbd7706d9359fc27ad06c48aabd96a4d255815859c2906ce1b5a7d49d56
+      - path: deprecated-variables.tf
+        type: file
+        mode: 420
+        sha256: 6673ff57823bd713afd7eafd59c34634c921b16328d95c2851ec190e7e924565
+      - path: imports.tf
+        type: file
+        mode: 420
+        sha256: 03b754a92a5de004eea53a6e355213eeaf67f9c7bebaa0f544728592c70dc941
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 15dae1e9405f691ce454bb04522f4adccab3e6cf2b94ea3d983398439a5b7f92
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 63ba49c87e90e8073183e3c219b7f642375bf6176bf54cc81fdb0af24821d5ef
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 556ca8428884d5398dee8948c00e94165ed7ad1aceec03fcef87a82cff766f48
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 65715aadf51fbd81f8ae2638ecb387bf38c1a13fb08d3b4315615c3d84444715
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: afc388fa842bbbff2fcf010a5269b670a39d406c5dc1dde976c1659dbf787ce6
+    order: 4
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+  df22a7a4c7c22e067717ba4f0411e856071c53b63d03a5e86fe51cccedecbcd1:
+    name: aws-scp-catalog
+    kind: remote
+    target: stacks/catalog/aws-scp/catalog
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-scp.git//catalog
+      resolved: github.com/cloudposse-terraform-components/aws-scp.git//catalog
+      digest: sha256:c642513a77f7714574b9ca532d7b71674fd2a343e19be2b547f027fd3195349f
+    files:
+      - path: DenyAccountRegionDisableEnable.yaml
+        type: file
+        mode: 420
+        sha256: 458263198e9a1d00ef00daf2b14a6ea7ccc901b614389b89bcbb148e47a5cf12
+      - path: DenyAllAccess.yaml
+        type: file
+        mode: 420
+        sha256: 2f84fad1ad6237c3763b52d8b91e1c8a287985869d0a86e4895b56e7d953f5ed
+      - path: DenyCloudTrailActions.yaml
+        type: file
+        mode: 420
+        sha256: 93bb72eef4ace3946993ea0dd41485d32bfc51eaaefe7420de4572d80caef225
+      - path: DenyCloudWatchDeletingLogs.yaml
+        type: file
+        mode: 420
+        sha256: 15e5a8b7ef90858f5ac8f03fc62464667d098ae66cc6fb4098d1149cd49f0a90
+      - path: DenyConfigRulesDelete.yaml
+        type: file
+        mode: 420
+        sha256: 1ac9bfd16c1409aa543462602b9361ff8fed47b605fbe891a63272bdea87f1dd
+      - path: DenyDeletingKMSKeys.yaml
+        type: file
+        mode: 420
+        sha256: 864f8ba48a541314b0dc7d10e39d10d90b3f24de85abebf3553fae125efeee5d
+      - path: DenyDisablingCloudWatch.yaml
+        type: file
+        mode: 420
+        sha256: 87cbfe5853068a00000af586aa46fed59ce150f1377c9f773436a8fcf21ea6da
+      - path: DenyDisablingGuardDuty.yaml
+        type: file
+        mode: 420
+        sha256: f954efe89c3a1e5e752771d4616db6bab580dfab9eb779325fb949ff73c1fe00
+      - path: DenyEC2ApiWithNoMFA.yaml
+        type: file
+        mode: 420
+        sha256: c29200fd63d3fa2f02679aba2a4a83e131f3dc09f780a61ad382d95c008af045
+      - path: DenyEC2AssociatePublicIp.yaml
+        type: file
+        mode: 420
+        sha256: d8027a72eb90b4c796f80538d44a8e7bf0e2bb13cdfd65ed2684979af1ab7c2f
+      - path: DenyEC2InstancesWithoutEncryptionInTransit.yaml
+        type: file
+        mode: 420
+        sha256: e66dacb17a04bbf99836b6beb849f0bda9cfb4674a2734629276d5ac56100eb7
+      - path: DenyEC2NonNitroInstances.yaml
+        type: file
+        mode: 420
+        sha256: 978a5203c553dc881e64a1cdbde08225c2fa7bfe3361d14f588322c5ac76b3d2
+      - path: DenyEC2PublicAMI.yaml
+        type: file
+        mode: 420
+        sha256: 0177c0ceebde86aea142247f9f59318c4e71018f53f9cbe68c15f0374e114ae9
+      - path: DenyEC2WithNoIMDSv2.yaml
+        type: file
+        mode: 420
+        sha256: b8f3ecdee14c2a906eba818853955558ee0fb23f43107a67ad840e86c729ab19
+      - path: DenyGuardDutyDisassociation.yaml
+        type: file
+        mode: 420
+        sha256: 3702e3f07069ae29589ce0381987bca1d93d3195157c607600fe71e9bb5ba4d5
+      - path: DenyIAMCreatingUsers.yaml
+        type: file
+        mode: 420
+        sha256: 0eef200e119957fed155428b82853beb50acadec30e0e6d270b6257c1aa7864f
+      - path: DenyIAMNoMFA.yaml
+        type: file
+        mode: 420
+        sha256: f600b0c9175114f8c49ae73eec2c45f5be00b7910fd418c254acc2ff57a9fe55
+      - path: DenyIAMRolesChanges.yaml
+        type: file
+        mode: 420
+        sha256: c185321809f2fd2e547c2ed386bc04880123857026ccde544f185fc04f709bd2
+      - path: DenyIAMRootAccount.yaml
+        type: file
+        mode: 420
+        sha256: 5d4e8a88da1135696a3f410794230a996eac6948f14ff6d488eaac99049d34f5
+      - path: DenyLambdaWithoutVpc.yaml
+        type: file
+        mode: 420
+        sha256: 86fb16a256add139e05ddbd3bd0fe7edd242a1995e71a1e81cb2c2f22b4165fb
+      - path: DenyLeavingOrganization.yaml
+        type: file
+        mode: 420
+        sha256: a964df1a91e37b51c00776e66d718c022f0184eb42d697a9243cb1dfbb72f0e9
+      - path: DenyRDSUnencrypted.yaml
+        type: file
+        mode: 420
+        sha256: c5c5c35f250015d8ffe1b913b01fa317c470936de235d451c564eb69467f8d0e
+      - path: DenyRootAccountAccess.yaml
+        type: file
+        mode: 420
+        sha256: 1c18d46d5e39057cdb439c46df4a2390f1a4f5f1b9243eb8f68ead62f206f35f
+      - path: DenyRoute53DeletingZones.yaml
+        type: file
+        mode: 420
+        sha256: 1cb728268996af5c201639903d03cbbaa0c37b005a7cbac0109c37186f236f13
+      - path: DenyS3BucketsPublicAccess.yaml
+        type: file
+        mode: 420
+        sha256: e261e4fab20c356c9a3c9bee09ee3e35c7776e51f67fd2af345fd296354dfba5
+      - path: DenyS3DeleteBucketsAndObjects.yaml
+        type: file
+        mode: 420
+        sha256: 5689fe23564ebb84df0ba10a27a63f4918519b30072ecc3b97ca1dcfdbf7b220
+      - path: DenyS3IncorrectEncryptionHeader.yaml
+        type: file
+        mode: 420
+        sha256: 52d611446ad1e40bd74f888654ecb7fa7928b51fa818ae169b48c22c473b8378
+      - path: DenyS3UnEncryptedObjectUploads.yaml
+        type: file
+        mode: 420
+        sha256: 10e2e960c2ebf593b2310bc669484dccf5a3e40adc6b9d0afa46b2f8495a1a19
+      - path: DenySagemakerDirectInternetNotebook.yaml
+        type: file
+        mode: 420
+        sha256: bf192a9a29e84c787b5d6aac318a7cd7e5a7c26545cc905934560200589ecfdc
+      - path: DenySagemakerWithoutInterContainerEncrypt.yaml
+        type: file
+        mode: 420
+        sha256: c9e48fd4158ba7088f879005561b0775115965485bf4661a31d5cf10b247a554
+      - path: DenySagemakerWithoutRootAccess.yaml
+        type: file
+        mode: 420
+        sha256: 43e6750ce52ebf41e676fc4db2281b4c8f34079c389066c6e92622e13e34d46b
+      - path: DenyShieldlRemoval.yaml
+        type: file
+        mode: 420
+        sha256: ad1074ee06b1710bd9a258c5c11da763c1053b88223e9699479c17481ef00b08
+      - path: DenyVpcDeletingFlowLogs.yaml
+        type: file
+        mode: 420
+        sha256: d803a51bff7cc2e754ee9a4e0a2146398b9ee943514ceb76a6952f4421b1d4e1
+      - path: DenyVpcInternetAccess.yaml
+        type: file
+        mode: 420
+        sha256: 748f8d298c97d75c4cf906ee23ce6ff9a13ec2c95aacace63efe3f3d50123cff
+      - path: DenyeSagemakerWithoutVpcDomain.yaml
+        type: file
+        mode: 420
+        sha256: c433c8ce6ee12e65a60237588287e4e280e442e495a245a8ece9481eddfda19c
+      - path: RequireEBSEncryption.yaml
+        type: file
+        mode: 420
+        sha256: b6b81b095ed2f37b701b4c1606292eba228f97e9658209862a51d3e6502944b0
+    order: 5
+    included_paths:
+      - '**/*.yaml'
   e35284ddeea3bcafae232da3e2e1f81a60feea13f1d57bdc05c47765976d60c7:
     name: aws-organization
     kind: remote

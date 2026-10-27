@@ -61,7 +61,9 @@ class Fixture(unittest.TestCase):
 class ManifestTest(unittest.TestCase):
     def test_valid(self):
         other = source(component="b", version="2.0.1", targets=["components/terraform/b"])
-        self.assertEqual(check.check_manifest(manifest(source(), other)), [])
+        catalog = source(component="c", targets=["stacks/catalog/c/catalog"],
+                         source="github.com/cloudposse-terraform-components/aws-c.git//catalog?ref={{ .Version }}")
+        self.assertEqual(check.check_manifest(manifest(source(), other, catalog)), [])
 
     def test_one_finding_each(self):
         with_imports = manifest(source())
@@ -72,6 +74,8 @@ class ManifestTest(unittest.TestCase):
             "other org": manifest(source(source="github.com/example/aws-x.git?ref={{ .Version }}")),
             "two targets": manifest(source(targets=[TARGET, "components/terraform/x"])),
             "nested target": manifest(source(targets=["components/terraform/vendor/x"])),
+            "stack manifest target": manifest(source(targets=["stacks/orgs/x/catalog"])),
+            "catalog not named catalog": manifest(source(targets=["stacks/catalog/x"])),
             "imports": with_imports,
         }.items():
             with self.subTest(label):

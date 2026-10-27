@@ -1,0 +1,7 @@
+sid: "DenyIAMCreatingUsers"
+effect: "Deny"
+actions:
+  - "iam:CreateUser"
+  - "iam:CreateAccessKey"
+resources:
+  - "*"

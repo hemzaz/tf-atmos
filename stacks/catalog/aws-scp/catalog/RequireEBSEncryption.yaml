@@ -1,0 +1,11 @@
+sid: "RequireEBSEncryption"
+effect: "Deny"
+actions:
+  - "ec2:CreateVolume"
+conditions:
+  - test: "Bool"
+    variable: "ec2:Encrypted"
+    values:
+      - "false"
+resources:
+  - "*"

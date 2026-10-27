@@ -1,0 +1,11 @@
+sid: "DenyEC2PublicAMI"
+effect: "Deny"
+actions:
+  - "ec2:RunInstances"
+conditions:
+  - test: "Bool"
+    variable: "ec2:Public"
+    values:
+      - "true"
+resources:
+  - "arn:aws:ec2:*::image/*"

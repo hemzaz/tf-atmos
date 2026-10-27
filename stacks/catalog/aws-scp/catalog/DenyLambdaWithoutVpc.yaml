@@ -1,0 +1,12 @@
+sid: "DenyLambdaWithoutVpc"
+effect: "Deny"
+actions:
+  - "lambda:CreateFunction"
+  - "lambda:UpdateFunctionConfiguration"
+conditions:
+  - test: "Null"
+    variable: "lambda:VpcIds"
+    values:
+      - "true"
+resources:
+  - "*"
