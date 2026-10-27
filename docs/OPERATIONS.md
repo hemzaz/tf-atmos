@@ -10,7 +10,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 
 | Input | Where |
 |-------|-------|
-| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`, `prod-eu` (the EU prod account, `fnx-ew1-prod` and its DR stack `fnx-ec1-prod`; GDPR keeps it apart from `prod`). Each stage's `settings.environment.account_id` (`fnx-ew1-prod`'s and `fnx-ec1-prod`'s from `prod-eu`), `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and `fnx-ew1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. A new account is added here by hand (the stack scaffold covers existing accounts only). The emulator and fixture stacks keep the emulator's `000000000000` |
+| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: Cloud Posse's core accounts `root` (management), `audit` (log archive), `security`, `network`, `identity` and `artifacts` (no stacks yet: Wave E2), and the workload accounts `dev`, `staging`, `prod`, `prod-eu` (the EU prod account, `fnx-ew1-prod` and its DR stack `fnx-ec1-prod`; GDPR keeps it apart from `prod`). `settings.static_account_map` repeats the map with `<tenant>-<account>` keys (`fnx-security`), the static `account_map` input of Cloud Posse components; its values are templates over `full_account_map`, so a new account needs a line in both. Each stage's `settings.environment.account_id` (`fnx-ew1-prod`'s and `fnx-ec1-prod`'s from `prod-eu`), `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and `fnx-ew1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. A new account is added here by hand (the stack scaffold covers existing accounts only). The emulator and fixture stacks keep the emulator's `000000000000` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
@@ -48,7 +48,13 @@ the following, naming the stack, the key and the row above:
 - a placeholder (`0`) GitHub App ID or installation ID;
 - a workload account equal to the management account;
 - two stages sharing one account;
-- an EU (GDPR-scoped) stack sharing an account with a US one (`prod-eu` equal to `prod`).
+- an EU (GDPR-scoped) stack sharing an account with a US one (`prod-eu` equal to `prod`);
+- an account map entry that is not 12 digits, or a stack whose map differs from the others';
+- a core account (`root`, `audit`, `security`, `network`, `identity`, `artifacts`) shared with
+  another core account, a workload account or a stack's `account_id` in another role's core account;
+- a missing or placeholder core account, when a checked stack is a core account's own or deploys a
+  component that reads them (`MAP_CONSUMERS` in the script: the org, identity and security
+  components). Otherwise it is a notice, so the backend bootstrap can run before the accounts exist.
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
 packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval,
