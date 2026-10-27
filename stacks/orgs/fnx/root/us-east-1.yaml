@@ -21,6 +21,7 @@ import:
   - orgs/fnx/root/_defaults
   - catalog/backend/roles/nonprod
   - catalog/backend/roles/prod
+  - catalog/access-analyzer/root
 
 vars:
   region: "{{ .settings.tfstate.region }}"

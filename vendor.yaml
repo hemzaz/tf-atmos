@@ -1,0 +1,21 @@
+# Cloud Posse components vendored into components/terraform (QE1). Each source
+# pins an exact release tag; vendor.lock.yaml is the receipt of its files.
+# scripts/check-vendor.py (lint step check-vendor) fails a vendored dir edited
+# in place or out of step with its pin; house changes go in a *_override.tf.
+# Add or bump: atmos vendor pull -c <component> --refresh-lock, then
+# atmos workflow providers-lock -f providers for its .terraform.lock.hcl.
+apiVersion: atmos/v1
+kind: AtmosVendorConfig
+metadata:
+  name: fnx-vendored-components
+  description: Cloud Posse components vendored from cloudposse-terraform-components
+spec:
+  sources:
+    # IAM Access Analyzer: org delegation (root) and organization analyzers
+    # (delegated administrator). stacks/catalog/access-analyzer.
+    - component: access-analyzer
+      source: "github.com/cloudposse-terraform-components/aws-access-analyzer.git//src?ref={{ .Version }}"
+      version: "v2.0.1"
+      targets:
+        - "components/terraform/access-analyzer"
+      included_paths: ["**/*.tf", "**/*.md"]

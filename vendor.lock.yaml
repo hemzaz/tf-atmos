@@ -1,0 +1,51 @@
+version: 1
+artifacts:
+  8dcae12c229f599e27e52b7bc421e7be36ff70ce7fa808aa708b703c25c793dd:
+    name: access-analyzer
+    kind: remote
+    target: components/terraform/access-analyzer
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-access-analyzer.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-access-analyzer.git//src
+      digest: sha256:596cac73c04d6a282409a5dda70b18a5bd429aea41c6923e9b33b365a9afd3fa
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 464fb1b61ff5952e12aab3d501e4918c8a64fbc232082a7bc7b7e131c7470db1
+      - path: account-verification.tf
+        type: file
+        mode: 420
+        sha256: 8926ae1c96c16020c97ff984d73b61c41546e7162d85a124d07f3ea79819f554
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 2fa4e92614fa30f8b7ffc456df07c11db8cb9c66583a57a4ae78cc9dbe86342f
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 6b84246fae4a7b5b586d83636406ad82f1b9c242fe95d1d6930fd469e91f4950
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 556ca8428884d5398dee8948c00e94165ed7ad1aceec03fcef87a82cff766f48
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: 19215f17ef39f456be5f09b7f7cc085dc8547fa9b91aa33fd6f4b5a18c217bd7
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: bf9c372b2ea62101473dd7e398e7d503ffa4ca856eac9818ee90067a138d076f
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: a94b4747599b327f1e94f3a36c1726bb7ef81698a024f6851178ce91f2124fde
+    order: 1
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'

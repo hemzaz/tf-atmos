@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# vendored - the abstract every vendored Cloud Posse component inherits
+# =============================================================================
+# Cloud Posse null-label context for vendored components (vendor.yaml), which
+# name resources from it: null-label 0.25.0 exports/context.tf `variable
+# "context"`. Its module reads every attribute of the object (type any, no
+# optional()), so all of them are set here: the module's own defaults except
+# tenant, environment, stage and label_order. The id is
+# {tenant}-{environment}-{stage}-{name}, the stack name's order (atmos.yaml
+# name_template). environment is settings.prefix, the region code plus
+# -<name> on a lane (owner, 2026-10-07), so null-label `name` stays the
+# component's own (its catalog sets vars.name). No namespace: no id here has
+# one. Tags come from the global vars.tags, which null-label merges in.
+#
+# tenant, environment and stage are also set as top-level vars: Cloud Posse
+# components read var.tenant / var.stage directly (aws-access-analyzer
+# account-verification.tf builds "<tenant>-<stage>" from them), and those stay
+# null when only the context carries them.
+#
+# An abstract inherited through metadata.inherits, not a global var:
+# hand-written components declare no `context` variable, and
+# check-dependencies.py fails a var a root module does not declare.
+# =============================================================================
+
+components:
+  terraform:
+    vendored:
+      metadata:
+        type: abstract
+      vars:
+        tenant: "{{ .settings.context.tenant }}"
+        environment: "{{ .settings.prefix }}"
+        stage: "{{ .settings.context.stage }}"
+        context:
+          enabled: true
+          namespace: null
+          tenant: "{{ .settings.context.tenant }}"
+          environment: "{{ .settings.prefix }}"
+          stage: "{{ .settings.context.stage }}"
+          name: null
+          delimiter: null
+          attributes: []
+          tags: {}
+          additional_tag_map: {}
+          regex_replace_chars: null
+          label_order: [tenant, environment, stage, name, attributes]
+          id_length_limit: null
+          label_key_case: null
+          label_value_case: null
+          descriptor_formats: {}
+          labels_as_tags: ["unset"]
