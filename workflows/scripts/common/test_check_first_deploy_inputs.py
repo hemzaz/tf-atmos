@@ -425,6 +425,8 @@ class StaticAccountMapTest(unittest.TestCase):
               "root_account_account_name": "fnx-root", "identity_account_account_name": "fnx-identity",
               "audit_account_account_name": "fnx-audit"}
 
+    DRIFTED = {**STATIC, "audit_account_account_name": "fnx-security"}
+
     def stacks(self, account_map, enabled=False):
         stacks = CoreAccountTest.with_map()
         root = stacks["fnx-ue1-root"]["components"]["terraform"]
@@ -434,18 +436,46 @@ class StaticAccountMapTest(unittest.TestCase):
         root["access-analyzer/root"] = spec
         return stacks
 
-    def test_an_equal_map_passes(self):
-        self.assertEqual(errors(self.stacks(self.STATIC), ["fnx-ue1-root"]), [])
+    @staticmethod
+    def failures(stacks):
+        return [f for f in preflight.check(stacks, ["fnx-ue1-root"]) if f.level in ("fatal", "error")]
 
-    def test_a_drifted_map_fails_on_a_disabled_instance(self):
+    def test_an_equal_map_passes(self):
+        self.assertEqual(self.failures(self.stacks(self.STATIC)), [])
+
+    def test_a_drifted_map_is_fatal_on_a_disabled_instance(self):
         full = dict(self.STATIC["full_account_map"])
         full.popitem()
-        for account_map in ({**self.STATIC, "audit_account_account_name": "fnx-security"},
-                            {**self.STATIC, "full_account_map": full}):
+        for account_map in (self.DRIFTED, {**self.STATIC, "full_account_map": full}):
             with self.subTest(account_map=account_map):
-                found = errors(self.stacks(account_map), ["fnx-ue1-root"])
-                self.assertEqual([(f.stack, f.key, f.row) for f in found],
-                                 [("fnx-ue1-root", "access-analyzer/root vars.account_map", "Account IDs")])
+                self.assertEqual([(f.level, f.stack, f.key, f.row) for f in self.failures(self.stacks(account_map))],
+                                 [("fatal", "fnx-ue1-root", "access-analyzer/root vars.account_map", "Account IDs")])
+
+    def run_main(self, stacks, *argv):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["check-first-deploy-inputs.py", *argv]), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(stacks))), contextlib.redirect_stdout(out):
+            return preflight.main(), out.getvalue()
+
+    def with_warnings(self, account_map):
+        """More than WARN_LIMIT placeholder errors besides the map under test."""
+        stacks = self.stacks(account_map)
+        stacks["fnx-ue1-root"]["components"]["terraform"]["backend_main"]["vars"]["emails"] = [
+            f"ops{i}@example.com" for i in range(preflight.WARN_LIMIT + 5)]
+        return stacks
+
+    def test_drift_fails_warn_mode_and_is_always_printed(self):
+        rc, out = self.run_main(self.with_warnings(self.DRIFTED), "--warn")
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(out.startswith("ERROR fnx-ue1-root: access-analyzer/root vars.account_map: differs"), out[:200])
+        self.assertEqual(out.count("\nWARN "), preflight.WARN_LIMIT, out)
+        self.assertIn("1 configuration error(s), fatal even with --warn", out)
+
+    def test_placeholders_alone_still_pass_warn_mode(self):
+        rc, out = self.run_main(self.with_warnings(self.STATIC), "--warn")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("vars.account_map", out)
+        self.assertNotIn("configuration error", out)
 
     def test_access_analyzer_needs_the_core_accounts_when_enabled(self):
         self.assertIn("access-analyzer", preflight.MAP_CONSUMERS)

@@ -18,10 +18,6 @@ Errors (fatal unless --warn):
     pipeline's placeholder (ghcr.io/fnx-platform/<service>:1.4.2)
   - a github-runners instance whose GitHub App ID or installation ID is the
     placeholder 0
-  - an instance's vars.account_map (a vendored Cloud Posse component's static
-    map) that differs from its settings.static_account_map, disabled and
-    abstract instances included: the vars copy is repeated by hand, so drift
-    is caught before the instance is enabled
   - a workload account equal to the management account
   - two stages sharing an account (one account per stage)
   - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
@@ -33,6 +29,11 @@ Errors (fatal unless --warn):
     MAP_CONSUMERS component (a notice otherwise: the backend bootstrap comes
     before the accounts exist)
 The last four skip placeholder IDs, which are already an error.
+Fatal (a config bug, not a placeholder: always printed, exit 1 even with --warn):
+  - an instance's vars.account_map (a vendored Cloud Posse component's static
+    map) that differs from its settings.static_account_map, disabled and
+    abstract instances included: the vars copy is repeated by hand, so lint
+    fails on drift before the instance is enabled
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
 protection, deploy tags, the GitHub App's private key and outside-collaborator
@@ -43,7 +44,8 @@ Only deployable stacks are checked: every stage but EXEMPT_STAGES. --stacks
 limits the placeholder checks to some of them (the bootstrap workflow passes
 the stack it is about to deploy); the account checks still compare against
 every deployable stack. --warn prints errors as WARN and exits 0 (lint: the
-repo holds placeholders until the first deploy). Exit 1 on any error otherwise.
+repo holds placeholders until the first deploy) unless a fatal finding exists.
+Exit 1 on any error or fatal finding otherwise.
 """
 import argparse
 import importlib.util
@@ -100,14 +102,14 @@ PLACEHOLDER_IMAGE_RE = re.compile(r"^ghcr\.io/fnx-platform/[a-z0-9-]+:1\.4\.2$")
 
 @dataclass(frozen=True)
 class Finding:
-    level: str  # "error" or "notice"
+    level: str  # "fatal" (exit 1 even with --warn), "error" or "notice"
     stack: str
     key: str
     detail: str
     row: str
 
     def line(self, warn: bool) -> str:
-        label = {"error": "WARN" if warn else "ERROR", "notice": "NOTICE"}[self.level]
+        label = {"fatal": "ERROR", "error": "WARN" if warn else "ERROR", "notice": "NOTICE"}[self.level]
         where = f"{self.stack}: {self.key}" if self.key else self.stack
         return f"{label} {where}: {self.detail} ({DOCS}: {self.row})"
 
@@ -164,7 +166,7 @@ def static_map_drift(stack: str, instance_name: str, spec: dict):
     static = (spec.get("settings") or {}).get("static_account_map")
     if variables["account_map"] == static:
         return None
-    return Finding("error", stack, f"{instance_name} vars.account_map",
+    return Finding("fatal", stack, f"{instance_name} vars.account_map",
                    "differs from settings.static_account_map (stacks/orgs/fnx/_defaults.yaml): keep the copy equal",
                    "Account IDs")
 
@@ -396,18 +398,20 @@ def main() -> int:
     exempt = [s for s in only if environment(stacks[s]).get("_stage") in EXEMPT_STAGES]
     if exempt:
         print(f"NOTICE never deployed to a real account, not checked: {', '.join(exempt)}")
-    # Repository-wide errors (the account map) first, so --warn always shows them.
+    # Fatal findings, then repository-wide errors (the account map) first, so --warn always shows them.
+    rank = {"fatal": 0, "error": 1, "notice": 2}
     findings = sorted(check(stacks, only),
-                      key=lambda f: (f.level != "error", f.stack != "repository", f.stack, f.row, f.key))
+                      key=lambda f: (rank[f.level], f.stack != "repository", f.stack, f.row, f.key))
+    fatal = [f for f in findings if f.level == "fatal"]
     errors = [f for f in findings if f.level == "error"]
     # Fatal mode (and --all) prints every finding; --warn (lint, every run)
-    # prints the first WARN_LIMIT errors and the per-row counts.
-    shown = findings if (args.all or not args.warn) else errors[:WARN_LIMIT]
+    # prints every fatal finding, the first WARN_LIMIT errors and the per-row counts.
+    shown = findings if (args.all or not args.warn) else fatal + errors[:WARN_LIMIT]
     for finding in shown:
         print(finding.line(args.warn))
     if len(shown) < len(findings):
-        print(f"... {len(errors) - len(shown)} more WARN and {len(findings) - len(errors)} NOTICE line(s) not shown; "
-              "see them all with --warn --all, or run without --warn")
+        print(f"... {len(errors) + len(fatal) - len(shown)} more WARN and {len(findings) - len(errors) - len(fatal)} "
+              "NOTICE line(s) not shown; see them all with --warn --all, or run without --warn")
     checked = ", ".join(sorted(set(only) - set(exempt))) if only else "every deployable stack"
     if errors:
         rows = {}
@@ -416,6 +420,11 @@ def main() -> int:
         print("By row: " + ", ".join(f"{row} {count}" for row, count in sorted(rows.items())))
         print(f"{len(errors)} first-deploy input(s) still hold placeholders or break the account model "
               f"(checked: {checked}). Replace them before deploying: {DOCS}")
+    if fatal:
+        print(f"{len(fatal)} configuration error(s), fatal even with --warn: a hand-repeated value differs "
+              f"from its source (checked: {checked}). Fix them: {DOCS}")
+        return 1
+    if errors:
         return 0 if args.warn else 1
     print(f"First-deploy inputs: no placeholders (checked: {checked}).")
     return 0

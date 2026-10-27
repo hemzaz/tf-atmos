@@ -53,13 +53,18 @@ class TodayTest(unittest.TestCase):
         )
 
     def test_plan_sweep_includes_every_root_stack(self):
-        # CI-disabled (actions_enabled: false) but deployable (backend/main): swept, with no notice.
-        stacks = dict(TODAY, **{"fnx-ew1-root": stack("root", False), "fnx-gbl-root": stack("root", False, False)})
+        # fnx-ue1-root and fnx-ew1-root: CI-disabled (actions_enabled: false) but deployable
+        # (backend/main), so swept. fnx-gbl-root (E3a, #440): every instance disabled until its
+        # accounts layer, so skipped with a notice like a core-account stack.
+        gbl = stack("root", False, False)
+        for spec in gbl["components"]["terraform"].values():
+            spec["metadata"] = {"enabled": False}
+        stacks = dict(TODAY, **{"fnx-ew1-root": stack("root", False), "fnx-gbl-root": gbl})
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             swept = ci_stacks.plan_sweep_stacks(stacks)
-        self.assertEqual([n for n in swept if n.endswith("-root")], ["fnx-ew1-root", "fnx-gbl-root", "fnx-ue1-root"])
-        self.assertEqual(err.getvalue(), "")
+        self.assertEqual([n for n in swept if n.endswith("-root")], ["fnx-ew1-root", "fnx-ue1-root"])
+        self.assertEqual(err.getvalue(), "::notice::plan-sweep skips fnx-gbl-root: no deployable instances\n")
         self.assertNotIn("root", ci_stacks.PLAN_SWEEP_EXCLUDED_STAGES)
         self.assertIn("local", ci_stacks.PLAN_SWEEP_EXCLUDED_STAGES)
         self.assertEqual(ci_stacks.ci_stacks(stacks), ci_stacks.ci_stacks(TODAY))
