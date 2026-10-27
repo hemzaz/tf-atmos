@@ -232,8 +232,10 @@ For CI across several accounts from one OIDC provider, see
 
 A stage stack (`stacks/orgs/<tenant>/<stage>/<region>.yaml`, for an existing stage and account) comes
 from the stack scaffold, `scaffolds/stack`. Pick its profile: `nonprod` (a dev or staging stack),
-`prod-primary` (an account's prod primary, which creates its singletons) or `standby` (a prod
-primary's DR warm standby). Its prompts say what each answer sets. From the repository root:
+`prod-primary` (an account's prod primary, which creates its singletons), `standby` (a prod
+primary's DR warm standby) or `core` (a core account's regional stack, like `fnx-ue1-security`, with
+no instance). A global stack (`fnx-gbl-root`) is hand-written: the management account's is the
+tenant's only one. Its prompts say what each answer sets. From the repository root:
 
 ```bash
 atmos scaffold generate stack . --force        # prompts for the answers
@@ -243,7 +245,9 @@ make onboard ANSWERS=my-stack.env              # the same, from a key=value file
 The `guard` hook refuses a stack that already exists and answers that disagree with the files they
 name (stage defaults, region mixin, account, the DR pair, the account's singletons). After writing
 it, `verify` resolves the stack and `wire` (`scripts/stack-wiring.py`) adds its state pattern pair and
-CI role ARNs to the backend that owns its state (see [State backend](#state-backend)). Still by hand:
+CI role ARNs to the backend that owns its state (see [State backend](#state-backend)); a core stack
+gets neither (the backend's root role holds its state, and its pair joins `root_write` with its first
+instance). Still by hand:
 
 - a new region first needs its `stacks/mixins/region/<region>.yaml`;
 - apply `backend/main` in `fnx-ue1-root` (`fnx-ew1-root` for `prod-eu`) after the wiring, before

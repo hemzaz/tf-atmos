@@ -27,7 +27,7 @@ apiVersion: atmos/v1
 kind: AtmosScaffoldConfig
 metadata:
   name: stack
-  description: Stage stack (stacks/orgs/<tenant>/<stage>/<region>.yaml) for an existing stage, account and region
+  description: Stage stack (stacks/orgs/<tenant>/<stage>/<region>.yaml) for an existing stage, account and region, platform or core
   version: 1.0.0
 spec:
   delimiters: ["[[", "]]"]
@@ -39,6 +39,9 @@ spec:
     # prod-primary: an account's prod primary, owner of its singletons, with
     # a DR warm standby in dr_region (reference stacks fnx-ue1-prod, the data
     # plane, and fnx-ew1-prod, the EU core subset).
+    # core: a core account's regional stack (reference stacks
+    # fnx-ue1-security and the other fnx-ue1-<core account> stacks), no
+    # instance, owner decision QE5; its global (gbl) stack is hand-written.
     # The defaults are the cheapest stack, a dev one.
     - name: profile
       type: select
@@ -48,6 +51,7 @@ spec:
         - nonprod
         - standby
         - prod-primary
+        - core
 
     # prod-primary: whether the stack runs fnx-ue1-prod's data plane (the
     # services VPC, eks/data, rds/data, the ECS cluster, the data API and
@@ -94,6 +98,11 @@ spec:
         - dev
         - staging
         - prod
+        - audit
+        - security
+        - network
+        - identity
+        - artifacts
 
     # The settings.account_map key; empty means the stage's own account.
     - name: account
@@ -101,8 +110,8 @@ spec:
       label: Account (settings.account_map key; empty = the stage)
       default: ""
       validation:
-        pattern: "^$|^(dev|staging|prod|prod-eu)$"
-        message: One of dev, staging, prod, prod-eu (or empty for the stage's account).
+        pattern: "^$|^(dev|staging|prod|prod-eu|audit|security|network|identity|artifacts)$"
+        message: One of dev, staging, prod, prod-eu, audit, security, network, identity, artifacts (or empty for the stage's account).
 
     - name: region
       type: select
@@ -132,6 +141,7 @@ spec:
       type: input
       label: vpc/main CIDR (/16)
       required: true
+      when: "answers.profile != 'core'"
       placeholder: 10.22.0.0/16
       validation:
         pattern: "^10\\.([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.0\\.0/16$"
@@ -167,6 +177,7 @@ spec:
       type: input
       label: Three AZ IDs, comma-separated (e.g. use2-az1,use2-az2,use2-az3)
       required: true
+      when: "answers.profile != 'core'"
       validation:
         pattern: "^[a-z0-9]+-az[0-9]+,[a-z0-9]+-az[0-9]+,[a-z0-9]+-az[0-9]+$"
         message: Exactly three AZ IDs, comma-separated, no spaces.
@@ -175,6 +186,7 @@ spec:
       type: input
       label: settings.environment.domain_name
       required: true
+      when: "answers.profile != 'core'"
       placeholder: fnx.example.com
       validation:
         pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
@@ -184,6 +196,7 @@ spec:
       type: input
       label: Critical alert emails, comma-separated
       required: true
+      when: "answers.profile != 'core'"
       validation:
         pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
         message: One or more email addresses, comma-separated, no spaces.
@@ -192,6 +205,7 @@ spec:
       type: input
       label: Warning alert emails, comma-separated
       required: true
+      when: "answers.profile != 'core'"
       validation:
         pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)*$"
         message: One or more email addresses, comma-separated, no spaces.
@@ -282,6 +296,9 @@ spec:
     - path: stack/prod-primary.yaml.tmpl
       target: "stacks/orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/[[ .Config.region ]].yaml"
       when: "answers.profile == 'prod-primary'"
+    - path: stack/core.yaml.tmpl
+      target: "stacks/orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/[[ .Config.region ]].yaml"
+      when: "answers.profile == 'core'"
 
   hooks:
     # Refuses to overwrite a stack (--force alone would), and checks the
@@ -313,6 +330,19 @@ spec:
           [ "$account" = "{{ .Answers.stage }}" ] \
             || { [ "{{ .Answers.stage }}" = "prod" ] && [ "$account" = "prod-eu" ]; } \
             || fail "account $account does not belong to stage {{ .Answers.stage }} (its own, or prod-eu for prod)"
+          # The core accounts' stages (the backend's root-role routing in
+          # stacks/orgs/<tenant>/_defaults.yaml) take profile core, and only them.
+          case "{{ .Answers.stage }}" in
+            audit|security|network|identity|artifacts) core=yes ;;
+            *) core=no ;;
+          esac
+          {{- if eq .Answers.profile "core" }}
+            [ "$core" = yes ] \
+              || fail "a core stack is a core account's stack (stage audit, security, network, identity or artifacts), not stage {{ .Answers.stage }}"
+          {{- else }}
+            [ "$core" = no ] \
+              || fail "stage {{ .Answers.stage }} is a core account's: its stack takes profile core"
+          {{- end }}
           # GDPR scope: the prod-eu account holds exactly the EU regions'
           # stacks, whatever the stage. check-data-residency.py treats any stack
           # in an eu- region as GDPR-scoped (its tags must say gdpr, its state
