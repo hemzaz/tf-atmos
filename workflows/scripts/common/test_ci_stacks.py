@@ -51,6 +51,21 @@ class TodayTest(unittest.TestCase):
              "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp"],
         )
 
+    def test_plan_sweep_skips_a_stack_with_nothing_to_plan(self):
+        # A core-account stack before its first component: only the region
+        # mixin's abstract vpc/defaults (or a disabled instance) - nothing to plan.
+        empty = stack("security", False)
+        empty["components"]["terraform"]["c0"]["metadata"] = {"type": "abstract"}
+        disabled = stack("audit", False)
+        disabled["components"]["terraform"]["c0"]["metadata"] = {"enabled": False}
+        stacks = dict(TODAY, **{"fnx-ue1-security": empty, "fnx-ue1-audit": disabled})
+        self.assertEqual(ci_stacks.plan_sweep_stacks(stacks), ci_stacks.plan_sweep_stacks(TODAY))
+        self.assertEqual(ci_stacks.ci_stacks(stacks), ci_stacks.ci_stacks(TODAY))
+        # Its first deployable instance brings it into the sweep.
+        empty["components"]["terraform"]["c1"] = {"settings": {"context": {"stage": "security"},
+                                                               "github": {"actions_enabled": False}}}
+        self.assertIn("fnx-ue1-security", ci_stacks.plan_sweep_stacks(stacks))
+
 
 def standby(stage_name, primary):
     """A describe-stacks entry of a DR standby (settings.dr.standby_of)."""
