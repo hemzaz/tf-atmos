@@ -16,6 +16,19 @@
 # o-xxxxxxxxxx. Creating where an organization already exists fails at apply
 # (AlreadyInOrganizationException) and changes nothing.
 #
+# Import runbook (before setting import_resource_id). aws_service_access_principals
+# and enabled_policy_types are authoritative: the first apply after an import
+# DISABLES every trusted service and policy type not in these lists (an
+# in-place update). Dropping sso or controltower trusted access breaks Identity
+# Center sign-in and Control Tower; dropping a policy type detaches all its
+# policies. So, from the management account:
+#   1. aws organizations list-aws-service-access-for-organization
+#      -> add every ServicePrincipal to aws_service_access_principals;
+#   2. aws organizations list-roots (Roots[].PolicyTypes, Status ENABLED)
+#      -> add every Type to enabled_policy_types;
+#   3. plan, and apply only if the plan removes no principal and no policy
+#      type from aws_organizations_organization.this.
+#
 # Destroy and replace are refused by the house lifecycle_override.tf
 # (prevent_destroy).
 
@@ -41,9 +54,11 @@ components:
         # refuses at plan.
         feature_set: ALL
         # Trusted access (EnableAWSServiceAccess) for the org-wide services
-        # Wave E delegates: CloudTrail, Config, GuardDuty, Security Hub,
-        # Inspector, Identity Center (sso) and IAM Access Analyzer (E0c's
-        # access-analyzer/root delegation needs access-analyzer.amazonaws.com).
+        # Wave E delegates: CloudTrail, Config (config-multiaccountsetup for
+        # organization conformance packs, Cloud Posse aws-config README),
+        # GuardDuty, Security Hub, Inspector, Identity Center (sso) and IAM
+        # Access Analyzer (E0c's access-analyzer/root delegation needs
+        # access-analyzer.amazonaws.com). Authoritative: see the import runbook.
         # Enabling trusted access only lets the service act in the
         # organization; each service is still enabled and delegated by its own
         # component (E4, E5), after this instance. The component adds
@@ -51,6 +66,7 @@ components:
         aws_service_access_principals:
           - cloudtrail.amazonaws.com
           - config.amazonaws.com
+          - config-multiaccountsetup.amazonaws.com
           - guardduty.amazonaws.com
           - securityhub.amazonaws.com
           - inspector2.amazonaws.com
