@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# Identity Account Defaults
+# =============================================================================
+# Cloud Posse's core "identity" account (owner decision Q1): the account people
+# and automation assume roles from (aws-teams, trusted by every account's
+# aws-team-roles), core-<region>-identity in Cloud Posse's reference
+# architecture and the account map's identity_account_account_name. Its
+# components arrive in Wave E (E4); until then its stacks hold no instance.
+#
+# Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
+# the tenant stays fnx, the account is the stage, the region code the
+# environment (owner decision QE5), so the home-region stack is fnx-ue1-identity.
+# =============================================================================
+
+import:
+  - orgs/fnx/_defaults
+  - mixins/tenant/fnx
+
+settings:
+  environment:
+    account: identity
+    # From the account map (stacks/orgs/fnx/_defaults.yaml), keyed by `account`.
+    account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
+  context:
+    stage: identity
+  # Kept out of the CI plan/deploy/drift matrices (ci-stacks.py), like root:
+  # no CI role is trusted in a core account until E4 defines who applies it.
+  github:
+    actions_enabled: false
