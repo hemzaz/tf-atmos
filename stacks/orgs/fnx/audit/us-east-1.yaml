@@ -1,0 +1,14 @@
+---
+# =============================================================================
+# fnx-ue1-audit - the audit account's home-region stack
+# =============================================================================
+# No instance yet: the US log-archive components (E5) land here. Its state
+# goes to fnx-ue1-root's bucket through the backend's root role, the applying
+# administrator only (stacks/orgs/fnx/_defaults.yaml); the first instance adds
+# this stack's pattern pair to fnx-ue1-root's root_write (check-state-keys.py).
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - mixins/region/us-east-1
+  - orgs/fnx/audit/_defaults
