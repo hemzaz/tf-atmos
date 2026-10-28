@@ -38,8 +38,9 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   (the region code, plus `-<name>` on a lane), never `settings.context.environment`; the full id is
   `{{ .atmos_stack }}`. `check-lane-names.py` fails two stacks or instances of one account and region that create the same name (and IAM/S3 names across the regions of one account).
 - A residue edit to a reference stack (`fnx-ue1-dev`, `fnx-ue1-staging`, `fnx-ue1-prod`, `fnx-ew1-prod`,
-  `fnx-ue2-prod`, `fnx-ec1-prod`) must update `scaffolds/stack` (its template or its
-  `scaffolds/stack-golden/<stack>.env`) in the same PR, or `check-stack-scaffold.sh` fails.
+  `fnx-ue2-prod`, `fnx-ec1-prod`, and the core `fnx-ue1-{audit,security,network,identity,artifacts}`)
+  must update `scaffolds/stack` (its template or its `scaffolds/stack-golden/<stack>.env`) in the
+  same PR, or `check-stack-scaffold.sh` fails.
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - Each stack's state is an exact `object_key_patterns` pair on its stage's backend roles
   (`stacks/orgs/fnx/root/us-east-1.yaml`): a new stack needs its pair (`check-state-keys.py`).

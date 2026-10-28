@@ -33,11 +33,12 @@
 # guard on 1.233), changing nothing outside the target.
 # Last, the fresh-stack end to end: brand-new stacks generated with the hooks
 # (a us-west-2 stack of each nonprod flavor with account_singletons=no beside
-# its account's committed stack, and a prod primary + standby pair,
+# its account's committed stack, a us-west-2 core stack, and a prod primary +
+# standby pair,
 # fnx-ue1-prod with its DR in us-west-2 and the new standby fnx-uw2-prod, in
 # place of the committed ue1/ue2 pair: no other prod primary is generatable,
-# one per account), so the wire hook adds each to the root backend. The root
-# file may differ only by the added lines, a second wiring run must add
+# one per account), so the wire hook adds each but the core stack to the root
+# backend. The root file may differ only by the added lines, a second wiring run must add
 # nothing, and every stack check (as check-stack-samples.sh runs them, plus
 # dr-pair --lint) must pass over the result.
 #
@@ -50,7 +51,9 @@
 #
 # Usage: scripts/check-stack-scaffold.sh [--sweep]
 # --sweep (atmos sweep --scaffold) runs only the fresh-stack end to end, then
-# scripts/plan-sweep.sh on the fresh stacks (lint runs the rest).
+# scripts/plan-sweep.sh on the fresh stacks its default would select (ci-stacks.py
+# --plan-sweep: a CI-disabled stack with nothing to plan is skipped with a
+# ::notice::); lint runs the rest.
 # Needs atmos, python3 and yamllint (and, for --sweep, plan-sweep's tools).
 # Exit 0 when every golden regenerates identically, every refusal is refused
 # and the fresh stacks pass, 1 otherwise.
@@ -104,6 +107,13 @@ REFUSALS=(
     "fnx-ew1-prod|dr_region us-east-2 and region eu-west-1 must both be EU (GDPR) or both not|dr_region=us-east-2 dr_region_code=ue2"
     "fnx-ew1-prod|dr_region_code ew1 is not|dr_region_code=ew1"
     "fnx-ew1-prod|the prod-eu account already has its prod primary (eu-west-1.yaml)|region=eu-central-1 region_code=ec1 az_ids=euc1-az1,euc1-az2,euc1-az3 dr_region=eu-west-1 dr_region_code=ew1"
+    # Core stacks: profile core takes exactly the core accounts' stages, each
+    # in its own account, outside the EU.
+    "fnx-ue1-security|a core stack is a core account's stack|stage=dev account=dev"
+    "fnx-ue1-dev|stage security is a core account's: its stack takes profile core|stage=security account=security"
+    "fnx-ue1-security|account audit does not belong to stage security|account=audit"
+    "fnx-ue1-security|the EU regions are exactly the prod-eu account's|region=eu-west-1 region_code=ew1"
+    "fnx-ue1-security|region_code ue2 is not|region_code=ue2"
     # Shell injection through an answer: refused by the field pattern, and the
     # command substitution never runs (no INJECTED file anywhere).
     "fnx-ue2-prod|One or more email addresses|critical_alerts=$INJECTION"
@@ -115,7 +125,7 @@ REFUSALS=(
     "fnx-ue1-dev|\"tenant\":|tenant=$TENANT_INJECTION"
     "fnx-ue1-dev|\"account\":|account=$ACCOUNT_INJECTION"
     "fnx-ue1-dev|\"region_code\":|region_code=$CODE_INJECTION"
-    "fnx-ue1-dev|(valid values: dev, staging, prod)|stage=$STAGE_INJECTION"
+    "fnx-ue1-dev|(valid values: dev, staging, prod, audit, security, network, identity, artifacts)|stage=$STAGE_INJECTION"
     "fnx-ue1-dev|(valid values: us-east-1, us-east-2, us-west-2, eu-west-1, eu-central-1)|region=$REGION_INJECTION"
 )
 
@@ -201,7 +211,7 @@ load() {
     local env="$1" line key override seen=" "
     shift
     sets=()
-    tenant="" stage="" region="" code=""
+    tenant="" stage="" region="" code="" profile=""
     while IFS= read -r line || [[ -n "$line" ]]; do
         case "$line" in ''|'#'*) continue ;; esac
         key="${line%%=*}"
@@ -215,6 +225,7 @@ load() {
             stage) stage="${line#*=}" ;;
             region) region="${line#*=}" ;;
             region_code) code="${line#*=}" ;;
+            profile) profile="${line#*=}" ;;
         esac
     done < "$env"
     for override in "$@"; do
@@ -262,7 +273,7 @@ imports() {
 
 # golden <env>: regenerate its stack; returns 1 on any difference.
 golden() {
-    local env="$1" stack kind rc=0
+    local env="$1" stack kind wired rc=0
     stack="$(basename "$env" .env)"
     load "$env"
     if [[ "$tenant-$code-$stage" != "$stack" ]]; then
@@ -299,9 +310,12 @@ golden() {
         cat "$out/$stack.generate.log" >&2
         return 1
     fi
-    # The wire hook ran (it found the reference stack already wired).
-    if ! logged "$out/$stack.generate.log" "is already wired"; then
-        echo "ERROR $stack: the wire hook did not report $stack as already wired:" >&2
+    # The wire hook ran (it found the reference stack already wired, or a
+    # core stack, which it leaves unwired).
+    wired="is already wired"
+    [[ "$profile" != "core" ]] || wired="is a core-account stack: nothing to wire"
+    if ! logged "$out/$stack.generate.log" "$stack $wired"; then
+        echo "ERROR $stack: the wire hook did not report \"$stack $wired\":" >&2
         cat "$out/$stack.generate.log" >&2
         rc=1
     fi
@@ -546,6 +560,8 @@ FRESH=(
     "fnx-ue2-prod|fnx-uw2-prod|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.26.0.0/16"
     # The EU backend: the prod-eu standby is wired into eu-west-1.yaml.
     "fnx-ec1-prod|fnx-ec1-prod|"
+    # A core account's second region: validated, left unwired (no line added).
+    "fnx-ue1-security|fnx-uw2-security|region=us-west-2 region_code=uw2"
 )
 us_root="${ROOT_FILES[0]}"
 eu_root="${ROOT_FILES[1]}"
@@ -560,6 +576,7 @@ grep -v -E '^ *- .*fnx-ec1-prod' "$out/fresh.eu.committed" > "$eu_root"
 cp "$us_root" "$out/fresh.us.base"
 cp "$eu_root" "$out/fresh.eu.base"
 fresh=()
+wired_fresh=0
 for case in "${FRESH[@]}"; do
     IFS='|' read -r golden_stack stack overrides <<< "$case"
     read -r -a override_list <<< "$overrides"
@@ -568,21 +585,31 @@ for case in "${FRESH[@]}"; do
         echo "ERROR fresh $stack: generating it failed:" >&2
         cat "$out/fresh.$stack.log" >&2
         fresh_ok=0
+    elif [[ "$profile" == "core" ]]; then
+        if ! logged "$out/fresh.$stack.log" "$stack is a core-account stack: nothing to wire" \
+            || logged "$out/fresh.$stack.log" "stack-wiring: added"; then
+            echo "ERROR fresh $stack: the wire hook did not leave the core stack unwired:" >&2
+            cat "$out/fresh.$stack.log" >&2
+            fresh_ok=0
+        fi
     elif ! logged "$out/fresh.$stack.log" "stack-wiring: added"; then
         echo "ERROR fresh $stack: the wire hook added nothing for it:" >&2
         cat "$out/fresh.$stack.log" >&2
         fresh_ok=0
+    else
+        wired_fresh=$((wired_fresh + 1))
     fi
     fresh+=("$stack")
 done
 if [[ "$fresh_ok" -eq 1 ]]; then
-    # The hook only adds lines: four per stack (its pattern pair, its plan and
-    # apply role ARNs), everything else byte for byte.
+    # The hook only adds lines: four per wired stack (its pattern pair, its
+    # plan and apply role ARNs; none for a core stack), everything else byte
+    # for byte.
     diff "$out/fresh.us.base" "$us_root" > "$out/fresh.root.diff" || true
     diff "$out/fresh.eu.base" "$eu_root" >> "$out/fresh.root.diff" || true
     if grep -v -e '^> ' -e '^[0-9,]*a[0-9,]*$' "$out/fresh.root.diff" > /dev/null \
-        || [[ "$(grep -c '^> ' "$out/fresh.root.diff")" -ne $((4 * ${#fresh[@]})) ]]; then
-        echo "ERROR fresh: $us_root and $eu_root changed by more than the $((4 * ${#fresh[@]})) added lines:" >&2
+        || [[ "$(grep -c '^> ' "$out/fresh.root.diff")" -ne $((4 * wired_fresh)) ]]; then
+        echo "ERROR fresh: $us_root and $eu_root changed by more than the $((4 * wired_fresh)) added lines:" >&2
         cat "$out/fresh.root.diff" >&2
         fresh_ok=0
     fi
@@ -637,12 +664,37 @@ if [[ "$fresh_ok" -eq 1 ]]; then
     fi
 fi
 if [[ "$fresh_ok" -eq 1 ]]; then
-    echo "fresh: ${fresh[*]} generated, wired ($((4 * ${#fresh[@]})) lines added to the root backends, a second run adds none) and pass every stack check"
+    echo "fresh: ${fresh[*]} generated, wired ($((4 * wired_fresh)) lines added to the root backends, a second run adds none) and pass every stack check"
 fi
 if [[ "$fresh_ok" -eq 1 && "$SWEEP" == "true" ]]; then
     # plan-sweep mirrors components/terraform with git ls-files.
     git init -q .
-    bash scripts/plan-sweep.sh "${fresh[@]}" || fresh_ok=0
+    # The fresh stacks plan-sweep's default would select (ci-stacks.py
+    # --plan-sweep's rule, over every resolved stack): a hosted-CI-disabled
+    # stack with nothing to plan (the fresh core stack) is skipped with its
+    # ::notice::; anything else it refuses fails here, as it fails the sweep.
+    if ! swept="$(python3 -B - "$out/fresh.json" "${fresh[@]}" <<'PY'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("ci_stacks", "workflows/scripts/common/ci-stacks.py")
+ci = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ci)
+stacks = json.load(open(sys.argv[1]))
+try:
+    selected = set(ci.plan_sweep_stacks(stacks))
+except ValueError as error:
+    sys.exit(f"::error::{error}")
+print(" ".join(name for name in sys.argv[2:] if name in selected))
+PY
+)"; then
+        echo "ERROR fresh: ci-stacks.py's plan-sweep selection failed" >&2
+        fresh_ok=0
+    elif [[ -z "$swept" ]]; then
+        echo "ERROR fresh: plan-sweep would select none of ${fresh[*]}" >&2
+        fresh_ok=0
+    else
+        read -r -a swept_list <<< "$swept"
+        bash scripts/plan-sweep.sh "${swept_list[@]}" || fresh_ok=0
+    fi
 fi
 [[ "$fresh_ok" -eq 1 ]] || failed="$failed fresh"
 clean_since "$out/fresh.before"
@@ -659,7 +711,7 @@ if [[ -n "$failed" ]]; then
     exit 1
 fi
 if [[ "$SWEEP" == "true" ]]; then
-    echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks and plan-sweep"
+    echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks, and plan-sweep passes the ${#swept_list[@]} it selects (${swept_list[*]})"
 else
-    echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order, the root backends untouched); $refused bad answer sets are refused; the ${#fresh[@]} fresh stacks (${fresh[*]}) are wired by the hook and pass every stack check"
+    echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order, the root backends untouched); $refused bad answer sets are refused; the ${#fresh[@]} fresh stacks (${fresh[*]}) are wired by the hook (a core stack left unwired) and pass every stack check"
 fi

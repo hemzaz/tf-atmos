@@ -1,0 +1,19 @@
+[[- $stack := printf "%s-%s-%s" .Config.tenant .Config.region_code .Config.stage -]]
+---
+# =============================================================================
+# [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
+# =============================================================================
+# A core-account stack (owner decision QE5): no instance yet. Its state goes to
+# [[ .Config.tenant ]]-ue1-root's bucket through the backend's root role
+# (stacks/orgs/[[ .Config.tenant ]]/_defaults.yaml), which trusts only the
+# management-account administrator, and its stage defaults keep it out of every
+# CI matrix (github.actions_enabled: false). So the first instance's PR adds to
+# [[ .Config.tenant ]]-ue1-root's root_write this stack's pattern pair
+# (check-state-keys.py) and, if needed, the [[ .Config.stage ]] account's
+# operator role in allowed_principal_arns.
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - mixins/region/[[ .Config.region ]]
+  - orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/_defaults
