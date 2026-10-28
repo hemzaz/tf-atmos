@@ -1,0 +1,11 @@
+sid: "DenyEC2WithNoIMDSv2"
+effect: "Deny"
+actions:
+  - "ec2:RunInstances"
+conditions:
+  - test: "StringNotEquals"
+    variable: "ec2:MetadataHttpTokens"
+    values:
+      - "required"
+resources:
+  - "arn:aws:ec2:*:*:instance/*"

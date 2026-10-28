@@ -1,0 +1,17 @@
+sid: "DenyIAMNoMFA"
+effect: "Deny"
+not_actions:
+  - "iam:CreateVirtualMFADevice"
+  - "iam:EnableMFADevice"
+  - "iam:GetUser"
+  - "iam:ListMFADevices"
+  - "iam:ListVirtualMFADevices"
+  - "iam:ResyncMFADevice"
+  - "sts:GetSessionToken"
+conditions:
+  - test: "BoolIfExists"
+    variable: "aws:MultiFactorAuthPresent"
+    values:
+      - "false"
+resources:
+  - "*"

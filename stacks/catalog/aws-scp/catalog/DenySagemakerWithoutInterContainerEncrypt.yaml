@@ -1,0 +1,19 @@
+sid: "DenySagemakerWithoutInterContainerEncrypt"
+effect: "Deny"
+actions:
+  - "sagemaker:CreateAutoMLJob"
+  - "sagemaker:CreateDataQualityJobDefinition"
+  - "sagemaker:CreateHyperParameterTuningJob"
+  - "sagemaker:CreateModelBiasJobDefinition"
+  - "sagemaker:CreateModelExplainabilityJobDefinition"
+  - "sagemaker:CreateModelQualityJobDefinition"
+  - "sagemaker:CreateMonitoringSchedule"
+  - "sagemaker:CreateProcessingJob"
+  - "sagemaker:CreateTrainingJob"
+conditions:
+  - test: "Bool"
+    variable: "sagemaker:InterContainerTrafficEncryption"
+    values:
+      - "false"
+resources:
+  - "*"

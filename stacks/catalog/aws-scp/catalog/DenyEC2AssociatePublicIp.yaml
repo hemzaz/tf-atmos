@@ -1,0 +1,11 @@
+sid: "DenyEC2AssociatePublicIp"
+effect: "Deny"
+actions:
+  - "ec2:RunInstances"
+conditions:
+  - test: "Bool"
+    variable: "ec2:AssociatePublicIpAddress"
+    values:
+      - "true"
+resources:
+  - "arn:aws:ec2:*:*:network-interface/*"

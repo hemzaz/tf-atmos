@@ -1,0 +1,123 @@
+# This policy denies instance types that do not support Encryption-in-Transit as
+# described in the following document:
+# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/data-protection.html#encryption-transit
+# and enumerated by the following command (adapted from the command specified in the documentation):
+#
+#      aws --region us-east-1 ec2 describe-instance-types \
+#        --filters Name=network-info.encryption-in-transit-supported,Values=true \
+#        --query "InstanceTypes[*].[InstanceType]" --output text | \
+#          cut -f 1 -d. | sort | uniq | awk '{print "        - " $0 ".*"}'
+#
+# However, that the command only lists instance types available in the specified region. To be
+# fully comprehensive, the command should be run in all regions where instances are launched.
+# As a shortcut, we only run the command in the default regions (those that do not require opt-in).
+# To date, it appears that the combination of us-east-1, us-east-2, us-west-2, and eu-west-1
+# regions combined appear to cover all instance types.
+#
+# In order to fit within the 5120-character limit for policies
+# (See https://docs.aws.amazon.com/organizations/latest/userguide/org_troubleshoot_policies.html )
+# only the instance family is checked, not the specific instance type. AWS support
+# has confirmed that this is in fact correct, and spot checking has failed to
+# find any instance families that have mixed support for encryption in transit based on size.
+sid: "DenyEC2InstancesWithoutEncryptionInTransit"
+effect: "Deny"
+actions:
+  - "ec2:RunInstances"
+conditions:
+  - test: "StringNotLike"
+    variable: "ec2:InstanceType"
+    values:
+      # updated 2025-02-14
+      - c5a.*
+      - c5ad.*
+      - c5n.*
+      - c6a.*
+      - c6gn.*
+      - c6i.*
+      - c6id.*
+      - c6in.*
+      - c7a.*
+      - c7g.*
+      - c7gd.*
+      - c7gn.*
+      - c7i-flex.*
+      - c7i.*
+      - c8g.*
+      - d3.*
+      - d3en.*
+      - dl1.*
+      - dl2q.*
+      - f2.*
+      - g4ad.*
+      - g4dn.*
+      - g5.*
+      - g6.*
+      - g6e.*
+      - gr6.*
+      - hpc6a.*
+      - hpc6id.*
+      - hpc7a.*
+      - hpc7g.*
+      - i3en.*
+      - i4g.*
+      - i4i.*
+      - i7ie.*
+      - i8g.*
+      - im4gn.*
+      - inf1.*
+      - inf2.*
+      - is4gen.*
+      - m5dn.*
+      - m5n.*
+      - m5zn.*
+      - m6a.*
+      - m6i.*
+      - m6id.*
+      - m6idn.*
+      - m6in.*
+      - m7a.*
+      - m7g.*
+      - m7gd.*
+      - m7i-flex.*
+      - m7i.*
+      - m8g.*
+      - p3dn.*
+      - p4d.*
+      - p5.*
+      - p5e.*
+      - p5en.*
+      - r5dn.*
+      - r5n.*
+      - r6a.*
+      - r6i.*
+      - r6id.*
+      - r6idn.*
+      - r6in.*
+      - r7a.*
+      - r7g.*
+      - r7gd.*
+      - r7i.*
+      - r7iz.*
+      - r8g.*
+      - trn1.*
+      - trn1n.*
+      - trn2.*
+      - u-12tb1.*
+      - u-18tb1.*
+      - u-24tb1.*
+      - u-3tb1.*
+      - u-6tb1.*
+      - u-9tb1.*
+      - u7i-12tb.*
+      - u7i-6tb.*
+      - u7i-8tb.*
+      - u7in-16tb.*
+      - u7in-24tb.*
+      - u7in-32tb.*
+      - vt1.*
+      - x2idn.*
+      - x2iedn.*
+      - x2iezn.*
+      - x8g.*
+resources:
+  - "arn:aws:ec2:*:*:instance/*"

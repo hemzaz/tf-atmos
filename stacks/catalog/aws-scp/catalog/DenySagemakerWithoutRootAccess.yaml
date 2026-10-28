@@ -1,0 +1,12 @@
+sid: "DenySagemakerWithoutRootAccess"
+effect: "Deny"
+actions:
+  - "sagemaker:CreateNotebookInstance"
+  - "sagemaker:UpdateNotebookInstance"
+conditions:
+  - test: "StringNotEquals"
+    variable: "sagemaker:RootAccess"
+    values:
+      - "Enabled"
+resources:
+  - "*"

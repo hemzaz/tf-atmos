@@ -1,0 +1,13 @@
+sid: "DenyEC2ApiWithNoMFA"
+effect: "Deny"
+actions:
+  - "ec2:StopInstances"
+  - "ec2:TerminateInstances"
+  - "ec2:SendDiagnosticInterrupt"
+conditions:
+  - test: "BoolIfExists"
+    variable: "aws:MultiFactorAuthPresent"
+    values:
+      - "false"
+resources:
+  - "*"

@@ -1,0 +1,12 @@
+sid: "DenyS3IncorrectEncryptionHeader"
+effect: "Deny"
+actions:
+  - "s3:PutObject"
+conditions:
+  - test: "StringNotEquals"
+    variable: "s3:x-amz-server-side-encryption"
+    values:
+      - "AES256"
+      - "aws:kms"
+resources:
+  - "*"

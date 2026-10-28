@@ -1,0 +1,6 @@
+sid: "DenyLeavingOrganization"
+effect: "Deny"
+actions:
+  - "organizations:LeaveOrganization"
+resources:
+  - "*"

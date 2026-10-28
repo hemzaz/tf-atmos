@@ -2,7 +2,8 @@
 """Fail a vendored component (QE1) that does not match its vendor.yaml pin or was edited in place.
 
 Offline: each source pins an exact cloudposse-terraform-components tag via ?ref={{ .Version }}
-into one components/terraform/<name>; vendor.lock.yaml holds a receipt per target and no other;
+into one components/terraform/<name> (or a statement catalog into stacks/catalog/<name>/catalog);
+vendor.lock.yaml holds a receipt per target and no other;
 each receipt file (a regular file at a relative path inside the target) is on disk with its
 sha256; nothing else is in the target (no extra file, symlink or empty directory) but
 .terraform.lock.hcl and *_override.tf. Atmos 1.229's receipt omits the version (`atmos vendor
@@ -27,7 +28,10 @@ MANIFEST, LOCK = "vendor.yaml", "vendor.lock.yaml"
 VERSION = re.compile(r"^v?\d+\.\d+\.\d+$")
 SOURCE = re.compile(r"^github\.com/cloudposse-terraform-components/aws-[a-z0-9-]+\.git"
                     r"(//[A-Za-z0-9_./-]+)?\?ref=\{\{ ?\.Version ?\}\}$")
-TARGET = re.compile(r"^components/terraform/[a-z0-9][a-z0-9-]*$")
+# A component's src into components/terraform/<name>, or a Cloud Posse statement catalog that a
+# stack !includes (aws-scp's catalog/) into stacks/catalog/<name>/catalog: atmos.yaml stacks
+# included_paths is orgs/** only, so its files are never read as stack manifests.
+TARGET = re.compile(r"^(components/terraform/[a-z0-9][a-z0-9-]*|stacks/catalog/[a-z0-9][a-z0-9-]*/catalog)$")
 HOUSE_FILES = (".terraform.lock.hcl", "*_override.tf")
 # Never committed: Terraform's working dir and the files Atmos writes before a run.
 IGNORED = {".terraform", "backend.tf.json", "providers_override.tf.json"}
@@ -91,7 +95,8 @@ def check_manifest(manifest):
             errs.append(f"{name}: source is not github.com/cloudposse-terraform-components/aws-<x>.git[//dir]?ref={{{{ .Version }}}}")
         tgt = src.get("targets") or []
         if len(tgt) != 1 or not TARGET.match(str(tgt[0])) or tgt[0] in targets:
-            errs.append(f"{name}: want one target components/terraform/<name> no other source uses, got {tgt}")
+            errs.append(f"{name}: want one target components/terraform/<name> or stacks/catalog/<name>/catalog"
+                        f" no other source uses, got {tgt}")
         targets.update(tgt)
     return errs
 

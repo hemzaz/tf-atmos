@@ -28,12 +28,22 @@
 # and the preflight does not yet demand the core account IDs or check their
 # vars (account emails, import ids): enabling them makes it do both.
 #
-# Deploy order (E3e): four phases, not one layer, because
+# Deploy order (E3e): five phases, not one layer, because
 # check-deploy-layers.py fails a !terraform.state read of an instance in the
 # same or a later phase: 1. aws-organization; 2. the core and plat OUs;
-# 3. the eu OU (reads plat); 4. the accounts (read their OU). Each reader
-# already names its target in dependencies.components, which
-# check-dependencies.py holds once the instances are enabled.
+# 3. the eu OU (reads plat) and the core and plat SCPs (read their OU);
+# 4. the eu SCP (reads eu); 5. the accounts (read their OU). The SCPs come
+# before the accounts so no account is created in or moved into an OU
+# without its guardrails. Each reader already names its target in
+# dependencies.components, which check-dependencies.py holds once the
+# instances are enabled.
+#
+# SCPs (E3c, catalog/aws-scp): one instance per policy and OU, attached to
+# OUs only, never the organization root (check-scp-policies.py). Before an
+# imported account already running workloads lands in an OU, check that it
+# uses no region the region-* policies deny, and that its deploy roles match
+# security-services' exception (<stack>-ci-apply, OrganizationAccountAccessRole;
+# E4 adds its own).
 #
 # OUs, Cloud Posse's reference architecture (aws-organizational-unit README):
 #   core  the core accounts (root stays at the organization root; audit,
@@ -50,6 +60,7 @@ import:
   - catalog/aws-organization/defaults
   - catalog/aws-organizational-unit/defaults
   - catalog/aws-account/defaults
+  - catalog/aws-scp/defaults
 
 settings:
   context:
@@ -233,3 +244,96 @@ components:
         name: "{{ .settings.context.tenant }}-prod-eu"
         account_email: "aws+{{ .settings.context.tenant }}-prod-eu@example.com"
         parent_id: !terraform.state aws-organizational-unit/eu organizational_unit_id
+
+    # Service control policies (E3c): one per policy and OU (catalog/aws-scp),
+    # each policy named <tenant>-gbl-root-<instance>. Never the organization
+    # root (organization_root_id) as a target.
+
+    aws-scp/baseline-core:
+      metadata:
+        component: aws-scp
+        enabled: false
+        inherits:
+          - aws-scp/baseline-defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/core
+      vars:
+        name: baseline-core
+        target_ids:
+          - !terraform.state aws-organizational-unit/core organizational_unit_id
+
+    aws-scp/baseline-plat:
+      metadata:
+        component: aws-scp
+        enabled: false
+        inherits:
+          - aws-scp/baseline-defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/plat
+      vars:
+        name: baseline-plat
+        target_ids:
+          - !terraform.state aws-organizational-unit/plat organizational_unit_id
+
+    aws-scp/security-services-core:
+      metadata:
+        component: aws-scp
+        enabled: false
+        inherits:
+          - aws-scp/security-services-defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/core
+      vars:
+        name: security-services-core
+        target_ids:
+          - !terraform.state aws-organizational-unit/core organizational_unit_id
+
+    aws-scp/security-services-plat:
+      metadata:
+        component: aws-scp
+        enabled: false
+        inherits:
+          - aws-scp/security-services-defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/plat
+      vars:
+        name: security-services-plat
+        target_ids:
+          - !terraform.state aws-organizational-unit/plat organizational_unit_id
+
+    # No region policy on core: Cloud Posse's reference organization attaches
+    # the same baseline to core and plat and no region policy at all (legacy
+    # account component README); QE3 restricts the workload OUs. The core
+    # accounts hold the organization-wide security services' delegated
+    # administrators and aggregators, which must reach every region they cover.
+    aws-scp/region-plat:
+      metadata:
+        component: aws-scp
+        enabled: false
+        inherits:
+          - aws-scp/region-plat-defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/plat
+      vars:
+        name: region-plat
+        target_ids:
+          - !terraform.state aws-organizational-unit/plat organizational_unit_id
+
+    aws-scp/region-eu:
+      metadata:
+        component: aws-scp
+        enabled: false
+        inherits:
+          - aws-scp/region-eu-defaults
+      dependencies:
+        components:
+          - component: aws-organizational-unit/eu
+      vars:
+        name: region-eu
+        target_ids:
+          - !terraform.state aws-organizational-unit/eu organizational_unit_id
