@@ -517,5 +517,31 @@ class VendoredDnsKindsTest(unittest.TestCase):
         ])
 
 
+    def test_duplicate_zone_names_fail(self):
+        house = instance("dns", {"zones": {"dup": {"name": DEV}}})
+        self.assert_result(cp_stacks(**{"old/main": house}), errors=[f"dev: public zone {DEV} is held twice: old/main zone dup, dns-delegated zone dev"])
+        stacks = cp_stacks()
+        stacks["staging"] = {"components": {"terraform": {"dns-delegated": stacks["dev"]["components"]["terraform"]["dns-delegated"]}}}
+        self.assert_result(stacks, errors=[f"dev: aws-dns-delegated zone {DEV} is held by stacks dev, staging"])
+        stacks["staging"]["components"]["terraform"]["dns-delegated"] = dict(
+            stacks["dev"]["components"]["terraform"]["dns-delegated"], settings={"context": {"stage": "fixtures"}})
+        self.assert_result(stacks)
+
+    def test_bad_reads_and_names(self):
+        stacks = cp_stacks(**{"acm/main": acm("!terraform.state dns-delegatd .default_dns_zone_id", (DEV, []))})
+        self.assert_result(stacks, errors=["acm/main: zone_id `!terraform.state dns-delegatd .default_dns_zone_id` reads dns-delegatd in dev, which does not exist"])
+        stacks = cp_stacks()
+        stacks["dev"]["components"]["terraform"]["dns-delegated"]["vars"]["dns_private_zone_enabled"] = "true"
+        errors, _ = check_domains.check(stacks)
+        self.assertIn("acm/main: zone_id reads dns-delegated .default_dns_zone_id, a private zone", errors[0])
+        stacks = cp_stacks()
+        stacks["dev"]["components"]["terraform"]["network/main"]["vars"]["external_zones"]["delegated"] = {"name": "dev.fnx-svc.exmaple.net"}
+        errors, _ = check_domains.check(stacks)
+        self.assertIn("external_zones.delegated.name dev.fnx-svc.exmaple.net is no deployable public zone of any stack", errors[-1])
+
+    def test_quoted_false_create_root_delegation_writes_no_ns(self):
+        child = instance("aws-dns-delegated", {"zone_config": [{"subdomain": "x", "zone_name": DEV}], "create_root_delegation": "false"})
+        self.assert_result(cp_stacks(child=child), errors=["but sets create_root_delegation: false"])
+
 if __name__ == "__main__":
     unittest.main()

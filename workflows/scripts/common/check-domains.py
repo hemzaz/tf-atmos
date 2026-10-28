@@ -38,6 +38,7 @@ stack zone) and aws-dns-delegated <subdomain>.<zone_name> (unless private), whic
 own NS record into zone_name: a deployable public zone of some stack and, in its own stack,
 its closest parent. A zone_id may read an aws-dns-delegated .default_dns_zone_id (its first
 zone), and a dns record's zone_name may be an external_zones key (by name or such a zone_id).
+A public zone name is held once per stack, and an aws-dns-delegated zone by one stack.
 Exits 1 on any violation.
 """
 import importlib.util
@@ -72,6 +73,11 @@ class Zone(NamedTuple):
 def dicts(value) -> dict:
     """The dict entries of a map (null or malformed entries skipped)."""
     return {k: v for k, v in (value or {}).items() if isinstance(v, dict)} if isinstance(value, dict) else {}
+
+
+def flag_on(value) -> bool:
+    """Whether Terraform reads value as a true bool (check-data-residency's rule)."""
+    return value is not None and value is not False and str(value).strip().lower() != "false"
 
 
 def normalize(name: str) -> str:
@@ -129,10 +135,14 @@ def state_reference(stacks: dict, stack_name: str, value, output: str, module: s
 def resolve_zone(stacks: dict, stack_name: str, zone_id) -> tuple[Optional[dict], Optional[str]]:
     """(zone, None), or (None, why it cannot be resolved), or (None, None) for a literal id."""
     ref = state_reference(stacks, stack_name, zone_id, "default_dns_zone_id", DELEGATED, keyed=False)
+    if isinstance(ref, str) and "does not read" not in ref:
+        return None, ref
     if isinstance(ref, tuple):
         first = next(iter(cp_zones(ref[0], ref[1], private=True)), None)
         if first is None:
             return None, f"reads {ref[0]} .default_dns_zone_id, but {ref[0]} has no zone_config entry"
+        if not is_public(first.config):
+            return None, f"reads {ref[0]} .default_dns_zone_id, a private zone (dns_private_zone_enabled)"
         return first.config, None
     ref = state_reference(stacks, stack_name, zone_id, "zone_ids", "dns")
     if ref is None or isinstance(ref, str):
@@ -154,14 +164,14 @@ def cp_zones(name: str, instance: dict, private: bool = False) -> list[Zone]:
     module, variables = check_dependencies.module_name(name, instance), instance.get("vars") or {}
     if module == PRIMARY:
         return [Zone(name, d, d, {"name": d, "kind": PRIMARY}) for d in variables.get("domain_names") or [] if isinstance(d, str)]
-    is_private = str(variables.get("dns_private_zone_enabled")).lower() == "true"
+    is_private = flag_on(variables.get("dns_private_zone_enabled"))
     if module != DELEGATED or (is_private and not private):
         return []
     return [
         Zone(name, z["subdomain"], f"{z['subdomain']}.{z['zone_name']}", {
             "name": f"{z['subdomain']}.{z['zone_name']}", "kind": DELEGATED, "zone_name": z["zone_name"],
             "vpc_associations": ["private"] if is_private else [],
-            "writes_ns": variables.get("create_root_delegation") is not False,
+            "writes_ns": variables.get("create_root_delegation") is None or flag_on(variables["create_root_delegation"]),
         })
         for z in variables.get("zone_config") or []
         if isinstance(z, dict) and isinstance(z.get("subdomain"), str) and isinstance(z.get("zone_name"), str)
@@ -179,7 +189,7 @@ def public_zones(instances: dict) -> list[Zone]:
     ] + [z for name, i in sorted(instances.items()) if check_dependencies.is_deployable(i) for z in cp_zones(name, i)]
 
 
-def record_zone(stacks: dict, stack_name: str, variables: dict, key) -> tuple[Optional[dict], Optional[str]]:
+def record_zone(stacks: dict, stack_name: str, variables: dict, key, everywhere=None) -> tuple[Optional[dict], Optional[str]]:
     """The zone a dns record's zone_name names (zones, else external_zones), or (None, why)."""
     own = dicts(variables.get("zones")).get(key) or {}
     if isinstance(own.get("name"), str):
@@ -188,6 +198,8 @@ def record_zone(stacks: dict, stack_name: str, variables: dict, key) -> tuple[Op
     if external is None:
         return None, f"zone_name {key!r} is not a key of zones or external_zones"
     if isinstance(external.get("name"), str):
+        if everywhere is not None and normalize(external["name"]) not in everywhere:
+            return None, f"external_zones.{key}.name {external['name']} is no deployable public zone of any stack"
         return {"name": external["name"]}, None
     zone, problem = resolve_zone(stacks, stack_name, external.get("zone_id"))
     if zone is not None:
@@ -219,14 +231,14 @@ def placement_error(name: str, zone: dict, zones: list[Zone], ns: bool = False) 
     return None
 
 
-def dns_errors(stacks: dict, stack_name: str, where: str, variables: dict, zones: list[Zone]) -> tuple[list, list]:
+def dns_errors(stacks: dict, stack_name: str, where: str, variables: dict, zones: list[Zone], everywhere: set) -> tuple[list, list]:
     """(errors, warnings) of a dns instance's records."""
     errors, warnings = [], []
     for record_id, record in sorted(dicts(variables.get("records")).items()):
         name, zone_key = record.get("name"), record.get("zone_name")
         if not isinstance(name, str):
             continue
-        zone, problem = record_zone(stacks, stack_name, variables, zone_key)
+        zone, problem = record_zone(stacks, stack_name, variables, zone_key, everywhere)
         if zone is None:
             literal = problem and problem.endswith("not checked")
             (warnings if literal else errors).append(f"{where} record {record_id}: {problem}")
@@ -425,12 +437,36 @@ def certificate_error(ref: tuple, domain: str) -> Optional[str]:
     return None
 
 
+def duplicate_errors(stacks: dict) -> list[str]:
+    """A public zone name held twice in one stack, or an aws-dns-delegated zone by two real stacks.
+
+    Two authoritative zones for one name answer differently, and two aws-dns-delegated
+    instances overwrite each other's NS record in the parent (root_ns allow_overwrite).
+    """
+    errors, delegated = [], {}
+    for stack_name, stack in sorted(stacks.items()):
+        instances = stack.get("components", {}).get("terraform", {})
+        held: dict = {}
+        for zone in public_zones(instances):
+            held.setdefault(normalize(zone.name), []).append(zone.label)
+            stage = ((instances[zone.instance].get("settings") or {}).get("context") or {}).get("stage")
+            if zone.config.get("kind") == DELEGATED and stage != check_dependencies.fixtures.FIXTURE_STAGE:
+                delegated.setdefault(normalize(zone.name), set()).add(stack_name)
+        errors += [f"{stack_name}: public zone {name} is held twice: {', '.join(labels)}" for name, labels in held.items() if len(labels) > 1]
+    errors += [
+        f"{min(owners)}: aws-dns-delegated zone {name} is held by stacks {', '.join(sorted(owners))}: their NS records overwrite each other"
+        for name, owners in sorted(delegated.items()) if len(owners) > 1
+    ]
+    return errors
+
+
 def check(stacks: dict) -> tuple[list[str], list[str]]:
     """(errors, warnings)."""
     errors, warnings = [], []
     everywhere = {
         normalize(z.name) for stack in stacks.values() for z in public_zones(stack.get("components", {}).get("terraform", {}))
     }
+    errors += duplicate_errors(stacks)
     for stack_name, stack in sorted(stacks.items()):
         instances = stack.get("components", {}).get("terraform", {})
         zones = public_zones(instances)
@@ -442,7 +478,7 @@ def check(stacks: dict) -> tuple[list[str], list[str]]:
             variables = instance.get("vars") or {}
             where = f"{stack_name}: {name}"
             if module == "dns":
-                found, warned = dns_errors(stacks, stack_name, where, variables, zones)
+                found, warned = dns_errors(stacks, stack_name, where, variables, zones, everywhere)
                 errors, warnings = errors + found, warnings + warned
                 continue
             if module == "apigateway":

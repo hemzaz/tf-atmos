@@ -18,9 +18,9 @@ deployable instance:
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
     nor dnssec_enabled: its signing KMS key can only be in us-east-1 (owner decision B5:
     no key there for an EU stack). The same holds for its external_zones entries;
-  - if an aws-dns-delegated instance (vendored), delegates no zone_config entry from a
-    zone_name held (aws-dns-primary, aws-dns-delegated or dns public zone) by a stack that is
-    not GDPR-scoped: its NS record would live in a US account (B5: no EU zone delegated from the US);
+  - holds no public zone (dns zones, vendored aws-dns-primary domain_names and aws-dns-delegated
+    zones) whose closest held ancestor zone a stack that is not GDPR-scoped holds, and names no
+    such zone in external_zones: it would hang off, or write into, a US account (B5);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
     each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions;
   - sets none of GLOBAL_SERVICE_EMAIL_VARS: vars a global AWS service hosted in us-east-1
@@ -88,6 +88,9 @@ EXEMPTIONS: tuple = (
     Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
     Exemption("apigateway/main", "vars.health_check_regions", "ap-southeast-1", _CHECKERS),
 )
+
+
+US_PARENT = "an EU zone may not hang off, or write into, a zone in a US account"
 
 
 # component -> vars a global service (hosted in us-east-1) stores as email subscribers.
@@ -185,35 +188,45 @@ def query_logging_errors(where: str, zones: Any, field: str = "zones") -> list[s
     ]
 
 
+def held_zones(name: str, instance: dict) -> list[str]:
+    """The public zone names a dns, aws-dns-primary or aws-dns-delegated instance holds (normalized)."""
+    component, variables = (instance.get("metadata") or {}).get("component") or name, instance.get("vars") or {}
+    names = []
+    if component == "dns" and isinstance(variables.get("zones"), dict):
+        names = [z.get("name") for z in variables["zones"].values() if isinstance(z, dict) and not z.get("vpc_associations")]
+    elif component == "aws-dns-primary":
+        names = list(variables.get("domain_names") or [])
+    elif component == "aws-dns-delegated" and not flag_on(variables.get("dns_private_zone_enabled")):
+        names = [f"{z.get('subdomain')}.{z.get('zone_name')}" for z in variables.get("zone_config") or [] if isinstance(z, dict)]
+    return [n.lower().rstrip(".") for n in names if isinstance(n, str)]
+
+
 def zone_holders(stacks: dict) -> dict:
-    """Public zone name -> the stacks whose deployable dns, aws-dns-primary or aws-dns-delegated instances hold it."""
+    """Public zone name -> the stacks whose deployable instances hold it."""
     holders: dict = {}
     for stack_name, stack in stacks.items():
         for name, instance in instances(stack).items():
-            component, variables = (instance.get("metadata") or {}).get("component") or name, instance.get("vars") or {}
-            names = []
-            if component == "dns" and isinstance(variables.get("zones"), dict):
-                names = [z.get("name") for z in variables["zones"].values() if isinstance(z, dict) and not z.get("vpc_associations")]
-            elif component == "aws-dns-primary":
-                names = list(variables.get("domain_names") or [])
-            elif component == "aws-dns-delegated" and not flag_on(variables.get("dns_private_zone_enabled")):
-                names = [f"{z.get('subdomain')}.{z.get('zone_name')}" for z in variables.get("zone_config") or [] if isinstance(z, dict)]
-            for zone in names:
-                if isinstance(zone, str):
-                    holders.setdefault(zone.lower().rstrip("."), set()).add(stack_name)
+            for zone in held_zones(name, instance):
+                holders.setdefault(zone, set()).add(stack_name)
     return holders
 
 
-def delegation_errors(where: str, instance: dict, scoped: set, holders: dict) -> list[str]:
-    """An EU aws-dns-delegated zone whose parent zone_name a stack that is not GDPR-scoped holds."""
+def zone_errors(where: str, name: str, instance: dict, scoped: set, holders: dict) -> list[str]:
+    """An EU zone whose closest held ancestor, or an EU external_zones name, a non-GDPR stack holds.
+
+    The EU zone then resolves only through, and is delegated from, a US account (B5).
+    """
     errors = []
-    for entry in (instance.get("vars") or {}).get("zone_config") or []:
-        parent = str((entry or {}).get("zone_name") or "").lower().rstrip(".") if isinstance(entry, dict) else ""
-        for holder in sorted(holders.get(parent, set()) - scoped):
-            errors.append(
-                f"{where} delegates {entry.get('subdomain')}.{parent} from {parent}, held in {holder}, which is "
-                "not GDPR-scoped: the EU zone's NS record would be written into, and controlled from, a US account"
-            )
+    for zone in held_zones(name, instance):
+        labels = zone.split(".")
+        ancestor = next((".".join(labels[i:]) for i in range(1, len(labels)) if ".".join(labels[i:]) in holders), None)
+        for holder in sorted(holders.get(ancestor, set()) - scoped):
+            errors.append(f"{where} zone {zone} sits below {ancestor}, held in {holder}, which is not GDPR-scoped: {US_PARENT}")
+    externals = (instance.get("vars") or {}).get("external_zones")
+    for key, external in sorted((externals if isinstance(externals, dict) else {}).items()):
+        target = str((external or {}).get("name") or "").lower().rstrip(".") if isinstance(external, dict) else ""
+        for holder in sorted(holders.get(target, set()) - scoped):
+            errors.append(f"{where} external_zones.{key} names {target}, held in {holder}, which is not GDPR-scoped: {US_PARENT}")
     return errors
 
 
@@ -236,8 +249,7 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
                 f"{where} sets dnssec_enabled: Route 53 signs only with a KMS key in us-east-1, "
                 "outside the EU"
             )
-    if component == "aws-dns-delegated":
-        errors += delegation_errors(where, instance, scoped, holders or {})
+    errors += zone_errors(where, name, instance, scoped, holders or {})
     if component == "security-monitoring" and flag_on((instance.get("vars") or {}).get("enable_alert_enrichment")):
         errors.append(
             f"{where} sets enable_alert_enrichment: its Lambda sends findings to Slack/PagerDuty, "
