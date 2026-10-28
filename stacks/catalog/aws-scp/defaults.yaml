@@ -15,10 +15,13 @@
 # Owner decision QE3 (a), attached to OUs only, never the organization root
 # (SCPs never apply to the management account, and a root attachment would
 # reach every OU at once). scripts/check-scp-policies.py (lint) fails a root
-# target, a policy over the 5,120-character limit, an OU with more than four
-# of these (AWS's five per target includes FullAWSAccess, which every OU keeps:
-# these are deny lists, so FullAWSAccess is the Allow each level needs), a
-# region list missing a global service, and a stack in a region its OU denies.
+# or literal target, a policy over the 5,120-character limit, an OU with more
+# than four of these (AWS's five per target includes FullAWSAccess, which every
+# OU keeps: these are deny lists, so FullAWSAccess is the Allow each level
+# needs), a NotAction or deny-all with no region or principal condition, a
+# misspelled condition key, a region list missing a global service, a stack in
+# a region its OU denies or denied a us-east-1 call its components make (the
+# relay, DNSSEC, query logging), and an EU account allowed data calls there.
 #
 #   policy             core  plat  eu   source
 #   baseline            x     x    (1)  Cloud Posse catalog (catalog/*.yaml)
@@ -241,10 +244,29 @@ components:
               - "waf-regional:*"
               - "waf:*"
               - "wafv2:*"
-              # Not Control Tower's: region-eu's us-east-1 relay (below). The
-              # second statement of each policy denies them outside its regions.
-              - "cloudwatch:*"
-              - "events:*"
+              # Not Control Tower's: the us-east-1 relay's alarm, rule and
+              # targets, the lifecycle and refresh calls the provider makes
+              # (region-eu, below), never cloudwatch:* or events:*: PutEvents,
+              # CreateArchive, PutMetricData and PutDashboard stay regional.
+              # The second statement of each policy (relay_actions, the same
+              # entries) denies these outside its regions.
+              - "cloudwatch:PutMetricAlarm"
+              - "cloudwatch:DeleteAlarms"
+              - "cloudwatch:DescribeAlarms"
+              - "cloudwatch:ListTagsForResource"
+              - "cloudwatch:TagResource"
+              - "cloudwatch:UntagResource"
+              - "events:PutRule"
+              - "events:DeleteRule"
+              - "events:DescribeRule"
+              - "events:EnableRule"
+              - "events:DisableRule"
+              - "events:PutTargets"
+              - "events:RemoveTargets"
+              - "events:ListTargetsByRule"
+              - "events:ListTagsForResource"
+              - "events:TagResource"
+              - "events:UntagResource"
             resources:
               - "*"
             conditions:
@@ -257,9 +279,24 @@ components:
                   - "eu-central-1"
           - sid: "DenyMonitoringOutsideAllowedRegions"
             effect: "Deny"
-            actions: &relay_services
-              - "cloudwatch:*"
-              - "events:*"
+            actions: &relay_actions
+              - "cloudwatch:PutMetricAlarm"
+              - "cloudwatch:DeleteAlarms"
+              - "cloudwatch:DescribeAlarms"
+              - "cloudwatch:ListTagsForResource"
+              - "cloudwatch:TagResource"
+              - "cloudwatch:UntagResource"
+              - "events:PutRule"
+              - "events:DeleteRule"
+              - "events:DescribeRule"
+              - "events:EnableRule"
+              - "events:DisableRule"
+              - "events:PutTargets"
+              - "events:RemoveTargets"
+              - "events:ListTargetsByRule"
+              - "events:ListTagsForResource"
+              - "events:TagResource"
+              - "events:UntagResource"
             resources:
               - "*"
             conditions:
@@ -273,8 +310,10 @@ components:
     # (apigateway health-check-alarm-relay.tf): Route 53 publishes the metric
     # only in us-east-1, so the alarm (cloudwatch) and the EventBridge rule and
     # targets (events) live there, holding no data (no SNS topic, key or log
-    # group, B5 round 5). The first statement exempts cloudwatch and events
-    # (the shared list), the second allows them in eu-* and us-east-1 only.
+    # group, B5 round 5). The first statement exempts only the relay's own
+    # alarm, rule and target actions (the shared list), the second allows them
+    # in eu-* and us-east-1 only; every other cloudwatch and events action
+    # (PutEvents, CreateArchive, PutMetricData, PutDashboard) is eu-* only.
     # Effective regions are eu-west-1 and eu-central-1: region-plat still
     # applies.
     aws-scp/region-eu-defaults:
@@ -298,7 +337,7 @@ components:
                   - "eu-*"
           - sid: "DenyMonitoringOutsideEUButRelay"
             effect: "Deny"
-            actions: *relay_services
+            actions: *relay_actions
             resources:
               - "*"
             conditions:

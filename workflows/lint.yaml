@@ -296,11 +296,12 @@ workflows:
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-data-residency.py < "$stacks_json"
       # Service control policies (aws-scp in fnx-gbl-root) cannot be planned
-      # against AWS before they are applied: OU targets only (never the root),
-      # valid JSON within 5,120 characters, at most four per OU, global services
-      # exempt from every region deny, the deploy roles excepted from the
-      # security-service deny, and no stack in a region its account's OU denies
-      # (check-scp-policies.py).
+      # against AWS before they are applied: OU reads only as targets (never the
+      # root), valid JSON within 5,120 characters, at most four per OU, broad
+      # denies conditioned, global services exempt from every region deny, the
+      # deploy roles excepted from the security-service deny, every stack's
+      # account known, no stack in a region (or denied a us-east-1 call) its
+      # account's OU denies, EU accounts kept out of us-east-1 (check-scp-policies.py).
       - name: check-scp-policies
         type: shell
         command: |
