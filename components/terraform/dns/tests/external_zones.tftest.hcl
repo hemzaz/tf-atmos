@@ -10,7 +10,7 @@ mock_provider "aws" {
     defaults = { zone_id = "ZMAIN000000000000000", arn = "arn:aws:route53:::hostedzone/ZMAIN000000000000000", name_servers = ["ns-1.awsdns-01.org"] }
   }
   mock_data "aws_route53_zone" {
-    defaults = { name = "dev.fnx-svc.example.net", arn = "arn:aws:route53:::hostedzone/ZDELEGATED0000000000" }
+    defaults = { name = "dev.fnx-svc.example.net", arn = "arn:aws:route53:::hostedzone/ZDELEGATED0000000000", name_servers = ["ns-2.awsdns-02.org"] }
   }
   mock_resource "aws_kms_key" {
     defaults = { arn = "arn:aws:kms:us-east-1:111111111111:key/11111111-1111-1111-1111-111111111111", key_id = "11111111-1111-1111-1111-111111111111" }
@@ -34,7 +34,7 @@ mock_provider "aws" {
   override_during = plan
 
   mock_data "aws_route53_zone" {
-    defaults = { zone_id = "ZPRIMARY000000000000", arn = "arn:aws:route53:::hostedzone/ZPRIMARY000000000000" }
+    defaults = { zone_id = "ZPRIMARY000000000000", arn = "arn:aws:route53:::hostedzone/ZPRIMARY000000000000", name_servers = ["ns-3.awsdns-03.org"] }
   }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "222222222222" }
@@ -42,19 +42,19 @@ mock_provider "aws" {
 }
 
 variables {
-  region         = "us-east-2"
-  root_domain    = "dev.fnx-svc.example.net"
-  dnssec_enabled = true
+  region                      = "us-east-2"
+  root_domain                 = "dev.fnx-svc.example.net"
+  dnssec_enabled              = true
+  dns_account_assume_role_arn = "arn:aws:iam::222222222222:role/dns"
   zones = {
     internal = { name = "internal.dev.fnx-svc.example.net", vpc_associations = ["vpc-0123456789abcdef0"] }
   }
   external_zones = {
-    delegated = { zone_id = "ZDELEGATED0000000000", dnssec_enabled = true, enable_query_logging = true }
+    delegated = { zone_id = "ZDELEGATED0000000000", dnssec_enabled = true, enable_query_logging = true, parent_zone = "primary" }
     primary   = { name = "fnx-svc.example.net", dns_account = true }
   }
   records = {
-    delegated_ds = { zone_name = "primary", name = "dev.fnx-svc.example.net", type = "DS", records = ["12345 13 2 ABCDEF0123456789"] }
-    www          = { zone_name = "delegated", name = "www.dev.fnx-svc.example.net", type = "CNAME", records = ["app.example.org"] }
+    www = { zone_name = "delegated", name = "www.dev.fnx-svc.example.net", type = "CNAME", records = ["app.example.org"] }
   }
   tags = { Environment = "test" }
 }
@@ -111,11 +111,12 @@ run "records_target_external_zones_in_either_account" {
 
   assert {
     condition = (
-      aws_route53_record.dns_account_records["delegated_ds"].zone_id == "ZPRIMARY000000000000"
+      aws_route53_record.dns_account_records["delegation_ds_delegated"].zone_id == "ZPRIMARY000000000000"
+      && aws_route53_record.dns_account_records["delegation_ds_delegated"].name == "dev.fnx-svc.example.net"
+      && aws_route53_record.dns_account_records["delegation_ds_delegated"].records == toset(["12345 13 2 ABCDEF0123456789"])
       && aws_route53_record.records["www"].zone_id == "ZDELEGATED0000000000"
-      && !contains(keys(aws_route53_record.records), "delegated_ds")
     )
-    error_message = "A record in a dns_account external zone goes through aws.dns_account; one in a local external zone through the default provider."
+    error_message = "parent_zone writes the signed zone's DS into its dns_account parent through aws.dns_account; a record in a local external zone uses the default provider."
   }
 
   assert {
@@ -167,4 +168,48 @@ run "signing_needs_instance_dnssec" {
   }
 
   expect_failures = [var.external_zones]
+}
+
+run "ds_off_drops_the_parent_ds" {
+  command = plan
+
+  variables {
+    dnssec_ds_enabled = false
+  }
+
+  assert {
+    condition     = !contains(keys(aws_route53_record.dns_account_records), "delegation_ds_delegated") && length(aws_route53_hosted_zone_dnssec.zones) == 1
+    error_message = "dnssec_ds_enabled = false keeps SIGNING but drops the parent DS record."
+  }
+}
+
+run "parent_zone_needs_a_signed_entry_and_a_known_key" {
+  command = plan
+
+  variables {
+    external_zones = { delegated = { zone_id = "ZDELEGATED0000000000", parent_zone = "nope" } }
+  }
+
+  expect_failures = [var.external_zones]
+}
+
+run "dns_account_needs_its_role" {
+  command = plan
+
+  variables {
+    dns_account_assume_role_arn = null
+  }
+
+  expect_failures = [var.external_zones]
+}
+
+run "private_zone_is_rejected" {
+  command = plan
+
+  override_data {
+    target = data.aws_route53_zone.external_zones["delegated"]
+    values = { name = "dev.fnx-svc.example.net", name_servers = [] }
+  }
+
+  expect_failures = [data.aws_route53_zone.external_zones["delegated"]]
 }

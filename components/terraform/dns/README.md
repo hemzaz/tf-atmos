@@ -71,9 +71,9 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
 - `external_zones` names public zones another component creates, such as a vendored Cloud Posse
   `aws-dns-delegated`/`aws-dns-primary` zone, which ships with no DNSSEC and no query logging.
   Each entry is found by `zone_id` or by name lookup, in this account or (`dns_account`) the
-  DNS account, and is never created. A record's `zone_name` may name one (e.g. the DS of a
-  delegated zone in the primary). Per entry, `dnssec_enabled` signs it with this instance's key
-  (needs the instance's `dnssec_enabled`; its DS lands in `ds_records`), and `enable_query_logging`
+  DNS account (needs `dns_account_assume_role_arn`), never created, and must be public. A record's
+  `zone_name` may name one. Per entry, `dnssec_enabled` signs it with this instance's key (needs the
+  instance's `dnssec_enabled`; DS in `ds_records`, and `parent_zone` writes it there), and `enable_query_logging`
   logs it to a log group and key this instance creates. A zone takes one query logging config, so
   only one component may log it. Keys must differ from `zones` keys.
 - Records in a DNS-account zone can only reference health checks from the main account.

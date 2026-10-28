@@ -106,8 +106,9 @@ variable "external_zones" {
     dns_account          = optional(bool, false)
     dnssec_enabled       = optional(bool, false)
     enable_query_logging = optional(bool, false)
+    parent_zone          = optional(string)
   }))
-  description = "Public zones another component creates (e.g. a vendored Cloud Posse aws-dns-delegated or aws-dns-primary zone, which have no DNSSEC or query logging), keyed like zones and found by zone_id or, failing that, by name lookup; dns_account looks it up through the aws.dns_account provider. records.<id>.zone_name may name one. dnssec_enabled signs it as dnssec_enabled signs this instance's own zones (needs that set too; its DS lands in ds_records). enable_query_logging logs it to a log group this component creates, as zones.<key>.enable_query_logging. A zone takes one query logging config, so its owner must not log it as well."
+  description = "Public zones another component creates (e.g. a vendored Cloud Posse aws-dns-delegated or aws-dns-primary zone, which have no DNSSEC or query logging), keyed like zones and found by zone_id or, failing that, by name lookup; dns_account looks it up through the aws.dns_account provider. records.<id>.zone_name may name one. dnssec_enabled signs it as dnssec_enabled signs this instance's own zones (needs that set too; its DS lands in ds_records, and parent_zone, a zones or external_zones key, gets a delegation_ds_<key> DS record; the owner writes the NS). enable_query_logging logs it to a log group this component creates, as zones.<key>.enable_query_logging. A zone takes one query logging config, so its owner must not log it as well."
   default     = {}
   nullable    = false
 
@@ -123,6 +124,18 @@ variable "external_zones" {
   validation {
     condition     = length(setintersection(keys(var.external_zones), keys(var.zones))) == 0
     error_message = "external_zones keys must differ from zones keys: records, signing and query logging find a zone by its key."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, z in var.external_zones : z.parent_zone == null || (z.dnssec_enabled && z.parent_zone != k && contains(concat(keys(var.zones), keys(var.external_zones)), coalesce(z.parent_zone, "-")))
+    ])
+    error_message = "external_zones.<key>.parent_zone must be another zones or external_zones key, on an entry with dnssec_enabled: it receives the zone's DS record."
+  }
+
+  validation {
+    condition     = var.dns_account_assume_role_arn != null || alltrue([for z in values(var.external_zones) : z.dns_account == false])
+    error_message = "external_zones.<key>.dns_account needs dns_account_assume_role_arn; without it aws.dns_account is this account."
   }
 
   validation {

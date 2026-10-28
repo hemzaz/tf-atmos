@@ -31,7 +31,7 @@ locals {
   # Get the normalized record list: var.records plus one NS record per zone
   # with a parent_zone, delegating it from that parent (Cloud Posse
   # dns-delegated's pattern, for a subzone whose parent is in this instance).
-  normalized_records = merge(local.explicit_records, local.delegation_records, local.dnssec_delegation_records)
+  normalized_records = merge(local.explicit_records, local.delegation_records, local.dnssec_delegation_records, local.external_ds_records)
 
   # With DS records on (dnssec_ds_enabled, default dnssec_enabled), a
   # parent_zone subzone's DS record next to its NS record in the parent zone,
@@ -44,6 +44,22 @@ locals {
       type    = "DS"
       records = [try(aws_route53_key_signing_key.zones[k].ds_record, aws_route53_key_signing_key.dns_account_zones[k].ds_record)]
     }) if zone.parent_zone != null && local.dnssec_ds_enabled
+  }
+
+  # A signed external zone's DS in its parent_zone (zones or external_zones key);
+  # its owner (e.g. aws-dns-delegated's root_ns) writes the NS record.
+  external_ds_records = {
+    for k, z in var.external_zones : "delegation_ds_${k}" => merge(
+      { for f in ["alias", "health_check_id", "set_identifier", "weighted_routing_policy", "latency_routing_policy", "geolocation_routing_policy", "failover_routing_policy", "multivalue_answer_routing_policy"] : f => null },
+      {
+        zone_id     = local.all_zones[z.parent_zone].zone_id
+        name        = trimsuffix(local.all_zones[k].name, ".")
+        type        = "DS"
+        ttl         = var.delegation_ttl
+        records     = [try(aws_route53_key_signing_key.zones[k].ds_record, aws_route53_key_signing_key.dns_account_zones[k].ds_record)]
+        dns_account = contains(local.dns_account_keys, z.parent_zone)
+      },
+    ) if z.parent_zone != null && local.dnssec_ds_enabled
   }
 
   # ttl: Cloud Posse dns-delegated hardcodes 30 on root_ns; here it is var.delegation_ttl (default 30).
@@ -143,6 +159,14 @@ data "aws_route53_zone" "external_zones" {
   zone_id      = each.value.zone_id
   name         = each.value.name
   private_zone = false
+
+  # private_zone only filters a name lookup; a private zone has no name servers.
+  lifecycle {
+    postcondition {
+      condition     = length(self.name_servers) > 0
+      error_message = "external_zones.${each.key} is a private zone: only public zones can be signed or query-logged."
+    }
+  }
 }
 
 data "aws_route53_zone" "dns_account_external_zones" {
@@ -152,6 +176,14 @@ data "aws_route53_zone" "dns_account_external_zones" {
   zone_id      = each.value.zone_id
   name         = each.value.name
   private_zone = false
+
+  # private_zone only filters a name lookup; a private zone has no name servers.
+  lifecycle {
+    postcondition {
+      condition     = length(self.name_servers) > 0
+      error_message = "external_zones.${each.key} is a private zone: only public zones can be signed or query-logged."
+    }
+  }
 }
 
 # Create all the requested zones (provider meta-arguments must be static, so zones
