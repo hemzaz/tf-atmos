@@ -51,7 +51,9 @@
 #
 # Usage: scripts/check-stack-scaffold.sh [--sweep]
 # --sweep (atmos sweep --scaffold) runs only the fresh-stack end to end, then
-# scripts/plan-sweep.sh on the fresh stacks (lint runs the rest).
+# scripts/plan-sweep.sh on the fresh stacks its default would select (ci-stacks.py
+# --plan-sweep: a CI-disabled stack with nothing to plan is skipped with a
+# ::notice::); lint runs the rest.
 # Needs atmos, python3 and yamllint (and, for --sweep, plan-sweep's tools).
 # Exit 0 when every golden regenerates identically, every refusal is refused
 # and the fresh stacks pass, 1 otherwise.
@@ -667,7 +669,32 @@ fi
 if [[ "$fresh_ok" -eq 1 && "$SWEEP" == "true" ]]; then
     # plan-sweep mirrors components/terraform with git ls-files.
     git init -q .
-    bash scripts/plan-sweep.sh "${fresh[@]}" || fresh_ok=0
+    # The fresh stacks plan-sweep's default would select (ci-stacks.py
+    # --plan-sweep's rule, over every resolved stack): a hosted-CI-disabled
+    # stack with nothing to plan (the fresh core stack) is skipped with its
+    # ::notice::; anything else it refuses fails here, as it fails the sweep.
+    if ! swept="$(python3 -B - "$out/fresh.json" "${fresh[@]}" <<'PY'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("ci_stacks", "workflows/scripts/common/ci-stacks.py")
+ci = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ci)
+stacks = json.load(open(sys.argv[1]))
+try:
+    selected = set(ci.plan_sweep_stacks(stacks))
+except ValueError as error:
+    sys.exit(f"::error::{error}")
+print(" ".join(name for name in sys.argv[2:] if name in selected))
+PY
+)"; then
+        echo "ERROR fresh: ci-stacks.py's plan-sweep selection failed" >&2
+        fresh_ok=0
+    elif [[ -z "$swept" ]]; then
+        echo "ERROR fresh: plan-sweep would select none of ${fresh[*]}" >&2
+        fresh_ok=0
+    else
+        read -r -a swept_list <<< "$swept"
+        bash scripts/plan-sweep.sh "${swept_list[@]}" || fresh_ok=0
+    fi
 fi
 [[ "$fresh_ok" -eq 1 ]] || failed="$failed fresh"
 clean_since "$out/fresh.before"
@@ -684,7 +711,7 @@ if [[ -n "$failed" ]]; then
     exit 1
 fi
 if [[ "$SWEEP" == "true" ]]; then
-    echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks and plan-sweep"
+    echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks, and plan-sweep passes the ${#swept_list[@]} it selects (${swept_list[*]})"
 else
     echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order, the root backends untouched); $refused bad answer sets are refused; the ${#fresh[@]} fresh stacks (${fresh[*]}) are wired by the hook (a core stack left unwired) and pass every stack check"
 fi
