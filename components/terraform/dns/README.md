@@ -68,6 +68,14 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   theirs; remove the registrar DS by hand), wait out the DS TTL (registrar: often 1-2 days), then
   `dnssec_enabled: false`. `dnssec_ds_enabled` (null = `dnssec_enabled`) cannot be on without
   signing. The key is in us-east-1, so a GDPR-scoped (EU) stack keeps DNSSEC off.
+- `external_zones` names public zones another component creates, such as a vendored Cloud Posse
+  `aws-dns-delegated`/`aws-dns-primary` zone, which ships with no DNSSEC and no query logging.
+  Each entry is found by `zone_id` or by name lookup, in this account or (`dns_account`) the
+  DNS account, and is never created. A record's `zone_name` may name one (e.g. the DS of a
+  delegated zone in the primary). Per entry, `dnssec_enabled` signs it with this instance's key
+  (needs the instance's `dnssec_enabled`; its DS lands in `ds_records`), and `enable_query_logging`
+  logs it to a log group and key this instance creates. A zone takes one query logging config, so
+  only one component may log it. Keys must differ from `zones` keys.
 - Records in a DNS-account zone can only reference health checks from the main account.
 - `workflows/scripts/common/check-domains.py` (run by `validate-all`) requires every record name
   to sit in its zone and not inside a more specific public zone of the stack, and every nested

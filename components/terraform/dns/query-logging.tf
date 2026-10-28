@@ -19,7 +19,15 @@
 locals {
   query_log_region = "us-east-1"
 
-  query_logged_zones = { for k, zone in var.zones : k => zone if zone.enable_query_logging }
+  # Zone key => { name, query_logging_config, tags }; external_zones (looked
+  # up, named by the lookup) log to a log group and key this component creates.
+  query_logged_zones = merge(
+    { for k, zone in var.zones : k => { name = zone.name, query_logging_config = zone.query_logging_config, tags = zone.tags } if zone.enable_query_logging },
+    {
+      for k, z in merge(data.aws_route53_zone.external_zones, data.aws_route53_zone.dns_account_external_zones) :
+      k => { name = z.name, query_logging_config = tomap({}), tags = tomap({}) } if var.external_zones[k].enable_query_logging
+    },
+  )
 
   # Zones whose log group this component creates (no caller-supplied group)
   query_log_groups = {
@@ -27,18 +35,18 @@ locals {
     if !contains(keys(zone.query_logging_config), "cloudwatch_log_group_arn")
   }
 
-  query_logged_local_keys       = [for k in keys(local.query_logged_zones) : k if !contains(local.dns_account_zone_keys, k)]
-  query_logged_dns_account_keys = [for k in keys(local.query_logged_zones) : k if contains(local.dns_account_zone_keys, k)]
+  query_logged_local_keys       = [for k in keys(local.query_logged_zones) : k if !contains(local.dns_account_keys, k)]
+  query_logged_dns_account_keys = [for k in keys(local.query_logged_zones) : k if contains(local.dns_account_keys, k)]
 
   # This component's own key encrypts every log group it creates without a
   # caller-supplied query_logging_config.kms_key_id, one key per account
   create_query_log_key = length([
     for k, zone in local.query_log_groups : k
-    if !contains(local.dns_account_zone_keys, k) && !contains(keys(zone.query_logging_config), "kms_key_id")
+    if !contains(local.dns_account_keys, k) && !contains(keys(zone.query_logging_config), "kms_key_id")
   ]) > 0
   create_dns_account_query_log_key = length([
     for k, zone in local.query_log_groups : k
-    if contains(local.dns_account_zone_keys, k) && !contains(keys(zone.query_logging_config), "kms_key_id")
+    if contains(local.dns_account_keys, k) && !contains(keys(zone.query_logging_config), "kms_key_id")
   ]) > 0
 
   # Resource policies and key aliases are account-wide names, and network/main
@@ -177,7 +185,7 @@ resource "aws_kms_alias" "dns_account_query_logs" {
 # --- Log groups (us-east-1) --------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "dns_query_logs" {
-  for_each = { for k, zone in local.query_log_groups : k => zone if !contains(local.dns_account_zone_keys, k) }
+  for_each = { for k, zone in local.query_log_groups : k => zone if !contains(local.dns_account_keys, k) }
   region   = local.query_log_region
 
   name              = "/aws/route53/${trimsuffix(each.value.name, ".")}/queries"
@@ -195,7 +203,7 @@ resource "aws_cloudwatch_log_group" "dns_query_logs" {
 
 resource "aws_cloudwatch_log_group" "dns_account_query_logs" {
   provider = aws.dns_account
-  for_each = { for k, zone in local.query_log_groups : k => zone if contains(local.dns_account_zone_keys, k) }
+  for_each = { for k, zone in local.query_log_groups : k => zone if contains(local.dns_account_keys, k) }
   region   = local.query_log_region
 
   name              = "/aws/route53/${trimsuffix(each.value.name, ".")}/queries"
@@ -232,7 +240,7 @@ resource "aws_cloudwatch_log_resource_policy" "route53_query_logging" {
         Resource  = [for k in local.query_logged_local_keys : "${local.query_log_group_arns[k]}:*"]
         Condition = {
           StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
-          ArnLike      = { "aws:SourceArn" = [for k in local.query_logged_local_keys : aws_route53_zone.zones[k].arn] }
+          ArnLike      = { "aws:SourceArn" = [for k in local.query_logged_local_keys : local.all_zones[k].arn] }
         }
       },
     ]
@@ -256,7 +264,7 @@ resource "aws_cloudwatch_log_resource_policy" "dns_account_route53_query_logging
         Resource  = [for k in local.query_logged_dns_account_keys : "${local.query_log_group_arns[k]}:*"]
         Condition = {
           StringEquals = { "aws:SourceAccount" = one(data.aws_caller_identity.dns_account[*].account_id) }
-          ArnLike      = { "aws:SourceArn" = [for k in local.query_logged_dns_account_keys : aws_route53_zone.dns_account_zones[k].arn] }
+          ArnLike      = { "aws:SourceArn" = [for k in local.query_logged_dns_account_keys : local.all_zones[k].arn] }
         }
       },
     ]
@@ -271,7 +279,7 @@ resource "aws_route53_query_log" "query_logging" {
   for_each = toset(local.query_logged_local_keys)
 
   cloudwatch_log_group_arn = local.query_log_group_arns[each.key]
-  zone_id                  = aws_route53_zone.zones[each.key].zone_id
+  zone_id                  = local.all_zones[each.key].zone_id
 
   depends_on = [aws_cloudwatch_log_resource_policy.route53_query_logging]
 
@@ -279,7 +287,7 @@ resource "aws_route53_query_log" "query_logging" {
   # variable validation only knows the region).
   lifecycle {
     precondition {
-      condition     = !contains(keys(var.zones[each.key].query_logging_config), "cloudwatch_log_group_arn") || split(":", var.zones[each.key].query_logging_config["cloudwatch_log_group_arn"])[4] == data.aws_caller_identity.current.account_id
+      condition     = !contains(keys(local.query_logged_zones[each.key].query_logging_config), "cloudwatch_log_group_arn") || split(":", local.query_logged_zones[each.key].query_logging_config["cloudwatch_log_group_arn"])[4] == data.aws_caller_identity.current.account_id
       error_message = "zones.${each.key}.query_logging_config.cloudwatch_log_group_arn must be in this component's account (${data.aws_caller_identity.current.account_id}): Route53 only logs to a log group in the zone's own account."
     }
   }
@@ -290,14 +298,14 @@ resource "aws_route53_query_log" "dns_account_query_logging" {
   for_each = toset(local.query_logged_dns_account_keys)
 
   cloudwatch_log_group_arn = local.query_log_group_arns[each.key]
-  zone_id                  = aws_route53_zone.dns_account_zones[each.key].zone_id
+  zone_id                  = local.all_zones[each.key].zone_id
 
   depends_on = [aws_cloudwatch_log_resource_policy.dns_account_route53_query_logging]
 
   # A caller-supplied log group must be in the DNS account, which owns the zone.
   lifecycle {
     precondition {
-      condition     = !contains(keys(var.zones[each.key].query_logging_config), "cloudwatch_log_group_arn") || split(":", var.zones[each.key].query_logging_config["cloudwatch_log_group_arn"])[4] == one(data.aws_caller_identity.dns_account[*].account_id)
+      condition     = !contains(keys(local.query_logged_zones[each.key].query_logging_config), "cloudwatch_log_group_arn") || split(":", local.query_logged_zones[each.key].query_logging_config["cloudwatch_log_group_arn"])[4] == one(data.aws_caller_identity.dns_account[*].account_id)
       error_message = "zones.${each.key}.query_logging_config.cloudwatch_log_group_arn must be in the DNS account: Route53 only logs to a log group in the zone's own account."
     }
   }

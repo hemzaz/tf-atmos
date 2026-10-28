@@ -99,6 +99,38 @@ variable "zones" {
   }
 }
 
+variable "external_zones" {
+  type = map(object({
+    zone_id              = optional(string)
+    name                 = optional(string)
+    dns_account          = optional(bool, false)
+    dnssec_enabled       = optional(bool, false)
+    enable_query_logging = optional(bool, false)
+  }))
+  description = "Public zones another component creates (e.g. a vendored Cloud Posse aws-dns-delegated or aws-dns-primary zone, which have no DNSSEC or query logging), keyed like zones and found by zone_id or, failing that, by name lookup; dns_account looks it up through the aws.dns_account provider. records.<id>.zone_name may name one. dnssec_enabled signs it as dnssec_enabled signs this instance's own zones (needs that set too; its DS lands in ds_records). enable_query_logging logs it to a log group this component creates, as zones.<key>.enable_query_logging. A zone takes one query logging config, so its owner must not log it as well."
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition = alltrue([
+      for z in values(var.external_zones) : (z.zone_id == null) != (z.name == null) && (
+        z.zone_id != null ? can(regex("^Z[A-Z0-9]{1,32}$", z.zone_id)) : can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}\\.?$", z.name))
+      )
+    ])
+    error_message = "Each external_zones entry sets exactly one of zone_id (a Route53 hosted zone id, e.g. Z0123456789ABCDEFGHIJ) and name (a lowercase DNS name)."
+  }
+
+  validation {
+    condition     = length(setintersection(keys(var.external_zones), keys(var.zones))) == 0
+    error_message = "external_zones keys must differ from zones keys: records, signing and query logging find a zone by its key."
+  }
+
+  validation {
+    condition     = var.dnssec_enabled || alltrue([for z in values(var.external_zones) : z.dnssec_enabled == false])
+    error_message = "external_zones.<key>.dnssec_enabled needs the instance's dnssec_enabled: its key and the ds_records output follow that input."
+  }
+}
+
 variable "dnssec_enabled" {
   type        = bool
   description = "Whether to sign every public zone this instance creates (the root zone and zones without vpc_associations) with DNSSEC: a us-east-1 ECC_NIST_P256 KMS key per account and a key-signing key per zone, as Cloud Posse dns-delegated's dnssec_enabled (default false there too). The chain of trust needs each zone's ds_records output added at its registrar or parent zone. The key lives in us-east-1, so a GDPR-scoped (EU) stack keeps it off."

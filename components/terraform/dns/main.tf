@@ -17,6 +17,15 @@ locals {
   # All managed zones, regardless of which account's provider created them
   managed_zones = merge(aws_route53_zone.zones, aws_route53_zone.dns_account_zones)
 
+  # Plus var.external_zones (looked up, never created), by key: records, signing
+  # and query logging reach a zone through these, whoever created it.
+  dns_account_keys = setunion(local.dns_account_zone_keys, [for k, z in var.external_zones : k if z.dns_account])
+  all_zones = merge(
+    local.managed_zones,
+    data.aws_route53_zone.external_zones,
+    data.aws_route53_zone.dns_account_external_zones,
+  )
+
   # Default zone name pattern from root domain
 
   # Get the normalized record list: var.records plus one NS record per zone
@@ -60,7 +69,7 @@ locals {
 
   explicit_records = {
     for id, record in var.records : id => {
-      zone_id                          = try(local.managed_zones[record.zone_name].zone_id, try(data.aws_route53_zone.existing_zones[record.zone_name].zone_id))
+      zone_id                          = try(local.all_zones[record.zone_name].zone_id, try(data.aws_route53_zone.existing_zones[record.zone_name].zone_id))
       name                             = try(trimsuffix(record.name, "."), null)
       type                             = record.type
       ttl                              = try(record.ttl, var.zones[record.zone_name].default_ttl, 300)
@@ -74,7 +83,7 @@ locals {
       failover_routing_policy          = try(record.failover_routing_policy, null)
       multivalue_answer_routing_policy = try(record.multivalue_answer_routing_policy, null)
       # Records follow their zone into the DNS account
-      dns_account = contains(local.dns_account_zone_keys, record.zone_name)
+      dns_account = contains(local.dns_account_keys, record.zone_name)
     }
     # A DS record with no value is dropped, not an error: it reads another
     # instance's ds_records, which is empty while that instance's DNSSEC (or
@@ -124,6 +133,25 @@ data "aws_route53_zone" "existing_zones" {
 
   name         = each.value.name
   private_zone = length(each.value.vpc_associations) > 0
+}
+
+# Zones another component creates (var.external_zones), e.g. a vendored
+# aws-dns-delegated zone, which has no DNSSEC or query logging of its own
+data "aws_route53_zone" "external_zones" {
+  for_each = { for k, z in var.external_zones : k => z if !z.dns_account }
+
+  zone_id      = each.value.zone_id
+  name         = each.value.name
+  private_zone = false
+}
+
+data "aws_route53_zone" "dns_account_external_zones" {
+  provider = aws.dns_account
+  for_each = { for k, z in var.external_zones : k => z if z.dns_account }
+
+  zone_id      = each.value.zone_id
+  name         = each.value.name
+  private_zone = false
 }
 
 # Create all the requested zones (provider meta-arguments must be static, so zones
@@ -367,10 +395,15 @@ locals {
   dnssec_key_region = "us-east-1"
 
   dnssec_root_zone = var.dnssec_enabled && var.create_root_zone
-  dnssec_local_zones = var.dnssec_enabled ? {
-    for k, z in var.zones : k => z if length(z.vpc_associations) == 0 && !contains(local.dns_account_zone_keys, k)
-  } : {}
-  dnssec_dns_account_zones = var.dnssec_enabled ? { for k in local.dns_account_zone_keys : k => var.zones[k] } : {}
+  # Zone key => name. external_zones opt in per zone (dnssec_enabled there).
+  dnssec_local_zones = var.dnssec_enabled ? merge(
+    { for k, z in var.zones : k => z.name if length(z.vpc_associations) == 0 && !contains(local.dns_account_zone_keys, k) },
+    { for k, z in data.aws_route53_zone.external_zones : k => z.name if var.external_zones[k].dnssec_enabled },
+  ) : {}
+  dnssec_dns_account_zones = var.dnssec_enabled ? merge(
+    { for k in local.dns_account_zone_keys : k => var.zones[k].name },
+    { for k, z in data.aws_route53_zone.dns_account_external_zones : k => z.name if var.external_zones[k].dnssec_enabled },
+  ) : {}
 
   # One key per account that has a signed zone.
   dnssec_key_accounts = merge(
@@ -417,7 +450,7 @@ locals {
   # KSK names allow only [A-Za-z0-9_] (3-128 characters).
   dnssec_ksk_names = {
     for k, name in merge(
-      { for k, z in merge(local.dnssec_local_zones, local.dnssec_dns_account_zones) : k => z.name },
+      merge(local.dnssec_local_zones, local.dnssec_dns_account_zones),
       local.dnssec_root_zone ? { "@root" = var.root_domain } : {},
     ) : k => substr("ksk_${replace(replace(trimsuffix(lower(name), "."), ".", "_"), "-", "_")}", 0, 128)
   }
@@ -476,7 +509,7 @@ resource "aws_route53_hosted_zone_dnssec" "root_zone" {
 resource "aws_route53_key_signing_key" "zones" {
   for_each = local.dnssec_local_zones
 
-  hosted_zone_id             = aws_route53_zone.zones[each.key].zone_id
+  hosted_zone_id             = local.all_zones[each.key].zone_id
   key_management_service_arn = aws_kms_key.dnssec[0].arn
   name                       = local.dnssec_ksk_names[each.key]
 }
@@ -484,7 +517,7 @@ resource "aws_route53_key_signing_key" "zones" {
 resource "aws_route53_hosted_zone_dnssec" "zones" {
   for_each = local.dnssec_local_zones
 
-  hosted_zone_id = aws_route53_zone.zones[each.key].zone_id
+  hosted_zone_id = local.all_zones[each.key].zone_id
 
   depends_on = [aws_route53_key_signing_key.zones]
 }
@@ -493,7 +526,7 @@ resource "aws_route53_key_signing_key" "dns_account_zones" {
   provider = aws.dns_account
   for_each = local.dnssec_dns_account_zones
 
-  hosted_zone_id             = aws_route53_zone.dns_account_zones[each.key].zone_id
+  hosted_zone_id             = local.all_zones[each.key].zone_id
   key_management_service_arn = aws_kms_key.dns_account_dnssec[0].arn
   name                       = local.dnssec_ksk_names[each.key]
 }
@@ -502,7 +535,7 @@ resource "aws_route53_hosted_zone_dnssec" "dns_account_zones" {
   provider = aws.dns_account
   for_each = local.dnssec_dns_account_zones
 
-  hosted_zone_id = aws_route53_zone.dns_account_zones[each.key].zone_id
+  hosted_zone_id = local.all_zones[each.key].zone_id
 
   depends_on = [aws_route53_key_signing_key.dns_account_zones]
 }
