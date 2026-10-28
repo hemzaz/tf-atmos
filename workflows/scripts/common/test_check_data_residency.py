@@ -238,6 +238,53 @@ class DataResidencyTest(unittest.TestCase):
             "fnx-ew1-prod: network/main vars.zones is list, not a map: its query logging cannot be checked",
         ])
 
+    def test_dns_external_zone_query_logging_fails_in_eu_only(self):
+        spec = instance(external_zones={"apex": {"name": "d", "enable_query_logging": True}, "quiet": {"name": "q"}})
+        spec["metadata"] = {"component": "dns"}
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": spec})}), [
+            "fnx-ew1-prod: network/main external_zones.apex sets enable_query_logging: Route 53 query logs are "
+            "only written to us-east-1, outside the EU",
+        ])
+        spec["vars"]["external_zones"]["apex"]["enable_query_logging"] = False
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": spec})}), [])
+
+    def test_eu_zone_delegated_from_a_us_held_zone_fails(self):
+        # Cloud Posse aws-dns-delegated writes its NS record into zone_name through aws.primary.
+        def cp(component, region="eu-west-1", compliance=EU, **variables):
+            spec = instance(region=region, compliance=compliance, **variables)
+            spec["metadata"] = {"component": component}
+            return spec
+
+        delegated = cp("aws-dns-delegated", zone_config=[{"subdomain": "eu", "zone_name": "svc.example.net"}])
+        us_primary = cp("aws-dns-primary", region="us-east-1", compliance=US, domain_names=["svc.example.net"])
+        us_primary["settings"]["tfstate"] = {"region": "us-east-1"}
+        us_primary["backend"] = us_primary["remote_state_backend"] = {"region": "us-east-1"}
+        self.assertEqual(residency.check({
+            "fnx-ew1-prod": eu_stack(**{"dns-delegated": delegated}),
+            "fnx-gbl-network": stack(**{"dns-primary": us_primary}),
+        }), [
+            "fnx-ew1-prod: dns-delegated delegates eu.svc.example.net from svc.example.net, held in fnx-gbl-network, "
+            "which is not GDPR-scoped: the EU zone's NS record would be written into, and controlled from, a US account",
+        ])
+        eu_primary = cp("aws-dns-primary", domain_names=["svc.example.net"])
+        self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"dns-delegated": delegated, "dns-primary": eu_primary})}), [])
+        us_primary["metadata"]["enabled"] = False
+        self.assertEqual(residency.check({
+            "fnx-ew1-prod": eu_stack(**{"dns-delegated": delegated}),
+            "fnx-gbl-network": stack(**{"dns-primary": us_primary}),
+        }), [])
+
+    def test_us_dns_parent_counts_case_insensitively(self):
+        us_dns = instance(region="us-east-1", compliance=US, zones={"main": {"name": "svc.example.net"}})
+        us_dns["metadata"] = {"component": "dns"}
+        eu = instance(zone_config=[{"subdomain": "eu", "zone_name": "SVC.example.net."}])
+        eu["metadata"] = {"component": "aws-dns-delegated"}
+        errors = residency.check({"fnx-ew1-prod": eu_stack(**{"d": eu}), "fnx-ue1-dev": stack(**{"network/main": us_dns})})
+        self.assertEqual([e for e in errors if "delegates" in e], [
+            "fnx-ew1-prod: d delegates eu.svc.example.net from svc.example.net, held in fnx-ue1-dev, which is not "
+            "GDPR-scoped: the EU zone's NS record would be written into, and controlled from, a US account",
+        ])
+
     def test_security_monitoring_alert_enrichment_fails_in_eu_only(self):
         def monitoring(value, **extra):
             spec = instance(enable_alert_enrichment=value, **extra)

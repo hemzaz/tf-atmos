@@ -17,7 +17,10 @@ deployable instance:
   - if a dns instance, turns on enable_query_logging for no zone: Route 53 public
     query logs (client IPs) go only to us-east-1 (components/terraform/dns/query-logging.tf);
     nor dnssec_enabled: its signing KMS key can only be in us-east-1 (owner decision B5:
-    no key there for an EU stack);
+    no key there for an EU stack). The same holds for its external_zones entries;
+  - if an aws-dns-delegated instance (vendored), delegates no zone_config entry from a
+    zone_name held (aws-dns-primary, aws-dns-delegated or dns public zone) by a stack that is
+    not GDPR-scoped: its NS record would live in a US account (B5: no EU zone delegated from the US);
   - if a security-monitoring instance, leaves enable_alert_enrichment off: its Lambda posts
     each finding (source IPs, principals) to Slack and PagerDuty, outside AWS's EU regions;
   - sets none of GLOBAL_SERVICE_EMAIL_VARS: vars a global AWS service hosted in us-east-1
@@ -167,21 +170,54 @@ def flag_on(value: Any) -> bool:
     return value is not None and value is not False and str(value).strip().lower() != "false"
 
 
-def query_logging_errors(where: str, zones: Any) -> list[str]:
-    """A dns instance's zones that turn on Route 53 query logging (us-east-1 only)."""
+def query_logging_errors(where: str, zones: Any, field: str = "zones") -> list[str]:
+    """A dns instance's zones (or external_zones) that turn on Route 53 query logging (us-east-1 only)."""
     if zones is None:
         return []
     if not isinstance(zones, dict):
-        return [f"{where} vars.zones is {type(zones).__name__}, not a map: its query logging cannot be checked"]
+        return [f"{where} vars.{field} is {type(zones).__name__}, not a map: its query logging cannot be checked"]
+    label = "zone " if field == "zones" else f"{field}."
     return [
-        f"{where} zone {key} sets enable_query_logging: Route 53 query logs are only "
+        f"{where} {label}{key} sets enable_query_logging: Route 53 query logs are only "
         "written to us-east-1, outside the EU"
         for key, zone in sorted(zones.items())
         if isinstance(zone, dict) and flag_on(zone.get("enable_query_logging"))
     ]
 
 
-def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exemptions: tuple) -> list[str]:
+def zone_holders(stacks: dict) -> dict:
+    """Public zone name -> the stacks whose deployable dns, aws-dns-primary or aws-dns-delegated instances hold it."""
+    holders: dict = {}
+    for stack_name, stack in stacks.items():
+        for name, instance in instances(stack).items():
+            component, variables = (instance.get("metadata") or {}).get("component") or name, instance.get("vars") or {}
+            names = []
+            if component == "dns" and isinstance(variables.get("zones"), dict):
+                names = [z.get("name") for z in variables["zones"].values() if isinstance(z, dict) and not z.get("vpc_associations")]
+            elif component == "aws-dns-primary":
+                names = list(variables.get("domain_names") or [])
+            elif component == "aws-dns-delegated" and not flag_on(variables.get("dns_private_zone_enabled")):
+                names = [f"{z.get('subdomain')}.{z.get('zone_name')}" for z in variables.get("zone_config") or [] if isinstance(z, dict)]
+            for zone in names:
+                if isinstance(zone, str):
+                    holders.setdefault(zone.lower().rstrip("."), set()).add(stack_name)
+    return holders
+
+
+def delegation_errors(where: str, instance: dict, scoped: set, holders: dict) -> list[str]:
+    """An EU aws-dns-delegated zone whose parent zone_name a stack that is not GDPR-scoped holds."""
+    errors = []
+    for entry in (instance.get("vars") or {}).get("zone_config") or []:
+        parent = str((entry or {}).get("zone_name") or "").lower().rstrip(".") if isinstance(entry, dict) else ""
+        for holder in sorted(holders.get(parent, set()) - scoped):
+            errors.append(
+                f"{where} delegates {entry.get('subdomain')}.{parent} from {parent}, held in {holder}, which is "
+                "not GDPR-scoped: the EU zone's NS record would be written into, and controlled from, a US account"
+            )
+    return errors
+
+
+def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exemptions: tuple, holders: Optional[dict] = None) -> list[str]:
     errors = []
     where = f"{stack_name}: {name}"
     for field, region in regions(instance):
@@ -194,11 +230,14 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
     component = (instance.get("metadata") or {}).get("component") or name
     if component == "dns":
         errors += query_logging_errors(where, (instance.get("vars") or {}).get("zones"))
+        errors += query_logging_errors(where, (instance.get("vars") or {}).get("external_zones"), "external_zones")
         if flag_on((instance.get("vars") or {}).get("dnssec_enabled")):
             errors.append(
                 f"{where} sets dnssec_enabled: Route 53 signs only with a KMS key in us-east-1, "
                 "outside the EU"
             )
+    if component == "aws-dns-delegated":
+        errors += delegation_errors(where, instance, scoped, holders or {})
     if component == "security-monitoring" and flag_on((instance.get("vars") or {}).get("enable_alert_enrichment")):
         errors.append(
             f"{where} sets enable_alert_enrichment: its Lambda sends findings to Slack/PagerDuty, "
@@ -223,9 +262,10 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
 def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
     errors = []
     scoped = {name for name, stack in stacks.items() if gdpr_scoped(stack)}
+    holders = zone_holders(stacks)
     for stack_name in sorted(scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
-            errors += check_instance(stack_name, name, instance, scoped, exemptions)
+            errors += check_instance(stack_name, name, instance, scoped, exemptions, holders)
     for stack_name in sorted(set(stacks) - scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             errors += outside_reader_errors(stack_name, name, instance, scoped, exemptions)

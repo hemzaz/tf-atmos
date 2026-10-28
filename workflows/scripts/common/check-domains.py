@@ -33,6 +33,11 @@ delegated from it: either zones.<key>.parent_zone names that parent zone in the
 same dns instance, or the parent zone has an NS record for the zone's name
 whose records read `!terraform.state <child dns instance> .zone_name_servers.<key>`.
 A stack's top-level public zone is delegated from outside the stack (manual).
+Vendored zones are public zones too: aws-dns-primary domain_names (roots, never below a
+stack zone) and aws-dns-delegated <subdomain>.<zone_name> (unless private), which writes its
+own NS record into zone_name: a deployable public zone of some stack and, in its own stack,
+its closest parent. A zone_id may read an aws-dns-delegated .default_dns_zone_id (its first
+zone), and a dns record's zone_name may be an external_zones key (by name or such a zone_id).
 Exits 1 on any violation.
 """
 import importlib.util
@@ -47,6 +52,10 @@ _spec = importlib.util.spec_from_file_location(
 )
 check_dependencies = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_dependencies)
+
+
+# Cloud Posse's vendored DNS components (components/terraform/<kind>).
+PRIMARY, DELEGATED = "aws-dns-primary", "aws-dns-delegated"
 
 
 class Zone(NamedTuple):
@@ -87,7 +96,7 @@ def covers(pattern: str, name: str) -> bool:
     return bool(label) and label != "*" and rest == pattern[2:]
 
 
-def state_reference(stacks: dict, stack_name: str, value, output: str, module: str):
+def state_reference(stacks: dict, stack_name: str, value, output: str, module: str, keyed: bool = True):
     """Follow `!terraform.state <instance> [<stack>] .<output>.<key>` to (instance name, target, key).
 
     None for a value that is not a state reference; a str when it cannot be followed.
@@ -102,9 +111,10 @@ def state_reference(stacks: dict, stack_name: str, value, output: str, module: s
     if stack is not None:
         tokens = tokens[1:]
     expression = " ".join(tokens).strip("'\"")
-    match = re.match(rf'^\.{output}(?:\.(?P<bare>[A-Za-z0-9_-]+)|\["(?P<quoted>[^"]+)"\])$', expression)
+    key = r'(?:\.(?P<bare>[A-Za-z0-9_-]+)|\["(?P<quoted>[^"]+)"\])' if keyed else ""
+    match = re.match(rf"^\.{output}{key}$", expression)
     if match is None:
-        return f"`{value}` does not read .{output}.<key> of a {module} instance"
+        return f"`{value}` does not read .{output}{'.<key>' if keyed else ''} of a {module} instance"
     target_stack = stack or stack_name
     target = stacks.get(target_stack, {}).get("components", {}).get("terraform", {}).get(component)
     if target is None:
@@ -113,11 +123,17 @@ def state_reference(stacks: dict, stack_name: str, value, output: str, module: s
         return f"`{value}` reads {component}, which is abstract or disabled"
     if check_dependencies.module_name(component, target) != module:
         return f"`{value}` reads {component}, which is not a {module} instance"
-    return component, target, match.group("bare") or match.group("quoted")
+    return component, target, (match.group("bare") or match.group("quoted")) if keyed else None
 
 
 def resolve_zone(stacks: dict, stack_name: str, zone_id) -> tuple[Optional[dict], Optional[str]]:
     """(zone, None), or (None, why it cannot be resolved), or (None, None) for a literal id."""
+    ref = state_reference(stacks, stack_name, zone_id, "default_dns_zone_id", DELEGATED, keyed=False)
+    if isinstance(ref, tuple):
+        first = next(iter(cp_zones(ref[0], ref[1], private=True)), None)
+        if first is None:
+            return None, f"reads {ref[0]} .default_dns_zone_id, but {ref[0]} has no zone_config entry"
+        return first.config, None
     ref = state_reference(stacks, stack_name, zone_id, "zone_ids", "dns")
     if ref is None or isinstance(ref, str):
         return None, ref
@@ -133,15 +149,50 @@ def is_public(zone: dict) -> bool:
     return not zone.get("vpc_associations")
 
 
+def cp_zones(name: str, instance: dict, private: bool = False) -> list[Zone]:
+    """The zones of an aws-dns-primary or aws-dns-delegated instance (its private ones only with private)."""
+    module, variables = check_dependencies.module_name(name, instance), instance.get("vars") or {}
+    if module == PRIMARY:
+        return [Zone(name, d, d, {"name": d, "kind": PRIMARY}) for d in variables.get("domain_names") or [] if isinstance(d, str)]
+    is_private = str(variables.get("dns_private_zone_enabled")).lower() == "true"
+    if module != DELEGATED or (is_private and not private):
+        return []
+    return [
+        Zone(name, z["subdomain"], f"{z['subdomain']}.{z['zone_name']}", {
+            "name": f"{z['subdomain']}.{z['zone_name']}", "kind": DELEGATED, "zone_name": z["zone_name"],
+            "vpc_associations": ["private"] if is_private else [],
+            "writes_ns": variables.get("create_root_delegation") is not False,
+        })
+        for z in variables.get("zone_config") or []
+        if isinstance(z, dict) and isinstance(z.get("subdomain"), str) and isinstance(z.get("zone_name"), str)
+    ]
+
+
 def public_zones(instances: dict) -> list[Zone]:
-    """Every public zone of the stack's deployable dns instances."""
+    """Every public zone of the stack's deployable dns, aws-dns-primary and aws-dns-delegated instances."""
     return [
         Zone(name, key, zone["name"], zone)
         for name, instance in sorted(instances.items())
         if check_dependencies.is_deployable(instance) and check_dependencies.module_name(name, instance) == "dns"
         for key, zone in sorted(dicts((instance.get("vars") or {}).get("zones")).items())
         if isinstance(zone.get("name"), str) and is_public(zone)
-    ]
+    ] + [z for name, i in sorted(instances.items()) if check_dependencies.is_deployable(i) for z in cp_zones(name, i)]
+
+
+def record_zone(stacks: dict, stack_name: str, variables: dict, key) -> tuple[Optional[dict], Optional[str]]:
+    """The zone a dns record's zone_name names (zones, else external_zones), or (None, why)."""
+    own = dicts(variables.get("zones")).get(key) or {}
+    if isinstance(own.get("name"), str):
+        return own, None
+    external = dicts(variables.get("external_zones")).get(key)
+    if external is None:
+        return None, f"zone_name {key!r} is not a key of zones or external_zones"
+    if isinstance(external.get("name"), str):
+        return {"name": external["name"]}, None
+    zone, problem = resolve_zone(stacks, stack_name, external.get("zone_id"))
+    if zone is not None:
+        return zone, None
+    return None, f"external_zones.{key}.zone_id {problem or 'is a literal zone id: its records are not checked'}"
 
 
 def parent_of(name: str, zones: list[Zone]) -> Optional[Zone]:
@@ -168,30 +219,49 @@ def placement_error(name: str, zone: dict, zones: list[Zone], ns: bool = False) 
     return None
 
 
-def dns_errors(where: str, variables: dict, zones: list[Zone]) -> list[str]:
-    errors = []
-    own = dicts(variables.get("zones"))
+def dns_errors(stacks: dict, stack_name: str, where: str, variables: dict, zones: list[Zone]) -> tuple[list, list]:
+    """(errors, warnings) of a dns instance's records."""
+    errors, warnings = [], []
     for record_id, record in sorted(dicts(variables.get("records")).items()):
         name, zone_key = record.get("name"), record.get("zone_name")
         if not isinstance(name, str):
             continue
-        zone = own.get(zone_key) or {}
-        if not isinstance(zone.get("name"), str):
-            errors.append(f"{where} record {record_id}: zone_name {zone_key!r} is not a key of zones")
+        zone, problem = record_zone(stacks, stack_name, variables, zone_key)
+        if zone is None:
+            literal = problem and problem.endswith("not checked")
+            (warnings if literal else errors).append(f"{where} record {record_id}: {problem}")
             continue
         problem = placement_error(name, zone, zones, ns=str(record.get("type", "")).upper() in ("NS", "DS"))
         if problem:
             errors.append(f"{where} record {record_id} (zone {zone_key}): {problem}")
-    return errors
+    return errors, warnings
 
 
-def delegation_errors(stacks: dict, stack_name: str, zones: list[Zone]) -> list[str]:
+def cp_delegation_error(zone: Zone, parent: Optional[Zone], everywhere: set) -> Optional[str]:
+    """Why a vendored zone is not delegated as its kind delegates, or None."""
+    if zone.config["kind"] == PRIMARY:
+        return None if parent is None else f"an {PRIMARY} zone is a root, but sits below {parent.name} ({parent.label})"
+    target = zone.config["zone_name"]
+    if not zone.config["writes_ns"]:
+        return None if parent is None else f"is below {parent.name} ({parent.label}) but sets create_root_delegation: false"
+    if normalize(target) not in everywhere:
+        return f"writes its NS record into zone_name {target}, which no deployable public zone of any stack holds"
+    if parent is not None and normalize(parent.name) != normalize(target):
+        return f"writes its NS record into {target}, but its closest parent zone in the stack is {parent.name} ({parent.label})"
+    return None
+
+
+def delegation_errors(stacks: dict, stack_name: str, zones: list[Zone], everywhere: set = frozenset()) -> list[str]:
     """Every public zone below another public zone of the stack is delegated from it."""
     instances = stacks[stack_name].get("components", {}).get("terraform", {})
     errors = []
     for zone in zones:
         parent = parent_of(zone.name, zones)
         where = f"{stack_name}: {zone.label} ({zone.name})"
+        if "kind" in zone.config:
+            problem = cp_delegation_error(zone, parent, everywhere)
+            errors += [f"{where} {problem}"] if problem else []
+            continue
         declared = zone.config.get("parent_zone")
         if parent is None:
             if declared is not None:
@@ -201,16 +271,19 @@ def delegation_errors(stacks: dict, stack_name: str, zones: list[Zone]) -> list[
             if (parent.instance, parent.key) != (zone.instance, declared):
                 errors.append(f"{where}: parent_zone {declared!r}, but its parent zone is {parent.name} ({parent.label})")
             continue
+        # The NS record may sit in any dns instance whose record zone is the parent zone
+        # (its own zones.<key>, or an external_zones entry naming a vendored zone).
         found = []
-        records = dicts(((instances.get(parent.instance) or {}).get("vars") or {}).get("records"))
-        for record_id, record in sorted(records.items()):
-            if (
-                record.get("zone_name") == parent.key
-                and str(record.get("type", "")).upper() == "NS"
-                and isinstance(record.get("name"), str)
-                and normalize(record["name"]) == normalize(zone.name)
-            ):
-                found.append((record_id, record.get("records")))
+        for writer, spec in sorted(instances.items()):
+            if not check_dependencies.is_deployable(spec) or check_dependencies.module_name(writer, spec) != "dns":
+                continue
+            variables = spec.get("vars") or {}
+            for record_id, record in sorted(dicts(variables.get("records")).items()):
+                if str(record.get("type", "")).upper() != "NS" or not isinstance(record.get("name"), str):
+                    continue
+                target, _ = record_zone(stacks, stack_name, variables, record.get("zone_name"))
+                if target and normalize(target["name"]) == normalize(parent.name) and normalize(record["name"]) == normalize(zone.name):
+                    found.append((f"{writer} {record_id}", record.get("records")))
         want = f"!terraform.state {zone.instance} .zone_name_servers.{zone.key}"
         if not found:
             same = f", or set zones.{zone.key}.parent_zone: {parent.key}" if parent.instance == zone.instance else ""
@@ -223,7 +296,7 @@ def delegation_errors(stacks: dict, stack_name: str, zones: list[Zone]) -> list[
             ref = state_reference(stacks, stack_name, values, "zone_name_servers", "dns")
             if not isinstance(ref, tuple) or (ref[0], ref[2]) != (zone.instance, zone.key):
                 errors.append(
-                    f"{where}: NS record {parent.instance} {record_id} must read `{want}` (got {values!r})"
+                    f"{where}: NS record {record_id} must read `{want}` (got {values!r})"
                 )
     return errors
 
@@ -355,10 +428,13 @@ def certificate_error(ref: tuple, domain: str) -> Optional[str]:
 def check(stacks: dict) -> tuple[list[str], list[str]]:
     """(errors, warnings)."""
     errors, warnings = [], []
+    everywhere = {
+        normalize(z.name) for stack in stacks.values() for z in public_zones(stack.get("components", {}).get("terraform", {}))
+    }
     for stack_name, stack in sorted(stacks.items()):
         instances = stack.get("components", {}).get("terraform", {})
         zones = public_zones(instances)
-        errors += delegation_errors(stacks, stack_name, zones)
+        errors += delegation_errors(stacks, stack_name, zones, everywhere)
         for name, instance in sorted(instances.items()):
             if not check_dependencies.is_deployable(instance):
                 continue
@@ -366,7 +442,8 @@ def check(stacks: dict) -> tuple[list[str], list[str]]:
             variables = instance.get("vars") or {}
             where = f"{stack_name}: {name}"
             if module == "dns":
-                errors += dns_errors(where, variables, zones)
+                found, warned = dns_errors(stacks, stack_name, where, variables, zones)
+                errors, warnings = errors + found, warnings + warned
                 continue
             if module == "apigateway":
                 problem, warning = certificate_problem(stacks, stack_name, variables)
