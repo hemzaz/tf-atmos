@@ -11,7 +11,6 @@
         "atmos workflow validate*",
         "atmos terraform plan*",
         "atmos terraform validate*",
-        "./scripts/list_stacks.sh*",
         "terraform fmt*",
         "python3*",
         "ls*",
