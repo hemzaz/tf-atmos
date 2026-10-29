@@ -242,7 +242,22 @@ SYNTH = [
     (r'^rest_api_stage_arn$',         'arn:aws:apigateway:us-east-1::/restapis/a1b2c3d4e5/stages/example'),
     (r'^api_name$',                   'example-api'),
     (r'^function_invoke_arn$',        'arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:example-function/invocations'),
+    # The vendored aws-dns-delegated's own zone (E6b): its id and its name.
+    (r'^default_dns_zone_id$',        'Z1234567890ABCDEFGHIJ'),
+    (r'^default_domain_name$',        'synthetic.example.com'),
 ]
+
+# Outputs whose shape the HCL reader cannot infer, by (component, output). The
+# vendored Cloud Posse dns components (E6b) return whole for_each'd
+# aws_route53_zone collections, through a local in aws-dns-delegated. A zone
+# carries only the attributes a reader is expected to use (its leaves come from
+# SYNTH), so a read of any other attribute stays null rather than guessed.
+ZONE = OBJ({'zone_id': SCALAR, 'name_servers': LIST(SCALAR)})
+OUTPUT_SHAPES = {
+    ('aws-dns-primary', 'zones'): MAP(ZONE),
+    ('aws-dns-delegated', 'zones'): MAP(ZONE),
+    ('aws-dns-delegated', 'default_dns_zone_id'): SCALAR,
+}
 
 # Only offered when the caller actually managed to generate one. An empty entry
 # here would substitute '' and trip the kubernetes provider's PEM decode, which
@@ -837,7 +852,8 @@ def resolve_ref(s, var, resolver, warnings=None):
             else:
                 missing.append(output)
             continue
-        shape = shape_of(comp.outputs[output], Ctx(comp))
+        shape = OUTPUT_SHAPES.get((os.path.basename(comp_name), output)) \
+            or shape_of(comp.outputs[output], Ctx(comp))
         value = synth_value(shape, [output, singular(output), var],
                             resolver.keys(stack, instance, output)) if known(shape) else None
         if value is None:
@@ -1181,6 +1197,13 @@ def self_test(components_dir, tmp):
         'apigateway/main': {'component': 'apigateway', 'vars': {}},
         'secretsmanager/main': {'component': 'secretsmanager', 'vars': {
             'x': '!terraform.state secretsmanager/main .secret_arns.redis'}},
+        # E6b: the vendored dns components (OUTPUT_SHAPES), and a reader of
+        # each zone key, so `dev` and the apex are keys of the synthetic maps.
+        'dns-primary/main': {'component': 'aws-dns-primary', 'vars': {}},
+        'dns-delegated/main': {'component': 'aws-dns-delegated', 'vars': {}},
+        'acm/delegated': {'component': 'acm', 'vars': {
+            'a': '!terraform.state dns-delegated/main .zones.dev.zone_id',
+            'b': '!terraform.state dns-primary/main .zones["svc.example.net"].name_servers'}},
     }}}}
     os.makedirs(os.path.join(tmp, 'fake'), exist_ok=True)
     with open(os.path.join(tmp, 'fake', 'main.tf'), 'w') as fh:
@@ -1324,6 +1347,21 @@ def self_test(components_dir, tmp):
           resolve_ref('!terraform.state network/main .zone_name_servers.main', 'records', res),
           ('shaped', ['ns-0001.awsdns-01.org', 'ns-0002.awsdns-02.co.uk',
                       'ns-0003.awsdns-03.com', 'ns-0004.awsdns-04.net']))
+    # E6b: the vendored dns outputs the HCL reader cannot shape (OUTPUT_SHAPES).
+    for what, ref_, var, want in [
+        ('delegated default_dns_zone_id', 'dns-delegated/main .default_dns_zone_id', 'zone_id',
+         'Z1234567890ABCDEFGHIJ'),
+        ('delegated default_domain_name', 'dns-delegated/main .default_domain_name', 'domain_name',
+         'synthetic.example.com'),
+        ('delegated zones key', 'dns-delegated/main .zones.dev.zone_id', 'zone_id',
+         'Z1234567890ABCDEFGHIJ'),
+        ('primary zones name_servers', 'dns-primary/main .zones["svc.example.net"].name_servers',
+         'records', ['ns-0001.awsdns-01.org', 'ns-0002.awsdns-02.co.uk',
+                     'ns-0003.awsdns-03.com', 'ns-0004.awsdns-04.net']),
+        # An attribute OUTPUT_SHAPES leaves out reads null, not a guess.
+        ('primary zones other attribute', 'dns-primary/main .zones["svc.example.net"].arn', 'x', None),
+    ]:
+        check('E6b %s' % what, resolve_ref('!terraform.state ' + ref_, var, res), ('shaped', want))
     # L3'. Keys read through a pipe or a select() anywhere in the stack are
     # in the synthetic map, so those reads get a value, not null.
     check('keys collected', res.keys(stack, 'acm/main', 'certificate_arns'),

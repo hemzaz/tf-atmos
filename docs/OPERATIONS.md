@@ -488,7 +488,7 @@ are set in the stack file.
 | Task | Command |
 |------|---------|
 | Drift (hourly in CI, [in-cluster components](#in-cluster-components) on the in-VPC runners; opens `drift` issues, below) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
-| Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-scan-report -f lint` lists every finding without failing. No baselines: fix a finding or suppress it inline with a reason (`#checkov:skip=<ID>:<reason>` in the block, `#trivy:ignore:<ID> <reason>` above it) |
+| Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-scan-report -f lint` lists every finding without failing. No baselines: fix a finding or suppress it inline with a reason (`#checkov:skip=<ID>:<reason>` in the block, `#trivy:ignore:<ID> <reason>` above it); a checkov finding in a vendored file, which cannot be edited, gets a (file, check, reason) entry in `scripts/check-checkov-allowlist.py`, and an entry that matches nothing fails the gate |
 | Security Hub findings | `atmos workflow security-audit -f security-hardening -s <stack>` |
 | Compliance | `atmos workflow check -f compliance-check -s <stack>`; `report` writes `compliance-report.md` |
 | Hardening | `STACK=<stack> atmos workflow harden -f security-hardening` (plans and applies `cloudtrail`, `awsconfig`, `guardduty`, `securityhub`), `harden-iam` (password policy) |

@@ -13,7 +13,7 @@ models something, copy its variable names, types and defaults; use typed objects
 
 ```
 atmos.yaml               Atmos config: version constraint, paths, name_template, Native CI, scaffolds
-components/terraform/    51 root modules (48 hand-written, 3 vendored; + _library/ shared modules); each has a README
+components/terraform/    55 root modules (48 hand-written, 7 vendored; + _library/ shared modules and account-map/, Cloud Posse's vendored iam-roles module); each has a README
 stacks/orgs/fnx/         org defaults (_defaults.yaml: tags, Terraform version, S3 backend) and the stacks
 stacks/catalog/          abstract component defaults; templates/ holds opt-in stack templates
 stacks/mixins/           tenant, stage and region mixins
@@ -151,7 +151,7 @@ until the repository variable `AWS_PLAN_ROLE_ARN` is set.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, actionlint (when `.github/workflows/` changes), plan sweep (`atmos sweep --all`), Trivy/Checkov gate (any HIGH/CRITICAL not suppressed inline; no baselines); PR only: plan of affected non-prod instances, each with its stack's read-only `iam/ci` plan role (PR comment), except the in-cluster components (a notice: `in-vpc.yml` plans them on master only). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan. A `changes` job skips the jobs whose paths did not change; `CI gate`, the check master's protection requires, runs on every PR and fails if any job, the emulator lane included, failed |
+| `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, actionlint (when `.github/workflows/` changes), plan sweep (`atmos sweep --all`), Trivy/Checkov gate (any HIGH/CRITICAL not suppressed inline or, in vendored code, by `scripts/check-checkov-allowlist.py`; no baselines); PR only: plan of affected non-prod instances, each with its stack's read-only `iam/ci` plan role (PR comment), except the in-cluster components (a notice: `in-vpc.yml` plans them on master only). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan. A `changes` job skips the jobs whose paths did not change; `CI gate`, the check master's protection requires, runs on every PR and fails if any job, the emulator lane included, failed |
 | `emulator.yml` | called by `terraform-ci.yml`, manual | LocalEmu lane: applies and destroys real resources |
 | `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag; the [in-cluster components](./docs/OPERATIONS.md#in-cluster-components) deploy on the stack's in-VPC runners (`in-vpc.yml`). No manual approval ([details](./docs/OPERATIONS.md#state-backend)) |
 | `drift-detection.yml` | hourly, manual | Read-only plan of every stack, the in-cluster components on the in-VPC runners; drift fails the job |

@@ -665,12 +665,23 @@ workflows:
           # null-label variables, so the skip drops CKV_TF_1/CKV_TF_2 on those
           # module blocks and nothing else; main.tf stays scanned. A newly
           # vendored dir is added to the alternation in all four commands.
+          # A finding in a vendored file that is not only module blocks goes in
+          # the per-check allowlist of scripts/check-checkov-allowlist.py
+          # instead (E6b): checkov runs with --soft-fail here, and
+          # checkov-allowlist below is the gate, failing as --soft-fail-on
+          # LOW,MEDIUM --hard-fail-on HIGH,CRITICAL did, except on an
+          # allowlisted (file, check) pair, and failing on a stale entry.
           - name: checkov
             type: shell
             command: >-
               checkov --directory components/terraform --framework terraform --skip-path '/tests/' --skip-path '/(access-analyzer|aws-organization|aws-organizational-unit|aws-account|aws-scp)/(context|remote-state)\.tf$'
-              --output sarif --output-file-path reports --quiet
-              --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL
+              --output sarif --output json --output-file-path reports --quiet --soft-fail
+      - name: checkov-allowlist
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_checkov_allowlist.py
+          python3 scripts/check-checkov-allowlist.py gate reports/results_json.json
 
   security-scan-report:
     description: Report-only scan for the nightly workflow (SARIF in reports/); never fails on findings
@@ -774,3 +785,8 @@ workflows:
               with open(path, "w") as f:
                   json.dump(sarif, f)
               print(f"{path}: dropped {dropped} suppressed result(s)")
+      # The vendored findings the gate's allowlist accepts
+      # (scripts/check-checkov-allowlist.py) are dropped the same way.
+      - name: drop-allowlisted-sarif-results
+        type: shell
+        command: python3 scripts/check-checkov-allowlist.py drop-sarif reports/results_sarif.sarif
