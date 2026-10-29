@@ -426,5 +426,122 @@ class CheckDomainsTest(unittest.TestCase):
         self.assert_result(stacks, errors=["s1: acm/main: certificate cert0", "s1: acm/main: certificate cert0", "s1: acm/main: certificate cert0", "s2: acm/main: certificate api"])
 
 
+SVC = "fnx-svc.example.net"
+DEV = f"dev.{SVC}"
+DELEGATED_ID = "!terraform.state dns-delegated .default_dns_zone_id"
+
+
+def cp_stacks(**dev_extra):
+    """E6b's target: an aws-dns-primary service domain, dev delegated from it (Cloud Posse
+    aws-dns-delegated), the house dns writing into the delegated zone through external_zones."""
+    main = instance("dns", {
+        "external_zones": {"delegated": {"zone_id": DELEGATED_ID}},
+        "records": {
+            "services_delegation": {"zone_name": "delegated", "name": f"services.{DEV}", "type": "NS",
+                                    "records": "!terraform.state network/services .zone_name_servers.services"},
+            "www": {"zone_name": "delegated", "name": f"www.{DEV}", "type": "CNAME"},
+        },
+    })
+    dev = {
+        "dns-delegated": instance("aws-dns-delegated", {"zone_config": [{"subdomain": "dev", "zone_name": SVC}]}),
+        "network/services": instance("dns", {"zones": {"services": {"name": f"services.{DEV}"}}}),
+        "network/main": main,
+        "acm/main": acm(DELEGATED_ID, (DEV, [f"*.{DEV}"])),
+        **dev_extra,
+    }
+    return {
+        "net": {"components": {"terraform": {"dns-primary": instance("aws-dns-primary", {"domain_names": [SVC]})}}},
+        "dev": {"components": {"terraform": dev}},
+    }
+
+
+class VendoredDnsKindsTest(unittest.TestCase):
+    assert_result = CheckDomainsTest.assert_result
+
+    def test_target_layout_passes(self):
+        self.assert_result(cp_stacks())
+
+    def test_delegated_parent_held_nowhere_fails(self):
+        stacks = cp_stacks()
+        stacks["net"]["components"]["terraform"]["dns-primary"]["metadata"]["enabled"] = False
+        self.assert_result(stacks, errors=[f"dev: dns-delegated zone dev ({DEV}) writes its NS record into zone_name {SVC}, which no deployable"])
+
+    def test_delegated_below_a_closer_zone_of_its_stack_fails(self):
+        stacks = cp_stacks()
+        stacks["dev"]["components"]["terraform"]["dns-delegated"]["vars"]["zone_config"].append({"subdomain": "a.dev", "zone_name": SVC})
+        self.assert_result(stacks, errors=[f"zone a.dev (a.{DEV}) writes its NS record into {SVC}, but its closest parent zone in the stack is {DEV}"])
+
+    def test_delegated_without_root_delegation_below_a_stack_zone_fails(self):
+        child = instance("aws-dns-delegated", {"zone_config": [{"subdomain": "x", "zone_name": DEV}], "create_root_delegation": False})
+        self.assert_result(cp_stacks(**{"child": child}), errors=[f"child zone x (x.{DEV}) is below {DEV} (dns-delegated zone dev) but sets create_root_delegation: false"])
+
+    def test_primary_below_a_stack_zone_fails(self):
+        nested = instance("aws-dns-primary", {"domain_names": [f"p.{DEV}"]})
+        self.assert_result(cp_stacks(**{"nested": nested}), errors=[f"an aws-dns-primary zone is a root, but sits below {DEV}"])
+
+    def test_private_delegated_zone_is_not_public(self):
+        private = instance("aws-dns-delegated", {"zone_config": [{"subdomain": "x", "zone_name": "nowhere.example"}], "dns_private_zone_enabled": True})
+        self.assert_result(cp_stacks(**{"private": private}))
+
+    def test_record_outside_its_external_zone_fails(self):
+        stacks = cp_stacks()
+        records = stacks["dev"]["components"]["terraform"]["network/main"]["vars"]["records"]
+        records["www"]["name"] = "www.elsewhere.example.org"
+        records["bad"] = {"zone_name": "nope", "name": f"x.{DEV}"}
+        self.assert_result(stacks, errors=[
+            "record bad: zone_name 'nope' is not a key of zones or external_zones",
+            f"record www (zone delegated): www.elsewhere.example.org is not in its zone ({DEV})",
+        ])
+
+    def test_external_zone_by_name_and_literal_id(self):
+        stacks = cp_stacks()
+        main = stacks["dev"]["components"]["terraform"]["network/main"]["vars"]
+        main["external_zones"] = {"delegated": {"name": DEV}, "lit": {"zone_id": "Z0123456789ABCDEFGHIJ"}}
+        main["records"]["lit"] = {"zone_name": "lit", "name": "a.example.org"}
+        self.assert_result(stacks, warnings=["record lit: external_zones.lit.zone_id is a literal zone id"])
+
+    def test_subzone_not_delegated_through_the_external_zone_fails(self):
+        stacks = cp_stacks()
+        del stacks["dev"]["components"]["terraform"]["network/main"]["vars"]["records"]["services_delegation"]
+        self.assert_result(stacks, errors=[f"zone services (services.{DEV}) is not delegated from its parent zone {DEV} (dns-delegated zone dev)"])
+
+    def test_acm_reading_default_dns_zone_id(self):
+        self.assert_result(cp_stacks(**{"acm/main": acm(DELEGATED_ID, ("api.other.example.org", []))}),
+                           errors=[f"certificate cert0: api.other.example.org is not in its zone ({DEV})"])
+        stacks = cp_stacks()
+        stacks["dev"]["components"]["terraform"]["dns-delegated"]["vars"]["zone_config"] = []
+        self.assert_result(stacks, errors=[
+            "acm/main: zone_id reads dns-delegated .default_dns_zone_id, but dns-delegated has no zone_config entry",
+            "network/main record services_delegation: external_zones.delegated.zone_id reads dns-delegated",
+            "network/main record www: external_zones.delegated.zone_id reads dns-delegated",
+        ])
+
+
+    def test_duplicate_zone_names_fail(self):
+        house = instance("dns", {"zones": {"dup": {"name": DEV}}})
+        self.assert_result(cp_stacks(**{"old/main": house}), errors=[f"dev: public zone {DEV} is held twice: old/main zone dup, dns-delegated zone dev"])
+        stacks = cp_stacks()
+        stacks["staging"] = {"components": {"terraform": {"dns-delegated": stacks["dev"]["components"]["terraform"]["dns-delegated"]}}}
+        self.assert_result(stacks, errors=[f"dev: aws-dns-delegated zone {DEV} is held by stacks dev, staging"])
+        stacks["staging"]["components"]["terraform"]["dns-delegated"] = dict(
+            stacks["dev"]["components"]["terraform"]["dns-delegated"], settings={"context": {"stage": "fixtures"}})
+        self.assert_result(stacks)
+
+    def test_bad_reads_and_names(self):
+        stacks = cp_stacks(**{"acm/main": acm("!terraform.state dns-delegatd .default_dns_zone_id", (DEV, []))})
+        self.assert_result(stacks, errors=["acm/main: zone_id `!terraform.state dns-delegatd .default_dns_zone_id` reads dns-delegatd in dev, which does not exist"])
+        stacks = cp_stacks()
+        stacks["dev"]["components"]["terraform"]["dns-delegated"]["vars"]["dns_private_zone_enabled"] = "true"
+        errors, _ = check_domains.check(stacks)
+        self.assertIn("acm/main: zone_id reads dns-delegated .default_dns_zone_id, a private zone", errors[0])
+        stacks = cp_stacks()
+        stacks["dev"]["components"]["terraform"]["network/main"]["vars"]["external_zones"]["delegated"] = {"name": "dev.fnx-svc.exmaple.net"}
+        errors, _ = check_domains.check(stacks)
+        self.assertIn("external_zones.delegated.name dev.fnx-svc.exmaple.net is no deployable public zone of any stack", errors[-1])
+
+    def test_quoted_false_create_root_delegation_writes_no_ns(self):
+        child = instance("aws-dns-delegated", {"zone_config": [{"subdomain": "x", "zone_name": DEV}], "create_root_delegation": "false"})
+        self.assert_result(cp_stacks(child=child), errors=["but sets create_root_delegation: false"])
+
 if __name__ == "__main__":
     unittest.main()
