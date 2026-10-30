@@ -25,7 +25,8 @@ it cannot be checked. Within a group this fails:
   - two instances that create the same account singleton (SINGLETONS: the
     GitHub OIDC provider, the Auto Scaling service-linked role, the
     multi-region CloudTrail trail, CloudTrail's global-service-event
-    recording, AWS Config's global-resource recording);
+    recording, AWS Config's global-resource recording, the IAM account alias
+    and the S3 account public access block);
     stage fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
@@ -120,6 +121,11 @@ SINGLETONS = {
     # account's global-service events: a regional trail sets it false.
     ("cloudtrail", "include_global_service_events", True): "CloudTrail global-service-event recording",
     ("awsconfig", "include_global_resource_types", True): "AWS Config global-resource recording",
+    # aws-account-settings' account-wide settings: its account's first stack
+    # sets them (catalog/aws-account-settings/main), the others turn them off
+    # (main-standby).
+    ("aws-account-settings", "account_alias_enabled", True): "IAM account alias",
+    ("aws-account-settings", "s3_block_public_access_enabled", True): "S3 account public access block",
 }
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
 # region (IAM is global within an account).
