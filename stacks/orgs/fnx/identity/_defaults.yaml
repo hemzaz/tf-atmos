@@ -6,7 +6,8 @@
 # and automation assume roles from (aws-teams, trusted by every account's
 # aws-team-roles), core-<region>-identity in Cloud Posse's reference
 # architecture and the account map's identity_account_account_name. Its
-# components arrive in Wave E (E4); until then its stacks hold no instance.
+# components arrive in Wave E (E4); until then its stacks hold no enabled
+# instance (aws-account-settings, below, is disabled until E3e).
 #
 # Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
 # the tenant stays fnx, the account is the stage, the region code the

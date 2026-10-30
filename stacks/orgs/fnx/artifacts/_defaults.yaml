@@ -6,7 +6,7 @@
 # of build artifacts the other accounts pull from (container registries, ECR in
 # Cloud Posse's reference architecture, core-<region>-artifacts there). No
 # Wave E item places a component here yet; until one does its stacks hold no
-# instance.
+# enabled instance (aws-account-settings, below, is disabled until E3e).
 #
 # Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
 # the tenant stays fnx, the account is the stage, the region code the

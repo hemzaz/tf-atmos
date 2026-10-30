@@ -5,7 +5,8 @@
 # Cloud Posse's core "audit" account (owner decision Q1): the log archive that
 # CloudTrail and AWS Config deliver to (per-residency buckets, owner decision
 # QE7), core-<region>-audit in Cloud Posse's reference architecture. Its
-# components arrive in Wave E (E5); until then its stacks hold no instance.
+# components arrive in Wave E (E5); until then its stacks hold no enabled
+# instance (aws-account-settings, below, is disabled until E3e).
 #
 # Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
 # the tenant stays fnx, the account is the stage, the region code the
