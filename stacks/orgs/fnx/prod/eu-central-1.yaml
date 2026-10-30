@@ -8,8 +8,9 @@
 # B5). Same account as fnx-ew1-prod (prod-eu), so its names carry the ec1
 # prefix (settings.prefix) and the account's singletons stay in fnx-ew1-prod:
 # the GitHub OIDC provider, the Auto Scaling service-linked role, the
-# multi-region CloudTrail trail, AWS Config's global-resource recording and
-# the account budget. Tagged Compliance "pci-sox-gdpr" (vars.tags below);
+# multi-region CloudTrail trail, AWS Config's global-resource recording, the
+# account budget, the IAM account alias and the S3 account public access block
+# (aws-account-settings/main). Tagged Compliance "pci-sox-gdpr" (vars.tags below);
 # check-data-residency.py fails it if it names a non-EU region or depends on a
 # US stack.
 #
