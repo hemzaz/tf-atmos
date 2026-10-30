@@ -1,0 +1,74 @@
+---
+##################################################
+# Catalog Configuration for account-level settings
+##################################################
+# Vendored Cloud Posse aws-account-settings v2.1.1 (vendor.yaml), its README's
+# catalog entry with every hardening setting on. One instance per account and
+# region, aws-account-settings, imported by each account stack from this
+# directory (main.yaml, main-standby.yaml). Two kinds of setting:
+#   - account-wide, once per account (an account singleton,
+#     check-lane-names.py SINGLETONS): the IAM account alias and the S3
+#     account public access block. The account's first stack sets them
+#     (main.yaml); its other regions' stacks leave them alone
+#     (main-standby.yaml), or two states would fight over one setting.
+#   - regional, in every stack of the account: EBS default encryption, EBS
+#     snapshot and AMI block public access, the IMDSv2 default for new
+#     instances, EMR block public access and SSM public document sharing.
+#     Cloud Posse deploys the component in each account's global stack only
+#     (README "Stack Level: Global"), so its regional settings reach one
+#     region; here every region an account deploys to gets them.
+#
+# Deviations from the plan and Cloud Posse's v1 component:
+#   - No IAM password policy. Cloud Posse removed it in v2.0.0 (CHANGELOG
+#     "Removed IAM password policy"), and nothing here needs one: people sign
+#     in through Identity Center (E4), CI through GitHub OIDC roles, and the
+#     baseline SCP (catalog/aws-scp, E3c) denies iam:CreateUser in every
+#     member account.
+#   - No alternate contacts (Cloud Posse's default, null): they are real
+#     people's names and phone numbers, which this repository does not hold.
+#   - EBS default encryption with the AWS-managed aws/ebs key (Cloud Posse's
+#     default, ebs_default_kms_key_arn null), not kms/main: a customer key
+#     would have to grant every EBS user (Auto Scaling's and EKS's
+#     service-linked roles) in its key policy first.
+#
+# Gotchas:
+#   - The account alias is unique across all of AWS. <tenant>-<account>
+#     (fnx-prod, the static_account_map key) may already be taken:
+#     CreateAccountAlias then fails EntityAlreadyExists; set vars.account_alias
+#     on the instance. vars.import_account_alias adopts an existing alias
+#     (owner decision QE2).
+#   - The IMDS default (http_tokens required, hop limit 1) applies only to a
+#     launch that sets no metadata options; the house eks, ec2, batch and
+#     github-runners launch templates set their own.
+#   - AMI block public access (block-new-sharing) refuses making an AMI
+#     public; sharing with named accounts still works.
+
+import:
+  - catalog/_base/vendored
+
+components:
+  terraform:
+    aws-account-settings/defaults:
+      metadata:
+        component: aws-account-settings
+        type: abstract
+        inherits:
+          - vendored
+      vars:
+        enabled: true
+        name: account-settings
+        # Account-wide (main-standby.yaml turns these off).
+        account_alias_enabled: true
+        account_alias: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}"
+        s3_block_public_access_enabled: true
+        # Regional.
+        ebs_default_encryption_enabled: true
+        ebs_snapshot_block_public_access_enabled: true
+        ebs_snapshot_block_public_access_state: block-all-sharing
+        ec2_instance_metadata_defaults_enabled: true
+        ec2_instance_metadata_http_tokens: required
+        ec2_image_block_public_access_enabled: true
+        emr_block_public_access_enabled: true
+        ssm_block_public_document_sharing: true
+        tags:
+          Component: "AccountSettings"

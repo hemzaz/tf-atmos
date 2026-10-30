@@ -13,7 +13,7 @@ models something, copy its variable names, types and defaults; use typed objects
 
 ```
 atmos.yaml               Atmos config: version constraint, paths, name_template, Native CI, scaffolds
-components/terraform/    55 root modules (48 hand-written, 7 vendored; + _library/ shared modules and account-map/, Cloud Posse's vendored iam-roles module); each has a README
+components/terraform/    56 root modules (48 hand-written, 8 vendored; + _library/ shared modules and account-map/, Cloud Posse's vendored iam-roles module); each has a README
 stacks/orgs/fnx/         org defaults (_defaults.yaml: tags, Terraform version, S3 backend) and the stacks
 stacks/catalog/          abstract component defaults; templates/ holds opt-in stack templates
 stacks/mixins/           tenant, stage and region mixins

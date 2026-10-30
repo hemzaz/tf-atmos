@@ -40,6 +40,8 @@ ALLOWLIST = (
      "not a secret, as a String"),
     (r"/aws-dns-delegated/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-dns-delegated/remote-state\.tf", "CKV_TF_1", TF_1),
+    # aws-account-settings (vendor.yaml): each account's account-level settings (E3d).
+    (r"/aws-account-settings/context\.tf", "CKV_TF_1", TF_1),
     # account-map's iam-roles module (vendor.yaml), reached through the dns providers.tf.
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),
     (r"/account-map/modules/iam-roles/main\.tf", "CKV_TF_1", TF_1),

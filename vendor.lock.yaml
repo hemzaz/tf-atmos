@@ -1,5 +1,54 @@
 version: 1
 artifacts:
+  8d3384db2b02f2039ac56766bbf59eecf5dd0f6598c9b987bd79b45e76196372:
+    name: aws-account-settings
+    kind: remote
+    target: components/terraform/aws-account-settings
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-account-settings.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-account-settings.git//src
+      digest: sha256:e4196761873f5df49a8b70148281f30739b980ab09862819eef21edaa6948510
+    files:
+      - path: CHANGELOG.md
+        type: file
+        mode: 420
+        sha256: 972f5ea885aebb329f043255e2ec5f940159a744dcac0ef3f4fe4e5efcdab221
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 0f812a7f29709c3624c4aa826fc9e6ee18a067bfcdc9e22585a1b5a006114043
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: imports.tf
+        type: file
+        mode: 420
+        sha256: c24c1414d036ff1497b6a71266764e8cf38d2150e07ce94f67d1a22de5b9a8db
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: cbab3f6f9dcb64cb57d657ba845a56b72888c734ac5a547b6f153143f26e1ccb
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: eb7b65f41af76aed1f5de0e447123521cbaf7cab5c7f61d3e6c51bf28a7cc647
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 556ca8428884d5398dee8948c00e94165ed7ad1aceec03fcef87a82cff766f48
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 707d39ac57b800a00ef5687b678e2fa321985686a2ed51d86f67359bb0ac1073
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 89a8dd13e30782b90c547254941fc80441b2324c55799ee410d45ab7a52019bb
+    order: 9
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
   8dcae12c229f599e27e52b7bc421e7be36ff70ce7fa808aa708b703c25c793dd:
     name: access-analyzer
     kind: remote
