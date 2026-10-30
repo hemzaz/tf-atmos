@@ -2,9 +2,10 @@
 # =============================================================================
 # fnx-ue1-network - the network account's home-region stack
 # =============================================================================
-# No instance yet: the Transit Gateway hub and primary DNS components (E6) land
-# here. Its state goes to fnx-ue1-root's bucket through the backend's root role
-# (stacks/orgs/fnx/_defaults.yaml), which trusts only the management-account
+# No instance yet: the primary DNS zones (aws-dns-primary, E6b) land here; the
+# Transit Gateway hub later (QE6). Its state goes to fnx-ue1-root's bucket
+# through the backend's root role (stacks/orgs/fnx/_defaults.yaml), which
+# trusts only the management-account
 # administrator, while the provider guard needs credentials in the network
 # account. So the first instance's PR adds to fnx-ue1-root's root_write this
 # stack's pattern pair (check-state-keys.py) and the network account's operator
