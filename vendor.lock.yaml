@@ -147,6 +147,92 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+  91354b80aae4647788a25259f091be51fa02ad6495b54d9ccc017343442016ef:
+    name: account-map
+    kind: remote
+    target: components/terraform/account-map
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-account-map.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-account-map.git//src
+      digest: sha256:ba3c74111410bc3f1fadd8794dcea9668e4ed50ccd63d38708e65020452fab2a
+    files:
+      - path: modules/iam-roles/README.md
+        type: file
+        mode: 420
+        sha256: 9efa28b1c64cc2b415990fa3d801c6fcfe9d53b0b9e561465bd1918e09f3b1da
+      - path: modules/iam-roles/context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: modules/iam-roles/main.tf
+        type: file
+        mode: 420
+        sha256: aecce07f3cafd9acd34771e783849cd59e7ad032de3e6c123f0cfdd5c5dc55dd
+      - path: modules/iam-roles/outputs.tf
+        type: file
+        mode: 420
+        sha256: 918239959bbf2b3989ee2396a13174356aaa2e7d26e8baee4125762ea339313e
+      - path: modules/iam-roles/providers.tf
+        type: file
+        mode: 420
+        sha256: 44832a77d77444a4096455ca23a568158ba203f58cfc39727b28c025ad49e60f
+      - path: modules/iam-roles/variables.tf
+        type: file
+        mode: 420
+        sha256: f1bfe5fea9949fc2fbcca1d81538c1837c0af42b077dcdc40436b2b623f31950
+      - path: modules/iam-roles/versions.tf
+        type: file
+        mode: 420
+        sha256: 8448df51bc37ca669bfb848c45390876ff46cd480444053ed91071273621ffa7
+    order: 6
+    included_paths:
+      - modules/iam-roles/*.tf
+      - modules/iam-roles/*.md
+  b3bbeebf73ca98c5102e6359e626266ad894e5f8acdc334579921bf94f2e47fa:
+    name: aws-dns-primary
+    kind: remote
+    target: components/terraform/aws-dns-primary
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-dns-primary.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-dns-primary.git//src
+      digest: sha256:79885346bc4787fb81b3573e04c9e46103a3dc785db7758037a3b670053c80ae
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 6f60dfb79b613090297a5d4b6e9ce35dd41f4cb2c8a91a287d08094e83ada8b7
+      - path: acm.tf
+        type: file
+        mode: 420
+        sha256: d4d7e3c0ec9a63700b3c6381db42760cf8fd5ae839877ddfcfe27a34ac309b98
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 709adb6a450635027ea9cbba18093611d2b41c3c420f53571c5e22c87f307c22
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 8ce187b4390b568e9f45052dcfc64892534d5ec4d4e8383f4ad2d101640f31e7
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 34c1fca4eb9a64f37e130374076f66a6de05001cdf6ed343199a5b21274319e5
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: cb7536a948cb72c7e0b7ffd6db018bd9a00bea02c567d66cea3ca8102ea1994f
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 5707f75f392813415b9ef8753e00e96ee873c3f963e156b5371990fcd17e47ca
+    order: 7
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
   d296b8afc0f9fe4b680c855754a11e5420b48ed303b24bca369dc0bfe8c3c5c4:
     name: aws-scp
     kind: remote
@@ -402,6 +488,59 @@ artifacts:
         mode: 420
         sha256: f9ba4850b17a7652a9dded641857c398f36d317472f91531004b7d67b5a6504b
     order: 2
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+  f335890f0bf073edd8430ab3ef4a1ffcb395e17c8993f7dfdb5bcb57eb9f07e1:
+    name: aws-dns-delegated
+    kind: remote
+    target: components/terraform/aws-dns-delegated
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-dns-delegated.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-dns-delegated.git//src
+      digest: sha256:91215eb23d12331a25f12525b032a846ecbd300f15532441120e4b4c4bd4125a
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 856cdf1a3f4f168be4fff2ccdb99385678c851768faf8f6dd353bd59723fcd16
+      - path: acm.tf
+        type: file
+        mode: 420
+        sha256: 68077d58cbc4b461c78dac9c2adedf732783fbb8c4f4d7b11a046a0c9cd17b48
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 256fca58852e2f554da7b341039267f54c608deebfe8c58bb25775e4e9e57065
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 9bbbf7a1c9e575533559f925974f45a81d84ffd6afa136082e1d7edc21b749b3
+      - path: providers-dns-primary.tf
+        type: file
+        mode: 420
+        sha256: 7ef92d19ce470325746ff20d4fc88c05e68cb11d2725af39097fa77438db074c
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 34c1fca4eb9a64f37e130374076f66a6de05001cdf6ed343199a5b21274319e5
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: 36a878161b5ba9ec5bab5c0b4a8b5802d9904ea4ab0b53023ea7cbb7da5a3cbc
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: a9802f40121e554ddd34e60c69b6ff96f9da67f14b6d570433eaf8f7de0c9aec
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 0bf533c074f5b3f67d71594ce79f90cf998b37e745f2d481b83fc4d4d3cd68b2
+    order: 8
     included_paths:
       - '**/*.tf'
       - '**/*.md'

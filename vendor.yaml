@@ -58,3 +58,29 @@ spec:
       targets:
         - "stacks/catalog/aws-scp/catalog"
       included_paths: ["**/*.yaml"]
+    # Cloud Posse's account-map iam-roles module only (no account-map root
+    # module yet; E4 vendors it): the v1 components below source
+    # ../account-map/modules/iam-roles for their provider roles.
+    - component: account-map
+      source: "github.com/cloudposse-terraform-components/aws-account-map.git//src?ref={{ .Version }}"
+      version: "v1.537.3"
+      targets:
+        - "components/terraform/account-map"
+      included_paths: ["modules/iam-roles/*.tf", "modules/iam-roles/*.md"]
+    # The service domain's primary zone (network account) and each stage's
+    # delegated subdomain, which writes its NS record into the primary through
+    # aws.primary (iam-roles' dns_terraform_role_arn). E6b: instances land
+    # disabled and are enabled after E4b; the house dns signs and query-logs
+    # their zones (external_zones mode).
+    - component: aws-dns-primary
+      source: "github.com/cloudposse-terraform-components/aws-dns-primary.git//src?ref={{ .Version }}"
+      version: "v1.537.0"
+      targets:
+        - "components/terraform/aws-dns-primary"
+      included_paths: ["**/*.tf", "**/*.md"]
+    - component: aws-dns-delegated
+      source: "github.com/cloudposse-terraform-components/aws-dns-delegated.git//src?ref={{ .Version }}"
+      version: "v1.538.1"
+      targets:
+        - "components/terraform/aws-dns-delegated"
+      included_paths: ["**/*.tf", "**/*.md"]
