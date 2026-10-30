@@ -3,7 +3,7 @@
 # Catalog Configuration for account-level settings
 ##################################################
 # Vendored Cloud Posse aws-account-settings v2.1.1 (vendor.yaml), its README's
-# catalog entry with every hardening setting on. One instance per account and
+# catalog entry less the deviations below. One instance per account and
 # region, aws-account-settings, imported by each account stack from this
 # directory (main.yaml, main-standby.yaml). Two kinds of setting:
 #   - account-wide, once per account (an account singleton,
@@ -26,6 +26,9 @@
 #     member account.
 #   - No alternate contacts (Cloud Posse's default, null): they are real
 #     people's names and phone numbers, which this repository does not hold.
+#   - SSM Session Manager preferences off (Cloud Posse's default, false): the
+#     README example's 30-minute idle timeout would lengthen AWS's 20-minute
+#     default, and no house component manages SSM-SessionManagerRunShell.
 #   - EBS default encryption with the AWS-managed aws/ebs key (Cloud Posse's
 #     default, ebs_default_kms_key_arn null), not kms/main: a customer key
 #     would have to grant every EBS user (Auto Scaling's and EKS's
@@ -33,7 +36,8 @@
 #
 # Gotchas:
 #   - The account alias is unique across all of AWS. <tenant>-<account>
-#     (fnx-prod, the static_account_map key) may already be taken:
+#     (the static_account_map key, e.g. tenant fnx + account prod-eu) may
+#     already be taken:
 #     CreateAccountAlias then fails EntityAlreadyExists; set vars.account_alias
 #     on the instance. vars.import_account_alias adopts an existing alias
 #     (owner decision QE2).
