@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# aws-account-settings in an account's first stack
+# =============================================================================
+# The catalog defaults as they are (aws-account-settings/defaults): the
+# account-wide settings (IAM account alias, S3 account public access block)
+# and this region's. Imported by the stack that owns its account's singletons
+# (fnx-ue1-dev, fnx-ue1-staging, the prod primaries); the account's other
+# regions import main-standby.yaml. One instance per account and region: a
+# second one would overwrite this one's settings.
+# =============================================================================
+
+import:
+  - catalog/aws-account-settings/defaults
+
+components:
+  terraform:
+    aws-account-settings:
+      metadata:
+        component: aws-account-settings
+        inherits:
+          - aws-account-settings/defaults

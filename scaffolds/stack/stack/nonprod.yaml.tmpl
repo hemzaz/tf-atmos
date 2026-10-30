@@ -52,6 +52,7 @@ import:
   # --- security
   - catalog/iam/[[ if eq $flavor "dev" ]]dev[[ else ]]main[[ end ]]
   - catalog/iam/ci
+  - catalog/aws-account-settings/main[[ if eq .Config.account_singletons "no" ]]-standby[[ end ]]
   - catalog/kms/main[[ $f ]]
   - catalog/secretsmanager/app
   - catalog/secretsmanager/infra[[ $f ]]
