@@ -6,7 +6,8 @@
 # standbys, a nonprod stack with account_singletons=no, the management
 # account's EU stack): this region's settings only. The IAM account alias and
 # the S3 account public access block are account-wide and belong to that
-# stack (check-lane-names.py allows each once per account).
+# stack (check-lane-names.py SINGLETONS allows each once per account from
+# E3d 3/5 on; until then only this split keeps them single).
 # =============================================================================
 
 import:

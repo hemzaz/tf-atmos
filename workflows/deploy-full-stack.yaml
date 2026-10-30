@@ -17,7 +17,9 @@
 # (Atmos applies a layer in dependency order). The backend layer has an instance
 # only in the root stacks (fnx-ue1-root; fnx-ew1-root, the EU state backend), deployed before any
 # workload stack; iam/ci reads it cross-stack. aws-account-settings (EBS default encryption, the S3
-# account public access block) shares the iam layer, before any volume or bucket exists.
+# account public access block) shares the iam layer, before any volume or bucket exists;
+# bootstrap.yaml full applies only iam and vpc (vpc creates no volume or bucket) and leaves
+# aws-account-settings to this workflow's iam layer, its next step.
 # Connectivity follows networking, security-monitoring
 # follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
