@@ -65,6 +65,7 @@ import:
 
   # --- security
   - catalog/iam/ci-standby
+  - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
   - catalog/awsconfig/main-standby
   - catalog/guardduty/main-standby

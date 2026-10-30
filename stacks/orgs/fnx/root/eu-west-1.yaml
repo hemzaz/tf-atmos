@@ -27,6 +27,7 @@ import:
   - mixins/region/eu-west-1
   - orgs/fnx/root/_defaults
   - catalog/backend/roles/prod
+  - catalog/aws-account-settings/main-standby
 
 vars:
   region: "{{ .settings.tfstate.region }}"
@@ -50,6 +51,13 @@ settings:
 
 components:
   terraform:
+    # The management account's eu-west-1 settings (E3d); its account-wide
+    # ones are fnx-gbl-root's. Disabled until E3e enables fnx-gbl-root's
+    # instance with this one: until then only the backend is applied here.
+    aws-account-settings:
+      metadata:
+        enabled: false
+
     backend/main:
       metadata:
         component: backend
