@@ -42,16 +42,15 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   `logs.us-east-1` scoped to `/aws/route53/*`), so the component works in any stack region. All
   three use the resource `region` argument, not a provider alias; DNS-account zones get theirs
   in the DNS account. CloudWatch Logs allows 10 account-scoped resource policies per region and
-  account; `check-domains.py` counts the house ones per account (this policy, a logging `waf`'s)
-  and fails an eleventh. Being
+  account; `check-domains.py` counts the house ones per account name (this policy, a logging
+  `waf`'s; a DNS-account policy in the account its role ARN's id maps to) and fails an eleventh. Being
   us-east-1 only, it stays off on every zone of a GDPR-scoped (EU) stack (`check-data-residency.py` fails it); Resolver
   (in-VPC) query logging, which would stay in the stack region, is not modelled.
 - `<first zone>` is the alphabetically first query-logged zone, so adding a zone that sorts earlier
   renames (replaces) the policy and the alias, briefly cutting Route53's write permission. Set
-  `query_logging_name` once the zones are settled to pin the suffix: the `network/main` catalog
-  entries pin `<settings.prefix>-main`, since E6b moves their public zone to `external_zones`.
-  Setting it on an existing stack is itself a one-time replace of the policy and the alias, so pin
-  it before the first apply. A caller-supplied `cloudwatch_log_group_arn` must be in the
+  `query_logging_name` once the zones are settled to pin the suffix. Setting it on an existing
+  stack is itself a one-time replace of the policy and the alias, so pin it before the first
+  apply. A caller-supplied `cloudwatch_log_group_arn` must be in the
   zone's account (a precondition on the query log).
 - `query_log_retention_in_days` defaults to 7 (prod: 90). A zone's `query_logging_config` may
   set `retention_days`, a us-east-1 `kms_key_id` (no own key is then created for it) or a

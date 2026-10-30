@@ -581,19 +581,62 @@ class LogPolicyQuotaTest(unittest.TestCase):
         self.assertEqual(check_domains.log_policy_errors(self.stacks(10, w=waf("REGIONAL"))), [])
         quiet = waf("CLOUDFRONT", manage_log_resource_policy=False)
         self.assertEqual(check_domains.log_policy_errors(self.stacks(10, w=quiet)), [])
+        off = waf("CLOUDFRONT", enabled=False)
+        self.assertEqual(check_domains.log_policy_errors(self.stacks(10, w=off)), [])
 
-    def test_dns_account_zones_count_in_the_dns_account(self):
+    def test_waf_without_enable_logging_counts_by_its_default(self):
+        found = instance("waf", {"scope": "CLOUDFRONT", "region": "us-east-2"})
+        found["settings"] = {"environment": {"account": "dev"}, "context": {"stage": "dev"}}
+        errors = check_domains.log_policy_errors(self.stacks(10, w=found))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("account dev region us-east-1: 11 CloudWatch Logs resource policies", errors[0])
+
+    @staticmethod
+    def mapped(found, **account_map):
+        found["settings"]["account_map"] = {"full_account_map": account_map}
+        return found
+
+    def test_dns_account_zones_count_in_the_role_accounts_name(self):
         role = "arn:aws:iam::222222222222:role/dns"
         remote = self.logged("dev", multi_account_dns_delegation=True, dns_account_assume_role_arn=role)
-        self.assertEqual(check_domains.log_policies("s1", "n", remote), [("account id 222222222222", "us-east-1")])
-        external = self.logged("dev", external_zones={"e": {"name": "x.example.org", "enable_query_logging": True, "dns_account": True}})
+        accounts = {"222222222222": {"network"}}
+        self.assertEqual(check_domains.log_policies("s1", "n", remote, accounts), ([("network", "us-east-1")], []))
+        # Counted with the network account's own policies, from the account map.
+        stacks = self.stacks(10, account="network")
+        stacks["s2"] = {"components": {"terraform": {"d": self.mapped(remote, dev="111111111111", network="222222222222")}}}
+        errors = check_domains.log_policy_errors(stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("account network region us-east-1: 11", errors[0])
+
+    def test_shared_placeholder_id_counts_in_each_account(self):
+        role = "arn:aws:iam::123456789012:role/dns"
+        remote = self.logged("dev", multi_account_dns_delegation=True, dns_account_assume_role_arn=role)
+        accounts = {"123456789012": {"network", "root"}}
         self.assertEqual(
-            check_domains.log_policies("s1", "n", external), [("dev", "us-east-1"), ("dev (dns account)", "us-east-1")]
+            check_domains.log_policies("s1", "n", remote, accounts),
+            ([("network", "us-east-1"), ("root", "us-east-1")], []),
+        )
+
+    def test_unknown_role_account_id_fails(self):
+        role = "arn:aws:iam::999999999999:role/dns"
+        remote = self.logged("dev", multi_account_dns_delegation=True, dns_account_assume_role_arn=role)
+        errors = check_domains.log_policy_errors({"s1": {"components": {"terraform": {"d": remote}}}})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("names account id 999999999999, which no stack", errors[0])
+
+    def test_dns_account_zones_without_a_role_count_in_the_own_account(self):
+        moved = self.logged("dev", multi_account_dns_delegation=True)
+        self.assertEqual(check_domains.log_policies("s1", "n", moved, {}), ([("dev", "us-east-1")], []))
+        external = {"e": {"name": "x.example.org", "enable_query_logging": True, "dns_account": True}}
+        both = self.logged("dev", external_zones=external)
+        # Two policy resources (the local one and the aws.dns_account one), both in dev.
+        self.assertEqual(
+            check_domains.log_policies("s1", "n", both, {}), ([("dev", "us-east-1"), ("dev", "us-east-1")], [])
         )
 
     def test_unlogged_private_disabled_and_fixture_instances_do_not_count(self):
         private = {"p": {"name": "p.example.org", "enable_query_logging": True, "vpc_associations": ["v"]}}
-        self.assertEqual(check_domains.log_policies("s1", "n", instance("dns", {"zones": private})), [])
+        self.assertEqual(check_domains.log_policies("s1", "n", instance("dns", {"zones": private}), {}), ([], []))
         self.assertEqual(check_domains.log_policy_errors(self.stacks(11, stage="fixtures")), [])
         disabled = self.logged("dev")
         disabled["metadata"]["enabled"] = False
