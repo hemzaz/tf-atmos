@@ -543,5 +543,66 @@ class VendoredDnsKindsTest(unittest.TestCase):
         child = instance("aws-dns-delegated", {"zone_config": [{"subdomain": "x", "zone_name": DEV}], "create_root_delegation": "false"})
         self.assert_result(cp_stacks(child=child), errors=["but sets create_root_delegation: false"])
 
+class LogPolicyQuotaTest(unittest.TestCase):
+    """CloudWatch Logs: 10 account-scoped resource policies per region and account."""
+
+    @staticmethod
+    def logged(account, stage="dev", **variables):
+        zones = {"main": {"name": f"{account}.example.org", "enable_query_logging": True}}
+        found = instance("dns", {"zones": zones, **variables})
+        found["settings"] = {"environment": {"account": account}, "context": {"stage": stage}}
+        return found
+
+    def stacks(self, count, account="dev", stage="dev", **extra):
+        held = {f"q{i}": self.logged(account, stage) for i in range(count)}
+        return {"s1": {"components": {"terraform": {**held, **extra}}}}
+
+    def test_ten_policies_pass(self):
+        self.assertEqual(check_domains.log_policy_errors(self.stacks(10)), [])
+
+    def test_eleven_policies_in_one_account_fail(self):
+        errors = check_domains.log_policy_errors(self.stacks(11))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("account dev region us-east-1: 11 CloudWatch Logs resource policies", errors[0])
+
+    def test_counted_across_stacks_by_account(self):
+        stacks = self.stacks(6)
+        stacks["s2"] = self.stacks(5)["s1"]
+        self.assertEqual(len(check_domains.log_policy_errors(stacks)), 1)
+        stacks["s2"] = self.stacks(5, account="staging")["s1"]
+        self.assertEqual(check_domains.log_policy_errors(stacks), [])
+
+    def test_waf_counts_in_its_region_and_cloudfront_in_us_east_1(self):
+        def waf(scope, **variables):
+            found = instance("waf", {"scope": scope, "region": "us-east-2", "enable_logging": True, **variables})
+            found["settings"] = {"environment": {"account": "dev"}, "context": {"stage": "dev"}}
+            return found
+        self.assertEqual(len(check_domains.log_policy_errors(self.stacks(10, w=waf("CLOUDFRONT")))), 1)
+        self.assertEqual(check_domains.log_policy_errors(self.stacks(10, w=waf("REGIONAL"))), [])
+        quiet = waf("CLOUDFRONT", manage_log_resource_policy=False)
+        self.assertEqual(check_domains.log_policy_errors(self.stacks(10, w=quiet)), [])
+
+    def test_dns_account_zones_count_in_the_dns_account(self):
+        role = "arn:aws:iam::222222222222:role/dns"
+        remote = self.logged("dev", multi_account_dns_delegation=True, dns_account_assume_role_arn=role)
+        self.assertEqual(check_domains.log_policies("s1", "n", remote), [("account id 222222222222", "us-east-1")])
+        external = self.logged("dev", external_zones={"e": {"name": "x.example.org", "enable_query_logging": True, "dns_account": True}})
+        self.assertEqual(
+            check_domains.log_policies("s1", "n", external), [("dev", "us-east-1"), ("dev (dns account)", "us-east-1")]
+        )
+
+    def test_unlogged_private_disabled_and_fixture_instances_do_not_count(self):
+        private = {"p": {"name": "p.example.org", "enable_query_logging": True, "vpc_associations": ["v"]}}
+        self.assertEqual(check_domains.log_policies("s1", "n", instance("dns", {"zones": private})), [])
+        self.assertEqual(check_domains.log_policy_errors(self.stacks(11, stage="fixtures")), [])
+        disabled = self.logged("dev")
+        disabled["metadata"]["enabled"] = False
+        self.assertEqual(check_domains.log_policy_errors(self.stacks(10, extra=disabled)), [])
+
+    def test_check_reports_the_quota(self):
+        errors, _ = check_domains.check(self.stacks(11))
+        self.assertTrue(any("CloudWatch Logs resource policies" in e for e in errors), errors)
+
+
 if __name__ == "__main__":
     unittest.main()

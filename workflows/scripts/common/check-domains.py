@@ -39,6 +39,11 @@ own NS record into zone_name: a deployable public zone of some stack and, in its
 its closest parent. A zone_id may read an aws-dns-delegated .default_dns_zone_id (its first
 zone), and a dns record's zone_name may be an external_zones key (by name or such a zone_id).
 A public zone name is held once per stack, and an aws-dns-delegated zone by one stack.
+CloudWatch Logs allows 10 account-scoped resource policies per region and account: per
+account (settings.environment.account) and region, the ones the house components create
+(a query-logging dns instance: one in us-east-1 for its own zones, one for its DNS-account
+zones; a logging waf with manage_log_resource_policy: one in its region, us-east-1 for
+CLOUDFRONT) stay within LOG_POLICY_LIMIT. Fixture stacks are never deployed and not counted.
 Exits 1 on any violation.
 """
 import importlib.util
@@ -460,13 +465,62 @@ def duplicate_errors(stacks: dict) -> list[str]:
     return errors
 
 
+# CloudWatch Logs account-scoped resource policies per region and account (a hard quota).
+LOG_POLICY_LIMIT = 10
+QUERY_LOG_REGION = "us-east-1"  # Route 53 only publishes query logs there (dns query-logging.tf)
+
+
+def log_policies(stack_name: str, name: str, instance: dict) -> list[tuple[str, str]]:
+    """(account, region) of each account-scoped CloudWatch Logs resource policy an instance creates."""
+    module, variables = check_dependencies.module_name(name, instance), instance.get("vars") or {}
+    account = str(((instance.get("settings") or {}).get("environment") or {}).get("account") or stack_name)
+    if module == "waf":
+        logs = flag_on(variables.get("enable_logging")) and (
+            variables.get("manage_log_resource_policy") is None or flag_on(variables["manage_log_resource_policy"])
+        )
+        region = QUERY_LOG_REGION if str(variables.get("scope", "")).upper() == "CLOUDFRONT" else str(variables.get("region"))
+        return [(account, region)] if logs else []
+    if module != "dns":
+        return []
+    # Public zones the dns module moves to aws.dns_account (multi_account_dns_delegation), and
+    # external_zones with dns_account: their policy is in the DNS account (its role's account id).
+    moved = flag_on(variables.get("multi_account_dns_delegation"))
+    places = {
+        moved for zone in dicts(variables.get("zones")).values()
+        if flag_on(zone.get("enable_query_logging")) and is_public(zone)
+    } | {
+        flag_on(zone.get("dns_account")) for zone in dicts(variables.get("external_zones")).values()
+        if flag_on(zone.get("enable_query_logging"))
+    }
+    role = str(variables.get("dns_account_assume_role_arn") or "")
+    dns_account = f"account id {role.split(':')[4]}" if role.count(":") >= 5 else f"{account} (dns account)"
+    return [(dns_account if remote else account, QUERY_LOG_REGION) for remote in sorted(places)]
+
+
+def log_policy_errors(stacks: dict) -> list[str]:
+    """Accounts and regions whose house-created CloudWatch Logs resource policies exceed the quota."""
+    held: dict = {}
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(stack.get("components", {}).get("terraform", {}).items()):
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            if not check_dependencies.is_deployable(instance) or stage == check_dependencies.fixtures.FIXTURE_STAGE:
+                continue
+            for place in log_policies(stack_name, name, instance):
+                held.setdefault(place, []).append(f"{stack_name} {name}")
+    return [
+        f"account {account} region {region}: {len(owners)} CloudWatch Logs resource policies "
+        f"(quota {LOG_POLICY_LIMIT} per region and account): {', '.join(owners)}"
+        for (account, region), owners in sorted(held.items()) if len(owners) > LOG_POLICY_LIMIT
+    ]
+
+
 def check(stacks: dict) -> tuple[list[str], list[str]]:
     """(errors, warnings)."""
     errors, warnings = [], []
     everywhere = {
         normalize(z.name) for stack in stacks.values() for z in public_zones(stack.get("components", {}).get("terraform", {}))
     }
-    errors += duplicate_errors(stacks)
+    errors += duplicate_errors(stacks) + log_policy_errors(stacks)
     for stack_name, stack in sorted(stacks.items()):
         instances = stack.get("components", {}).get("terraform", {})
         zones = public_zones(instances)
@@ -519,7 +573,8 @@ def main() -> int:
     print(
         "every dns record, acm domain/SAN and apigateway custom domain is inside the zone it is written to, "
         "every public subzone is delegated from its parent zone, every apigateway certificate covers its domain, "
-        "and every acm certificate that writes no validation record depends on a same-account one that does"
+        "every acm certificate that writes no validation record depends on a same-account one that does, "
+        f"and no account and region holds more than {LOG_POLICY_LIMIT} house CloudWatch Logs resource policies"
     )
     return 0
 
