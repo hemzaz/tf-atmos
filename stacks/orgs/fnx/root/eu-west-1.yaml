@@ -17,8 +17,10 @@
 # (catalog/backend/roles/prod) and no read/write: check-state-keys.py fails a
 # role that matches no state.
 #
-# Bootstrap (cold start, once):
+# Bootstrap (cold start, once), then the management account's eu-west-1
+# settings (aws-account-settings, below):
 #   atmos workflow backend-cold-start -f bootstrap -s fnx-ew1-root
+#   atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root
 # =============================================================================
 
 import:
@@ -51,12 +53,16 @@ settings:
 
 components:
   terraform:
-    # The management account's eu-west-1 settings (E3d); its account-wide
-    # ones are fnx-gbl-root's. Disabled until E3e enables fnx-gbl-root's
-    # instance with this one: until then only the backend is applied here.
+    # The management account's eu-west-1 settings (E3d, enabled in E3e with
+    # fnx-gbl-root's): EBS default encryption, the IMDSv2 default, the EBS
+    # snapshot and AMI public access blocks. Its account-wide ones (alias, S3
+    # account block) are fnx-gbl-root's (main-standby). Applied by
+    # deploy-full-stack's iam layer after this stack's backend
+    # (`atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root`,
+    # docs/OPERATIONS.md "Bootstrap order", step 3).
     aws-account-settings:
       metadata:
-        enabled: false
+        enabled: true
 
     backend/main:
       metadata:

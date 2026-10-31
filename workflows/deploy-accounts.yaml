@@ -93,8 +93,9 @@ workflows:
       # Removal guard (E3a #440 carry): aws_service_access_principals and
       # enabled_policy_types are authoritative, so the first apply after an
       # import would disable every trusted service and policy type the stack
-      # does not list. Fails the run if this plan removes any, changes the
-      # feature set, or deletes the organization. The planfile is Atmos's
+      # does not list. Fails the run if this plan removes any, deletes the
+      # organization, or changes the feature set other than the in-place
+      # CONSOLIDATED_BILLING -> ALL upgrade. The planfile is Atmos's
       # <stack>-<component>.planfile in the component directory; a missing one
       # fails here too (pipefail), never silently.
       - name: guard-org-removals
@@ -204,4 +205,6 @@ workflows:
           (`atmos terraform output aws-account/<account> -s fnx-gbl-root`, account_id) into
           settings.account_map.full_account_map in stacks/orgs/fnx/_defaults.yaml, re-apply the
           backends (`atmos workflow backend-only -f bootstrap`, and `-s fnx-ew1-root`) so their
-          access_roles trust the accounts' roles, then deploy the account stacks.
+          access_roles trust the accounts' roles, then deploy the account stacks. The management
+          account's eu-west-1 settings are fnx-ew1-root's
+          (`atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root`).
