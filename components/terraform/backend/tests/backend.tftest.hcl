@@ -241,6 +241,23 @@ run "trust_is_limited_to_named_principals_and_the_caller" {
   }
 }
 
+run "cold_start_trusts_only_the_caller" {
+  command = plan
+
+  variables {
+    access_role_principals_enabled = false
+  }
+
+  assert {
+    condition = alltrue([
+      for key in keys(var.access_roles) :
+      local.access_role_principal_arns[key] == tolist(["arn:aws:iam::111111111111:role/admin"])
+      && local.access_role_principal_accounts[key] == tolist(["arn:aws:iam::111111111111:root"])
+    ])
+    error_message = "With access_role_principals_enabled = false (the cold start) every role trusts the caller alone: no account named by allowed_principal_arns, which may not exist yet."
+  }
+}
+
 run "root_user_caller_is_not_trusted" {
   command = plan
 
