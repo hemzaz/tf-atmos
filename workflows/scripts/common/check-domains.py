@@ -531,11 +531,25 @@ def role_arn(stack: dict, instance: dict) -> Optional[str]:
 
 
 def record_names(instance: dict) -> set:
-    """Every route53 record name an aws-iam-role instance's policy_statements condition allows."""
+    """Every route53 record name an aws-iam-role instance's policy conditions allow.
+
+    From policy_statements (condition) and policy_documents (JSON strings, Condition); a
+    document that is not JSON allows nothing.
+    """
+    variables = instance.get("vars") or {}
+    conditions = [s.get("condition") for s in dicts(variables.get("policy_statements")).values()]
+    for document in variables.get("policy_documents") or []:
+        try:
+            statements = json.loads(document).get("Statement") if isinstance(document, str) else None
+        except (ValueError, AttributeError):
+            continue
+        statements = [statements] if isinstance(statements, dict) else statements or []
+        conditions += [s.get("Condition") for s in statements if isinstance(s, dict)]
     names = set()
-    for statement in dicts((instance.get("vars") or {}).get("policy_statements")).values():
-        for condition in (statement.get("condition") or {}).values():
-            values = condition.get(RECORD_NAMES_KEY) if isinstance(condition, dict) else None
+    for condition in conditions:
+        for operator in (condition or {}).values() if isinstance(condition, dict) else []:
+            values = operator.get(RECORD_NAMES_KEY) if isinstance(operator, dict) else None
+            values = [values] if isinstance(values, str) else values
             names |= {normalize(v) for v in (values or []) if isinstance(v, str)}
     return names
 

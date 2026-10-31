@@ -676,8 +676,8 @@ def signed_stacks():
     role = instance("aws-iam-role", {
         **off, "name": "dns-delegation",
         "context": {"tenant": "fnx", "environment": "ue1", "stage": "network", "label_order": ["tenant", "environment", "stage", "name"]},
-        "policy_statements": {"WriteDelegations": {"effect": "Allow", "condition": {
-            "ForAllValues:StringEquals": {check_domains.RECORD_NAMES_KEY: [DEV, f"staging.{SVC}"]}}}},
+        "policy_documents": [json.dumps({"Statement": [{"Sid": "WriteDelegations", "Condition": {
+            "ForAllValues:StringEquals": {check_domains.RECORD_NAMES_KEY: [DEV, f"staging.{SVC}"]}}}]})],
     })
     role["settings"] = {"environment": {"account_id": NET_ID}}
     signer = lambda key, name: instance("dns", {"dnssec_enabled": True, "external_zones": {
@@ -735,6 +735,12 @@ class VendoredSigningTest(unittest.TestCase):
         errors = self.errors(stacks)
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("aws-iam-role/dns-delegation: account_map_enabled must be false", errors[0])
+
+    def test_record_names_from_statements_and_documents(self):
+        statement = {"effect": "Allow", "condition": {"StringEquals": {check_domains.RECORD_NAMES_KEY: f"qa.{SVC}."}}}
+        role = instance("aws-iam-role", {"policy_statements": {"W": statement}, "policy_documents": [
+            "not json", json.dumps({"Statement": {"Condition": {"ForAllValues:StringEquals": {check_domains.RECORD_NAMES_KEY: [DEV]}}}})]})
+        self.assertEqual(check_domains.record_names(role), {f"qa.{SVC}", DEV})
 
     def test_main_runs_it(self):
         stacks = signed_stacks()

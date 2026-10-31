@@ -55,6 +55,17 @@ components:
               - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-plan"
               - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
               - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+        # The NS/DS write is a policy_documents JSON statement: policy_statements
+        # is a map(object) whose `any` condition must have one type in every
+        # statement, so a conditioned statement cannot sit beside ReadZones.
+        policy_documents:
+          - >-
+            {"Version": "2012-10-17", "Statement": [{"Sid": "WriteDelegations", "Effect": "Allow",
+            "Action": "route53:ChangeResourceRecordSets", "Resource": "arn:aws:route53:::hostedzone/*",
+            "Condition": {"ForAllValues:StringEquals": {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames": ["dev.{{ .settings.environment.domain_name }}",
+            "staging.{{ .settings.environment.domain_name }}", "prod.{{ .settings.environment.domain_name }}"],
+            "route53:ChangeResourceRecordSetsRecordTypes": ["NS", "DS"]}}}]}
         policy_statements:
           ReadZones:
             effect: Allow
@@ -68,20 +79,5 @@ components:
               - route53:ListTagsForResource
             resources:
               - "*"
-          WriteDelegations:
-            effect: Allow
-            actions:
-              - route53:ChangeResourceRecordSets
-            resources:
-              - "arn:aws:route53:::hostedzone/*"
-            condition:
-              ForAllValues:StringEquals:
-                route53:ChangeResourceRecordSetsNormalizedRecordNames:
-                  - "dev.{{ .settings.environment.domain_name }}"
-                  - "staging.{{ .settings.environment.domain_name }}"
-                  - "prod.{{ .settings.environment.domain_name }}"
-                route53:ChangeResourceRecordSetsRecordTypes:
-                  - NS
-                  - DS
         tags:
           Component: "DNS"
