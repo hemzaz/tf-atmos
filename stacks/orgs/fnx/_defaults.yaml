@@ -158,6 +158,16 @@ settings:
     root_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.root_account_account_name }}'
     identity_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.identity_account_account_name }}'
     audit_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.audit_account_account_name }}'
+    # The static map's role-ARN field (Cloud Posse mixins v0.5.0
+    # providers-account-map-bypass: iam_role_arn_templates). dns-delegation:
+    # the network account's DNS delegation role (aws-iam-role/dns-delegation in
+    # fnx-ue1-network, null-label id <tenant>-ue1-network-dns-delegation), which
+    # aws-dns-delegated's aws.primary assumes to write its NS record into the
+    # apex (providers-dns-primary_override.tf). One role, so a full ARN, no %s.
+    # check-domains.py fails an enabled aws-dns-delegated whose role is not
+    # that instance's.
+    iam_role_arn_templates:
+      dns-delegation: 'arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/{{ .settings.context.tenant }}-ue1-network-dns-delegation'
   # The state backend every stack's terraform.backend reads (above): the bucket
   # backend/main creates in fnx-ue1-root, its region and the name prefix of its
   # access roles (<role_prefix>-role, -read-role, -prod-role, -prod-read-role,

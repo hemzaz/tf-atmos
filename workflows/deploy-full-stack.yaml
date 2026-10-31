@@ -113,7 +113,9 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
       - name: plan-iam
         type: atmos
-        command: terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
+        command: >-
+          terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          or .metadata.component == "aws-iam-role"'
       - name: confirm_iam
         type: confirm
         prompt: Apply the iam layer plan above?
@@ -123,7 +125,9 @@ workflows:
         command: test "{{ .steps.confirm_iam.value }}" = "true" || { echo "Deployment cancelled before the iam layer."; exit 1; }
       - name: deploy-iam
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
+        command: >-
+          terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          or .metadata.component == "aws-iam-role"'
       - name: kms_instances
         type: atmos
         command: >-
@@ -291,10 +295,15 @@ workflows:
       # NS record that network/main writes from network/services'
       # zone_name_servers, so network/services has its own dns-zones layer
       # before dns. (network/services delegates its data zone itself:
-      # zones.data.parent_zone.)
+      # zones.data.parent_zone.) The vendored aws-dns-primary (network
+      # account) and aws-dns-delegated create the zones the house dns
+      # instances sign and query-log by name lookup (external_zones), so they
+      # share this layer too.
       - name: plan-dns-zones
         type: atmos
-        command: terraform plan --query '.atmos_component == "network/services"'
+        command: >-
+          terraform plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
+          or .metadata.component == "aws-dns-delegated"'
       - name: confirm_dns_zones
         type: confirm
         prompt: Apply the dns-zones layer plan above?
@@ -304,7 +313,9 @@ workflows:
         command: test "{{ .steps.confirm_dns_zones.value }}" = "true" || { echo "Deployment cancelled before the dns-zones layer."; exit 1; }
       - name: deploy-dns-zones
         type: atmos
-        command: terraform deploy --from-plan --query '.atmos_component == "network/services"'
+        command: >-
+          terraform deploy --from-plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
+          or .metadata.component == "aws-dns-delegated"'
       # DNS records point at data-layer endpoints (prod network/main reads
       # rds/main .instance_address), so dns plans only after the data layer is
       # applied; apigateway (services) reads the zones, so dns precedes it.
@@ -436,7 +447,9 @@ workflows:
       - *refuse-fixtures
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
+        command: >-
+          terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          or .metadata.component == "aws-iam-role"'
       - name: confirm
         type: confirm
         prompt: Deploy the iam layer?
@@ -446,7 +459,9 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
+        command: >-
+          terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          or .metadata.component == "aws-iam-role"'
 
   deploy-kms:
     description: "Deploy the kms layer: customer-managed KMS keys (only stacks that define kms)"
@@ -670,7 +685,9 @@ workflows:
       - *refuse-fixtures
       - name: plan
         type: atmos
-        command: terraform plan --query '.atmos_component == "network/services"'
+        command: >-
+          terraform plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
+          or .metadata.component == "aws-dns-delegated"'
       - name: confirm
         type: confirm
         prompt: Deploy the dns-zones layer?
@@ -680,7 +697,9 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.atmos_component == "network/services"'
+        command: >-
+          terraform deploy --from-plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
+          or .metadata.component == "aws-dns-delegated"'
 
   deploy-dns:
     description: "Deploy the dns layer: Route 53 zones and records other than network/services (after the data layer, whose endpoints they point at, and the dns-zones layer, which they delegate)"
