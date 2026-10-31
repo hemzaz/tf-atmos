@@ -37,6 +37,7 @@ import:
   # --- security
   - catalog/iam/dev
   - catalog/iam/ci
+  - catalog/aws-account-settings/main
   - catalog/kms/main-dev
   - catalog/secretsmanager/app
   - catalog/secretsmanager/infra-dev
