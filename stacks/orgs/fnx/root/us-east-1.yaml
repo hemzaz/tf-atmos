@@ -119,8 +119,9 @@ components:
           # OrganizationAccountAccessRole, which Organizations creates in every
           # account it creates and which trusts the management account, is
           # listed until E4's Identity Center roles replace it. This role also
-          # reaches the root stacks' state: a dedicated core role is E5's
-          # (docs/OPERATIONS.md, State backend).
+          # reaches the root stacks' state: a dedicated core_write role (E5), or
+          # removing these OAARs, must land before E4 grants any permission set
+          # in a core account (docs/OPERATIONS.md, State backend).
           root_write:
             object_key_patterns:
               - "*/fnx-ue1-root/*"
