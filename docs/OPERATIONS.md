@@ -152,7 +152,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 | `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
 | `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`, DR `fnx-ec1-prod`) | the prod stacks' CI plan roles |
 | `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
-| `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) and the core stages' (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; read too, under `TFSTATE_ACCESS=read`) | none (the applying administrator, and each core account's `OrganizationAccountAccessRole`, which applies that account's stacks until E4's Identity Center roles; it also reaches the root stacks' state until E5's dedicated core role) |
+| `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) and the core stages' (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; read too, under `TFSTATE_ACCESS=read`) | none (the applying administrator, and each core account's `OrganizationAccountAccessRole`, which applies that account's stacks until E4's Identity Center roles; it also reaches the root stacks' state until E5's dedicated core role, which, or removing the OAARs, must land before E4 grants any permission set in a core account) |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU:
@@ -269,7 +269,7 @@ A stage stack (`stacks/orgs/<tenant>/<stage>/<region>.yaml`, for an existing sta
 from the stack scaffold, `scaffolds/stack`. Pick its profile: `nonprod` (a dev or staging stack),
 `prod-primary` (an account's prod primary, which creates its singletons), `standby` (a prod
 primary's DR warm standby) or `core` (a core account's regional stack, like `fnx-ue1-security`, with
-no instance). A global stack (`fnx-gbl-root`) is hand-written: the management account's is the
+no instance of its own: its stage's `aws-account-settings` only). A global stack (`fnx-gbl-root`) is hand-written: the management account's is the
 tenant's only one. Its prompts say what each answer sets. From the repository root:
 
 ```bash
