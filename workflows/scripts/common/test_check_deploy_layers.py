@@ -43,8 +43,9 @@ def subset_workflow(*steps):
     ]}
 
 
-# Minimal valid deploy-app and bootstrap `full` workflows that select nothing the tests use.
+# Minimal valid deploy-accounts, deploy-app and bootstrap `full` workflows that select nothing the tests use.
 SUBSET_WORKFLOWS = {
+    "deploy-accounts.yaml": {"workflows": {"deploy": subset_workflow(("plan", ["x"]), ("deploy", ["x"]))}},
     "deploy-application.yaml": {"workflows": {"deploy-app": subset_workflow(("plan", ["x"]), ("deploy", ["x"]))}},
     "bootstrap.yaml": {"workflows": {"full": subset_workflow(("plan", ["x"]), ("deploy", ["x"]))}},
 }
@@ -310,6 +311,7 @@ class CheckDeployLayersTest(unittest.TestCase):
         self.assert_errors(
             {}, {},
             "deploy-full-stack.yaml `deploy`: no such workflow",
+            "deploy-accounts.yaml `deploy`: no such workflow",
             "deploy-application.yaml `deploy-app`: no such workflow",
             "bootstrap.yaml `full`: no such workflow",
         )
@@ -435,6 +437,80 @@ class SubsetWorkflowTest(unittest.TestCase):
         errors = [e for e in check_deploy_layers.check(self.STACKS, files) if e.startswith("bootstrap.yaml")]
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("reads lambda/fn, which is planned in the same phase", errors[0])
+
+
+
+class AccountsLayerTest(unittest.TestCase):
+    """deploy-accounts.yaml covers the accounts layer's root modules; deploy-full-stack never selects them."""
+
+    STACKS = {"fnx-gbl-root": stack(
+        **{"aws-organization": instance("aws-organization")},
+        aws_ou__plat=instance(
+            "aws-organizational-unit", {"parent_id": "!terraform.state aws-organization organization_root_id"},
+            [{"component": "aws-organization"}],
+        ),
+        aws_account__dev=instance(
+            "aws-account", {"parent_id": "!terraform.state aws_ou/plat organizational_unit_id"},
+            [{"component": "aws_ou/plat"}],
+        ),
+        aws_account_settings=instance("aws-account-settings"),
+    )}
+
+    def files(self, *steps, full=(("iam", ["aws-account-settings"]),)):
+        files = workflow_files(*full)
+        files["deploy-accounts.yaml"] = {"workflows": {"deploy": subset_workflow(*steps)}}
+        return files
+
+    def test_phased_accounts_layer_passes(self):
+        files = self.files(
+            ("plan", ["aws-organization"]), ("deploy", ["aws-organization"]),
+            ("plan", ["aws-organizational-unit"]), ("deploy", ["aws-organizational-unit"]),
+            ("plan", ["aws-account", "aws-account-settings"]), ("deploy", ["aws-account", "aws-account-settings"]),
+        )
+        self.assertEqual(check_deploy_layers.check(self.STACKS, files), [])
+
+    def test_accounts_instance_missing_from_deploy_accounts_fails(self):
+        files = self.files(
+            ("plan", ["aws-organization"]), ("deploy", ["aws-organization"]),
+            ("plan", ["aws-organizational-unit"]), ("deploy", ["aws-organizational-unit"]),
+        )
+        errors = check_deploy_layers.check(self.STACKS, files)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("deploy-accounts.yaml `deploy`: fnx-gbl-root: aws_account/dev", errors[0])
+        self.assertIn("is in no layer", errors[0])
+
+    def test_same_phase_read_in_deploy_accounts_fails(self):
+        files = self.files(
+            ("plan", ["aws-organization", "aws-organizational-unit"]),
+            ("deploy", ["aws-organization", "aws-organizational-unit"]),
+            ("plan", ["aws-account"]), ("deploy", ["aws-account"]),
+        )
+        errors = check_deploy_layers.check(self.STACKS, files)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("reads aws-organization, which is planned in the same phase", errors[0])
+
+    def test_deploy_full_stack_selecting_an_accounts_instance_fails(self):
+        files = self.files(
+            ("plan", ["aws-organization"]), ("deploy", ["aws-organization"]),
+            ("plan", ["aws-organizational-unit"]), ("deploy", ["aws-organizational-unit"]),
+            ("plan", ["aws-account"]), ("deploy", ["aws-account"]),
+            full=(("accounts", ["aws-organization"]), ("iam", ["aws-account-settings"])),
+        )
+        errors = check_deploy_layers.check(self.STACKS, files)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("deploy-full-stack.yaml `deploy`: fnx-gbl-root: aws-organization", errors[0])
+        self.assertIn("is deployed by deploy-accounts.yaml only", errors[0])
+
+    def test_non_accounts_instance_still_needs_a_deploy_full_stack_layer(self):
+        files = self.files(
+            ("plan", ["aws-organization"]), ("deploy", ["aws-organization"]),
+            ("plan", ["aws-organizational-unit"]), ("deploy", ["aws-organizational-unit"]),
+            ("plan", ["aws-account", "aws-account-settings"]), ("deploy", ["aws-account", "aws-account-settings"]),
+            full=(("iam", ["iam"]),),
+        )
+        errors = check_deploy_layers.check(self.STACKS, files)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("aws_account_settings (metadata.component 'aws-account-settings') is in no layer", errors[0])
 
 
 if __name__ == "__main__":
