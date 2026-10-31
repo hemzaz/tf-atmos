@@ -8,7 +8,7 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: backend, iam, kms, storage, networking, connectivity, security, security-monitoring, compute, platform, data, dns-zones, dns, certificates, addons, services, regional-waf, monitoring
+#   layers: backend, iam, kms, storage, networking, connectivity, security, security-monitoring, compute, platform, data, dns-apex, dns-zones, dns, certificates, addons, services, regional-waf, monitoring
 #
 # A layer plans all its instances before it applies any of them, so an instance
 # that reads another's state (!terraform.state / !terraform.output) must be in a
@@ -19,7 +19,9 @@
 # workload stack; iam/ci reads it cross-stack. aws-account-settings (EBS default encryption, the S3
 # account public access block) shares the iam layer, before any volume or bucket exists;
 # bootstrap.yaml full applies only iam and vpc (vpc creates no volume or bucket) and leaves
-# aws-account-settings to this workflow's iam layer, its next step.
+# aws-account-settings to this workflow's iam layer, its next step. The vendored aws-iam-role
+# (the network account's dns-delegation role that aws-dns-delegated's aws.primary provider
+# assumes) shares the iam layer too.
 # Connectivity follows networking, security-monitoring
 # follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
@@ -30,9 +32,17 @@
 # lambda/cognito-user-migration (connectivity: it reads only its primary, fnx-ue1-prod or
 # fnx-ew1-prod) precedes the DR stack's cognito/main (security: fnx-ue2-prod, fnx-ec1-prod),
 # whose lambda_config reads its ARN.
+# The vendored aws-dns-delegated zones (dev/staging/prod <stage>.<apex>) write their
+# delegation NS records into the apex zone that aws-dns-primary (fnx-ue1-network)
+# creates, which they find by a data lookup through aws.primary (the network
+# account's dns-delegation role, aws-iam-role, iam layer). That read is cross-stack
+# and cross-account, so aws-dns-primary has its own dns-apex layer before the
+# dns-zones layer that holds aws-dns-delegated (check-deploy-layers.py
+# CROSS_STACK_AFTER enforces the order).
 # network/main writes the NS record delegating network/services' zone from
 # its own zone_name_servers, so network/services has a dns-zones layer before
-# dns. acm validates its certificates in the dns instances' zones (zone_ids), so it
+# dns. The house dns instances sign and query-log the aws-dns-* zones by name
+# lookup (external_zones), so both aws-dns-* layers precede dns. acm validates its certificates in the dns instances' zones (zone_ids), so it
 # has its own certificates layer after dns and before services and monitoring,
 # which read its certificate ARNs, as does cloudfront (services), which also
 # writes alias records into the dns instances' zones. eks-addons reads its dns
@@ -63,8 +73,9 @@
 # the apigateway routes (services) that read its listener. A Secrets Manager rotation
 # lambda (vars.rotation_secret_arn set) reads its rotation target (e.g. elasticache,
 # data), so it leaves compute for addons, after data.
-# Every layer except backend and regional-waf (no workload stack has a waf
-# instance yet; an empty layer plans "No components matched") has at least one
+# Every layer except backend, dns-apex (aws-dns-primary is only in fnx-ue1-network)
+# and regional-waf (no workload stack has a waf instance yet; an empty layer plans
+# "No components matched") has at least one
 # enabled instance in every workload stack (eks-backend-services/main, the last
 # to gain instances, joined the compute layer in all 3 stacks); fnx-ue1-root
 # has only the backend layer.
@@ -291,19 +302,35 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
           or .metadata.component == "backup" or .metadata.component == "firehose"'
+      # aws-dns-primary (fnx-ue1-network) creates the apex zone whose
+      # existence every aws-dns-delegated plan checks (data
+      # aws_route53_zone.root_zone through aws.primary), so it is applied in
+      # its own dns-apex layer before dns-zones plans aws-dns-delegated.
+      - name: plan-dns-apex
+        type: atmos
+        command: terraform plan --query '.metadata.component == "aws-dns-primary"'
+      - name: confirm_dns_apex
+        type: confirm
+        prompt: Apply the dns-apex layer plan above?
+        default: false
+      - name: guard-dns-apex
+        type: shell
+        command: test "{{ .steps.confirm_dns_apex.value }}" = "true" || { echo "Deployment cancelled before the dns-apex layer."; exit 1; }
+      - name: deploy-dns-apex
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "aws-dns-primary"'
       # network/services' zones are delegated from network/main's zone by an
       # NS record that network/main writes from network/services'
       # zone_name_servers, so network/services has its own dns-zones layer
       # before dns. (network/services delegates its data zone itself:
-      # zones.data.parent_zone.) The vendored aws-dns-primary (network
-      # account) and aws-dns-delegated create the zones the house dns
-      # instances sign and query-log by name lookup (external_zones), so they
-      # share this layer too.
+      # zones.data.parent_zone.) aws-dns-delegated (after dns-apex, whose
+      # apex zone it delegates from) creates the <stage> zones the house dns
+      # instances sign and query-log by name lookup (external_zones), so it
+      # shares this layer too.
       - name: plan-dns-zones
         type: atmos
         command: >-
-          terraform plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
-          or .metadata.component == "aws-dns-delegated"'
+          terraform plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-delegated"'
       - name: confirm_dns_zones
         type: confirm
         prompt: Apply the dns-zones layer plan above?
@@ -314,8 +341,7 @@ workflows:
       - name: deploy-dns-zones
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
-          or .metadata.component == "aws-dns-delegated"'
+          terraform deploy --from-plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-delegated"'
       # DNS records point at data-layer endpoints (prod network/main reads
       # rds/main .instance_address), so dns plans only after the data layer is
       # applied; apigateway (services) reads the zones, so dns precedes it.
@@ -441,7 +467,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
 
   deploy-iam:
-    description: "Deploy the iam layer: IAM roles, the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack) and the account settings"
+    description: "Deploy the iam layer: IAM roles, the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack), the account settings and the vendored aws-iam-role (the network account's dns-delegation role)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -678,16 +704,34 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
           or .metadata.component == "backup" or .metadata.component == "firehose"'
 
+  deploy-dns-apex:
+    description: "Deploy the dns-apex layer: aws-dns-primary's apex zone in the network account (before dns-zones, whose aws-dns-delegated zones delegate from it)"
+    steps:
+      - *fixtures-stages
+      - *refuse-fixtures
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.metadata.component == "aws-dns-primary"'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the dns-apex layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "aws-dns-primary"'
+
   deploy-dns-zones:
-    description: "Deploy the dns-zones layer: network/services' zones (delegated from network/main's zone in the dns layer)"
+    description: "Deploy the dns-zones layer: network/services' zones (delegated from network/main's zone in the dns layer) and aws-dns-delegated's <stage> zones (delegated from the dns-apex layer's apex zone)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
-          or .metadata.component == "aws-dns-delegated"'
+          terraform plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-delegated"'
       - name: confirm
         type: confirm
         prompt: Deploy the dns-zones layer?
@@ -698,8 +742,7 @@ workflows:
       - name: deploy
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-primary"
-          or .metadata.component == "aws-dns-delegated"'
+          terraform deploy --from-plan --query '.atmos_component == "network/services" or .metadata.component == "aws-dns-delegated"'
 
   deploy-dns:
     description: "Deploy the dns layer: Route 53 zones and records other than network/services (after the data layer, whose endpoints they point at, and the dns-zones layer, which they delegate)"
