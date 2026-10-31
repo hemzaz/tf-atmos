@@ -42,6 +42,17 @@ spec:
       targets:
         - "components/terraform/aws-account"
       included_paths: ["**/*.tf", "**/*.md"]
+    # Each account's account-level settings (E3d): the IAM account alias and
+    # S3 account public access block once per account, EBS default
+    # encryption, EBS snapshot / AMI / EMR block public access, the IMDSv2
+    # default and SSM public document sharing per region.
+    # stacks/catalog/aws-account-settings.
+    - component: aws-account-settings
+      source: "github.com/cloudposse-terraform-components/aws-account-settings.git//src?ref={{ .Version }}"
+      version: "v2.1.1"
+      targets:
+        - "components/terraform/aws-account-settings"
+      included_paths: ["**/*.tf", "**/*.md"]
     # One Service Control Policy per instance (single-resource pattern), applied
     # from fnx-gbl-root, and Cloud Posse's SCP statement catalog, which lives
     # outside src/ and is read with !include, never copied into a stack.

@@ -16,7 +16,11 @@
 # yet. A dependency only declared in dependencies.components may share a layer
 # (Atmos applies a layer in dependency order). The backend layer has an instance
 # only in the root stacks (fnx-ue1-root; fnx-ew1-root, the EU state backend), deployed before any
-# workload stack; iam/ci reads it cross-stack. Connectivity follows networking, security-monitoring
+# workload stack; iam/ci reads it cross-stack. aws-account-settings (EBS default encryption, the S3
+# account public access block) shares the iam layer, before any volume or bucket exists;
+# bootstrap.yaml full applies only iam and vpc (vpc creates no volume or bucket) and leaves
+# aws-account-settings to this workflow's iam layer, its next step.
+# Connectivity follows networking, security-monitoring
 # follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
 # dependencies.components), lambda (compute) precedes apigateway (services), as
@@ -109,7 +113,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
       - name: plan-iam
         type: atmos
-        command: terraform plan --query '.metadata.component == "iam"'
+        command: terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
       - name: confirm_iam
         type: confirm
         prompt: Apply the iam layer plan above?
@@ -119,7 +123,7 @@ workflows:
         command: test "{{ .steps.confirm_iam.value }}" = "true" || { echo "Deployment cancelled before the iam layer."; exit 1; }
       - name: deploy-iam
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "iam"'
+        command: terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
       - name: kms_instances
         type: atmos
         command: >-
@@ -426,13 +430,13 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
 
   deploy-iam:
-    description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack)"
+    description: "Deploy the iam layer: IAM roles, the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack) and the account settings"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "iam"'
+        command: terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
       - name: confirm
         type: confirm
         prompt: Deploy the iam layer?
@@ -442,7 +446,7 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "iam"'
+        command: terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"'
 
   deploy-kms:
     description: "Deploy the kms layer: customer-managed KMS keys (only stacks that define kms)"
