@@ -65,6 +65,9 @@ SWEEP="false"
 [[ "${1:-}" == "--sweep" ]] && SWEEP="true"
 # The backends the wire hook edits; the real ones must never change.
 ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.yaml)
+# Core stacks whose account's OrganizationAccountAccessRole is in root_write
+# (stacks/orgs/fnx/root/us-east-1.yaml): their golden must report wired.
+ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security"
 
 # A critical_alerts answer that runs a command if any hook interpolates it
 # into shell unchecked (literal: the $( ) is the point).
@@ -312,8 +315,11 @@ golden() {
     fi
     # The wire hook ran: it found the reference stack already wired, or a
     # core stack whose account is not onboarded yet, which it leaves unwired.
+    # A core stack in ONBOARDED_CORE_STACKS must report wired, so one whose
+    # account lost its operator role from root_write fails here.
     wired="is already wired"
-    if [[ "$profile" == "core" ]] && ! logged "$out/$stack.generate.log" "$stack $wired"; then
+    if [[ "$profile" == "core" ]] && [[ " $ONBOARDED_CORE_STACKS " != *" $stack "* ]] \
+        && ! logged "$out/$stack.generate.log" "$stack $wired"; then
         wired="is a core-account stack whose account is not onboarded"
     fi
     if ! logged "$out/$stack.generate.log" "$stack $wired"; then

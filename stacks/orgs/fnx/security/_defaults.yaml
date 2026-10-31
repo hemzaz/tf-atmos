@@ -6,8 +6,7 @@
 # administrator of the org-wide security services (GuardDuty, Security Hub,
 # Inspector, Access Analyzer), core-<region>-security in Cloud Posse's
 # reference architecture. Its components arrive in Wave E (E5); until then its
-# stacks hold only
-# aws-account-settings (below).
+# stacks hold only aws-account-settings (imported above).
 #
 # Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
 # the tenant stays fnx, the account is the stage, the region code the
