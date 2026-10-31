@@ -69,9 +69,11 @@ spec:
       targets:
         - "stacks/catalog/aws-scp/catalog"
       included_paths: ["**/*.yaml"]
-    # Cloud Posse's account-map iam-roles module only (no account-map root
-    # module yet; E4 vendors it): the v1 components below source
-    # ../account-map/modules/iam-roles for their provider roles.
+    # Cloud Posse's account-map iam-roles module only, never the account-map
+    # root module (E4 is Cloud Posse's Evolution 4: no account-map, owner
+    # 2026-10-31): the account-map-bypass providers mixin below sources
+    # ../account-map/modules/iam-roles and bypasses it (account_map_enabled
+    # false), so it reads no account-map state.
     - component: account-map
       source: "github.com/cloudposse-terraform-components/aws-account-map.git//src?ref={{ .Version }}"
       version: "v1.537.3"
@@ -80,18 +82,55 @@ spec:
       included_paths: ["modules/iam-roles/*.tf", "modules/iam-roles/*.md"]
     # The service domain's primary zone (network account) and each stage's
     # delegated subdomain, which writes its NS record into the primary through
-    # aws.primary (iam-roles' dns_terraform_role_arn). E6b: instances land
-    # disabled and are enabled after E4b; the house dns signs and query-logs
-    # their zones (external_zones mode).
+    # aws.primary. E6b: instances land disabled; the house dns signs and
+    # query-logs their zones (external_zones mode). Their upstream providers.tf
+    # (account-map iam-roles) is excluded: each gets Cloud Posse's mixins
+    # below instead.
     - component: aws-dns-primary
       source: "github.com/cloudposse-terraform-components/aws-dns-primary.git//src?ref={{ .Version }}"
       version: "v1.537.0"
       targets:
         - "components/terraform/aws-dns-primary"
       included_paths: ["**/*.tf", "**/*.md"]
+      excluded_paths: ["**/providers.tf"]
     - component: aws-dns-delegated
       source: "github.com/cloudposse-terraform-components/aws-dns-delegated.git//src?ref={{ .Version }}"
       version: "v1.538.1"
       targets:
         - "components/terraform/aws-dns-delegated"
       included_paths: ["**/*.tf", "**/*.md"]
+      excluded_paths: ["**/providers.tf"]
+    # One IAM role per instance: the network account's DNS delegation role,
+    # which each stage's aws-dns-delegated assumes as aws.primary
+    # (stacks/catalog/aws-iam-role). Upstream providers.tf excluded, as above.
+    - component: aws-iam-role
+      source: "github.com/cloudposse-terraform-components/aws-iam-role.git//src?ref={{ .Version }}"
+      version: "v1.539.0"
+      targets:
+        - "components/terraform/aws-iam-role"
+      included_paths: ["**/*.tf", "**/*.md"]
+      excluded_paths: ["**/providers.tf"]
+    # Cloud Posse's providers mixins for the account-map-less model (Evolution
+    # 4, the migrate-from-account-map tutorial), vendored into each component
+    # above in place of its providers.tf: providers-account-map-bypass.depth-1
+    # (account_map_enabled false: ambient credentials, iam-roles bypassed) and
+    # account-verification (fails a run whose credentials are not in the
+    # account var.account_map maps to <tenant>-<stage>).
+    - component: aws-dns-primary-mixins
+      source: "github.com/cloudposse-terraform-components/mixins.git//src/mixins?ref={{ .Version }}"
+      version: "v0.5.0"
+      targets:
+        - "components/terraform/aws-dns-primary"
+      included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
+    - component: aws-dns-delegated-mixins
+      source: "github.com/cloudposse-terraform-components/mixins.git//src/mixins?ref={{ .Version }}"
+      version: "v0.5.0"
+      targets:
+        - "components/terraform/aws-dns-delegated"
+      included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
+    - component: aws-iam-role-mixins
+      source: "github.com/cloudposse-terraform-components/mixins.git//src/mixins?ref={{ .Version }}"
+      version: "v0.5.0"
+      targets:
+        - "components/terraform/aws-iam-role"
+      included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
