@@ -25,16 +25,17 @@
 # lifecycle_override.tf (prevent_destroy) refuses at plan. A changed name, or
 # parent_id (MoveAccount), is an in-place update, so review the import plan
 # for parent_id and name changes: it moves and renames the account in place,
-# and a move changes which SCPs apply to it. A rename also needs the
-# organization's trusted access for account.amazonaws.com (E3e carry): until
-# then, set vars.name to the account's current AWS name when importing.
+# and a move changes which SCPs apply to it. A rename (PutAccountName) uses
+# the organization's trusted access for account.amazonaws.com
+# (catalog/aws-organization).
 #
 # Emails: one root-user address per account, unique across all of AWS, never
 # reusable after the account closes. The aws+fnx-<account>@example.com values
-# are placeholders the first-deploy preflight (check-first-deploy-inputs.py,
-# example domain) fails; the owner sets real addresses (plus-addressing one
-# monitored mailbox, Cloud Posse's account_email_format) before E3e enables
-# the instances.
+# are placeholders; fnx-gbl-root keeps each instance disabled until the PR
+# that sets its real address (plus-addressing one monitored mailbox, Cloud
+# Posse's account_email_format). The first-deploy preflight
+# (check-first-deploy-inputs.py) fails an enabled instance's example address
+# and two instances, enabled or not, sharing one address.
 #
 # The account map stays the reader contract (Cloud Posse's static-map path):
 # no reader takes remote state from this stack, because CI never reads root
