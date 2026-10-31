@@ -56,7 +56,7 @@ stack that depends on a GDPR-scoped one or names an `eu-` ARN in its vars.
 | `fnx-gbl-root` | `root/global-region.yaml` | management account, global (`gbl`, Cloud Posse's global-region mixin): the accounts layer, today the Organization (`aws-organization`) and its OUs (`aws-organizational-unit/core`, `/plat`, `/eu` under `plat`), all disabled until Wave E3e adds the `accounts` deploy layer; not run by CI |
 | `fnx-ue1-security` | `security/us-east-1.yaml` | core security account (delegated admin of the org security services); no instances until Wave E5; not run by CI |
 | `fnx-ue1-audit` | `audit/us-east-1.yaml` | core audit account (log archive); no instances until Wave E5; not run by CI |
-| `fnx-ue1-network` | `network/us-east-1.yaml` | core network account (Transit Gateway hub, primary DNS zones); no instances until Wave E6; not run by CI |
+| `fnx-ue1-network` | `network/us-east-1.yaml` | core network account (primary DNS zones, E6b; Transit Gateway hub later); no enabled instance yet; not run by CI |
 | `fnx-ue1-identity` | `identity/us-east-1.yaml` | core identity account (the teams people and automation assume roles from); no instances until Wave E4; not run by CI |
 | `fnx-ue1-artifacts` | `artifacts/us-east-1.yaml` | core artifacts account (shared build artifacts); no instances yet; not run by CI |
 | `fnx-ue1-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
