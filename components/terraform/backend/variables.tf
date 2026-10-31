@@ -32,6 +32,19 @@ variable "region" {
   }
 }
 
+variable "access_role_principals_enabled" {
+  type        = bool
+  description = <<-EOT
+    Whether each access role trusts its `allowed_principal_arns`. False only for the cold start
+    (bootstrap.yaml backend-cold-start), before the accounts those ARNs name exist: every role then
+    trusts the caller alone, as an empty list does. Cloud Posse's aws-tfstate-backend cold start sets
+    `access_roles_enabled = false` instead, which would also drop the root_write role the root stacks'
+    own backends assume.
+  EOT
+  default     = true
+  nullable    = false
+}
+
 variable "access_roles" {
   type = map(object({
     role_name              = string
