@@ -99,9 +99,23 @@ the last step.
 5. **Backend access roles**: `atmos workflow backend-only -f bootstrap`, and again with
    `-s fnx-ew1-root`. Its preflight is fatal and finds the real IDs now; the access roles gain the
    principals `access_roles` lists.
-6. **Account stacks**, with administrator credentials in each account: the core stacks, then each
-   workload stack's `atmos workflow full -f bootstrap -s <stack>` and
-   [Deploying a stack](#deploying-a-stack).
+6. **Account stacks**, as each account's `OrganizationAccountAccessRole`, assumed from the
+   management account (a profile with `role_arn = arn:aws:iam::<account>:role/OrganizationAccountAccessRole`
+   and the management-account `source_profile`): every provider runs only in its stack's own
+   account (`allowed_account_ids`), and that role is the one principal of the account the state
+   backend trusts before CI exists (`root_write` for the core accounts, `write`/`prod_write` for
+   the workload accounts; E4's Identity Center roles replace it). The core stacks
+   (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`: today only their
+   `aws-account-settings`), then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
+   and [Deploying a stack](#deploying-a-stack).
+
+**An imported account without `OrganizationAccountAccessRole`.** Organizations creates that role
+only in the accounts it creates; an account that joined by invitation has none, so step 6 and the
+backend's trust have no way in. Before step 6, in that account (its root user or an existing
+administrator), create the role as AWS documents it: name `OrganizationAccountAccessRole`, trusting
+the management account (`arn:aws:iam::<management account>:root`), with `AdministratorAccess`. Same
+name, so the backend's trust, the E3c `security-services` SCP exception and these steps need no
+change.
 
 ## State backend
 
@@ -126,7 +140,8 @@ overrides all of `settings.tfstate` to point there (`stack: fnx-ew1-root`), so i
 first; `check-data-residency.py` fails one that names a non-EU region.
 It holds only prod state (`fnx-ew1-prod` and its DR stack `fnx-ec1-prod`, both in the `prod-eu`
 account, whose state stays in `eu-west-1` as `fnx-ue2-prod`'s stays in `us-east-1`), so it has the
-`prod_read`, `prod_write` and `root_write` roles, trusting those two stacks' CI roles.
+`prod_read`, `prod_write` and `root_write` roles, trusting those two stacks' CI roles and, on
+`prod_write` until E4, the `prod-eu` account's `OrganizationAccountAccessRole`.
 
 The backend workflows default to `fnx-ue1-root`; `-s fnx-ew1-root` runs them on the EU backend
 (the bucket and roles come from that stack's `settings.tfstate`):
@@ -149,9 +164,9 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 | Role (`access_roles` key) | Access | Trusted CI role |
 |---------------------------|--------|-----------------|
 | `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
-| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
+| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles, and the dev and staging accounts' `OrganizationAccountAccessRole` until E4's Identity Center roles (step 6 of [Bootstrap order](#bootstrap-order)); like the apply roles, each reaches both stages' state |
 | `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`, DR `fnx-ec1-prod`) | the prod stacks' CI plan roles |
-| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
+| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles, and the prod account's (EU: `prod-eu`'s) `OrganizationAccountAccessRole` until E4 |
 | `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) and the core stages' (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; read too, under `TFSTATE_ACCESS=read`) | none (the applying administrator, and each core account's `OrganizationAccountAccessRole`, which applies that account's stacks until E4's Identity Center roles; it also reaches the root stacks' state until E5's dedicated core role, which, or removing the OAARs, must land before E4 grants any permission set in a core account) |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
@@ -295,8 +310,8 @@ prints the edit to make). Still by hand:
 ## Deploying a stack
 
 After the backend: `atmos workflow full -f bootstrap -s <stack>` (IAM, including the CI roles, and
-VPCs) with administrator credentials in the stack's account, since no CI role exists yet; no
-stack sets a provider role, so every component runs as the caller. Then
+VPCs) as the stack's account's `OrganizationAccountAccessRole` (see [Bootstrap order](#bootstrap-order)),
+since no CI role exists yet; no stack sets a provider role, so every component runs as the caller. Then
 `atmos workflow deploy -f deploy-full-stack -s <stack>`. It runs these layers in order, each
 planned, confirmed, then applied from the saved plan. Each layer is also its own workflow
 (`atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>`):

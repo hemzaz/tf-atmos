@@ -31,8 +31,11 @@ terraform:
   # Access goes through one of the backend's access roles (Cloud Posse
   # tfstate-backend access_roles), split by stage (state objects "*/<stack>/*" and "*/<stack>-*"):
   #   <role_prefix>-role            read/write, dev/staging objects; the dev/staging CI apply roles
+  #                                 and the dev/staging accounts' OrganizationAccountAccessRole
+  #                                 until E4 (each reaches both stages' state, as the apply roles do)
   #   <role_prefix>-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
-  #   <role_prefix>-prod-role       read/write, prod objects; prod's apply role only
+  #   <role_prefix>-prod-role       read/write, prod objects; the prod stacks' apply roles and the
+  #                                 prod account's OrganizationAccountAccessRole until E4 (EU: prod-eu's)
   #   <role_prefix>-prod-read-role  read-only, prod objects; prod's plan role only
   #   <role_prefix>-root-role       read/write, the root stacks' and the core stages' objects;
   #                                 the administrator who applies backend/main, plus each
@@ -50,11 +53,11 @@ terraform:
   # too, as for root. The provider guard needs credentials in the core account,
   # so the PR enabling a core stack's first instance adds the stack's pattern
   # pair and that account's OrganizationAccountAccessRole to root_write's
-  # allowed_principal_arns (audit and network so far) until E4's Identity Center
-  # roles replace it. A dedicated core_write role (E5), or removing the OAARs
-  # from root_write, must land before E4 grants any permission set in a core
-  # account: from then on a principal there that can edit OAAR's trust reaches
-  # the root stacks' state.
+  # allowed_principal_arns (stacks/orgs/fnx/root/us-east-1.yaml) until E4's
+  # Identity Center roles replace it. A dedicated core_write role (E5), or
+  # removing the OAARs from root_write, must land before E4 grants any permission
+  # set in a core account: from then on a principal there that can edit OAAR's
+  # trust reaches the root stacks' state.
   #
   # TFSTATE_SOURCE=replica reads the bucket's cross-region replica instead
   # (<bucket>-replica in settings.tfstate.replica_region, backend/main's

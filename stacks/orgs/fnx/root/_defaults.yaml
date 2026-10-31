@@ -3,8 +3,10 @@
 # Management ("root") Account Defaults
 # =============================================================================
 # The management account holds shared, organization-wide infrastructure that
-# no single workload stage owns. Today that is only the Terraform state
-# backend (stacks/orgs/fnx/root/us-east-1.yaml).
+# no single workload stage owns: the Terraform state backends
+# (stacks/orgs/fnx/root/us-east-1.yaml, eu-west-1.yaml) and the accounts layer,
+# the organization, its OUs, SCPs and member accounts (global-region.yaml,
+# fnx-gbl-root, workflows/deploy-accounts.yaml).
 #
 # Naming follows Cloud Posse's reference architecture, where the management
 # account is the "root" account (core-gbl-root, in its "core" tenant). This
