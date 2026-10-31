@@ -274,6 +274,23 @@ The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instanc
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that
 and that every enabled instance is in exactly one layer.
 
+**The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
+its own workflow, run with management-account administrator credentials, never by CI:
+
+```bash
+atmos workflow deploy -f deploy-accounts      # fnx-gbl-root
+```
+
+Its phases, each planned, confirmed and applied from the saved plan, follow the state reads:
+`org` (`aws-organization`), `ous` (`core`, `plat`), `ou-eu` (the `eu` OU and every SCP but
+`region-eu`), `scp-eu`, `accounts` (`aws-account/*`, after the SCPs so no account lands in an OU
+without its guardrails), `settings` (the management account's `aws-account-settings`). It runs the
+first-deploy preflight on `fnx-gbl-root` first, and after planning the organization
+`check-organization-plan.py`, which stops the run if the plan would disable a trusted service or
+policy type the live organization has (an import with a shorter list in the stack) or change its
+feature set. `check-deploy-layers.py` requires it to select every enabled instance of those root
+modules and `deploy-full-stack.yaml` to select none.
+
 **Before `certificates`: delegate the stack's domain.** ACM validates in `network/main`'s `main`
 zone, so its domain must resolve, or validation times out after 45 minutes. Prod's
 `fnx.example.com` is delegated at the registrar to prod's `zone_name_servers.main`

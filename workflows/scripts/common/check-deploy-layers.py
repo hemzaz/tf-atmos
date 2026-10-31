@@ -25,13 +25,19 @@ step of a checked workflow that is not one of the forms here, is an error.
 select that one instance.
 
 Checked workflows (LAYERED): `deploy` in deploy-full-stack.yaml, which must
-select every deployable instance of every stack (COVERAGE); `deploy-app` in
-deploy-application.yaml and `full` in bootstrap.yaml, which deploy a subset
-(instances they do not select are assumed deployed already). Exits 1 when:
+select every deployable instance of every stack (COVERAGE) but the accounts
+layer's (ACCOUNTS_COMPONENTS: the organization, its OUs, SCPs and member
+accounts, in fnx-gbl-root), and none of those; `deploy` in
+deploy-accounts.yaml, which must select every deployable accounts-layer
+instance; `deploy-app` in deploy-application.yaml and `full` in
+bootstrap.yaml, which deploy a subset (instances they do not select are
+assumed deployed already). Exits 1 when:
   - a query is not of that form, or a --from-plan step comes before any plan;
   - an instance is planned by two phases, planned but applied by no step or by
     two, or applied by a step whose phase did not plan it;
-  - (COVERAGE) an enabled, non-abstract instance is in no phase;
+  - (COVERAGE) an enabled, non-abstract instance is in no phase of the
+    workflow that covers its root module, or deploy-full-stack selects an
+    accounts-layer instance;
   - an instance reads (!terraform.state / !terraform.output) a same-stack
     instance planned in the same or a later phase: a phase plans everything
     before it applies anything, so on a first deploy that state does not exist;
@@ -47,15 +53,31 @@ import json
 import pathlib
 import re
 import sys
-from typing import Optional
+from typing import Callable, Optional
 
 FULL_STACK_FILE = "deploy-full-stack.yaml"
 ALL_LAYERS_WORKFLOW = "deploy"
-# (file, workflow, must select every deployable instance)
+ACCOUNTS_FILE = "deploy-accounts.yaml"
+# The accounts layer (E3e): root modules deploy-accounts.yaml deploys, in its own phases, from the
+# management account's global stack; deploy-full-stack never selects them.
+ACCOUNTS_COMPONENTS = frozenset({"aws-organization", "aws-organizational-unit", "aws-scp", "aws-account"})
+
+
+def accounts_layer(component: Optional[str]) -> bool:
+    return component in ACCOUNTS_COMPONENTS
+
+
+def not_accounts_layer(component: Optional[str]) -> bool:
+    return component not in ACCOUNTS_COMPONENTS
+
+
+# (file, workflow, must select every deployable instance whose metadata.component this accepts,
+#  must select no instance whose metadata.component this accepts); None: no such rule.
 LAYERED = (
-    (FULL_STACK_FILE, ALL_LAYERS_WORKFLOW, True),
-    ("deploy-application.yaml", "deploy-app", False),
-    ("bootstrap.yaml", "full", False),
+    (FULL_STACK_FILE, ALL_LAYERS_WORKFLOW, not_accounts_layer, accounts_layer),
+    (ACCOUNTS_FILE, "deploy", accounts_layer, None),
+    ("deploy-application.yaml", "deploy-app", None, None),
+    ("bootstrap.yaml", "full", None, None),
 )
 PLAN = re.compile(r"^terraform plan (?:--log-order \w+ )?--query '(?P<query>[^']*)'$")
 DEPLOY = re.compile(r"^terraform deploy --from-plan --query '(?P<query>[^']*)'$")
@@ -247,21 +269,30 @@ def dependencies(stack_name: str, instance: dict) -> dict[str, bool]:
     return {target: reads for target, reads in result.items() if target}
 
 
-def place(instances: dict, where: str, ordered: list[dict], coverage: bool) -> tuple[dict, list[str]]:
+Coverage = Optional[Callable[[Optional[str]], bool]]
+
+
+def place(
+    instances: dict, where: str, ordered: list[dict], covers: Coverage, forbids: Coverage = None
+) -> tuple[dict, list[str]]:
     """instance -> (phase index, deploy step index within the phase), plus selection errors."""
     placed: dict[str, tuple[int, int]] = {}
     errors = []
     for name, instance in sorted(instances.items()):
         if not check_dependencies.is_deployable(instance):
             continue
+        component_type = (instance.get("metadata") or {}).get("component")
         planned = [i for i, phase in enumerate(ordered) if selects(phase["plan"], name, instance)]
+        if planned and forbids is not None and forbids(component_type):
+            errors.append(f"{where}{name} (metadata.component {component_type!r}) is deployed by "
+                          f"{ACCOUNTS_FILE} only, never by this workflow")
+            continue
         for i, phase in enumerate(ordered):
             for step, query in phase["deploys"]:
                 if i not in planned and selects(query, name, instance):
                     errors.append(f"{where}{name} is applied by step {step}, whose phase did not plan it")
         if not planned:
-            if coverage:
-                component_type = (instance.get("metadata") or {}).get("component")
+            if covers is not None and covers(component_type):
                 errors.append(f"{where}{name} (metadata.component {component_type!r}) is in no layer")
             continue
         if len(planned) > 1:
@@ -297,19 +328,21 @@ def order_errors(stack_name: str, instances: dict, placed: dict, where: str, ord
     return errors
 
 
-def check_workflow(stacks: dict, where: str, ordered: list[dict], coverage: bool) -> list[str]:
+def check_workflow(
+    stacks: dict, where: str, ordered: list[dict], covers: Coverage, forbids: Coverage = None
+) -> list[str]:
     errors = []
     for stack_name, stack in sorted(stacks.items()):
         instances = stack.get("components", {}).get("terraform", {})
         prefix = f"{where}: {stack_name}: "
-        placed, place_errors = place(instances, prefix, ordered, coverage)
+        placed, place_errors = place(instances, prefix, ordered, covers, forbids)
         errors += place_errors + order_errors(stack_name, instances, placed, prefix, ordered)
     return errors
 
 
 def check(stacks: dict, workflow_files: dict) -> list[str]:
     errors = []
-    for file_name, workflow, coverage in LAYERED:
+    for file_name, workflow, covers, forbids in LAYERED:
         workflows = (workflow_files.get(file_name) or {}).get("workflows") or {}
         where = f"{file_name} `{workflow}`"
         steps = workflow_steps(workflows, workflow)
@@ -319,7 +352,7 @@ def check(stacks: dict, workflow_files: dict) -> list[str]:
         ordered, parse_errors = phases(steps, where)
         if file_name == FULL_STACK_FILE:
             parse_errors += layer_query_drift(workflows)
-        errors += parse_errors or check_workflow(stacks, where, ordered, coverage)
+        errors += parse_errors or check_workflow(stacks, where, ordered, covers, forbids)
     return errors
 
 
