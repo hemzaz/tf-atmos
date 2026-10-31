@@ -5,12 +5,17 @@
 # main-prod.yaml's zones plus the records that read data-plane instances
 # (network/services, rds/main), with those reads in dependencies. Each stack
 # keeps its zone comments, its public zone's query-logging switch and its
-# query-log retention; a record without a read (e.g. a child stage's NS
-# delegation) can be added in the stack, as records merge per key.
+# query-log retention; records merge per key, so a stack can add one. The
+# public zone is prod.<apex>, delegated from fnx-ue1-network's apex by
+# aws-dns-delegated (imported here, disabled with it; dev and staging delegate
+# from the apex themselves, not from this zone): see
+# catalog/aws-dns-delegated/main for the external_zones form main takes when
+# it is enabled.
 # =============================================================================
 
 import:
   - catalog/network/defaults
+  - catalog/aws-dns-delegated/main
 
 components:
   terraform:

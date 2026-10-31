@@ -14,7 +14,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
-| Domains | `settings.environment.domain_name` in each stack's file (`stacks/orgs/fnx/<stage>/<region>.yaml`); every zone, record, certificate and API domain derives from it (`fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex). The EU apex is its own registered domain, never under the US one, delegated at its own registrar to `fnx-ew1-prod`'s `network/main` (see [Deploying a stack](#deploying-a-stack)) |
+| Domains | `settings.environment.domain_name` in each stack's file (`stacks/orgs/fnx/<stage>/<region>.yaml`); every zone, record, certificate and API domain derives from it (the US apex `fnx.example.com` in `stacks/orgs/fnx/network/_defaults.yaml`, each US stage `<stage>.<apex>`; `fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex). The EU apex is its own registered domain, never under the US one, delegated at its own registrar to `fnx-ew1-prod`'s `network/main` (see [Deploying a stack](#deploying-a-stack)) |
 | Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in each stack's file (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach people only through each stack's `security-monitoring/main` topic, whose `security_email_subscriptions` is empty everywhere (a preflight notice per stack) |
 | Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in the stack file (USD: dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s). Each budget counts the spend tagged with its stack's `Environment`; a prod primary's also counts its DR standby's (`budget_additional_environment_tags`: `fnx-ue1-prod` ue1+ue2, `fnx-ew1-prod` ew1+ec1, owner decision; lint `check-dr-pairs` fails a standby missing there), so the owner may raise those amounts |
 | Cost-allocation tags | the `Environment` tag activated as a user-defined cost-allocation tag in the payer (management) account's Billing console (Cost allocation tags); until then every budget's `user:Environment$<tag>` filter matches no spend and no budget alerts |
@@ -273,28 +273,32 @@ another's state must be in a later layer; `check-deploy-layers.py` (validate-all
 and that every enabled instance is in exactly one layer.
 
 **Before `certificates`: delegate the stack's domain.** ACM validates in `network/main`'s `main`
-zone, so its domain must resolve, or validation times out after 45 minutes. Prod's
-`fnx.example.com` is delegated at the registrar to prod's `zone_name_servers.main`
-(`atmos terraform output network/main -s fnx-ue1-prod`). Dev's and staging's parent is
-that Terraform-managed zone: add an NS record for `dev.`/`staging.fnx.example.com` to prod's
-`network/main` `records` with the child stack's `zone_name_servers.main`, and deploy prod's
-`network/main`. Its existing records are in `stacks/catalog/network/main-prod-data-plane.yaml`;
-put this one in prod's stack file, `stacks/orgs/fnx/prod/us-east-1.yaml`, as a key under the
-existing `network/main` entry's `vars.records` in `components.terraform` (add `records:` there if
-it is absent; one key per child zone; not a second `components:` or `network/main` key; records
-merge per key with the catalog's). EU prod
-(`fnx-ew1-prod`) has its own apex, never under the US domain: delegate it at its registrar to
-`fnx-ew1-prod`'s `network/main` `zone_name_servers.main`.
+zone, so its domain must resolve, or validation times out after 45 minutes. The US domains follow
+Cloud Posse's layout: the apex `fnx.example.com` is `fnx-ue1-network`'s `aws-dns-primary` zone
+(signed and query-logged by its `network/primary`), and each stage's `<stage>.fnx.example.com`
+(dev, staging, prod; `fnx-ue2-prod` serves prod's) is its `aws-dns-delegated` zone, which writes
+its NS record into the apex itself through `aws-iam-role/dns-delegation`; the stage's
+`network/main` signs and query-logs it and writes its DS record there. So deploy
+`fnx-ue1-network` (layers `iam`, `dns-zones`, `dns`) before the stages, and the one owner step is
+the apex at the registrar: NS to `aws-dns-primary`'s `zones` name servers
+(`atmos terraform output aws-dns-primary -s fnx-ue1-network`). These instances are disabled while
+the apex and the account IDs are placeholders: enable them in the PR that sets the real values,
+the network stack's first (and its state-key pair, see its stack file), and in each stage move
+`network/main`'s `main` zone to `external_zones` as `stacks/catalog/aws-dns-delegated/main.yaml`
+shows; `check-domains.py` (validate-all) fails an enable that leaves a zone held twice, unsigned
+or outside the delegation role. Until then each stage's `network/main` creates its zone and the
+apex has no zone to delegate from. EU prod (`fnx-ew1-prod`) has its own apex, never under the US
+domain: delegate it at its registrar to `fnx-ew1-prod`'s `network/main` `zone_name_servers.main`.
 `services.<d>` delegation is wired by the stacks themselves.
 
 **After `dns`: publish the DS record (owner step).** The US stacks sign their public zones with
 DNSSEC (`dnssec_enabled`, `stacks/catalog/network/defaults.yaml`; off in `fnx-ew1-prod`, whose
 key would sit in us-east-1). Signing alone changes nothing for resolvers; the chain of trust
-starts at the parent. For prod's apex, add the DS record from `network/main`'s
-`ds_records.main` (`atmos terraform output network/main -s fnx-ue1-prod`) at the registrar
-(key tag, algorithm 13, digest type 2, digest). For dev and staging add it as a `DS` record next
-to their NS record in prod's `network/main` `records`, as above. `services.<d>` and
-`data.services.<d>` DS records are wired by the stacks. Turning DNSSEC off is two deploys, or
+starts at the parent. For the US apex, add the DS record from `network/primary`'s
+`ds_records.apex` (`atmos terraform output network/primary -s fnx-ue1-network`) at the registrar
+(key tag, algorithm 13, digest type 2, digest). Each stage's `network/main` writes its zone's DS
+record into the apex itself (`parent_zone: apex`). `services.<d>` and `data.services.<d>` DS
+records are wired by the stacks. Turning DNSSEC off is two deploys, or
 validating resolvers stop resolving the zone: set `dnssec_ds_enabled: false` on the instances and
 remove the registrar DS, deploy (`network/services`, then `network/main`), wait out the DS TTL,
 then set `dnssec_enabled: false` and deploy again.

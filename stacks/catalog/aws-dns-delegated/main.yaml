@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# aws-dns-delegated - a US stage's subdomain, delegated from the network apex
+# =============================================================================
+# Cloud Posse's layout (owner decision (a), 2026-10-31): vendored
+# aws-dns-delegated v1.538.1 holds the stage's zone
+# settings.environment.domain_name = <stage>.<apex> (dev, staging, prod; the
+# label before the first dot is the subdomain, the rest the apex) and writes its
+# NS record into the apex (catalog/aws-dns-primary/main, fnx-ue1-network) as
+# aws.primary, which assumes aws-iam-role/dns-delegation
+# (providers-dns-primary_override.tf). This replaces the manual child NS
+# record that prod's network/main used to carry. Imported with network/main by
+# catalog/network/main (dev, staging) and main-prod-data-plane (fnx-ue1-prod;
+# fnx-ue2-prod writes into fnx-ue1-prod's zones and has none).
+#
+# Cloud Posse ships the zone unsigned and unlogged: the stage's network/main
+# signs and query-logs it (house dns external_zones), and check-domains.py
+# fails an enabled zone it does not.
+#
+# Disabled, like fnx-ue1-network's instances, until the apex and account IDs are
+# real (preflight: docs/OPERATIONS.md#first-deploy-inputs, Domains and Account
+# IDs); until then network/main creates the zone itself (zones.main). The PR
+# that enables them (in the network stack first) also moves, in network/main,
+# zones.main to
+#   external_zones:
+#     main: {name: <domain_name>, dnssec_enabled: true, enable_query_logging: true, parent_zone: apex}
+#     apex: {name: <apex>, dns_account: true}
+# with dns_account_assume_role_arn set to the delegation role, so the zone's DS
+# record lands in the apex beside its NS record; check-domains.py fails the
+# enable otherwise (the zone held twice, or unsigned).
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-dns-delegated:
+      metadata:
+        component: aws-dns-delegated
+        enabled: false
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: dns-delegated
+        zone_config:
+          - subdomain: '{{ (splitn "." 2 .settings.environment.domain_name)._0 }}'
+            zone_name: '{{ (splitn "." 2 .settings.environment.domain_name)._1 }}'
+        # Public; certificates are the house acm component's (acm/main).
+        dns_private_zone_enabled: false
+        request_acm_certificate: false
+        tags:
+          Component: "DNS"
