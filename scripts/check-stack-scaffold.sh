@@ -67,7 +67,7 @@ SWEEP="false"
 ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.yaml)
 # Core stacks whose account's OrganizationAccountAccessRole is in root_write
 # (stacks/orgs/fnx/root/us-east-1.yaml): their golden must report wired.
-ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security"
+ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security fnx-ue1-identity fnx-ue1-artifacts"
 
 # A critical_alerts answer that runs a command if any hook interpolates it
 # into shell unchecked (literal: the $( ) is the point).

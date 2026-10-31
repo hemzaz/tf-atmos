@@ -34,7 +34,8 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
   stacks' objects only, trusted by prod's plan / apply role only.
 - `root_write` (`fnx-terraform-backend-root-role`, EU `fnx-ew1-terraform-backend-root-role`): the
   root stacks' objects (`fnx-ue1-root`, `fnx-gbl-root`; EU `fnx-ew1-root`) and the core stages'
-  once they have instances (`fnx-ue1-audit`, `fnx-ue1-network`), trusted by the administrator who
+  once they have instances (every core stage: `fnx-ue1-audit`, `fnx-ue1-security`,
+  `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`), trusted by the administrator who
   applies `backend/main` and, until E4's Identity Center roles replace it, each such core
   account's `OrganizationAccountAccessRole`. So that role also reaches the root stacks' state
   until E5's dedicated core role splits it off, which must land before E4 grants any permission
