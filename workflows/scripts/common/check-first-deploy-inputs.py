@@ -29,8 +29,8 @@ Errors (fatal unless --warn):
     not 12 digits, two core accounts (CORE_ACCOUNTS) sharing an ID, a workload
     account or a target stack's account_id in a core account; and a missing or
     placeholder core account when a target is a core stack or deploys a
-    MAP_CONSUMERS component (a notice otherwise: the backend bootstrap comes
-    before the accounts exist)
+    MAP_CONSUMERS component (a notice otherwise: the backend cold start and
+    the accounts layer that creates the core accounts come before they exist)
 The last four skip placeholder IDs, which are already an error.
 Fatal (a config bug, not a placeholder: always printed, exit 1 even with --warn):
   - an instance's vars.account_map (a vendored Cloud Posse component's static
@@ -42,6 +42,13 @@ feature plan, cross-account caller role existence, Lambda packages, GitHub
 protection, deploy tags, the GitHub App's private key and outside-collaborator
 approval, the cost-allocation tag), each stack's budget amount to confirm, and
 an enabled security-monitoring instance with no security_email_subscriptions.
+
+--cold-start (bootstrap.yaml backend-cold-start): a placeholder account ID in
+a backend instance's access_roles allowed_principal_arns is a notice, not an
+error: the cold start applies with TFSTATE_COLD_START=true, so every access
+role trusts only the caller and those ARNs are not applied (the accounts they
+name do not exist yet); the re-apply after the accounts layer (backend-only)
+checks them fatally.
 
 Only deployable stacks are checked: every stage but EXEMPT_STAGES. --stacks
 limits the placeholder checks to some of them (the bootstrap workflow passes
@@ -75,11 +82,12 @@ PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
 # Cloud Posse's core accounts (owner decision Q1): settings.account_map keys. Every other key is a
 # workload account (a stage's, or prod-eu).
 CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts")
-# Components (metadata.component) that read the core accounts: the Cloud Posse org, identity and
-# security components Wave E brings in (E3-E5), and today's account-level security components that E5
-# turns org-wide. Deploying one needs real core account IDs.
+# Components (metadata.component) that read the core accounts: the Cloud Posse identity and security
+# components Wave E brings in (E4, E5), and today's account-level security components that E5 turns
+# org-wide. Deploying one needs real core account IDs. Not the accounts layer (aws-organization,
+# aws-organizational-unit, aws-scp, aws-account: deploy-accounts.yaml), which creates the core accounts
+# and reads none of their IDs, nor aws-account-settings, which configures only its own account.
 MAP_CONSUMERS = frozenset({
-    "aws-organization", "aws-account", "aws-organizational-unit", "aws-scp", "aws-account-settings",
     "aws-identity-center", "aws-teams", "aws-team-roles", "access-analyzer",
     "guardduty", "securityhub", "inspector2", "cloudtrail", "awsconfig",
 })
@@ -183,7 +191,12 @@ def static_map_drift(stack: str, instance_name: str, spec: dict):
                    "Account IDs")
 
 
-def stack_findings(name: str, config: dict) -> list:
+def cold_start_principal(component: str, path: str) -> bool:
+    """A backend instance's access-role principal, which the cold start does not apply."""
+    return component == "backend" and path.startswith("vars.access_roles.") and ".allowed_principal_arns[" in path
+
+
+def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
     findings, seen = [], set()
 
     def add(finding):
@@ -208,7 +221,13 @@ def stack_findings(name: str, config: dict) -> list:
         variables = spec.get("vars") or {}
         component = spec.get("component") or (spec.get("metadata") or {}).get("component")
         for path, text in strings(variables, "vars"):
-            add(placeholder(name, f"{instance_name} {path}", text))
+            finding = placeholder(name, f"{instance_name} {path}", text)
+            if finding and cold_start and finding.row == "Account IDs" and cold_start_principal(component, path):
+                finding = Finding("notice", name, finding.key,
+                                  f"{finding.detail}: not applied by the cold start (every access role trusts only "
+                                  "the caller); fill in settings.account_map after the accounts layer and re-apply "
+                                  "with backend-only", "Account IDs")
+            add(finding)
             if path.startswith("vars.trusted_principal_arns") and OPERATOR_ROLE in text:
                 operator_roles = True
         if component == "eks" and not variables.get("map_additional_iam_roles"):
@@ -394,7 +413,7 @@ def notices() -> list:
     ]
 
 
-def check(stacks: dict, only=None) -> list:
+def check(stacks: dict, only=None, cold_start: bool = False) -> list:
     """All findings for the deployable stacks (`only`: limit the per-stack checks to these)."""
     deployable_stacks = {
         name: config for name, config in stacks.items()
@@ -403,7 +422,7 @@ def check(stacks: dict, only=None) -> list:
     targets = set(deployable_stacks) if not only else set(only) & set(deployable_stacks)
     findings = []
     for name in sorted(targets):
-        findings.extend(stack_findings(name, deployable_stacks[name]))
+        findings.extend(stack_findings(name, deployable_stacks[name], cold_start))
     findings.extend(account_findings(deployable_stacks, targets))
     findings.extend(core_account_findings(deployable_stacks, targets))
     findings.extend(account_email_findings(deployable_stacks))
@@ -416,6 +435,8 @@ def main() -> int:
     parser.add_argument("--warn", action="store_true",
                         help=f"print errors as WARN and exit 0; only the first {WARN_LIMIT} unless --all")
     parser.add_argument("--all", action="store_true", help="with --warn, print every finding")
+    parser.add_argument("--cold-start", action="store_true",
+                        help="backend cold start: placeholder accounts in backend access-role principals are notices")
     args = parser.parse_args()
 
     stacks = json.load(sys.stdin)
@@ -430,7 +451,7 @@ def main() -> int:
         print(f"NOTICE never deployed to a real account, not checked: {', '.join(exempt)}")
     # Fatal findings, then repository-wide errors (the account map) first, so --warn always shows them.
     rank = {"fatal": 0, "error": 1, "notice": 2}
-    findings = sorted(check(stacks, only),
+    findings = sorted(check(stacks, only, args.cold_start),
                       key=lambda f: (rank[f.level], f.stack != "repository", f.stack, f.row, f.key))
     fatal = [f for f in findings if f.level == "fatal"]
     errors = [f for f in findings if f.level == "error"]
