@@ -1,0 +1,207 @@
+# The accounts layer: the AWS Organization, its OUs, SCPs and member accounts,
+# and the management account's settings, from the management account's global
+# stack fnx-gbl-root (stacks/orgs/fnx/root/global-region.yaml). Cloud Posse
+# deploys the same layer from core-gbl-root with its accounts workflows
+# (docs.cloudposse.com/layers/accounts/deploy-accounts/).
+#
+# Usage (management-account administrator credentials; never CI: root stays out
+# of every CI matrix, as with the backend):
+#   atmos workflow deploy -f deploy-accounts            # fnx-gbl-root, every phase
+#
+# Bootstrap order (docs/OPERATIONS.md, "Bootstrap order"): the backend cold
+# start (fnx-ue1-root, whose root role holds this stack's state), then this
+# workflow, then copy each aws-account's account_id output into
+# settings.account_map, re-apply the backend (its access_roles name the new
+# accounts' roles), then the account stacks.
+#
+# Six phases, each planned, confirmed, then applied from the saved plan.
+# check-deploy-layers.py fails a !terraform.state read of an instance planned
+# in the same or a later phase (a phase plans everything before applying
+# anything), so a reader follows what it reads:
+#   1. org            aws-organization (then the removal guard, below)
+#   2. ous            the core and plat OUs (read the organization root id)
+#   3. ou-eu          the eu OU (reads plat), and every SCP but region-eu (each
+#                     reads the OU it is attached to)
+#   4. scp-eu         region-eu (reads the eu OU)
+#   5. accounts       the member accounts (each reads its OU): after the SCPs,
+#                     so no account lands in an OU without its guardrails
+#   6. settings       the management account's aws-account-settings (reads
+#                     nothing; deploy-full-stack's iam layer selects it too)
+# A disabled instance is in no phase; an empty phase plans "No components
+# matched". check-deploy-layers.py (validate-all) requires this workflow to
+# select every enabled instance of the accounts layer's root modules
+# (ACCOUNTS_COMPONENTS), and deploy-full-stack.yaml to select none of them.
+workflows:
+  deploy:
+    description: "Deploy the accounts layer of fnx-gbl-root: organization, OUs, SCPs, member accounts, then the management account's settings"
+    # The default; -s on the command line wins over it. refuse-non-accounts
+    # stops a stack without an aws-organization instance.
+    stack: fnx-gbl-root
+    steps:
+      # Template fixture stacks are never deployed (see deploy-full-stack.yaml).
+      - name: stages
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[].settings.context.stage] | unique | join(",")'
+        output: none
+      - name: refuse-fixtures
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
+      # The selected stack: one stack (the -s or the default) with an enabled
+      # aws-organization instance.
+      - name: targets
+        type: atmos
+        command: describe stacks --process-functions=false --format json --query 'keys | join(",")'
+        output: none
+      - name: organizations
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform["aws-organization"] | select(. != null and .metadata.enabled != false)] | length'
+        output: none
+      # Unquoted assignments: a --query value is a JSON string ("fnx-gbl-root",
+      # quotes included), which the shell assignment unquotes.
+      - name: refuse-non-accounts
+        type: shell
+        command: >-
+          stack={{ .steps.targets.value }};
+          organizations={{ .steps.organizations.value }};
+          case "$stack" in ""|null|*,*) echo "Pass one stack (fnx-gbl-root), not '$stack'."; exit 1 ;; esac;
+          test "$organizations" = "1"
+          || { echo "$stack has no enabled aws-organization instance: this workflow deploys fnx-gbl-root's accounts layer."; exit 1; }
+      - name: validate
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate` rejects that flag.
+        type: shell
+        command: atmos validate stacks
+      # First-deploy preflight, fatal, before anything touches AWS: the
+      # management account ID, the core account IDs (every component here
+      # reads them, check-first-deploy-inputs.py MAP_CONSUMERS), placeholder
+      # OU/organization import ids and account emails, and one root-user email
+      # per account. docs/OPERATIONS.md#first-deploy-inputs.
+      - name: preflight
+        type: shell
+        command: >-
+          atmos describe stacks --process-functions=false --format json
+          | python3 workflows/scripts/common/check-first-deploy-inputs.py
+          --stacks '{{ .steps.targets.value }}'
+
+      - name: plan-org
+        type: atmos
+        command: terraform plan --query '.metadata.component == "aws-organization"'
+      # Removal guard (E3a #440 carry): aws_service_access_principals and
+      # enabled_policy_types are authoritative, so the first apply after an
+      # import would disable every trusted service and policy type the stack
+      # does not list. Fails the run if this plan removes any, changes the
+      # feature set, or deletes the organization. The planfile is Atmos's
+      # <stack>-<component>.planfile in the component directory; a missing one
+      # fails here too (pipefail), never silently.
+      - name: guard-org-removals
+        type: shell
+        command: |
+          set -eu
+          set -o pipefail
+          stack={{ .steps.targets.value }}
+          atmos terraform show aws-organization -s "$stack" -json "${stack}-aws-organization.planfile" \
+            | python3 workflows/scripts/common/check-organization-plan.py
+      - name: confirm_org
+        type: confirm
+        prompt: Apply the organization plan above (trusted services, policy types, feature set)?
+        default: false
+      - name: guard-org
+        type: shell
+        command: test "{{ .steps.confirm_org.value }}" = "true" || { echo "Deployment cancelled before the organization."; exit 1; }
+      - name: deploy-org
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "aws-organization"'
+
+      - name: plan-ous
+        type: atmos
+        command: >-
+          terraform plan --query '.metadata.component == "aws-organizational-unit"
+          and .atmos_component != "aws-organizational-unit/eu"'
+      - name: confirm_ous
+        type: confirm
+        prompt: Apply the core and plat OU plan above?
+        default: false
+      - name: guard-ous
+        type: shell
+        command: test "{{ .steps.confirm_ous.value }}" = "true" || { echo "Deployment cancelled before the OUs."; exit 1; }
+      - name: deploy-ous
+        type: atmos
+        command: >-
+          terraform deploy --from-plan --query '.metadata.component == "aws-organizational-unit"
+          and .atmos_component != "aws-organizational-unit/eu"'
+
+      - name: plan-ou-eu
+        type: atmos
+        command: >-
+          terraform plan --query '.atmos_component == "aws-organizational-unit/eu"
+          or .metadata.component == "aws-scp" and .atmos_component != "aws-scp/region-eu"'
+      - name: confirm_ou_eu
+        type: confirm
+        prompt: Apply the eu OU and core/plat SCP plan above (an SCP can deny the role you deploy with)?
+        default: false
+      - name: guard-ou-eu
+        type: shell
+        command: test "{{ .steps.confirm_ou_eu.value }}" = "true" || { echo "Deployment cancelled before the eu OU and SCPs."; exit 1; }
+      - name: deploy-ou-eu
+        type: atmos
+        command: >-
+          terraform deploy --from-plan --query '.atmos_component == "aws-organizational-unit/eu"
+          or .metadata.component == "aws-scp" and .atmos_component != "aws-scp/region-eu"'
+
+      - name: plan-scp-eu
+        type: atmos
+        command: terraform plan --query '.atmos_component == "aws-scp/region-eu"'
+      - name: confirm_scp_eu
+        type: confirm
+        prompt: Apply the eu OU's region SCP plan above?
+        default: false
+      - name: guard-scp-eu
+        type: shell
+        command: test "{{ .steps.confirm_scp_eu.value }}" = "true" || { echo "Deployment cancelled before the eu SCP."; exit 1; }
+      - name: deploy-scp-eu
+        type: atmos
+        command: terraform deploy --from-plan --query '.atmos_component == "aws-scp/region-eu"'
+
+      # Review an import's plan for name and parent_id changes: both apply in
+      # place (a rename, PutAccountName, needs trusted access for
+      # account.amazonaws.com; a move changes which SCPs apply).
+      - name: plan-accounts
+        type: atmos
+        command: terraform plan --query '.metadata.component == "aws-account"'
+      - name: confirm_accounts
+        type: confirm
+        prompt: Apply the member account plan above (creates, imports, renames or moves accounts)?
+        default: false
+      - name: guard-accounts
+        type: shell
+        command: test "{{ .steps.confirm_accounts.value }}" = "true" || { echo "Deployment cancelled before the accounts."; exit 1; }
+      - name: deploy-accounts
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "aws-account"'
+
+      - name: plan-settings
+        type: atmos
+        command: terraform plan --query '.metadata.component == "aws-account-settings"'
+      - name: confirm_settings
+        type: confirm
+        prompt: Apply the management account settings plan above?
+        default: false
+      - name: guard-settings
+        type: shell
+        command: test "{{ .steps.confirm_settings.value }}" = "true" || { echo "Deployment cancelled before the account settings."; exit 1; }
+      - name: deploy-settings
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "aws-account-settings"'
+      - name: next
+        type: alert
+        level: info
+        content: >-
+          Next (docs/OPERATIONS.md, "Bootstrap order"): copy each new account's ID
+          (`atmos terraform output aws-account/<account> -s fnx-gbl-root`, account_id) into
+          settings.account_map.full_account_map in stacks/orgs/fnx/_defaults.yaml, re-apply the
+          backends (`atmos workflow backend-only -f bootstrap`, and `-s fnx-ew1-root`) so their
+          access_roles trust the accounts' roles, then deploy the account stacks.
