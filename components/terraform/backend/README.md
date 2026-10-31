@@ -29,14 +29,17 @@ Each stack's objects are an exact pattern pair, `*/<stack>/*` and `*/<stack>-*` 
 instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`.
 
 - `read` / `write` (`fnx-terraform-backend-read-role` / `-role`): the dev and staging stacks'
-  objects, trusted by those stages' CI plan / apply roles.
+  objects, trusted by those stages' CI plan / apply roles; `write` also by the dev and staging
+  accounts' `OrganizationAccountAccessRole` until E4's Identity Center roles replace it (each
+  reaches both stages' state, as the apply roles do).
 - `prod_read` / `prod_write` (`fnx-terraform-backend-prod-read-role` / `-prod-role`): the prod
-  stacks' objects only, trusted by prod's plan / apply role only.
+  stacks' objects only, trusted by the prod stacks' plan / apply roles; `prod_write` also by the
+  prod account's (EU: `prod-eu`'s) `OrganizationAccountAccessRole` until E4.
 - `root_write` (`fnx-terraform-backend-root-role`, EU `fnx-ew1-terraform-backend-root-role`): the
   root stacks' objects (`fnx-ue1-root`, `fnx-gbl-root`; EU `fnx-ew1-root`) and the core stages'
-  once they have instances (`fnx-ue1-audit`, `fnx-ue1-network`), trusted by the administrator who
-  applies `backend/main` and, until E4's Identity Center roles replace it, each such core
-  account's `OrganizationAccountAccessRole`. So that role also reaches the root stacks' state
+  (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`,
+  `fnx-ue1-artifacts`), trusted by the administrator who applies `backend/main` and, until E4's
+  Identity Center roles replace it, each core account's `OrganizationAccountAccessRole`. So that role also reaches the root stacks' state
   until E5's dedicated core role splits it off, which must land before E4 grants any permission
   set in a core account.
 
