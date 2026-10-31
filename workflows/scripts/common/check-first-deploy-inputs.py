@@ -304,8 +304,9 @@ def account_email_findings(stacks: dict) -> list:
         for instance_name, spec in sorted(instances(stacks[name]).items()):
             spec = spec or {}
             metadata = spec.get("metadata") or {}
+            component = spec.get("component") or metadata.get("component")
             email = (spec.get("vars") or {}).get(ACCOUNT_EMAIL)
-            if metadata.get("component") != "aws-account" or metadata.get("type") == "abstract" or not email:
+            if component != "aws-account" or metadata.get("type") == "abstract" or not email:
                 continue
             owners.setdefault(str(email).strip().lower(), []).append(f"{name} {instance_name}")
     return [Finding("error", "repository", f"{ACCOUNT_EMAIL} {email}",
