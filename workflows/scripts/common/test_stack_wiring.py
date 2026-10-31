@@ -159,9 +159,8 @@ class Wire(Copy):
             self.assertIsNone(self.wire("fnx", "identity", "", region, f"fnx-{code}-identity"))
         self.assertEqual(self.text(US), stripped)
         # Onboarded by hand (its operator role): the hook then adds each stack's pair, never the role.
-        text = stripped.replace(
-            ':role/OrganizationAccountAccessRole"\n',
-            ':role/OrganizationAccountAccessRole"\n' + operator, 1)
+        audit = 'full_account_map.audit }}:role/OrganizationAccountAccessRole"\n'
+        text = stripped.replace(audit, audit + operator, 1)
         (self.root / US).write_text(text)
         self.assertEqual(len(self.wire("fnx", "identity", "", "us-west-2", "fnx-uw2-identity")), 1)
         self.assertEqual(self.text(US).count(operator), 1)
