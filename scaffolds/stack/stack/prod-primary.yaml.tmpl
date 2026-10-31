@@ -93,6 +93,7 @@ import:
 [[- if $data_plane ]]
   - catalog/iam/main-prod
   - catalog/iam/ci-prod
+  - catalog/aws-account-settings/main
   - catalog/kms/main-prod
   - catalog/secretsmanager/app-prod
   - catalog/secretsmanager/infra-prod
@@ -109,6 +110,7 @@ import:
 [[- else ]]
   - catalog/iam/main-prod
   - catalog/iam/ci-prod
+  - catalog/aws-account-settings/main
   - catalog/kms/main-prod
   - catalog/cloudtrail/main
   - catalog/awsconfig/main

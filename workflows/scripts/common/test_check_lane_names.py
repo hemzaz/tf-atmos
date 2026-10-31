@@ -191,6 +191,29 @@ class GroupTest(unittest.TestCase):
         self.assertIn("both create the CloudTrail global-service-event recording '(one per account)' in account dev",
                       errors[0])
 
+    def test_account_settings_in_a_second_region_without_its_account_wide_settings_passes(self):
+        # fnx-ue2-prod imports catalog/aws-account-settings/main-standby.
+        self.assertEqual(self.errors({
+            "fnx-ue1-prod": stack(**{"aws-account-settings": instance(
+                "ue1", component="aws-account-settings", stage="prod")}),
+            "fnx-ue2-prod": stack(**{"aws-account-settings": instance(
+                "ue2", component="aws-account-settings", stage="prod", region="us-east-2",
+                account_alias_enabled=False, s3_block_public_access_enabled=False)}),
+        }), [])
+
+    def test_account_settings_alias_and_s3_block_in_two_regions_fail(self):
+        errors = self.errors({
+            "fnx-ue1-prod": stack(**{"aws-account-settings": instance(
+                "ue1", component="aws-account-settings", stage="prod")}),
+            "fnx-ue2-prod": stack(**{"aws-account-settings": instance(
+                "ue2", component="aws-account-settings", stage="prod", region="us-east-2",
+                account_alias_enabled=True)}),
+        })
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("both create the IAM account alias '(one per account)' in account prod", errors[0])
+        self.assertIn("both create the S3 account public access block '(one per account)' in account prod",
+                      errors[1])
+
     def test_trusted_oidc_provider_with_a_creator_passes(self):
         arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
         self.assertEqual(self.errors({
