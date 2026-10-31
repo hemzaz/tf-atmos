@@ -55,20 +55,53 @@ the following, naming the stack, the key and the row above:
 - a core account (`root`, `audit`, `security`, `network`, `identity`, `artifacts`) shared with
   another core account, a workload account or a stack's `account_id` in another role's core account;
 - a missing or placeholder core account, when a checked stack is a core account's own or deploys a
-  component that reads them (`MAP_CONSUMERS` in the script: the org, identity and security
-  components). Otherwise it is a notice, so the backend bootstrap can run before the accounts exist.
+  component that reads them (`MAP_CONSUMERS` in the script: the identity and security
+  components). Otherwise it is a notice, so the backend cold start and the accounts layer, which
+  creates the core accounts, run before they exist ([Bootstrap order](#bootstrap-order)).
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
 packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval,
 cost-allocation tags) as notices, and per stack its budget amount to confirm and an empty
 `security_email_subscriptions`. The `local` and `fixtures` stacks are exempt.
 `bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
-`backend-only`, `full`) before any AWS call. `atmos workflow lint` runs it with `--warn`: it
+`backend-only`, `full`) before any AWS call, and so does `deploy-accounts.yaml`; the cold start
+passes `--cold-start`, which makes a placeholder account in the backend's access-role principals a
+notice (it applies none of them). `atmos workflow lint` runs it with `--warn`: it
 never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
 them all). It stands in for Cloud Posse's cold-start checks: there, `account-map` holds the
 account IDs and the accounts layer is deployed and verified first
 ([deploy accounts](https://docs.cloudposse.com/layers/accounts/deploy-accounts/),
 [aws-account-map](https://github.com/cloudposse-terraform-components/aws-account-map)).
+
+## Bootstrap order
+
+From the management account alone to deployed stacks: Cloud Posse's cold start, then its accounts
+layer, then the account stacks. Management-account administrator credentials throughout, except in
+the last step.
+
+1. **The management account's ID** in `settings.account_map.full_account_map.root`
+   (`stacks/orgs/fnx/_defaults.yaml`). The other entries stay placeholders until step 4.
+2. **Backend cold start**: `atmos workflow backend-cold-start -f bootstrap`, then the same with
+   `-s fnx-ew1-root`. Its preflight (`--cold-start`) needs only the management account's ID: the
+   access roles' principals name accounts that do not exist yet, so the cold start does not apply
+   them (`TFSTATE_COLD_START=true`, the backend's `access_role_principals_enabled`) and every
+   access role trusts only you.
+3. **Accounts layer**: `atmos workflow deploy -f deploy-accounts` (`fnx-gbl-root`, whose state goes
+   through the US backend's root role): the organization, its OUs, SCPs and member accounts (see
+   [Deploying a stack](#deploying-a-stack), "The accounts layer"). To adopt existing ones instead of
+   creating them, set the instances' import ids first (`stacks/catalog/aws-organization`,
+   `aws-organizational-unit` and `aws-account` defaults say how, and which plans to review).
+4. **Account IDs**: copy each member account's ID, the `account_id` output of
+   `atmos terraform output aws-account/<account> -s fnx-gbl-root`, into
+   `full_account_map.<account>` (the instance suffix is the map key; `prod-eu` too), and merge it.
+   The account map stays the reader contract (Cloud Posse's static map): nothing reads
+   `fnx-gbl-root`'s state.
+5. **Backend access roles**: `atmos workflow backend-only -f bootstrap`, and again with
+   `-s fnx-ew1-root`. Its preflight is fatal and finds the real IDs now; the access roles gain the
+   principals `access_roles` lists.
+6. **Account stacks**, with administrator credentials in each account: the core stacks, then each
+   workload stack's `atmos workflow full -f bootstrap -s <stack>` and
+   [Deploying a stack](#deploying-a-stack).
 
 ## State backend
 

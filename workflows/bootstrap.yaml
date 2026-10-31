@@ -61,20 +61,23 @@ workflows:
       # (workload account = management account; two stages in one account;
       # a core account shared or not 12 digits). A placeholder core account
       # (audit, security, ...) is only a notice here unless the stack is a core
-      # stack or deploys an org/security component: backend-cold-start runs
-      # before the accounts layer creates those accounts.
+      # stack or deploys an identity/security component: backend-cold-start runs
+      # before the accounts layer creates those accounts. --cold-start: the
+      # access roles' principals, whose accounts the accounts layer has not
+      # created yet, are notices, not errors: this cold start does not apply
+      # them (TFSTATE_COLD_START below); backend-only re-applies them, fatally
+      # checked, once settings.account_map holds the accounts' real IDs.
       # docs/OPERATIONS.md#first-deploy-inputs. lint runs it warn-only.
       - &preflight-targets
         name: preflight_targets
         type: atmos
         command: describe stacks --process-functions=false --format json --query 'keys | join(",")'
         output: none
-      - &preflight
-        name: preflight
+      - name: preflight
         type: shell
         command: >-
           atmos describe stacks --process-functions=false --format json
-          | python3 workflows/scripts/common/check-first-deploy-inputs.py
+          | python3 workflows/scripts/common/check-first-deploy-inputs.py --cold-start
           --stacks '{{ .steps.preflight_targets.value }}'
       # A second cold start would fail at bucket creation after creating some
       # of the other resources in a fresh local state. Refuse up front.
@@ -112,9 +115,16 @@ workflows:
       # added to every access role's trust, as in Cloud Posse's tfstate-backend,
       # and is the ONLY principal of the root role (<role_prefix>-root-role,
       # e.g. fnx-terraform-backend-root-role), the one the root stack's own backend assumes.
+      # TFSTATE_COLD_START=true turns the backend's access_role_principals_enabled
+      # off (stacks/catalog/backend/defaults.yaml): every role trusts only this
+      # caller, since the accounts its allowed_principal_arns name do not exist
+      # before the accounts layer (docs/OPERATIONS.md, "Bootstrap order"). A
+      # shell step, to set the variable for this atmos run only.
       - name: apply-local-state
-        type: atmos
-        command: terraform deploy backend/main --auto-generate-backend-file=false
+        type: shell
+        command: >-
+          stack={{ .steps.preflight_targets.value }};
+          TFSTATE_COLD_START=true atmos terraform deploy backend/main -s "$stack" --auto-generate-backend-file=false
       # The role the migration will assume: the one this stack's backend
       # configuration names.
       - name: backend_role
@@ -154,8 +164,11 @@ workflows:
       - type: markdown
         content: |
           **State backend created.** Its state now lives in the bucket; delete the
-          local copy, `components/terraform/backend/terraform.tfstate.d/`.
-          Next: `atmos workflow full -f bootstrap -s <stack>` for each workload stack.
+          local copy, `components/terraform/backend/terraform.tfstate.d/`. Every access
+          role trusts only you until the accounts exist.
+          Next (docs/OPERATIONS.md, "Bootstrap order"): `atmos workflow deploy -f deploy-accounts`,
+          copy the new account IDs into settings.account_map, then
+          `atmos workflow backend-only -f bootstrap` (same -s) to add the access roles' principals.
 
   backend-only:
     description: Plan and apply a state backend (backend/main in fnx-ue1-root, or -s fnx-ew1-root) after its cold start
@@ -168,7 +181,13 @@ workflows:
       # access_roles changes (a new stack's CI role ARNs) ship here after the
       # cold start: a placeholder ARN must not reach the live bucket policy.
       - *preflight-targets
-      - *preflight
+      - &preflight
+        name: preflight
+        type: shell
+        command: >-
+          atmos describe stacks --process-functions=false --format json
+          | python3 workflows/scripts/common/check-first-deploy-inputs.py
+          --stacks '{{ .steps.preflight_targets.value }}'
       - name: plan
         type: atmos
         command: terraform plan backend/main

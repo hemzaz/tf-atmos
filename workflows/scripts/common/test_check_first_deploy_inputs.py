@@ -603,5 +603,54 @@ class OrganizationInputsTest(unittest.TestCase):
         self.assertIn("aws_account_prod", found[0].detail)
 
 
+class BootstrapOrderTest(unittest.TestCase):
+    """Backend cold start -> accounts layer: neither may need the account IDs the accounts layer creates."""
+
+    PLACEHOLDER_CORE = {**ACCOUNTS, "security": "123456789012", "audit": "123456789012"}
+
+    def root(self):
+        backend = {"component": "backend", "account_id": MGMT, "access_roles": {
+            "write": {"allowed_principal_arns": ["arn:aws:iam::123456789012:role/fnx-ue1-dev-ci-apply"]},
+            "root_write": {"allowed_principal_arns": []}}}
+        return {"fnx-ue1-root": stack("root", None, backend_main=backend)}
+
+    def test_cold_start_downgrades_access_role_principals_to_notices(self):
+        findings = preflight.check(self.root(), ["fnx-ue1-root"], cold_start=True)
+        self.assertEqual([f for f in findings if f.level == "error"], [])
+        notice = [f for f in findings if f.level == "notice" and "allowed_principal_arns" in f.key]
+        self.assertEqual(len(notice), 1, notice)
+        self.assertIn("not applied by the cold start", notice[0].detail)
+
+    def test_backend_re_apply_still_fails_on_placeholder_principals(self):
+        found = errors(self.root(), ["fnx-ue1-root"])
+        self.assertEqual([(f.stack, f.row) for f in found], [("fnx-ue1-root", "Account IDs")])
+
+    def test_cold_start_keeps_other_placeholders_fatal(self):
+        stacks = self.root()
+        stacks["fnx-ue1-root"]["components"]["terraform"]["backend_main"]["vars"]["account_id"] = "123456789012"
+        found = preflight.check(stacks, ["fnx-ue1-root"], cold_start=True)
+        self.assertEqual([f.key for f in found if f.level == "error"], ["backend_main vars.account_id"])
+
+    def test_accounts_layer_does_not_need_the_core_accounts(self):
+        stacks = clean()
+        stacks["fnx-gbl-root"] = stack("root", None, **{
+            "aws-organization": {"component": "aws-organization", "accounts": self.PLACEHOLDER_CORE},
+            "aws-account-settings": {"component": "aws-account-settings", "accounts": self.PLACEHOLDER_CORE}})
+        for name in stacks:
+            for spec in stacks[name]["components"]["terraform"].values():
+                spec["settings"]["account_map"]["full_account_map"] = self.PLACEHOLDER_CORE
+        findings = preflight.check(stacks, ["fnx-gbl-root"])
+        core = [f for f in findings if "full_account_map." in f.key]
+        self.assertTrue(core)
+        self.assertEqual({f.level for f in core}, {"notice"})
+
+    def test_cold_start_flag_reaches_main(self):
+        out = io.StringIO()
+        argv = ["check-first-deploy-inputs.py", "--stacks", "fnx-ue1-root", "--cold-start"]
+        with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdin", io.StringIO(json.dumps(self.root()))), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(preflight.main(), 0, out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
