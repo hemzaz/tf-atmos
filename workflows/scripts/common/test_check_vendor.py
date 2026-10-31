@@ -35,6 +35,22 @@ def manifest(*srcs):
     return {"apiVersion": "atmos/v1", "kind": "AtmosVendorConfig", "spec": {"sources": list(srcs)}}
 
 
+def mixin(**over):
+    return {"component": "access-analyzer-mixins", "version": "v0.5.0", "targets": [TARGET],
+            "source": "github.com/cloudposse-terraform-components/mixins.git//src/mixins?ref={{ .Version }}",
+            "included_paths": ["providers-account-map-bypass.depth-1.tf"], **over}
+
+
+MIXIN_TF = 'provider "aws" {}\n'
+
+
+def mixin_lock(path="providers-account-map-bypass.depth-1.tf"):
+    both = lock()
+    both["artifacts"]["mix"] = {"name": "access-analyzer-mixins", "target": TARGET, "files": [
+        {"path": path, "type": "file", "sha256": hashlib.sha256(MIXIN_TF.encode()).hexdigest()}]}
+    return both
+
+
 def lock(digest=DIGEST):
     return {"version": 1, "artifacts": {"id": {"name": "access-analyzer", "target": TARGET,
                                                "files": [{"path": "main.tf", "type": "file", "sha256": digest}]}}}
@@ -82,6 +98,21 @@ class ManifestTest(unittest.TestCase):
                 self.assertEqual(len(check.check_manifest(m)), 1)
         self.assertEqual(len(check.check_manifest(manifest(source(), source()))), 2)
 
+    def test_mixins(self):
+        good = mixin()
+        self.assertEqual(check.check_manifest(manifest(source(), good)), [])
+        for label, m in {
+            "no owning source": manifest(good),
+            "wrong name": manifest(source(), mixin(component="x-mixins")),
+            "other target": manifest(source(), mixin(targets=["components/terraform/x"])),
+            "glob": manifest(source(), mixin(included_paths=["*.tf"])),
+            "no files": manifest(source(), mixin(included_paths=[])),
+            "other path": manifest(source(), mixin(
+                source="github.com/cloudposse-terraform-components/mixins.git//src?ref={{ .Version }}")),
+        }.items():
+            with self.subTest(label):
+                self.assertTrue(check.check_manifest(m), label)
+
 
 class LockTest(Fixture):
     def errs(self, lck=None):
@@ -101,6 +132,19 @@ class LockTest(Fixture):
         self.assertEqual(len(errs), 2)
         self.assertIn("missing on disk", errs[0])
         self.assertIn("not from the vendor pull", errs[1])
+
+    def test_mixin_receipt_shares_the_target(self):
+        m = manifest(source(), mixin())
+        self.write(f"{TARGET}/providers-account-map-bypass.depth-1.tf", MIXIN_TF)
+        self.assertEqual(check.check_lock(m, mixin_lock(), self.root), [])
+        # Without the mixin's receipt its file is an extra and the source has no receipt.
+        errs = check.check_lock(m, lock(), self.root)
+        self.assertEqual(sum("no receipt" in e for e in errs), 1, errs)
+        self.assertEqual(sum("not from the vendor pull" in e for e in errs), 1, errs)
+        # Two sources writing one file.
+        self.write(f"{TARGET}/main.tf", MIXIN_TF)
+        errs = check.check_lock(m, mixin_lock("main.tf"), self.root)
+        self.assertIn("written by two vendor sources", errs[0])
 
     def test_receipt_gaps(self):
         self.assertIn("no receipt", self.errs({})[0])

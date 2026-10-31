@@ -1,5 +1,26 @@
 version: 1
 artifacts:
+  2d57fff1970fe254cf0baa29faf194b34795d9a25b969cd92253a9e4fe35f3c4:
+    name: aws-dns-primary-mixins
+    kind: remote
+    target: components/terraform/aws-dns-primary
+    source:
+      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
+    files:
+      - path: account-verification.mixin.tf
+        type: file
+        mode: 420
+        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
+      - path: providers-account-map-bypass.depth-1.tf
+        type: file
+        mode: 420
+        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
+    order: 11
+    included_paths:
+      - providers-account-map-bypass.depth-1.tf
+      - account-verification.mixin.tf
   8d3384db2b02f2039ac56766bbf59eecf5dd0f6598c9b987bd79b45e76196372:
     name: aws-account-settings
     kind: remote
@@ -147,6 +168,74 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+  87b2573fac10b54afcddd575991fd8233d60e7e5d1deb4d1abcb06d46f916464:
+    name: aws-iam-role
+    kind: remote
+    target: components/terraform/aws-iam-role
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-iam-role.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-iam-role.git//src
+      digest: sha256:ccb7c082422065ef63e0887e10f02079aa446cebf8053e881d3c948bca72f565
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: fdbb50c17c940232edb1c3dbb635f98fe392524a9981e5901f9c2c9d1e393441
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: eks-assume-role-policy.tf
+        type: file
+        mode: 420
+        sha256: 1b85b1b0c29820dc9b57b520dcc1d206c63b23068a2a5a64cf4068a6a0ed049d
+      - path: github-assume-role-policy.tf
+        type: file
+        mode: 420
+        sha256: 8e969faf21e07d17dd329b4b0a702ddde2e74d97fcf6ee373c9795ebb29d93d4
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 6f2777e53669c86b2a54fbf5dc57b0291afd4b555dcc6068a358c1886ffeedae
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 32ff6a1eb040c32e7cec05782c8e193c7f6356530e2a87eb1b3ceb05f4a5bcb5
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 968d88866ab7f9ebb774d020bb166f32f66f1344e857faa6ab6e854d6d3d17c1
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 5707f75f392813415b9ef8753e00e96ee873c3f963e156b5371990fcd17e47ca
+    order: 10
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+    excluded_paths:
+      - '**/providers.tf'
+  95e418cfcec359f48bd723abb3185864dfc4fe55a858263ef50b169af2a5076c:
+    name: aws-dns-delegated-mixins
+    kind: remote
+    target: components/terraform/aws-dns-delegated
+    source:
+      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
+    files:
+      - path: account-verification.mixin.tf
+        type: file
+        mode: 420
+        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
+      - path: providers-account-map-bypass.depth-1.tf
+        type: file
+        mode: 420
+        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
+    order: 12
+    included_paths:
+      - providers-account-map-bypass.depth-1.tf
+      - account-verification.mixin.tf
   048344d2c134549d53079e5b2d1373639c2f2e1df645dc63d96bb0c97476c475:
     name: aws-organizational-unit
     kind: remote
@@ -237,6 +326,27 @@ artifacts:
     included_paths:
       - modules/iam-roles/*.tf
       - modules/iam-roles/*.md
+  153186fd960ad93c65122a22f9b12ee4e79b8e556304b6d5b94d5bf8441a4942:
+    name: aws-iam-role-mixins
+    kind: remote
+    target: components/terraform/aws-iam-role
+    source:
+      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
+    files:
+      - path: account-verification.mixin.tf
+        type: file
+        mode: 420
+        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
+      - path: providers-account-map-bypass.depth-1.tf
+        type: file
+        mode: 420
+        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
+    order: 13
+    included_paths:
+      - providers-account-map-bypass.depth-1.tf
+      - account-verification.mixin.tf
   b3bbeebf73ca98c5102e6359e626266ad894e5f8acdc334579921bf94f2e47fa:
     name: aws-dns-primary
     kind: remote
@@ -266,10 +376,6 @@ artifacts:
         type: file
         mode: 420
         sha256: 8ce187b4390b568e9f45052dcfc64892534d5ec4d4e8383f4ad2d101640f31e7
-      - path: providers.tf
-        type: file
-        mode: 420
-        sha256: 34c1fca4eb9a64f37e130374076f66a6de05001cdf6ed343199a5b21274319e5
       - path: variables.tf
         type: file
         mode: 420
@@ -282,6 +388,8 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+    excluded_paths:
+      - '**/providers.tf'
   d296b8afc0f9fe4b680c855754a11e5420b48ed303b24bca369dc0bfe8c3c5c4:
     name: aws-scp
     kind: remote
@@ -573,10 +681,6 @@ artifacts:
         type: file
         mode: 420
         sha256: 7ef92d19ce470325746ff20d4fc88c05e68cb11d2725af39097fa77438db074c
-      - path: providers.tf
-        type: file
-        mode: 420
-        sha256: 34c1fca4eb9a64f37e130374076f66a6de05001cdf6ed343199a5b21274319e5
       - path: remote-state.tf
         type: file
         mode: 420
@@ -593,3 +697,5 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+    excluded_paths:
+      - '**/providers.tf'
