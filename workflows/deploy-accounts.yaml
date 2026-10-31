@@ -60,12 +60,16 @@ workflows:
           describe stacks --process-functions=false --format json
           --query '[.[].components.terraform["aws-organization"] | select(. != null and .metadata.enabled != false)] | length'
         output: none
+      # Unquoted assignments: a --query value is a JSON string ("fnx-gbl-root",
+      # quotes included), which the shell assignment unquotes.
       - name: refuse-non-accounts
         type: shell
         command: >-
-          case '{{ .steps.targets.value }}' in ""|null|*,*) echo "Pass one stack (fnx-gbl-root), not '{{ .steps.targets.value }}'."; exit 1 ;; esac;
-          test "$(echo '{{ .steps.organizations.value }}' | tr -d '[:space:]')" = "1"
-          || { echo "{{ .steps.targets.value }} has no enabled aws-organization instance: this workflow deploys fnx-gbl-root's accounts layer."; exit 1; }
+          stack={{ .steps.targets.value }};
+          organizations={{ .steps.organizations.value }};
+          case "$stack" in ""|null|*,*) echo "Pass one stack (fnx-gbl-root), not '$stack'."; exit 1 ;; esac;
+          test "$organizations" = "1"
+          || { echo "$stack has no enabled aws-organization instance: this workflow deploys fnx-gbl-root's accounts layer."; exit 1; }
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate` rejects that flag.
@@ -98,7 +102,7 @@ workflows:
         command: |
           set -eu
           set -o pipefail
-          stack='{{ .steps.targets.value }}'
+          stack={{ .steps.targets.value }}
           atmos terraform show aws-organization -s "$stack" -json "${stack}-aws-organization.planfile" \
             | python3 workflows/scripts/common/check-organization-plan.py
       - name: confirm_org
