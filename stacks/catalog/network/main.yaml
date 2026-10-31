@@ -4,11 +4,16 @@
 # =============================================================================
 # The stage's public zone, and the private internal zone on vpc/main. Each
 # stack keeps its zone comments and its records' addresses
-# (the stack file, orgs/fnx/<stage>/<region>.yaml).
+# (the stack file, orgs/fnx/<stage>/<region>.yaml). The public zone is
+# <stage>.<apex>, delegated from fnx-ue1-network's apex by the stage's
+# aws-dns-delegated (imported here, disabled with it): see
+# catalog/aws-dns-delegated/main for the external_zones form main takes when
+# it is enabled.
 # =============================================================================
 
 import:
   - catalog/network/defaults
+  - catalog/aws-dns-delegated/main
 
 components:
   terraform:

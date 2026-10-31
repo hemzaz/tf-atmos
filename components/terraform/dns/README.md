@@ -10,7 +10,9 @@ provider.
 
 Instances are named `network/main` and `network/services` (`metadata.component: dns`) in the
 three AWS stacks; `network/main` also in `fnx-ue1-local-sandbox` and in `fnx-ew1-prod` (the EU
-apex: `main` and `internal`, no `network/services`). `network/vpc-peering` is a
+apex: `main` and `internal`, no `network/services`); `network/primary` in `fnx-ue1-network`
+signs and query-logs the US apex, the vendored `aws-dns-primary` zone
+(`stacks/catalog/aws-dns-primary/main.yaml`, disabled with it). `network/vpc-peering` is a
 different component (`network`).
 
 - In the AWS stacks, `network/main` reads `vpc/main .vpc_id` (private `internal` zone) and
@@ -27,8 +29,14 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
 
 - `network/services` deploys in its own `dns-zones` layer before the `dns` layer
   (`deploy-full-stack`), because `network/main` reads its name servers.
-- `<d>` itself must be delegated from its parent domain manually, by the owner, before the first
-  `deploy-certificates`; ACM validation hangs otherwise. See [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#deploying-a-stack).
+- A US stage's `<d>` is `<stage>.<apex>`: Cloud Posse's layout, where the stage's vendored
+  `aws-dns-delegated` holds it and writes its NS record into the apex (`aws-dns-primary` in
+  `fnx-ue1-network`) itself, so no child NS record is added by hand. `network/main` then signs and
+  query-logs that zone as an `external_zones` entry (`stacks/catalog/aws-dns-delegated/main.yaml`
+  has the form) and writes its DS record into the apex through `aws.dns_account`. Until those
+  instances are enabled (placeholder apex and account IDs), `network/main` creates `<d>` itself.
+  Only the apexes are delegated by hand, at their registrars: the US one to `aws-dns-primary`, the
+  EU one (`fnx-ew1-prod`) to its `network/main`. See [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#deploying-a-stack).
 - Delegation NS records (from `parent_zone`, and the stacks' `services_delegation`) use a 30 s
   TTL, Cloud Posse `dns-delegated`'s value, so a re-created subzone's name servers propagate
   quickly; `delegation_ttl` sets it for `parent_zone` records. The child zone's own apex NS
