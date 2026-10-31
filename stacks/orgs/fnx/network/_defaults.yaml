@@ -3,10 +3,11 @@
 # Network Account Defaults
 # =============================================================================
 # Cloud Posse's core "network" account (owner decision Q1): the primary DNS
-# zones (aws-dns-primary, E6b) and, in a later wave, the Transit Gateway hub
+# zone (aws-dns-primary, E6b) and, in a later wave, the Transit Gateway hub
 # (aws-tgw-hub; QE6 moved TGW out of Wave E), core-<region>-network in Cloud
-# Posse's reference architecture. Until E6b's instances land its stacks hold
-# no enabled instance (aws-account-settings, below, is disabled until E3e).
+# Posse's reference architecture. Its stacks hold no enabled instance yet:
+# aws-account-settings (below) waits for E3e, and the primary DNS instances
+# (catalog/aws-dns-primary/main) for a real apex and account IDs.
 #
 # Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
 # the tenant stays fnx, the account is the stage, the region code the
@@ -17,12 +18,17 @@ import:
   - orgs/fnx/_defaults
   - mixins/tenant/fnx
   - catalog/aws-account-settings/main
+  - catalog/aws-dns-primary/main
 
 settings:
   environment:
     account: network
     # From the account map (stacks/orgs/fnx/_defaults.yaml), keyed by `account`.
     account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
+    # The US apex (owner decision (a), 2026-10-31): aws-dns-primary's zone;
+    # each stage's domain_name is <stage>.<this> (aws-dns-delegated). A
+    # placeholder base until the owner sets the real domain.
+    domain_name: "fnx.example.com"
   context:
     stage: network
   # Kept out of the CI plan/deploy/drift matrices (ci-stacks.py), like root:

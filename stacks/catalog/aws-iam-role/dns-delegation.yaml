@@ -1,0 +1,143 @@
+---
+# =============================================================================
+# aws-iam-role/dns-delegation-<stage> - the network account's DNS delegation roles
+# =============================================================================
+# Vendored Cloud Posse aws-iam-role v1.539.0 (vendor.yaml) in fnx-ue1-network
+# (stacks/orgs/fnx/network/_defaults.yaml): one role per delegated stage,
+# <tenant>-ue1-network-dns-delegation-<stage> for dev, staging and prod. A
+# stage's aws-dns-delegated assumes its own as aws.primary to write its NS
+# record into the apex zone (aws-dns-primary), and the stage's house dns
+# (network/main) assumes it as aws.dns_account to write the zone's DNSSEC DS
+# record beside it. This is Cloud Posse's account-map-less replacement for
+# iam-roles' dns_terraform_role_arn (owner decision OQ3, 2026-10-31).
+#
+# One role per stage, so no stage can rewrite another's delegation (a dev
+# principal must never change prod.<apex> NS/DS):
+# - Trust: only that stage's account, limited by aws:PrincipalArn to its CI
+#   apply roles (<stack>-ci-apply, catalog/iam/ci*) and
+#   OrganizationAccountAccessRole (the first deploy, before CI), the
+#   principals the SCP baseline also treats as privileged. Never the CI plan
+#   roles: plans stay read-only (a plan of aws-dns-delegated or network/main
+#   in that stage cannot assume it).
+# - Permissions: read the zones; write only NS and DS records named exactly
+#   <stage>.<apex>.
+# check-domains.py fails an enabled aws-dns-delegated whose role trusts
+# another account or allows any other name, lacks the aws:PrincipalArn
+# apply-only limit (or lets ci-plan in), or sets managed_policy_arns,
+# assume_role_policy or a GitHub/EKS OIDC trust.
+#
+# Disabled until the apex and account IDs are real (preflight:
+# docs/OPERATIONS.md#first-deploy-inputs, Domains and Account IDs).
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    # What every stage's role shares: the zone reads and the description.
+    aws-iam-role/dns-delegation:
+      metadata:
+        type: abstract
+        component: aws-iam-role
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        role_description: "Writes one stage subdomain's NS and DS records into the apex zone (aws-dns-delegated aws.primary, dns aws.dns_account)"
+        policy_description: "Read Route 53 zones; NS and DS records of one delegated stage subdomain only"
+        policy_statements:
+          ReadZones:
+            effect: Allow
+            actions:
+              - route53:GetChange
+              - route53:GetDNSSEC
+              - route53:GetHostedZone
+              - route53:ListHostedZones
+              - route53:ListHostedZonesByName
+              - route53:ListResourceRecordSets
+              - route53:ListTagsForResource
+            resources:
+              - "*"
+        tags:
+          Component: "DNS"
+
+    # Each stage's write is a policy_documents JSON statement: policy_statements
+    # is a map(object) whose `any` condition must have one type in every
+    # statement, so a conditioned statement cannot sit beside ReadZones.
+    aws-iam-role/dns-delegation-dev:
+      metadata:
+        component: aws-iam-role
+        enabled: false
+        inherits:
+          - aws-iam-role/dns-delegation
+      vars:
+        name: dns-delegation-dev
+        principals:
+          AWS:
+            - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:root"
+        assume_role_conditions:
+          - test: ArnLike
+            variable: aws:PrincipalArn
+            values:
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/{{ .settings.context.tenant }}-*-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/OrganizationAccountAccessRole"
+        policy_documents:
+          - >-
+            {"Version": "2012-10-17", "Statement": [{"Sid": "WriteDelegation", "Effect": "Allow",
+            "Action": "route53:ChangeResourceRecordSets", "Resource": "arn:aws:route53:::hostedzone/*",
+            "Condition": {"ForAllValues:StringEquals": {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames": ["dev.{{ .settings.environment.domain_name }}"],
+            "route53:ChangeResourceRecordSetsRecordTypes": ["NS", "DS"]}}}]}
+
+    aws-iam-role/dns-delegation-staging:
+      metadata:
+        component: aws-iam-role
+        enabled: false
+        inherits:
+          - aws-iam-role/dns-delegation
+      vars:
+        name: dns-delegation-staging
+        principals:
+          AWS:
+            - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:root"
+        assume_role_conditions:
+          - test: ArnLike
+            variable: aws:PrincipalArn
+            values:
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/{{ .settings.context.tenant }}-*-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/OrganizationAccountAccessRole"
+        policy_documents:
+          - >-
+            {"Version": "2012-10-17", "Statement": [{"Sid": "WriteDelegation", "Effect": "Allow",
+            "Action": "route53:ChangeResourceRecordSets", "Resource": "arn:aws:route53:::hostedzone/*",
+            "Condition": {"ForAllValues:StringEquals": {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames": ["staging.{{ .settings.environment.domain_name }}"],
+            "route53:ChangeResourceRecordSetsRecordTypes": ["NS", "DS"]}}}]}
+
+    aws-iam-role/dns-delegation-prod:
+      metadata:
+        component: aws-iam-role
+        enabled: false
+        inherits:
+          - aws-iam-role/dns-delegation
+      vars:
+        name: dns-delegation-prod
+        principals:
+          AWS:
+            - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:root"
+        assume_role_conditions:
+          - test: ArnLike
+            variable: aws:PrincipalArn
+            values:
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/{{ .settings.context.tenant }}-*-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/OrganizationAccountAccessRole"
+        policy_documents:
+          - >-
+            {"Version": "2012-10-17", "Statement": [{"Sid": "WriteDelegation", "Effect": "Allow",
+            "Action": "route53:ChangeResourceRecordSets", "Resource": "arn:aws:route53:::hostedzone/*",
+            "Condition": {"ForAllValues:StringEquals": {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames": ["prod.{{ .settings.environment.domain_name }}"],
+            "route53:ChangeResourceRecordSetsRecordTypes": ["NS", "DS"]}}}]}
