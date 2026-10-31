@@ -41,7 +41,9 @@ spec:
     # plane, and fnx-ew1-prod, the EU core subset).
     # core: a core account's regional stack (reference stacks
     # fnx-ue1-security and the other fnx-ue1-<core account> stacks), no
-    # instance, owner decision QE5; its global (gbl) stack is hand-written.
+    # enabled instance (aws-account-settings waits for E3e; outside us-east-1
+    # it imports main-standby), owner decision QE5; its global (gbl) stack is
+    # hand-written.
     # The defaults are the cheapest stack, a dev one.
     - name: profile
       type: select

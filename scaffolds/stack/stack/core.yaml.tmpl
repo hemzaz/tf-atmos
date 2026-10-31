@@ -1,9 +1,11 @@
 [[- $stack := printf "%s-%s-%s" .Config.tenant .Config.region_code .Config.stage -]]
+[[- $home := eq .Config.region "us-east-1" -]]
 ---
 # =============================================================================
 # [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
 # =============================================================================
-# A core-account stack (owner decision QE5): no instance yet. Its state goes to
+# A core-account stack (owner decision QE5): no enabled instance yet (its stage
+# defaults' aws-account-settings is disabled until E3e). Its state goes to
 # [[ .Config.tenant ]]-ue1-root's bucket through the backend's root role
 # (stacks/orgs/[[ .Config.tenant ]]/_defaults.yaml), which trusts only the
 # management-account administrator, and its stage defaults keep it out of every
@@ -11,9 +13,19 @@
 # [[ .Config.tenant ]]-ue1-root's root_write this stack's pattern pair
 # (check-state-keys.py) and, if needed, the [[ .Config.stage ]] account's
 # operator role in allowed_principal_arns.
+[[- if not $home ]]
+#
+# Not the account's home region (us-east-1, [[ .Config.tenant ]]-ue1-[[ .Config.stage ]]):
+# aws-account-settings/main-standby, after the stage defaults, leaves the
+# account-wide IAM account alias and S3 account public access block to the
+# home-region stack (check-lane-names.py SINGLETONS).
+[[- end ]]
 # =============================================================================
 
 import:
   - catalog/_base/defaults
   - mixins/region/[[ .Config.region ]]
   - orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/_defaults
+[[- if not $home ]]
+  - catalog/aws-account-settings/main-standby
+[[- end ]]
