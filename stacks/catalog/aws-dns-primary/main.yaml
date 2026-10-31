@@ -6,7 +6,8 @@
 # the apex settings.environment.domain_name (fnx.example.com) in vendored
 # aws-dns-primary v1.537.0, and each stage's aws-dns-delegated holds
 # <stage>.<apex> (catalog/aws-dns-delegated/main), writing its NS record here
-# through aws-iam-role/dns-delegation. The apex keeps only vanity aliases
+# through its own aws-iam-role/dns-delegation-<stage> (one role per stage,
+# allowed only that stage's name). The apex keeps only vanity aliases
 # (record_config / alias_record_config); every workload name is under a stage
 # zone. The EU apex (fnx-eu.example.com) is never under this one: it stays
 # fnx-ew1-prod's house dns, delegated at the registrar (B5).

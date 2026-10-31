@@ -57,10 +57,12 @@ dns instance of its stack with dnssec_enabled (and the instance's dnssec_enabled
 enable_query_logging, and no zone of an instance. Those instances, and aws-iam-role, run without
 account-map (Cloud Posse Evolution 4): account_map_enabled false. A deployable aws-dns-delegated
 then assumes account_map.iam_role_arn_templates["dns-delegation"] as aws.primary, which must be
-the ARN of a deployable aws-iam-role instance whose policy names the zone in
-route53:ChangeResourceRecordSetsNormalizedRecordNames.
+the ARN of a deployable aws-iam-role instance whose policy lets it write the zone's NS records
+(route53:ChangeResourceRecordSetsNormalizedRecordNames, counted from Allow statements only) and
+no other name, and whose trust names only the delegated zone's own account.
 Exits 1 on any violation.
 """
+import fnmatch
 import importlib.util
 import json
 import pathlib
@@ -530,28 +532,92 @@ def role_arn(stack: dict, instance: dict) -> Optional[str]:
     return f"arn:aws:iam::{account_id}:role{path}{'-'.join(parts)}"
 
 
-def record_names(instance: dict) -> set:
-    """Every route53 record name an aws-iam-role instance's policy conditions allow.
+WRITE_ACTION = "route53:ChangeResourceRecordSets"
+RECORD_TYPES_KEY = "route53:ChangeResourceRecordSetsRecordTypes"
+# The condition operators that restrict a name to the listed values (StringNotEquals and the like widen it).
+NAME_OPERATORS = ("StringEquals", "ForAllValues:StringEquals")
+ANY_NAME = "*"
 
-    From policy_statements (condition) and policy_documents (JSON strings, Condition); a
-    document that is not JSON allows nothing.
+
+def as_list(value) -> list:
+    """A policy value (a string or a list of them) as a list."""
+    return [value] if isinstance(value, str) else [v for v in value or [] if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def policy_statements(instance: dict) -> list[dict]:
+    """An aws-iam-role instance's policy statements in IAM JSON form.
+
+    From policy_statements (aws-iam-role's YAML form) and policy_documents (JSON strings); a
+    document that is not JSON has none.
     """
     variables = instance.get("vars") or {}
-    conditions = [s.get("condition") for s in dicts(variables.get("policy_statements")).values()]
+    statements = [
+        {"Effect": s.get("effect"), "Action": s.get("actions"), "NotAction": s.get("not_actions"),
+         "Condition": s.get("condition")}
+        for s in dicts(variables.get("policy_statements")).values()
+    ]
     for document in variables.get("policy_documents") or []:
         try:
-            statements = json.loads(document).get("Statement") if isinstance(document, str) else None
+            found = json.loads(document).get("Statement") if isinstance(document, str) else None
         except (ValueError, AttributeError):
             continue
-        statements = [statements] if isinstance(statements, dict) else statements or []
-        conditions += [s.get("Condition") for s in statements if isinstance(s, dict)]
+        found = [found] if isinstance(found, dict) else found or []
+        statements += [s for s in found if isinstance(s, dict)]
+    return statements
+
+
+def grants_write(statement: dict) -> bool:
+    """Whether an IAM statement allows route53:ChangeResourceRecordSets for NS records."""
+    if str(statement.get("Effect", "")).lower() != "allow":
+        return False
+    action = WRITE_ACTION.lower()
+    if statement.get("NotAction") is not None:
+        if any(fnmatch.fnmatchcase(action, a.lower()) for a in as_list(statement.get("NotAction"))):
+            return False
+    elif not any(fnmatch.fnmatchcase(action, a.lower()) for a in as_list(statement.get("Action"))):
+        return False
+    condition = statement.get("Condition") if isinstance(statement.get("Condition"), dict) else {}
+    for operator in NAME_OPERATORS:
+        types = (condition.get(operator) or {}).get(RECORD_TYPES_KEY) if isinstance(condition.get(operator), dict) else None
+        if types is not None and "NS" not in {t.upper() for t in as_list(types)}:
+            return False
+    return True
+
+
+def record_names(instance: dict) -> set:
+    """Every route53 record name an aws-iam-role instance's policy lets it write NS records for.
+
+    Only Allow statements whose actions cover route53:ChangeResourceRecordSets (and whose
+    RecordTypes condition, if any, includes NS) count, and only their StringEquals /
+    ForAllValues:StringEquals record-name values: a Deny naming a zone allows nothing, and a
+    StringNotEquals naming one is no restriction. A granting statement with no StringEquals record-name
+    condition allows every name (ANY_NAME).
+    """
     names = set()
-    for condition in conditions:
-        for operator in (condition or {}).values() if isinstance(condition, dict) else []:
-            values = operator.get(RECORD_NAMES_KEY) if isinstance(operator, dict) else None
-            values = [values] if isinstance(values, str) else values
-            names |= {normalize(v) for v in (values or []) if isinstance(v, str)}
+    for statement in policy_statements(instance):
+        if not grants_write(statement):
+            continue
+        condition = statement.get("Condition") if isinstance(statement.get("Condition"), dict) else {}
+        listed = [(condition.get(op) or {}).get(RECORD_NAMES_KEY) for op in NAME_OPERATORS
+                  if isinstance(condition.get(op), dict) and RECORD_NAMES_KEY in condition.get(op)]
+        if not listed:
+            return {ANY_NAME}
+        # Several restricting operators in one statement all apply: their intersection.
+        allowed = set.intersection(*({normalize(v) for v in as_list(values)} for values in listed))
+        names |= allowed
     return names
+
+
+def trust_errors(role: dict, account_id: Optional[str]) -> list[str]:
+    """Principals of a delegation role outside the one account that may assume it."""
+    if not account_id:
+        return ["its account id is unknown, so the role's trust cannot be checked"]
+    principals = (role.get("vars") or {}).get("principals") or {}
+    outside = sorted(
+        f"{kind} {arn}" for kind, arns in principals.items() for arn in as_list(arns)
+        if kind != "AWS" or not re.fullmatch(rf"arn:aws:iam::{re.escape(str(account_id))}:\S+", arn)
+    )
+    return [f"trusts {', '.join(outside)}, outside account {account_id}"] if outside else []
 
 
 def vendored_dns_errors(stacks: dict) -> list[str]:
@@ -584,9 +650,17 @@ def vendored_dns_errors(stacks: dict) -> list[str]:
                 errors.append(f"{where}: account_map.iam_role_arn_templates.{DELEGATION_ROLE_KEY} {arn!r} is not the ARN "
                               "of a deployable aws-iam-role instance: aws.primary could not assume it")
                 continue
-            allowed = record_names(role)
+            allowed, own = record_names(role), {normalize(z.name) for z in zones}
             errors += [f"{where}: zone {z.name}: the delegation role {arn} does not allow it in {RECORD_NAMES_KEY}"
-                       for z in zones if normalize(z.name) not in allowed]
+                       for z in zones if normalize(z.name) not in allowed and ANY_NAME not in allowed]
+            # Least privilege: the role this stage assumes writes its zone only, and only this stage's
+            # account assumes it (another stage must never rewrite this delegation, nor this one another's).
+            others = sorted(allowed - own)
+            if others:
+                errors.append(f"{where}: the delegation role {arn} also allows {', '.join(others)}: "
+                              "give each delegated zone its own role (catalog/aws-iam-role/dns-delegation)")
+            account_id = ((instance.get("settings") or {}).get("environment") or {}).get("account_id")
+            errors += [f"{where}: the delegation role {arn} {p}" for p in trust_errors(role, account_id)]
     return errors
 
 
@@ -792,7 +866,7 @@ def main() -> int:
         "every acm certificate that writes no validation record depends on a same-account one that does, "
         f"no account and region holds more than {LOG_POLICY_LIMIT} house CloudWatch Logs resource policies "
         "(nor two of one name), and every vendored Cloud Posse zone is signed and query-logged by the house dns, "
-        "with no account-map and aws.primary's delegation role allowing it"
+        "with no account-map and aws.primary's delegation role allowing it alone, trusted by its account alone"
     )
     return 0
 
