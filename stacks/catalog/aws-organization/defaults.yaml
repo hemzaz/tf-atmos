@@ -29,7 +29,8 @@
 #   3. plan, and apply only if the plan removes no principal and no policy
 #      type from aws_organizations_organization.this. deploy-accounts.yaml
 #      enforces it: after its org plan, check-organization-plan.py fails the
-#      run on any removal, a feature_set change or a destroy.
+#      run on any removal, a destroy, or a feature_set change other than the
+#      in-place CONSOLIDATED_BILLING -> ALL upgrade (feature_set, below).
 #
 # Destroy and replace are refused by the house lifecycle_override.tf
 # (prevent_destroy).
