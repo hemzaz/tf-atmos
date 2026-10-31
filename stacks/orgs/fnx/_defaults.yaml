@@ -50,11 +50,11 @@ terraform:
   # too, as for root. The provider guard needs credentials in the core account,
   # so the PR enabling a core stack's first instance adds the stack's pattern
   # pair and that account's OrganizationAccountAccessRole to root_write's
-  # allowed_principal_arns (audit and network so far) until E4's Identity Center
-  # roles replace it. A dedicated core_write role (E5), or removing the OAARs
-  # from root_write, must land before E4 grants any permission set in a core
-  # account: from then on a principal there that can edit OAAR's trust reaches
-  # the root stacks' state.
+  # allowed_principal_arns (stacks/orgs/fnx/root/us-east-1.yaml) until E4's
+  # Identity Center roles replace it. A dedicated core_write role (E5), or
+  # removing the OAARs from root_write, must land before E4 grants any permission
+  # set in a core account: from then on a principal there that can edit OAAR's
+  # trust reaches the root stacks' state.
   #
   # TFSTATE_SOURCE=replica reads the bucket's cross-region replica instead
   # (<bucket>-replica in settings.tfstate.replica_region, backend/main's

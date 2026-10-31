@@ -99,9 +99,23 @@ the last step.
 5. **Backend access roles**: `atmos workflow backend-only -f bootstrap`, and again with
    `-s fnx-ew1-root`. Its preflight is fatal and finds the real IDs now; the access roles gain the
    principals `access_roles` lists.
-6. **Account stacks**, with administrator credentials in each account: the core stacks, then each
-   workload stack's `atmos workflow full -f bootstrap -s <stack>` and
-   [Deploying a stack](#deploying-a-stack).
+6. **Account stacks**, as each account's `OrganizationAccountAccessRole`, assumed from the
+   management account (a profile with `role_arn = arn:aws:iam::<account>:role/OrganizationAccountAccessRole`
+   and the management-account `source_profile`): every provider runs only in its stack's own
+   account (`allowed_account_ids`), and that role is the one principal of the account the state
+   backend trusts before CI exists (`root_write` for the core accounts, `write`/`prod_write` for
+   the workload accounts; E4's Identity Center roles replace it). The core stacks
+   (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`: today only their
+   `aws-account-settings`), then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
+   and [Deploying a stack](#deploying-a-stack).
+
+**An imported account without `OrganizationAccountAccessRole`.** Organizations creates that role
+only in the accounts it creates; an account that joined by invitation has none, so step 6 and the
+backend's trust have no way in. Before step 6, in that account (its root user or an existing
+administrator), create the role as AWS documents it: name `OrganizationAccountAccessRole`, trusting
+the management account (`arn:aws:iam::<management account>:root`), with `AdministratorAccess`. Same
+name, so the backend's trust, the E3c `security-services` SCP exception and these steps need no
+change.
 
 ## State backend
 
@@ -295,8 +309,8 @@ prints the edit to make). Still by hand:
 ## Deploying a stack
 
 After the backend: `atmos workflow full -f bootstrap -s <stack>` (IAM, including the CI roles, and
-VPCs) with administrator credentials in the stack's account, since no CI role exists yet; no
-stack sets a provider role, so every component runs as the caller. Then
+VPCs) as the stack's account's `OrganizationAccountAccessRole` (see [Bootstrap order](#bootstrap-order)),
+since no CI role exists yet; no stack sets a provider role, so every component runs as the caller. Then
 `atmos workflow deploy -f deploy-full-stack -s <stack>`. It runs these layers in order, each
 planned, confirmed, then applied from the saved plan. Each layer is also its own workflow
 (`atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>`):
