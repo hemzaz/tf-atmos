@@ -133,7 +133,13 @@ components:
               - "*/fnx-ue1-network-*"
               - "*/fnx-ue1-security/*"
               - "*/fnx-ue1-security-*"
+              - "*/fnx-ue1-identity/*"
+              - "*/fnx-ue1-identity-*"
+              - "*/fnx-ue1-artifacts/*"
+              - "*/fnx-ue1-artifacts-*"
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/OrganizationAccountAccessRole"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.identity }}:role/OrganizationAccountAccessRole"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.artifacts }}:role/OrganizationAccountAccessRole"
