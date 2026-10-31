@@ -37,8 +37,8 @@
 # standby pair,
 # fnx-ue1-prod with its DR in us-west-2 and the new standby fnx-uw2-prod, in
 # place of the committed ue1/ue2 pair: no other prod primary is generatable,
-# one per account), so the wire hook adds each but the core stack to the root
-# backend. The root file may differ only by the added lines, a second wiring run must add
+# one per account), so the wire hook adds each to the root backend (the core
+# stack: its pattern pair, its account being onboarded). The root file may differ only by the added lines, a second wiring run must add
 # nothing, and every stack check (as check-stack-samples.sh runs them, plus
 # dr-pair --lint) must pass over the result.
 #
@@ -65,6 +65,9 @@ SWEEP="false"
 [[ "${1:-}" == "--sweep" ]] && SWEEP="true"
 # The backends the wire hook edits; the real ones must never change.
 ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.yaml)
+# Core stacks whose account's OrganizationAccountAccessRole is in root_write
+# (stacks/orgs/fnx/root/us-east-1.yaml): their golden must report wired.
+ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security"
 
 # A critical_alerts answer that runs a command if any hook interpolates it
 # into shell unchecked (literal: the $( ) is the point).
@@ -310,10 +313,15 @@ golden() {
         cat "$out/$stack.generate.log" >&2
         return 1
     fi
-    # The wire hook ran (it found the reference stack already wired, or a
-    # core stack, which it leaves unwired).
+    # The wire hook ran: it found the reference stack already wired, or a
+    # core stack whose account is not onboarded yet, which it leaves unwired.
+    # A core stack in ONBOARDED_CORE_STACKS must report wired, so one whose
+    # account lost its operator role from root_write fails here.
     wired="is already wired"
-    [[ "$profile" != "core" ]] || wired="is a core-account stack: nothing to wire"
+    if [[ "$profile" == "core" ]] && [[ " $ONBOARDED_CORE_STACKS " != *" $stack "* ]] \
+        && ! logged "$out/$stack.generate.log" "$stack $wired"; then
+        wired="is a core-account stack whose account is not onboarded"
+    fi
     if ! logged "$out/$stack.generate.log" "$stack $wired"; then
         echo "ERROR $stack: the wire hook did not report \"$stack $wired\":" >&2
         cat "$out/$stack.generate.log" >&2
@@ -560,7 +568,8 @@ FRESH=(
     "fnx-ue2-prod|fnx-uw2-prod|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.26.0.0/16"
     # The EU backend: the prod-eu standby is wired into eu-west-1.yaml.
     "fnx-ec1-prod|fnx-ec1-prod|"
-    # A core account's second region: validated, left unwired (no line added).
+    # A core account's second region: its pattern pair joins root_write (two
+    # lines; the account's operator role is already there, from fnx-ue1-security).
     "fnx-ue1-security|fnx-uw2-security|region=us-west-2 region_code=uw2"
 )
 us_root="${ROOT_FILES[0]}"
@@ -577,6 +586,7 @@ cp "$us_root" "$out/fresh.us.base"
 cp "$eu_root" "$out/fresh.eu.base"
 fresh=()
 wired_fresh=0
+wired_core=0
 for case in "${FRESH[@]}"; do
     IFS='|' read -r golden_stack stack overrides <<< "$case"
     read -r -a override_list <<< "$overrides"
@@ -586,11 +596,12 @@ for case in "${FRESH[@]}"; do
         cat "$out/fresh.$stack.log" >&2
         fresh_ok=0
     elif [[ "$profile" == "core" ]]; then
-        if ! logged "$out/fresh.$stack.log" "$stack is a core-account stack: nothing to wire" \
-            || logged "$out/fresh.$stack.log" "stack-wiring: added"; then
-            echo "ERROR fresh $stack: the wire hook did not leave the core stack unwired:" >&2
+        if ! logged "$out/fresh.$stack.log" "stack-wiring: added stacks/orgs/fnx/root/us-east-1.yaml: state patterns */$stack/*"; then
+            echo "ERROR fresh $stack: the wire hook did not add the core stack's pair to root_write:" >&2
             cat "$out/fresh.$stack.log" >&2
             fresh_ok=0
+        else
+            wired_core=$((wired_core + 1))
         fi
     elif ! logged "$out/fresh.$stack.log" "stack-wiring: added"; then
         echo "ERROR fresh $stack: the wire hook added nothing for it:" >&2
@@ -602,14 +613,15 @@ for case in "${FRESH[@]}"; do
     fresh+=("$stack")
 done
 if [[ "$fresh_ok" -eq 1 ]]; then
-    # The hook only adds lines: four per wired stack (its pattern pair, its
-    # plan and apply role ARNs; none for a core stack), everything else byte
-    # for byte.
+    # The hook only adds lines: four per wired workload stack (its pattern
+    # pair, its plan and apply role ARNs), two per core stack (its pair on
+    # root_write), everything else byte for byte.
+    added_lines=$((4 * wired_fresh + 2 * wired_core))
     diff "$out/fresh.us.base" "$us_root" > "$out/fresh.root.diff" || true
     diff "$out/fresh.eu.base" "$eu_root" >> "$out/fresh.root.diff" || true
     if grep -v -e '^> ' -e '^[0-9,]*a[0-9,]*$' "$out/fresh.root.diff" > /dev/null \
-        || [[ "$(grep -c '^> ' "$out/fresh.root.diff")" -ne $((4 * wired_fresh)) ]]; then
-        echo "ERROR fresh: $us_root and $eu_root changed by more than the $((4 * wired_fresh)) added lines:" >&2
+        || [[ "$(grep -c '^> ' "$out/fresh.root.diff")" -ne "$added_lines" ]]; then
+        echo "ERROR fresh: $us_root and $eu_root changed by more than the $added_lines added lines:" >&2
         cat "$out/fresh.root.diff" >&2
         fresh_ok=0
     fi
@@ -664,7 +676,7 @@ if [[ "$fresh_ok" -eq 1 ]]; then
     fi
 fi
 if [[ "$fresh_ok" -eq 1 ]]; then
-    echo "fresh: ${fresh[*]} generated, wired ($((4 * wired_fresh)) lines added to the root backends, a second run adds none) and pass every stack check"
+    echo "fresh: ${fresh[*]} generated, wired ($((4 * wired_fresh + 2 * wired_core)) lines added to the root backends, a second run adds none) and pass every stack check"
 fi
 if [[ "$fresh_ok" -eq 1 && "$SWEEP" == "true" ]]; then
     # plan-sweep mirrors components/terraform with git ls-files.
@@ -713,5 +725,5 @@ fi
 if [[ "$SWEEP" == "true" ]]; then
     echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks, and plan-sweep passes the ${#swept_list[@]} it selects (${swept_list[*]})"
 else
-    echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order, the root backends untouched); $refused bad answer sets are refused; the ${#fresh[@]} fresh stacks (${fresh[*]}) are wired by the hook (a core stack left unwired) and pass every stack check"
+    echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order, the root backends untouched); $refused bad answer sets are refused; the ${#fresh[@]} fresh stacks (${fresh[*]}) are wired by the hook and pass every stack check"
 fi
