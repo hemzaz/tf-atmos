@@ -102,7 +102,10 @@ components:
             # OrganizationAccountAccessRole: the administrator's way into a new
             # account, which applies its stacks' first deploy (bootstrap.yaml
             # full: no CI role exists yet) until E4's Identity Center roles
-            # replace it (docs/OPERATIONS.md, Bootstrap order).
+            # replace it (docs/OPERATIONS.md, Bootstrap order). Accepted
+            # interim: write is not split by stage, so the dev OAAR also
+            # reaches staging state and the reverse, as the CI apply roles do
+            # (Cloud Posse's tfstate roles are not stage-split at all).
             object_key_patterns: *non_prod_state
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/OrganizationAccountAccessRole"

@@ -140,7 +140,8 @@ overrides all of `settings.tfstate` to point there (`stack: fnx-ew1-root`), so i
 first; `check-data-residency.py` fails one that names a non-EU region.
 It holds only prod state (`fnx-ew1-prod` and its DR stack `fnx-ec1-prod`, both in the `prod-eu`
 account, whose state stays in `eu-west-1` as `fnx-ue2-prod`'s stays in `us-east-1`), so it has the
-`prod_read`, `prod_write` and `root_write` roles, trusting those two stacks' CI roles.
+`prod_read`, `prod_write` and `root_write` roles, trusting those two stacks' CI roles and, on
+`prod_write` until E4, the `prod-eu` account's `OrganizationAccountAccessRole`.
 
 The backend workflows default to `fnx-ue1-root`; `-s fnx-ew1-root` runs them on the EU backend
 (the bucket and roles come from that stack's `settings.tfstate`):
@@ -163,9 +164,9 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 | Role (`access_roles` key) | Access | Trusted CI role |
 |---------------------------|--------|-----------------|
 | `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
-| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
+| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles, and the dev and staging accounts' `OrganizationAccountAccessRole` until E4's Identity Center roles (step 6 of [Bootstrap order](#bootstrap-order)); like the apply roles, each reaches both stages' state |
 | `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`, DR `fnx-ec1-prod`) | the prod stacks' CI plan roles |
-| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
+| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles, and the prod account's (EU: `prod-eu`'s) `OrganizationAccountAccessRole` until E4 |
 | `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) and the core stages' (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; read too, under `TFSTATE_ACCESS=read`) | none (the applying administrator, and each core account's `OrganizationAccountAccessRole`, which applies that account's stacks until E4's Identity Center roles; it also reaches the root stacks' state until E5's dedicated core role, which, or removing the OAARs, must land before E4 grants any permission set in a core account) |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.

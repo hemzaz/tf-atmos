@@ -31,8 +31,11 @@ terraform:
   # Access goes through one of the backend's access roles (Cloud Posse
   # tfstate-backend access_roles), split by stage (state objects "*/<stack>/*" and "*/<stack>-*"):
   #   <role_prefix>-role            read/write, dev/staging objects; the dev/staging CI apply roles
+  #                                 and the dev/staging accounts' OrganizationAccountAccessRole
+  #                                 until E4 (each reaches both stages' state, as the apply roles do)
   #   <role_prefix>-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
-  #   <role_prefix>-prod-role       read/write, prod objects; prod's apply role only
+  #   <role_prefix>-prod-role       read/write, prod objects; the prod stacks' apply roles and the
+  #                                 prod account's OrganizationAccountAccessRole until E4 (EU: prod-eu's)
   #   <role_prefix>-prod-read-role  read-only, prod objects; prod's plan role only
   #   <role_prefix>-root-role       read/write, the root stacks' and the core stages' objects;
   #                                 the administrator who applies backend/main, plus each
