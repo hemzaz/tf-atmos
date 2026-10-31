@@ -59,7 +59,10 @@ account-map (Cloud Posse Evolution 4): account_map_enabled false. A deployable a
 then assumes account_map.iam_role_arn_templates["dns-delegation"] as aws.primary, which must be
 the ARN of a deployable aws-iam-role instance whose policy lets it write the zone's NS records
 (route53:ChangeResourceRecordSetsNormalizedRecordNames, counted from Allow statements only) and
-no other name, and whose trust names only the delegated zone's own account.
+no other name, and whose trust names only the delegated zone's own account, limited by an
+assume_role_conditions aws:PrincipalArn condition to that account's *-ci-apply roles and
+OrganizationAccountAccessRole (never ci-plan). managed_policy_arns, assume_role_policy and the
+GitHub/EKS OIDC trusts would bypass both, so any of them set fails.
 Exits 1 on any violation.
 """
 import fnmatch
@@ -620,6 +623,53 @@ def trust_errors(role: dict, account_id: Optional[str]) -> list[str]:
     return [f"trusts {', '.join(outside)}, outside account {account_id}"] if outside else []
 
 
+# aws-iam-role inputs that would widen a delegation role past its policy and principals (main.tf,
+# github-assume-role-policy.tf, eks-assume-role-policy.tf): any of them set is a failure.
+WIDENING_INPUTS = {
+    "managed_policy_arns": "attaches managed policies (any of them may write every record name)",
+    "assume_role_policy": "sets a raw assume_role_policy (it replaces principals and assume_role_conditions)",
+    "github_oidc_provider_enabled": "trusts GitHub OIDC",
+    "eks_oidc_provider_enabled": "trusts an EKS OIDC provider",
+}
+PRINCIPAL_ARN = "aws:principalarn"
+# The condition operators that limit aws:PrincipalArn to the listed values.
+PRINCIPAL_OPERATORS = {"arnlike", "arnequals", "stringequals", "stringlike"}
+APPLY_ROLE_SUFFIXES = ("-ci-apply", ":role/OrganizationAccountAccessRole")
+
+
+def principal_arn_error(value, account_id: str) -> bool:
+    """Whether an aws:PrincipalArn value is anything but an apply principal of the one trusted account."""
+    return (not isinstance(value, str) or "ci-plan" in value.lower()
+            or not value.startswith(f"arn:aws:iam::{account_id}:role/") or not value.endswith(APPLY_ROLE_SUFFIXES))
+
+
+def widening_errors(role: dict, account_id: Optional[str]) -> list[str]:
+    """A delegation role's trust or permissions beyond principals, policy_statements and policy_documents.
+
+    The owner rule (2026-10-31): the per-stage write roles never trust the CI plan roles, so
+    assume_role_conditions must limit aws:PrincipalArn to the stage account's *-ci-apply roles and
+    OrganizationAccountAccessRole (an empty list trusts every principal of the account, ci-plan included).
+    """
+    variables = role.get("vars") or {}
+    errors = [text for key, text in WIDENING_INPUTS.items()
+              if (flag_on(variables.get(key)) if key.endswith("_enabled") else
+                  bool(variables.get(key)) if key == "managed_policy_arns" else variables.get(key) is not None)]
+    if not account_id:
+        return errors
+    conditions = [c for c in variables.get("assume_role_conditions") or []
+                  if isinstance(c, dict) and str(c.get("variable", "")).lower() == PRINCIPAL_ARN]
+    # A StringNotLike and the like narrows the trust further, so only the limiting operators' values count.
+    limited = [c for c in conditions if str(c.get("test", "")).lower() in PRINCIPAL_OPERATORS]
+    bad = sorted({str(v) for c in limited for v in c.get("values") or [None] if principal_arn_error(v, account_id)})
+    if bad:
+        errors.append(f"lets aws:PrincipalArn {', '.join(bad)} assume it: only {account_id}'s *-ci-apply roles and "
+                      "OrganizationAccountAccessRole may (never the CI plan roles)")
+    elif not limited:
+        errors.append("has no assume_role_conditions ArnLike/ArnEquals/StringEquals/StringLike aws:PrincipalArn limit: "
+                      f"every principal of {account_id} could assume it, the CI plan roles included")
+    return errors
+
+
 def vendored_dns_errors(stacks: dict) -> list[str]:
     """Unsigned or unlogged vendored zones, account-map lookups, and a wrong aws.primary role."""
     errors, roles = [], {}
@@ -660,7 +710,8 @@ def vendored_dns_errors(stacks: dict) -> list[str]:
                 errors.append(f"{where}: the delegation role {arn} also allows {', '.join(others)}: "
                               "give each delegated zone its own role (catalog/aws-iam-role/dns-delegation)")
             account_id = ((instance.get("settings") or {}).get("environment") or {}).get("account_id")
-            errors += [f"{where}: the delegation role {arn} {p}" for p in trust_errors(role, account_id)]
+            errors += [f"{where}: the delegation role {arn} {p}"
+                       for p in trust_errors(role, account_id) + widening_errors(role, account_id)]
     return errors
 
 

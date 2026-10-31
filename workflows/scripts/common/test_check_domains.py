@@ -687,6 +687,8 @@ def signed_stacks():
         **off, "name": "dns-delegation-dev",
         "context": {"tenant": "fnx", "environment": "ue1", "stage": "network", "label_order": ["tenant", "environment", "stage", "name"]},
         "principals": {"AWS": [f"arn:aws:iam::{DEV_ID}:root"]},
+        "assume_role_conditions": [{"test": "ArnLike", "variable": "aws:PrincipalArn", "values": [
+            f"arn:aws:iam::{DEV_ID}:role/fnx-*-ci-apply", f"arn:aws:iam::{DEV_ID}:role/OrganizationAccountAccessRole"]}],
         "policy_statements": {"ReadZones": {"effect": "Allow", "actions": ["route53:ListHostedZones"], "resources": ["*"]}},
         "policy_documents": [write_document(DEV)],
     })
@@ -808,6 +810,57 @@ class VendoredSigningTest(unittest.TestCase):
         stacks = signed_stacks()
         del stacks["dev"]["components"]["terraform"]["aws-dns-delegated"]["settings"]
         self.assertIn("account id is unknown", self.errors(stacks)[0])
+
+    def test_role_widening_inputs_fail(self):
+        """#471 round 4: aws-iam-role inputs beyond principals and the policies must not widen the role."""
+        cases = {
+            "managed_policy_arns": (["arn:aws:iam::aws:policy/AmazonRoute53FullAccess"], "attaches managed policies"),
+            "github_oidc_provider_enabled": (True, "trusts GitHub OIDC"),
+            "eks_oidc_provider_enabled": ("true", "trusts an EKS OIDC provider"),
+            "assume_role_policy": (json.dumps({"Statement": [{"Effect": "Allow", "Principal": {
+                "AWS": "arn:aws:iam::999999999999:root"}, "Action": "sts:AssumeRole"}]}), "sets a raw assume_role_policy"),
+        }
+        for key, (value, named) in cases.items():
+            with self.subTest(key):
+                stacks = signed_stacks()
+                stacks["net"]["components"]["terraform"]["aws-iam-role/dns-delegation-dev"]["vars"][key] = value
+                errors = self.errors(stacks)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn(f"the delegation role {ROLE} {named}", errors[0])
+        stacks = signed_stacks()
+        role = stacks["net"]["components"]["terraform"]["aws-iam-role/dns-delegation-dev"]["vars"]
+        role.update(managed_policy_arns=[], github_oidc_provider_enabled=False, assume_role_policy=None)
+        self.assertEqual(self.errors(stacks), [])
+
+    def test_role_trusting_ci_plan_or_any_principal_fails(self):
+        """Owner rule 2026-10-31: the per-stage write roles never trust the CI plan roles."""
+        arn = f"arn:aws:iam::{DEV_ID}:role/"
+        unlimited = "has no assume_role_conditions"
+        cases = {
+            "no conditions": ([], unlimited),
+            "another variable": ([{"test": "StringEquals", "variable": "aws:PrincipalTag/x", "values": ["y"]}], unlimited),
+            "widening operator": ([{"test": "ArnNotLike", "variable": "aws:PrincipalArn", "values": [f"{arn}x"]}], unlimited),
+            "ci-plan": ([{"test": "ArnLike", "variable": "aws:PrincipalArn", "values": [f"{arn}fnx-*-ci-plan"]}],
+                        f"lets aws:PrincipalArn {arn}fnx-*-ci-plan assume it"),
+            "bare *": ([{"test": "StringLike", "variable": "aws:PrincipalArn", "values": ["*"]}], "lets aws:PrincipalArn * assume"),
+            "no values": ([{"test": "ArnLike", "variable": "aws:PrincipalArn", "values": []}], "lets aws:PrincipalArn None"),
+            "other account": ([{"test": "ArnEquals", "variable": "aws:PrincipalArn",
+                                "values": ["arn:aws:iam::333333333333:role/fnx-ue1-dev-ci-apply"]}], "333333333333"),
+            "plan beside apply": ([{"test": "ArnLike", "variable": "aws:PrincipalArn",
+                                    "values": [f"{arn}fnx-*-ci-apply", f"{arn}fnx-ue1-dev-ci-plan"]}], "ci-plan"),
+        }
+        for case, (conditions, named) in cases.items():
+            with self.subTest(case):
+                stacks = signed_stacks()
+                stacks["net"]["components"]["terraform"]["aws-iam-role/dns-delegation-dev"]["vars"]["assume_role_conditions"] = conditions
+                errors = self.errors(stacks)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn(f"the delegation role {ROLE} ", errors[0])
+                self.assertIn(named, errors[0])
+        stacks = signed_stacks()
+        stacks["net"]["components"]["terraform"]["aws-iam-role/dns-delegation-dev"]["vars"]["assume_role_conditions"].append(
+            {"test": "ArnNotLike", "variable": "aws:PrincipalArn", "values": [f"{arn}fnx-*-ci-plan"]})
+        self.assertEqual(self.errors(stacks), [])
 
     def test_main_runs_it(self):
         stacks = signed_stacks()

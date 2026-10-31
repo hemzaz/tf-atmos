@@ -22,7 +22,9 @@
 # - Permissions: read the zones; write only NS and DS records named exactly
 #   <stage>.<apex>.
 # check-domains.py fails an enabled aws-dns-delegated whose role trusts
-# another account or allows any other name.
+# another account or allows any other name, lacks the aws:PrincipalArn
+# apply-only limit (or lets ci-plan in), or sets managed_policy_arns,
+# assume_role_policy or a GitHub/EKS OIDC trust.
 #
 # Disabled until the apex and account IDs are real (preflight:
 # docs/OPERATIONS.md#first-deploy-inputs, Domains and Account IDs).
