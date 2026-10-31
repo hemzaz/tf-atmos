@@ -742,6 +742,21 @@ class VendoredSigningTest(unittest.TestCase):
             "not json", json.dumps({"Statement": {"Condition": {"ForAllValues:StringEquals": {check_domains.RECORD_NAMES_KEY: [DEV]}}}})]})
         self.assertEqual(check_domains.record_names(role), {f"qa.{SVC}", DEV})
 
+    def test_zone_ids_readers_follow_an_external_zone(self):
+        # dns zone_ids maps external_zones keys too: acm keeps reading network/main .zone_ids.main.
+        reader = "!terraform.state network/main .zone_ids.main"
+        stacks = signed_stacks()
+        stacks["dev"]["components"]["terraform"]["acm/main"] = acm(reader, (DEV, [f"*.{DEV}"]))
+        self.assertEqual(check_domains.check(stacks)[0], [])
+        entry = stacks["dev"]["components"]["terraform"]["network/main"]["vars"]["external_zones"]["main"]
+        entry.pop("name")
+        entry["zone_id"] = "!terraform.state aws-dns-delegated .default_dns_zone_id"
+        self.assertEqual(check_domains.check(stacks)[0], [])
+        stacks["dev"]["components"]["terraform"]["acm/main"] = acm(reader, ("api.other.example.org", []))
+        errors, _ = check_domains.check(stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn(f"api.other.example.org is not in its zone ({DEV})", errors[0])
+
     def test_main_runs_it(self):
         stacks = signed_stacks()
         stacks["net"]["components"]["terraform"]["network/primary"]["vars"]["dnssec_enabled"] = False
