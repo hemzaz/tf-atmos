@@ -1,16 +1,19 @@
+# Both maps include external_zones (looked up, not created) under their keys, so a
+# reader of zone_ids.<key> keeps working when a zone moves from zones to
+# external_zones (a stage zone handed to a vendored aws-dns-delegated).
 output "zone_ids" {
-  description = "Map of zone names to their IDs"
+  description = "Map of zone keys (zones and external_zones) to their IDs"
   value = merge(
     var.create_root_zone ? { (var.root_domain) = aws_route53_zone.root_zone[0].zone_id } : {},
-    { for k, zone in local.managed_zones : k => zone.zone_id }
+    { for k, zone in local.all_zones : k => zone.zone_id }
   )
 }
 
 output "zone_name_servers" {
-  description = "Map of zone names to their name servers"
+  description = "Map of zone keys (zones and external_zones) to their name servers"
   value = merge(
     var.create_root_zone ? { (var.root_domain) = aws_route53_zone.root_zone[0].name_servers } : {},
-    { for k, zone in local.managed_zones : k => zone.name_servers }
+    { for k, zone in local.all_zones : k => zone.name_servers }
   )
 }
 

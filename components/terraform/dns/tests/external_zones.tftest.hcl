@@ -84,6 +84,20 @@ run "external_zone_is_signed_with_the_instance_key" {
   }
 }
 
+run "outputs_include_external_zones" {
+  command = plan
+
+  assert {
+    condition = (
+      output.zone_ids["delegated"] == "ZDELEGATED0000000000"
+      && output.zone_ids["primary"] == "ZPRIMARY000000000000"
+      && output.zone_ids["internal"] == "ZMAIN000000000000000"
+      && tolist(output.zone_name_servers["delegated"]) == tolist(["ns-2.awsdns-02.org"])
+    )
+    error_message = "zone_ids and zone_name_servers map external_zones keys too, so zone_ids.<key> readers survive a move from zones to external_zones."
+  }
+}
+
 run "external_zone_is_query_logged" {
   command = plan
 

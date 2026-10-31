@@ -21,7 +21,8 @@ For each enabled, non-abstract instance, by root module:
     followed offline: it is reported as a warning, not checked.
 An acm/apigateway zone_id must be `!terraform.state <dns instance> [<stack>]
 .zone_ids.<key>`. With --process-functions=false it stays symbolic, so it is
-resolved by following it to that deployable dns instance's zones.<key>.name.
+resolved by following it to that deployable dns instance's zones.<key>.name, or its
+external_zones.<key> (by name, or its own zone_id followed the same way): zone_ids maps those too.
 A literal zone id cannot be resolved offline: it is reported as a warning, not
 checked.
 A name written into a public zone must not also fall inside a more specific
@@ -152,7 +153,7 @@ def state_reference(stacks: dict, stack_name: str, value, output: str, module: s
     return component, target, (match.group("bare") or match.group("quoted")) if keyed else None
 
 
-def resolve_zone(stacks: dict, stack_name: str, zone_id) -> tuple[Optional[dict], Optional[str]]:
+def resolve_zone(stacks: dict, stack_name: str, zone_id, depth: int = 0) -> tuple[Optional[dict], Optional[str]]:
     """(zone, None), or (None, why it cannot be resolved), or (None, None) for a literal id."""
     ref = state_reference(stacks, stack_name, zone_id, "default_dns_zone_id", DELEGATED, keyed=False)
     if isinstance(ref, str) and "does not read" not in ref:
@@ -169,9 +170,16 @@ def resolve_zone(stacks: dict, stack_name: str, zone_id) -> tuple[Optional[dict]
         return None, ref
     component, target, key = ref
     zone = dicts((target.get("vars") or {}).get("zones")).get(key) or {}
-    if not isinstance(zone.get("name"), str):
-        return None, f"reads {component} .zone_ids.{key}, but {component} has no zone {key!r}"
-    return zone, None
+    if isinstance(zone.get("name"), str):
+        return zone, None
+    # zone_ids maps external_zones keys too (dns outputs.tf): follow the entry, in the target's stack.
+    external = dicts((target.get("vars") or {}).get("external_zones")).get(key)
+    if external is not None and depth < 2:
+        if isinstance(external.get("name"), str):
+            return {"name": external["name"]}, None
+        target_stack = next(iter(check_dependencies.references(zone_id)))[1] or stack_name
+        return resolve_zone(stacks, target_stack, external.get("zone_id"), depth + 1)
+    return None, f"reads {component} .zone_ids.{key}, but {component} has no zone {key!r}"
 
 
 def is_public(zone: dict) -> bool:

@@ -19,7 +19,9 @@ different component (`network`).
   `network/services .zone_name_servers.services` (NS record delegating `services.<d>`); in prod
   also `rds/main .instance_address` (`db.internal.<d>` CNAME).
 - Used by: `acm` (`zone_ids`, validation zone), `apigateway` (`zone_ids`, alias records),
-  `eks-addons` (`zone_ids`, external-dns and cert-manager).
+  `eks-addons` (`zone_ids`, external-dns and cert-manager). `zone_ids` and `zone_name_servers`
+  map `external_zones` keys too, so these readers of `zone_ids.main` stay as they are when a
+  stage's `main` moves to `external_zones` (its `aws-dns-delegated` enabled).
 
 Zones (`<d>` = `settings.environment.domain_name`): `network/main` holds `main` = `<d>` and
 private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
@@ -88,5 +90,7 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   only one component may log it. Keys must differ from `zones` keys.
 - Records in a DNS-account zone can only reference health checks from the main account.
 - `workflows/scripts/common/check-domains.py` (run by `validate-all`) requires every record name
-  to sit in its zone and not inside a more specific public zone of the stack, and every nested
-  public zone to be delegated from its parent.
+  to sit in its zone and not inside a more specific public zone of the stack, every nested
+  public zone to be delegated from its parent, and every enabled `aws-dns-primary`/
+  `aws-dns-delegated` zone to be an `external_zones` entry of a dns instance of its stack with
+  `dnssec_enabled` and `enable_query_logging` (why their checkov CKV2_AWS_38/39 are allowlisted).
