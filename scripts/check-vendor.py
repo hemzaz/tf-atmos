@@ -3,7 +3,9 @@
 
 Offline: each source pins an exact cloudposse-terraform-components tag via ?ref={{ .Version }}
 into one components/terraform/<name> (or a statement catalog into stacks/catalog/<name>/catalog);
-vendor.lock.yaml holds a receipt per target and no other;
+a Cloud Posse mixins source (mixins.git//src/mixins, named <component>-mixins) adds the files it
+names to its component's target and no other, and no two sources of a target write one file;
+vendor.lock.yaml holds a receipt per source and no other;
 each receipt file (a regular file at a relative path inside the target) is on disk with its
 sha256; nothing else is in the target (no extra file, symlink or empty directory) but
 .terraform.lock.hcl and *_override.tf. Atmos 1.229's receipt omits the version (`atmos vendor
@@ -28,6 +30,12 @@ MANIFEST, LOCK = "vendor.yaml", "vendor.lock.yaml"
 VERSION = re.compile(r"^v?\d+\.\d+\.\d+$")
 SOURCE = re.compile(r"^github\.com/cloudposse-terraform-components/aws-[a-z0-9-]+\.git"
                     r"(//[A-Za-z0-9_./-]+)?\?ref=\{\{ ?\.Version ?\}\}$")
+# Cloud Posse's providers/verification mixins (the account-map-less providers.tf and friends),
+# vendored into a component's own target beside its src: the component excludes the file the
+# mixin replaces (excluded_paths), and the mixin source names its files in included_paths.
+MIXIN_SOURCE = re.compile(r"^github\.com/cloudposse-terraform-components/mixins\.git//src/mixins"
+                          r"\?ref=\{\{ ?\.Version ?\}\}$")
+MIXIN_SUFFIX = "-mixins"
 # A component's src into components/terraform/<name>, or a Cloud Posse statement catalog that a
 # stack !includes (aws-scp's catalog/) into stacks/catalog/<name>/catalog: atmos.yaml stacks
 # included_paths is orgs/** only, so its files are never read as stack manifests.
@@ -60,7 +68,25 @@ def sources(manifest):
 
 
 def receipts(lock):
-    return {a.get("target"): a for a in ((lock or {}).get("artifacts") or {}).values()}
+    """{(source name, target): receipt}."""
+    return {(a.get("name"), a.get("target")): a for a in ((lock or {}).get("artifacts") or {}).values()}
+
+
+def is_mixin(src):
+    return bool(MIXIN_SOURCE.match(str(src.get("source", ""))))
+
+
+def target_files(have, target, errs):
+    """{path: sha256} over every receipt for target; a path two receipts both record is an error."""
+    found = {}
+    for (_, tgt), receipt in sorted(have.items(), key=lambda kv: str(kv[0])):
+        if tgt != target:
+            continue
+        for rel, digest in files(receipt, target, errs).items():
+            if rel in found:
+                errs.append(f"{target}/{rel}: written by two vendor sources (one must exclude it)")
+            found[rel] = digest
+    return found
 
 
 def files(receipt, target, errs):
@@ -83,7 +109,7 @@ def check_manifest(manifest):
         errs.append(f"{MANIFEST}: want apiVersion atmos/v1, kind AtmosVendorConfig")
     if (manifest.get("spec") or {}).get("imports"):
         errs.append(f"{MANIFEST}: no spec.imports; declare every source in {MANIFEST}")
-    names, targets = set(), set()
+    names, targets, mixins = set(), {}, []
     for i, src in enumerate(sources(manifest)):
         name = src.get("component") or f"sources[{i}]"
         if name in names:
@@ -91,13 +117,25 @@ def check_manifest(manifest):
         names.add(name)
         if not VERSION.match(str(src.get("version", ""))):
             errs.append(f"{name}: version {src.get('version')!r} is not an exact release tag vX.Y.Z")
-        if not SOURCE.match(str(src.get("source", ""))):
-            errs.append(f"{name}: source is not github.com/cloudposse-terraform-components/aws-<x>.git[//dir]?ref={{{{ .Version }}}}")
         tgt = src.get("targets") or []
+        if is_mixin(src):
+            mixins.append((name, src, tgt))
+            continue
+        if not SOURCE.match(str(src.get("source", ""))):
+            errs.append(f"{name}: source is not github.com/cloudposse-terraform-components/aws-<x>.git[//dir]"
+                        "?ref={{ .Version }} or mixins.git//src/mixins?ref={{ .Version }}")
         if len(tgt) != 1 or not TARGET.match(str(tgt[0])) or tgt[0] in targets:
             errs.append(f"{name}: want one target components/terraform/<name> or stacks/catalog/<name>/catalog"
                         f" no other source uses, got {tgt}")
-        targets.update(tgt)
+        targets.update({t: name for t in tgt})
+    for name, src, tgt in mixins:
+        owner = targets.get(tgt[0]) if len(tgt) == 1 else None
+        if owner is None or not str(tgt[0]).startswith("components/terraform/") or name != owner + MIXIN_SUFFIX:
+            errs.append(f"{name}: a mixins source targets one components/terraform/<c> another source vendors"
+                        f" and is named <c>{MIXIN_SUFFIX}, got {tgt}")
+        paths = src.get("included_paths") or []
+        if not paths or any(not re.fullmatch(r"[A-Za-z0-9_.-]+\.tf", str(p)) for p in paths):
+            errs.append(f"{name}: a mixins source names its files in included_paths (<file>.tf, no glob), got {paths}")
     return errs
 
 
@@ -117,14 +155,13 @@ def on_disk(root, target):
 
 def check_lock(manifest, lock, root):
     errs, have = [], receipts(lock)
-    declared = {(s.get("targets") or [None])[0]: s.get("component") for s in sources(manifest)}
-    for target in sorted(set(have) - set(declared)):
-        errs.append(f"{LOCK}: receipt for {target}, which {MANIFEST} does not declare (atmos vendor clean)")
-    for target, name in declared.items():
-        if target not in have:
-            errs.append(f"{name}: no receipt in {LOCK} (atmos vendor pull -c {name})")
-            continue
-        locked = files(have[target], target, errs)
+    declared = {(s.get("component"), (s.get("targets") or [None])[0]) for s in sources(manifest)}
+    for name, target in sorted(set(have) - declared, key=str):
+        errs.append(f"{LOCK}: receipt for {name} -> {target}, which {MANIFEST} does not declare (atmos vendor clean)")
+    for name, _ in sorted(declared - set(have), key=str):
+        errs.append(f"{name}: no receipt in {LOCK} (atmos vendor pull -c {name})")
+    for target in sorted({t for _, t in declared & set(have)}):
+        locked = target_files(have, target, errs)
         for rel, digest in sorted(locked.items()):
             path = os.path.join(root, target, rel)
             if os.path.islink(path) or not os.path.isfile(path):
@@ -164,11 +201,12 @@ def repull(lock):
             raise ToolError(f"atmos vendor pull failed:\n{out.stdout}{out.stderr}")
         fresh, have = receipts(load_yaml(os.path.join(tmp, LOCK))), receipts(lock)
     errs = []
-    for target in sorted(set(fresh) | set(have)):
-        if target not in fresh or target not in have:
-            errs.append(f"{target}: in {'the committed ' + LOCK if target in have else 'a fresh pull'} only")
+    for key in sorted(set(fresh) | set(have), key=str):
+        name, target = key
+        if key not in fresh or key not in have:
+            errs.append(f"{name} -> {target}: in {'the committed ' + LOCK if key in have else 'a fresh pull'} only")
             continue
-        pulled, locked = files(fresh[target], target, errs), files(have[target], target, errs)
+        pulled, locked = files(fresh[key], target, errs), files(have[key], target, errs)
         errs += [f"{target}/{rel}: differs from a fresh pull of its pinned version"
                  for rel in sorted(set(pulled) | set(locked)) if pulled.get(rel) != locked.get(rel)]
     return errs
@@ -189,7 +227,7 @@ def main(argv):
         if "--list" in flags:
             if errs:
                 raise ToolError(f"{MANIFEST} is invalid, so no vendored dirs are listed: " + "; ".join(errs))
-            print("".join(f"{s['targets'][0]}\n" for s in sources(manifest)), end="")
+            print("".join(f"{t}\n" for t in dict.fromkeys(s["targets"][0] for s in sources(manifest))), end="")
             return 0
         lock = load_yaml(LOCK) if os.path.exists(LOCK) else {}
         errs = errs or check_lock(manifest, lock, ".")
@@ -202,7 +240,7 @@ def main(argv):
     for err in errs:
         print(f"check-vendor: {err}")
     if not errs:
-        print(f"check-vendor: {len(sources(manifest))} vendored component(s) match {MANIFEST} and {LOCK}")
+        print(f"check-vendor: {len(sources(manifest))} vendor source(s) match {MANIFEST} and {LOCK}")
     return 1 if errs else 0
 
 

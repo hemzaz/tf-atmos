@@ -42,7 +42,11 @@ ALLOWLIST = (
     (r"/aws-dns-delegated/remote-state\.tf", "CKV_TF_1", TF_1),
     # aws-account-settings (vendor.yaml): each account's account-level settings (E3d).
     (r"/aws-account-settings/context\.tf", "CKV_TF_1", TF_1),
-    # account-map's iam-roles module (vendor.yaml), reached through the dns providers.tf.
+    # aws-iam-role (vendor.yaml): the network account's DNS delegation role (E6b).
+    (r"/aws-iam-role/context\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-iam-role/main\.tf", "CKV_TF_1", TF_1),
+    # account-map's iam-roles module (vendor.yaml), reached through the account-map-bypass
+    # providers mixin of the dns components and aws-iam-role (bypassed, still expanded).
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),
     (r"/account-map/modules/iam-roles/main\.tf", "CKV_TF_1", TF_1),
 )
