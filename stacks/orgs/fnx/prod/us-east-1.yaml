@@ -120,9 +120,12 @@ settings:
     account: prod
     # The stack's one domain. Every dns zone/record, acm domain/SAN and
     # apigateway custom domain derives from it; the Route 53 zone ids come from
-    # the dns instances' zone_ids output, never from settings. example.com is a
+    # the dns instances' zone_ids output, never from settings. Cloud Posse's
+    # layout (owner decision (a), 2026-10-31): prod.<apex>, delegated from the
+    # apex in fnx-ue1-network (aws-dns-primary) like dev.<apex> and
+    # staging.<apex>; the apex keeps only vanity aliases. example.com is a
     # placeholder base until the owner sets the real domain.
-    domain_name: "fnx.example.com"
+    domain_name: "prod.fnx.example.com"
 
     # Monitoring contacts - 24/7 coverage
     monitoring:

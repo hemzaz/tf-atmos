@@ -110,8 +110,9 @@ settings:
   environment:
     account: prod
     # The production domain: api.<domain> fails over to this stack. Its zone is
-    # fnx-ue1-prod's network/main (the zone is global; Route 53 has no region).
-    domain_name: "fnx.example.com"
+    # fnx-ue1-prod's network/main (the zone is global; Route 53 has no region),
+    # prod.<apex> like fnx-ue1-prod's.
+    domain_name: "prod.fnx.example.com"
     monitoring:
       critical_alerts:
         - "prod-critical@example.com"
