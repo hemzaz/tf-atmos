@@ -51,6 +51,12 @@
 #   plat  the platform (workload) accounts: dev, staging, prod
 #   eu    under plat, prod-eu only: E3c attaches the EU region allow-list
 #         (owner decision QE3) here, and plat's baseline SCPs still apply
+#
+# Account settings (E3d, catalog/aws-account-settings/main): the management
+# account's alias and S3 account public access block, and its us-east-1
+# settings; fnx-ew1-root has its eu-west-1 ones. Disabled with the rest of
+# this stack; E3e enables it with them (it reads no other instance, so any
+# phase).
 # =============================================================================
 
 import:
@@ -61,6 +67,7 @@ import:
   - catalog/aws-organizational-unit/defaults
   - catalog/aws-account/defaults
   - catalog/aws-scp/defaults
+  - catalog/aws-account-settings/main
 
 settings:
   context:
@@ -69,6 +76,10 @@ settings:
 
 components:
   terraform:
+    aws-account-settings:
+      metadata:
+        enabled: false
+
     aws-organization:
       metadata:
         component: aws-organization

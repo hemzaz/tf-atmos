@@ -14,7 +14,8 @@
 # carry the [[ .Config.region_code ]] prefix (settings.prefix) and the account's singletons stay in
 # [[ $primary ]]: the GitHub OIDC provider, the Auto Scaling service-linked role,
 # the multi-region CloudTrail trail, AWS Config's global-resource recording,
-# the account budget and the cross-account role. What "warm" means per
+# the account budget, the cross-account role, the IAM account alias and the
+# S3 account public access block (aws-account-settings/main). What "warm" means per
 # component is in docs/OPERATIONS.md ("Disaster recovery"):
 #   - networking, CI roles, regional security services: full, as in the primary;
 #   - KMS: [[ $primary ]] kms/main's multi-region replica (alias [[ .Config.region_code ]]-main);
@@ -75,6 +76,7 @@ import:
 
   # --- security
   - catalog/iam/ci-standby
+  - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
   - catalog/awsconfig/main-standby
   - catalog/guardduty/main-standby
