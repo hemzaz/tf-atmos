@@ -98,15 +98,23 @@ components:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue2-prod-ci-plan"
           write:
             # Dev/staging state: their CI apply roles (master branch subject
-            # only, see iam/ci ci_apply_role_trusted_repos).
+            # only, see iam/ci ci_apply_role_trusted_repos), and each account's
+            # OrganizationAccountAccessRole: the administrator's way into a new
+            # account, which applies its stacks' first deploy (bootstrap.yaml
+            # full: no CI role exists yet) until E4's Identity Center roles
+            # replace it (docs/OPERATIONS.md, Bootstrap order).
             object_key_patterns: *non_prod_state
             allowed_principal_arns:
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/OrganizationAccountAccessRole"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-ue1-dev-ci-apply"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-ue1-staging-ci-apply"
           prod_write:
-            # Prod state: ONLY prod's apply role.
+            # Prod state: ONLY prod's apply roles among the CI roles, and the
+            # prod account's OrganizationAccountAccessRole (as write, above).
             object_key_patterns: *prod_state
             allowed_principal_arns:
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue1-prod-ci-apply"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue2-prod-ci-apply"
           # This stack's own state (backend/main), the management account's

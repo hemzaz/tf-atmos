@@ -89,9 +89,13 @@ components:
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-plan'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-plan'
           prod_write:
-            # EU prod state: ONLY the EU prod stacks' apply roles.
+            # EU prod state: ONLY the EU prod stacks' apply roles among the CI
+            # roles, and the prod-eu account's OrganizationAccountAccessRole,
+            # the administrator's way into the new account for its stacks'
+            # first deploy, until E4's Identity Center roles replace it.
             object_key_patterns: *prod_state
             allowed_principal_arns:
+              - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/OrganizationAccountAccessRole'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-apply'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-apply'
           # This stack's own state (backend/main). No principals listed: the
