@@ -586,12 +586,12 @@ class OrganizationInputsTest(unittest.TestCase):
         self.assertEqual(errors(stacks), [])
 
     def test_example_account_email_is_its_own_row(self):
-        stacks = self.gbl(aws_account_dev=self.account("aws+fnx-dev@example.com"))
+        stacks = self.gbl(aws_account_dev=self.account("root+dev@example.com"))
         self.assertEqual([(f.stack, f.row) for f in errors(stacks)], [("fnx-gbl-root", "Account emails")])
 
     def test_distinct_real_emails_pass(self):
-        stacks = self.gbl(aws_account_dev=self.account("aws+fnx-dev@acme.io"),
-                          aws_account_prod=self.account("aws+fnx-prod@acme.io"))
+        stacks = self.gbl(aws_account_dev=self.account("root+dev@acme.io"),
+                          aws_account_prod=self.account("root+prod@acme.io"))
         self.assertEqual(errors(stacks), [])
 
     def test_shared_email_fails_case_insensitively_disabled_included(self):
@@ -601,6 +601,13 @@ class OrganizationInputsTest(unittest.TestCase):
         self.assertEqual([(f.stack, f.row) for f in found], [("repository", "Account emails")])
         self.assertIn("aws_account_dev", found[0].detail)
         self.assertIn("aws_account_prod", found[0].detail)
+
+    def test_shared_email_found_by_the_top_level_component_alone(self):
+        stacks = self.gbl(aws_account_dev=self.account("root@acme.io"),
+                          aws_account_prod=self.account("root@acme.io"))
+        for spec in stacks["fnx-gbl-root"]["components"]["terraform"].values():
+            del spec["metadata"]["component"]
+        self.assertEqual([(f.stack, f.row) for f in errors(stacks)], [("repository", "Account emails")])
 
 
 class BootstrapOrderTest(unittest.TestCase):
