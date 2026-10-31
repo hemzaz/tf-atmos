@@ -47,7 +47,18 @@ CLOUDFRONT; an unset bool takes its Terraform default, true) stay within LOG_POL
 DNS-account policy counts in the account dns_account_assume_role_arn's id names (via
 settings.account_map.full_account_map or settings.environment.account_id: an unknown id fails,
 an id several names share counts in each), or in the instance's own account with no role.
-Fixture stacks are never deployed and not counted.
+Fixture stacks are never deployed and not counted. Two dns instances of one account whose
+query-logging policies (route53-query-logging-<suffix>: query_logging_name, else the first
+query-logged zone) would share a name fail too.
+Cloud Posse ships aws-dns-primary/aws-dns-delegated zones unsigned and unlogged (the reason of
+their CKV2_AWS_38/39 entries in scripts/check-checkov-allowlist.py), so every deployable one
+(public) must be an external_zones entry (by name, or a zone_id following to it) of a deployable
+dns instance of its stack with dnssec_enabled (and the instance's dnssec_enabled) and
+enable_query_logging, and no zone of an instance. Those instances, and aws-iam-role, run without
+account-map (Cloud Posse Evolution 4): account_map_enabled false. A deployable aws-dns-delegated
+then assumes account_map.iam_role_arn_templates["dns-delegation"] as aws.primary, which must be
+the ARN of a deployable aws-iam-role instance whose policy names the zone in
+route53:ChangeResourceRecordSetsNormalizedRecordNames.
 Exits 1 on any violation.
 """
 import importlib.util
@@ -469,6 +480,139 @@ def duplicate_errors(stacks: dict) -> list[str]:
     return errors
 
 
+# Cloud Posse's account-map-less components (vendor.yaml *-mixins) and the static-map key of the
+# role aws-dns-delegated's aws.primary assumes (its providers-dns-primary_override.tf).
+BYPASS_MODULES = (PRIMARY, DELEGATED, "aws-iam-role")
+DELEGATION_ROLE_KEY = "dns-delegation"
+RECORD_NAMES_KEY = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
+
+
+def signer_of(stacks: dict, stack_name: str, zone: Zone, instances: dict) -> Optional[str]:
+    """The problem with how the stack's house dns signs and query-logs a vendored zone, or None."""
+    want, found = normalize(zone.name), []
+    for name, instance in sorted(instances.items()):
+        if not check_dependencies.is_deployable(instance) or check_dependencies.module_name(name, instance) != "dns":
+            continue
+        variables = instance.get("vars") or {}
+        for key, entry in sorted(dicts(variables.get("external_zones")).items()):
+            target = entry.get("name")
+            if target is None and entry.get("zone_id") is not None:
+                resolved, _ = resolve_zone(stacks, stack_name, entry.get("zone_id"))
+                target = (resolved or {}).get("name")
+            if isinstance(target, str) and normalize(target) == want:
+                found.append((name, key, entry, flag_on(variables.get("dnssec_enabled"))))
+    if not found:
+        return (f"{zone.instance} zone {zone.name} is not an external_zones entry of a dns instance of this stack: "
+                "Cloud Posse ships it unsigned and unlogged, so the house dns must sign and query-log it")
+    good = [f for f in found if f[3] and flag_on(f[2].get("dnssec_enabled")) and flag_on(f[2].get("enable_query_logging"))]
+    if good:
+        return None
+    name, key = found[0][0], found[0][1]
+    return (f"{zone.instance} zone {zone.name}: {name} external_zones.{key} must set dnssec_enabled and "
+            "enable_query_logging (and the instance dnssec_enabled)")
+
+
+def role_arn(stack: dict, instance: dict) -> Optional[str]:
+    """The ARN of the IAM role an aws-iam-role instance creates (null-label id, use_fullname), or None."""
+    variables = instance.get("vars") or {}
+    context = variables.get("context") or {}
+    settings = instance.get("settings") or {}
+    account_id = (settings.get("environment") or {}).get("account_id")
+    order = context.get("label_order") or ["tenant", "environment", "stage", "name", "attributes"]
+    labels = {**context, "name": variables.get("name", context.get("name"))}
+    parts = []
+    for label in order:
+        value = labels.get(label)
+        parts += [str(v) for v in value] if isinstance(value, list) else ([str(value)] if value else [])
+    if not account_id or not parts or variables.get("use_fullname") is False:
+        return None
+    path = str(variables.get("path") or "/")
+    return f"arn:aws:iam::{account_id}:role{path}{'-'.join(parts)}"
+
+
+def record_names(instance: dict) -> set:
+    """Every route53 record name an aws-iam-role instance's policy_statements condition allows."""
+    names = set()
+    for statement in dicts((instance.get("vars") or {}).get("policy_statements")).values():
+        for condition in (statement.get("condition") or {}).values():
+            values = condition.get(RECORD_NAMES_KEY) if isinstance(condition, dict) else None
+            names |= {normalize(v) for v in (values or []) if isinstance(v, str)}
+    return names
+
+
+def vendored_dns_errors(stacks: dict) -> list[str]:
+    """Unsigned or unlogged vendored zones, account-map lookups, and a wrong aws.primary role."""
+    errors, roles = [], {}
+    for stack in stacks.values():
+        for name, instance in stack.get("components", {}).get("terraform", {}).items():
+            if check_dependencies.is_deployable(instance) and check_dependencies.module_name(name, instance) == "aws-iam-role":
+                arn = role_arn(stack, instance)
+                if arn:
+                    roles[arn] = instance
+    for stack_name, stack in sorted(stacks.items()):
+        instances = stack.get("components", {}).get("terraform", {})
+        for name, instance in sorted(instances.items()):
+            module = check_dependencies.module_name(name, instance)
+            if not check_dependencies.is_deployable(instance) or module not in BYPASS_MODULES:
+                continue
+            variables, where = instance.get("vars") or {}, f"{stack_name}: {name}"
+            if flag_on(variables.get("account_map_enabled", True)):
+                errors.append(f"{where}: account_map_enabled must be false (no account-map: Cloud Posse Evolution 4; "
+                              "inherit the abstract account-map-bypass)")
+                continue
+            zones = cp_zones(name, instance)
+            errors += [f"{where}: {p}" for p in (signer_of(stacks, stack_name, z, instances) for z in zones) if p]
+            if module != DELEGATED:
+                continue
+            arn = ((variables.get("account_map") or {}).get("iam_role_arn_templates") or {}).get(DELEGATION_ROLE_KEY)
+            role = roles.get(arn) if isinstance(arn, str) else None
+            if role is None:
+                errors.append(f"{where}: account_map.iam_role_arn_templates.{DELEGATION_ROLE_KEY} {arn!r} is not the ARN "
+                              "of a deployable aws-iam-role instance: aws.primary could not assume it")
+                continue
+            allowed = record_names(role)
+            errors += [f"{where}: zone {z.name}: the delegation role {arn} does not allow it in {RECORD_NAMES_KEY}"
+                       for z in zones if normalize(z.name) not in allowed]
+    return errors
+
+
+def query_log_suffix(variables: dict) -> Optional[str]:
+    """The dns query-logging policy suffix (query-logging.tf query_log_name_suffix), or None if it logs nothing."""
+    logged = [
+        normalize(z["name"]) for z in dicts(variables.get("zones")).values()
+        if isinstance(z.get("name"), str) and flag_on(z.get("enable_query_logging")) and is_public(z)
+    ] + [
+        normalize(z["name"]) for z in dicts(variables.get("external_zones")).values()
+        if isinstance(z.get("name"), str) and flag_on(z.get("enable_query_logging"))
+    ]
+    if not logged and not any(flag_on(z.get("enable_query_logging")) for z in dicts(variables.get("external_zones")).values()):
+        return None
+    pinned = variables.get("query_logging_name")
+    return str(pinned) if pinned else (sorted(logged)[0].replace(".", "-") if logged else None)
+
+
+def log_policy_name_errors(stacks: dict) -> list[str]:
+    """Two dns instances of one account whose query-logging policy and key alias names collide."""
+    held, accounts = {}, account_names(stacks)
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(stack.get("components", {}).get("terraform", {}).items()):
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            if (not check_dependencies.is_deployable(instance) or stage == check_dependencies.fixtures.FIXTURE_STAGE
+                    or check_dependencies.module_name(name, instance) != "dns"):
+                continue
+            variables = instance.get("vars") or {}
+            suffix = query_log_suffix(variables)
+            if suffix is None:
+                continue
+            for (account, _) in log_policies(stack_name, name, instance, accounts)[0]:
+                held.setdefault((account, suffix), set()).add(f"{stack_name} {name}")
+    return [
+        f"account {account}: route53-query-logging-{suffix} (policy and key alias) is created by {', '.join(sorted(owners))}: "
+        "set a distinct query_logging_name"
+        for (account, suffix), owners in sorted(held.items()) if len(owners) > 1
+    ]
+
+
 # CloudWatch Logs account-scoped resource policies per region and account (a hard quota).
 LOG_POLICY_LIMIT = 10
 QUERY_LOG_REGION = "us-east-1"  # Route 53 only publishes query logs there (dns query-logging.tf)
@@ -616,7 +760,10 @@ def check(stacks: dict) -> tuple[list[str], list[str]]:
 
 
 def main() -> int:
-    errors, warnings = check(json.load(sys.stdin))
+    stacks = json.load(sys.stdin)
+    errors, warnings = check(stacks)
+    # Separate from check() (placement and quota), so each part is tested on its own fixtures.
+    errors += log_policy_name_errors(stacks) + vendored_dns_errors(stacks)
     errors = check_dependencies.fixtures.fatal(errors, "check-domains")
     for warning in warnings:
         print(f"WARN {warning}")
@@ -629,7 +776,9 @@ def main() -> int:
         "every dns record, acm domain/SAN and apigateway custom domain is inside the zone it is written to, "
         "every public subzone is delegated from its parent zone, every apigateway certificate covers its domain, "
         "every acm certificate that writes no validation record depends on a same-account one that does, "
-        f"and no account and region holds more than {LOG_POLICY_LIMIT} house CloudWatch Logs resource policies"
+        f"no account and region holds more than {LOG_POLICY_LIMIT} house CloudWatch Logs resource policies "
+        "(nor two of one name), and every vendored Cloud Posse zone is signed and query-logged by the house dns, "
+        "with no account-map and aws.primary's delegation role allowing it"
     )
     return 0
 

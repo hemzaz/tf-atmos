@@ -1,7 +1,12 @@
 """Tests for check-domains.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import importlib.util
+import io
+import json
 import pathlib
+import sys
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "check_domains", pathlib.Path(__file__).with_name("check-domains.py")
@@ -645,6 +650,112 @@ class LogPolicyQuotaTest(unittest.TestCase):
     def test_check_reports_the_quota(self):
         errors, _ = check_domains.check(self.stacks(11))
         self.assertTrue(any("CloudWatch Logs resource policies" in e for e in errors), errors)
+
+    def test_policy_names_collide_per_account(self):
+        # Pinned to one name in two accounts (dev, staging): distinct policies.
+        apart = {"s1": {"components": {"terraform": {"m": self.logged("dev", query_logging_name="ue1-main")}}},
+                 "s2": {"components": {"terraform": {"m": self.logged("staging", query_logging_name="ue1-main")}}}}
+        self.assertEqual(check_domains.log_policy_name_errors(apart), [])
+        # The same name twice in one account, pinned or derived from the same first zone.
+        clash = self.stacks(1, extra=self.logged("dev", query_logging_name="dev-example-org"))
+        errors = check_domains.log_policy_name_errors(clash)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("account dev: route53-query-logging-dev-example-org", errors[0])
+        unpinned = self.logged("dev")
+        unpinned["vars"]["zones"]["main"]["enable_query_logging"] = False
+        self.assertEqual(check_domains.log_policy_name_errors(self.stacks(1, extra=unpinned)), [])
+
+
+NET_ID = "111111111111"
+ROLE = f"arn:aws:iam::{NET_ID}:role/fnx-ue1-network-dns-delegation"
+
+
+def signed_stacks():
+    """E6b-inst's target: network signs and logs the apex, dev its delegated zone, aws.primary's role allows it."""
+    off = {"account_map_enabled": False}
+    role = instance("aws-iam-role", {
+        **off, "name": "dns-delegation",
+        "context": {"tenant": "fnx", "environment": "ue1", "stage": "network", "label_order": ["tenant", "environment", "stage", "name"]},
+        "policy_statements": {"WriteDelegations": {"effect": "Allow", "condition": {
+            "ForAllValues:StringEquals": {check_domains.RECORD_NAMES_KEY: [DEV, f"staging.{SVC}"]}}}},
+    })
+    role["settings"] = {"environment": {"account_id": NET_ID}}
+    signer = lambda key, name: instance("dns", {"dnssec_enabled": True, "external_zones": {
+        key: {"name": name, "dnssec_enabled": True, "enable_query_logging": True}}})
+    delegated = instance("aws-dns-delegated", {**off, "zone_config": [{"subdomain": "dev", "zone_name": SVC}],
+                                               "account_map": {"iam_role_arn_templates": {"dns-delegation": ROLE}}})
+    return {
+        "net": {"components": {"terraform": {
+            "aws-dns-primary": instance("aws-dns-primary", {**off, "domain_names": [SVC]}),
+            "aws-iam-role/dns-delegation": role,
+            "network/primary": signer("apex", SVC),
+        }}},
+        "dev": {"components": {"terraform": {"aws-dns-delegated": delegated, "network/main": signer("main", DEV)}}},
+    }
+
+
+class VendoredSigningTest(unittest.TestCase):
+    """The #449 allowlist reason (CKV2_AWS_38/39: the house dns signs and logs them), enforced."""
+
+    def errors(self, stacks):
+        return check_domains.vendored_dns_errors(stacks)
+
+    def test_target_passes_and_disabled_instances_are_skipped(self):
+        self.assertEqual(self.errors(signed_stacks()), [])
+        stacks = signed_stacks()
+        del stacks["dev"]["components"]["terraform"]["network/main"]
+        stacks["dev"]["components"]["terraform"]["aws-dns-delegated"]["metadata"]["enabled"] = False
+        self.assertEqual(self.errors(stacks), [])
+
+    def test_unlisted_unsigned_or_unlogged_zone_fails(self):
+        stacks = signed_stacks()
+        del stacks["net"]["components"]["terraform"]["network/primary"]
+        errors = self.errors(stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn(f"net: aws-dns-primary: aws-dns-primary zone {SVC} is not an external_zones entry", errors[0])
+        for where, key in (("entry", "enable_query_logging"), ("entry", "dnssec_enabled"), ("instance", "dnssec_enabled")):
+            with self.subTest(f"{where} {key}"):
+                stacks = signed_stacks()
+                main = stacks["dev"]["components"]["terraform"]["network/main"]["vars"]
+                (main["external_zones"]["main"] if where == "entry" else main)[key] = False
+                errors = self.errors(stacks)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn("network/main external_zones.main must set dnssec_enabled and enable_query_logging", errors[0])
+
+    def test_listing_by_zone_id_reading_the_delegated_zone_passes(self):
+        stacks = signed_stacks()
+        entry = stacks["dev"]["components"]["terraform"]["network/main"]["vars"]["external_zones"]["main"]
+        entry.pop("name")
+        entry["zone_id"] = "!terraform.state aws-dns-delegated .default_dns_zone_id"
+        self.assertEqual(self.errors(stacks), [])
+
+    def test_account_map_lookup_fails(self):
+        stacks = signed_stacks()
+        del stacks["net"]["components"]["terraform"]["aws-iam-role/dns-delegation"]["vars"]["account_map_enabled"]
+        errors = self.errors(stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("aws-iam-role/dns-delegation: account_map_enabled must be false", errors[0])
+
+    def test_main_runs_it(self):
+        stacks = signed_stacks()
+        stacks["net"]["components"]["terraform"]["network/primary"]["vars"]["dnssec_enabled"] = False
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(stacks))), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(check_domains.main(), 1)
+        self.assertIn("external_zones.apex must set dnssec_enabled", out.getvalue())
+
+    def test_wrong_role_or_unallowed_name_fails(self):
+        stacks = signed_stacks()
+        templates = stacks["dev"]["components"]["terraform"]["aws-dns-delegated"]["vars"]["account_map"]["iam_role_arn_templates"]
+        templates["dns-delegation"] = ROLE.replace("network-dns", "network-dnz")
+        errors = self.errors(stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("is not the ARN of a deployable aws-iam-role instance", errors[0])
+        stacks = signed_stacks()
+        stacks["dev"]["components"]["terraform"]["aws-dns-delegated"]["vars"]["zone_config"][0]["subdomain"] = "qa"
+        stacks["dev"]["components"]["terraform"]["network/main"]["vars"]["external_zones"]["main"]["name"] = f"qa.{SVC}"
+        errors = self.errors(stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn(f"zone qa.{SVC}: the delegation role {ROLE} does not allow it", errors[0])
 
 
 if __name__ == "__main__":

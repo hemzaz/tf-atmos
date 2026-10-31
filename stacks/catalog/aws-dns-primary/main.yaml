@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# aws-dns-primary - the US apex zone, in the network account
+# =============================================================================
+# Cloud Posse's layout (owner decision (a), 2026-10-31): fnx-ue1-network holds
+# the apex settings.environment.domain_name (fnx.example.com) in vendored
+# aws-dns-primary v1.537.0, and each stage's aws-dns-delegated holds
+# <stage>.<apex> (catalog/aws-dns-delegated/main), writing its NS record here
+# through aws-iam-role/dns-delegation. The apex keeps only vanity aliases
+# (record_config / alias_record_config); every workload name is under a stage
+# zone. The EU apex (fnx-eu.example.com) is never under this one: it stays
+# fnx-ew1-prod's house dns, delegated at the registrar (B5).
+#
+# Cloud Posse ships the zone unsigned and unlogged, so network/primary (the
+# house dns, external_zones mode) signs it (DNSSEC; the owner publishes its
+# ds_records at the registrar) and query-logs it; check-domains.py fails an
+# enabled aws-dns-primary zone no such entry covers. The registrar's NS for the
+# apex points at this zone (docs/OPERATIONS.md).
+#
+# Disabled until the apex and the network account ID are real (preflight:
+# docs/OPERATIONS.md#first-deploy-inputs, Domains and Account IDs); each stays
+# disabled with the others.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+  - catalog/network/defaults
+  - catalog/aws-iam-role/dns-delegation
+
+components:
+  terraform:
+    aws-dns-primary:
+      metadata:
+        component: aws-dns-primary
+        enabled: false
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: dns-primary
+        domain_names:
+          - "{{ .settings.environment.domain_name }}"
+        # Vanity aliases only (none yet: no public endpoint has a vanity name;
+        # api is apigateway's api.<prod domain>). A vanity name served by a
+        # stage needs that stage's certificate to cover it.
+        record_config: []
+        alias_record_config: []
+        # Certificates are the house acm component's, per stage.
+        request_acm_certificate: false
+        tags:
+          Component: "DNS"
+
+    # Signs and query-logs the apex (external_zones: found by name, never
+    # created), in the network account like the zone.
+    network/primary:
+      metadata:
+        component: dns
+        enabled: false
+        inherits:
+          - dns
+      vars:
+        root_domain: "{{ .settings.environment.domain_name }}"
+        # Pinned (dns README): route53-query-logging-ue1-primary, alone in
+        # the network account.
+        query_logging_name: "{{ .settings.prefix }}-primary"
+        query_log_retention_in_days: 90
+        external_zones:
+          apex:
+            name: "{{ .settings.environment.domain_name }}"
+            dnssec_enabled: true
+            enable_query_logging: true
+      dependencies:
+        components:
+          - component: aws-dns-primary

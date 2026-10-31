@@ -1,0 +1,87 @@
+---
+# =============================================================================
+# aws-iam-role/dns-delegation - the network account's DNS delegation role
+# =============================================================================
+# Vendored Cloud Posse aws-iam-role v1.539.0 (vendor.yaml) in fnx-ue1-network
+# (stacks/orgs/fnx/network/_defaults.yaml): role
+# <tenant>-ue1-network-dns-delegation, the ARN settings.static_account_map's
+# iam_role_arn_templates["dns-delegation"] names. Each stage's
+# aws-dns-delegated assumes it as aws.primary to write its NS record into the
+# apex zone (aws-dns-primary), and the stage's house dns (network/main) assumes
+# it as aws.dns_account to write the zone's DNSSEC DS record beside it. This is
+# Cloud Posse's account-map-less replacement for iam-roles'
+# dns_terraform_role_arn (owner decision OQ3, 2026-10-31).
+#
+# Trust: the dev, staging and prod accounts, limited by aws:PrincipalArn to
+# their CI plan and apply roles (<stack>-ci-plan / -ci-apply, catalog/iam/ci*)
+# and OrganizationAccountAccessRole (the first deploy, before CI), the
+# principals the SCP baseline also treats as privileged. Plan needs it too:
+# aws.primary looks the apex zone up at plan time.
+# Permissions: read the zones; write only NS and DS records named exactly
+# <stage>.<apex> for dev, staging and prod. check-domains.py fails an enabled
+# aws-dns-delegated zone this list does not name.
+#
+# Disabled until the apex and account IDs are real (preflight:
+# docs/OPERATIONS.md#first-deploy-inputs, Domains and Account IDs).
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-iam-role/dns-delegation:
+      metadata:
+        component: aws-iam-role
+        enabled: false
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: dns-delegation
+        role_description: "Writes the stage subdomains' NS and DS records into the apex zone (aws-dns-delegated aws.primary, dns aws.dns_account)"
+        policy_description: "Read Route 53 zones; NS and DS records of the delegated stage subdomains only"
+        principals:
+          AWS:
+            - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:root"
+            - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:root"
+            - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:root"
+        assume_role_conditions:
+          - test: ArnLike
+            variable: aws:PrincipalArn
+            values:
+              - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-plan"
+              - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
+              - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+        policy_statements:
+          ReadZones:
+            effect: Allow
+            actions:
+              - route53:GetChange
+              - route53:GetDNSSEC
+              - route53:GetHostedZone
+              - route53:ListHostedZones
+              - route53:ListHostedZonesByName
+              - route53:ListResourceRecordSets
+              - route53:ListTagsForResource
+            resources:
+              - "*"
+          WriteDelegations:
+            effect: Allow
+            actions:
+              - route53:ChangeResourceRecordSets
+            resources:
+              - "arn:aws:route53:::hostedzone/*"
+            condition:
+              ForAllValues:StringEquals:
+                route53:ChangeResourceRecordSetsNormalizedRecordNames:
+                  - "dev.{{ .settings.environment.domain_name }}"
+                  - "staging.{{ .settings.environment.domain_name }}"
+                  - "prod.{{ .settings.environment.domain_name }}"
+                route53:ChangeResourceRecordSetsRecordTypes:
+                  - NS
+                  - DS
+        tags:
+          Component: "DNS"
