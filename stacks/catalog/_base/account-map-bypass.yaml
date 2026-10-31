@@ -44,4 +44,4 @@ components:
           identity_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.identity_account_account_name }}'
           audit_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.audit_account_account_name }}'
           iam_role_arn_templates:
-            dns-delegation: 'arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/{{ .settings.context.tenant }}-ue1-network-dns-delegation'
+            dns-delegation: 'arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/{{ .settings.context.tenant }}-ue1-network-dns-delegation-{{ .settings.context.stage }}'
