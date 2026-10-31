@@ -63,9 +63,14 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("TAG_POLICY", errors[0])
 
-    def test_feature_set_change_fails(self):
-        errors = guard.check(plan(org(STACK, feature_set="CONSOLIDATED_BILLING"), org(STACK)))
-        self.assertTrue(any("feature_set" in e for e in errors))
+    def test_consolidated_billing_to_all_upgrade_passes(self):
+        live = org(STACK, feature_set="CONSOLIDATED_BILLING")
+        self.assertEqual(guard.check(plan(live, org(STACK), importing=True)), [])
+
+    def test_all_to_consolidated_billing_fails(self):
+        errors = guard.check(plan(org(STACK), org(STACK, feature_set="CONSOLIDATED_BILLING")))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("feature_set changes from ALL to CONSOLIDATED_BILLING", errors[0])
 
     def test_delete_or_replace_fails(self):
         errors = guard.check(plan(org(STACK), None, actions=("delete", "create")))

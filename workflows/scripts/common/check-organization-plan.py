@@ -15,8 +15,12 @@ the planned state after, and exits 1 when the plan would:
     breaks Identity Center sign-in, controltower.amazonaws.com Control Tower);
   - disable a policy type: a type in before.enabled_policy_types that is not in
     after's (DisablePolicyType detaches every policy of that type);
-  - change feature_set, or delete or replace the organization (the house
-    lifecycle_override.tf prevent_destroy already refuses the last two at plan).
+  - change feature_set, except the in-place CONSOLIDATED_BILLING -> ALL upgrade
+    (EnableAllFeatures, the catalog's supported import path: every invited
+    member account must accept its handshake before it completes); ALL back to
+    CONSOLIDATED_BILLING replaces the organization;
+  - delete or replace the organization (the house lifecycle_override.tf
+    prevent_destroy already refuses it at plan).
 Both lists are authoritative in the Cloud Posse aws-organization component, so
 importing an existing organization with a shorter list in the stack would do
 exactly that on its first apply (stacks/catalog/aws-organization/defaults.yaml,
@@ -33,6 +37,8 @@ GUARDED_LISTS = (
     ("aws_service_access_principals", "trusted access disabled for"),
     ("enabled_policy_types", "policy type disabled (its policies detached):"),
 )
+# The one feature_set change an existing organization may take (EnableAllFeatures, in place).
+ALLOWED_FEATURE_SET_CHANGE = ("CONSOLIDATED_BILLING", "ALL")
 
 
 def load_plan(text: str) -> dict:
@@ -69,8 +75,12 @@ def change_errors(resource: dict) -> list[str]:
                 f"{address}: {effect} {', '.join(lost)} (live {attribute} not in the stack's list; "
                 "add them to the instance's vars, see the import runbook)"
             )
-    if after.get("feature_set") not in (None, before.get("feature_set")):
-        errors.append(f"{address}: feature_set changes from {before.get('feature_set')} to {after.get('feature_set')}")
+    old, new = before.get("feature_set"), after.get("feature_set")
+    if new not in (None, old) and (old, new) != ALLOWED_FEATURE_SET_CHANGE:
+        errors.append(
+            f"{address}: feature_set changes from {old} to {new} (only CONSOLIDATED_BILLING -> ALL "
+            "is in place; keep the live organization's feature_set)"
+        )
     return errors
 
 
