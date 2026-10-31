@@ -10,9 +10,12 @@ whatever file they are written in. Covers every row of docs/OPERATIONS.md
 Errors (fatal unless --warn):
   - an AWS docs placeholder account ID (123456789012, 000000000000) in any
     string: account IDs, ARNs (backend access_roles, trusted_principal_arns...)
-  - the placeholder AWS Organization ID (o-xxxxxxxxxx)
+  - the placeholder AWS Organization ID (o-xxxxxxxxxx) or OU ID (ou-xxxx-xxxxxxxx)
   - a reserved example domain (RFC 2606: example.com/.net/.org, *.example,
-    *.test, *.invalid) in a domain or an alert address
+    *.test, *.invalid) in a domain, an alert address or an aws-account
+    instance's account_email
+  - two aws-account instances with one account_email (disabled ones too: the
+    address is each account's root user, unique across AWS), case-insensitive
   - an enabled eks instance with no map_additional_iam_roles (EKS admin role)
   - a settings.environment.backend_service_images entry still on the release
     pipeline's placeholder (ghcr.io/fnx-platform/<service>:1.4.2)
@@ -89,6 +92,10 @@ ACCOUNT_RE = re.compile(
 )
 WARN_LIMIT = 10
 ORG_RE = re.compile(r"\bo-x{10}\b", re.IGNORECASE)
+# An OU ID placeholder (ou-<root suffix>-<OU suffix>, all x): an OU's import_resource_id or a parent_id.
+OU_RE = re.compile(r"\bou-x{4,32}-x{8,32}\b", re.IGNORECASE)
+# The aws-account variable holding the account's root-user address.
+ACCOUNT_EMAIL = "account_email"
 EXAMPLE_DOMAIN_RE = re.compile(
     r"(?:^|[.@/])(?:example\.(?:com|net|org)|[a-z0-9-]+\.(?:example|test|invalid))(?![a-z0-9-])",
     re.IGNORECASE,
@@ -150,8 +157,13 @@ def placeholder(stack: str, key: str, text: str):
         return Finding("error", stack, key, f"placeholder account ID in {text!r}", "Account IDs")
     if ORG_RE.search(text):
         return Finding("error", stack, key, f"placeholder organization ID {text!r}", "AWS Organization ID")
+    if OU_RE.search(text):
+        return Finding("error", stack, key, f"placeholder organizational unit ID {text!r}", "AWS Organization ID")
     if EXAMPLE_DOMAIN_RE.search(text):
-        row = "Alert recipients" if "@" in text else "Domains"
+        if key.endswith(f"vars.{ACCOUNT_EMAIL}"):
+            row = "Account emails"
+        else:
+            row = "Alert recipients" if "@" in text else "Domains"
         return Finding("error", stack, key, f"example domain in {text!r}", row)
     return None
 
@@ -284,6 +296,23 @@ def residency_account_findings(stacks: dict, targets: set) -> list:
     return findings
 
 
+def account_email_findings(stacks: dict) -> list:
+    """Two non-abstract aws-account instances, enabled or not, with one account_email (case-insensitive):
+    CreateAccount fails EMAIL_ALREADY_EXISTS for the second, and an import keeps each account's own."""
+    owners = {}
+    for name in sorted(stacks):
+        for instance_name, spec in sorted(instances(stacks[name]).items()):
+            spec = spec or {}
+            metadata = spec.get("metadata") or {}
+            email = (spec.get("vars") or {}).get(ACCOUNT_EMAIL)
+            if metadata.get("component") != "aws-account" or metadata.get("type") == "abstract" or not email:
+                continue
+            owners.setdefault(str(email).strip().lower(), []).append(f"{name} {instance_name}")
+    return [Finding("error", "repository", f"{ACCOUNT_EMAIL} {email}",
+                    f"shared by {', '.join(names)}: one root-user address per account", "Account emails")
+            for email, names in sorted(owners.items()) if len(names) > 1]
+
+
 def account_map(config: dict):
     """The stack's settings.account_map.full_account_map (the same on every instance), or None."""
     for spec in instances(config).values():
@@ -377,6 +406,7 @@ def check(stacks: dict, only=None) -> list:
         findings.extend(stack_findings(name, deployable_stacks[name]))
     findings.extend(account_findings(deployable_stacks, targets))
     findings.extend(core_account_findings(deployable_stacks, targets))
+    findings.extend(account_email_findings(deployable_stacks))
     return findings + notices()
 
 

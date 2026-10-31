@@ -562,5 +562,46 @@ class MainTest(unittest.TestCase):
         self.assertIn("not checked: fnx-ue1-local-sandbox", out)
 
 
+class OrganizationInputsTest(unittest.TestCase):
+    """fnx-gbl-root's accounts layer: OU ID placeholders and the aws-account root-user emails."""
+
+    def gbl(self, **instances):
+        stacks = clean()
+        stacks["fnx-gbl-root"] = stack("root", None, **instances)
+        return stacks
+
+    @staticmethod
+    def account(email, enabled=True):
+        return {"component": "aws-account", "enabled": enabled, "account_email": email,
+                "parent_id": "ou-abcd-12345678"}
+
+    def test_placeholder_ou_id(self):
+        stacks = self.gbl(ou_eu={"component": "aws-organizational-unit", "import_resource_id": "ou-xxxx-xxxxxxxx"})
+        found = errors(stacks)
+        self.assertEqual([(f.stack, f.row) for f in found], [("fnx-gbl-root", "AWS Organization ID")])
+        self.assertIn("organizational unit", found[0].detail)
+
+    def test_real_ou_id_passes(self):
+        stacks = self.gbl(ou_eu={"component": "aws-organizational-unit", "import_resource_id": "ou-ab12-cd34ef56"})
+        self.assertEqual(errors(stacks), [])
+
+    def test_example_account_email_is_its_own_row(self):
+        stacks = self.gbl(aws_account_dev=self.account("aws+fnx-dev@example.com"))
+        self.assertEqual([(f.stack, f.row) for f in errors(stacks)], [("fnx-gbl-root", "Account emails")])
+
+    def test_distinct_real_emails_pass(self):
+        stacks = self.gbl(aws_account_dev=self.account("aws+fnx-dev@acme.io"),
+                          aws_account_prod=self.account("aws+fnx-prod@acme.io"))
+        self.assertEqual(errors(stacks), [])
+
+    def test_shared_email_fails_case_insensitively_disabled_included(self):
+        stacks = self.gbl(aws_account_dev=self.account("aws+fnx@acme.io"),
+                          aws_account_prod=self.account("AWS+fnx@acme.io ", enabled=False))
+        found = errors(stacks)
+        self.assertEqual([(f.stack, f.row) for f in found], [("repository", "Account emails")])
+        self.assertIn("aws_account_dev", found[0].detail)
+        self.assertIn("aws_account_prod", found[0].detail)
+
+
 if __name__ == "__main__":
     unittest.main()
