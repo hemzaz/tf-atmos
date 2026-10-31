@@ -92,6 +92,14 @@ The first apply trusts the caller in every role and makes it the root role's onl
 workflow waits for that role to become assumable before migrating. Delete `terraform.tfstate.d/`
 afterwards.
 
+The cold start runs before the accounts layer (`fnx-gbl-root`) creates the accounts that
+`allowed_principal_arns` name, so their IDs are still placeholders: it sets `TFSTATE_COLD_START=true`,
+which turns `access_role_principals_enabled` off (`stacks/catalog/backend/defaults.yaml`) and every
+role trusts the caller alone. Cloud Posse's cold start sets `access_roles_enabled = false` instead;
+that would also drop `root_write`, which the root stacks' own backends assume. Once the account IDs
+are in `settings.account_map`, `backend-only` re-applies with the principals (docs/OPERATIONS.md,
+"Bootstrap order").
+
 If the bucket already exists (created by `atmos terraform backend create` or by hand), the
 cold-start workflow refuses to run. Import the bucket, then run the workflow's two steps by hand:
 
