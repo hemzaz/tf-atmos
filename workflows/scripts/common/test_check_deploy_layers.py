@@ -306,6 +306,29 @@ class CheckDeployLayersTest(unittest.TestCase):
         steps[0]["command"] = "terraform plan --query '.metadata.component == \"vpc\"\n or .metadata.component == \"dns\"'"
         self.assert_errors({}, files)
 
+    DNS_STACKS = {
+        "fnx-ue1-network": stack(aws_dns_primary=instance("aws-dns-primary", enabled=False)),
+        "fnx-ue1-dev": stack(aws_dns_delegated=instance("aws-dns-delegated", enabled=False)),
+        "fnx-ue1-catalog": stack(aws_dns_delegated__defaults=instance("aws-dns-delegated", type="abstract")),
+    }
+
+    def test_cross_stack_reader_after_read_module_passes(self):
+        # aws-dns-delegated planned after aws-dns-primary is applied, though both are disabled.
+        files = workflow_files(("dns-apex", ["aws-dns-primary"]), ("dns-zones", ["aws-dns-delegated"]))
+        self.assert_errors(self.DNS_STACKS, files)
+
+    def test_cross_stack_reader_in_same_phase_fails_even_disabled(self):
+        files = workflow_files(("dns-zones", ["aws-dns-primary", "aws-dns-delegated"]))
+        self.assert_errors(
+            self.DNS_STACKS, files,
+            "fnx-ue1-dev aws_dns_delegated (aws-dns-delegated, plan step plan-dns-zones) must be planned after "
+            "fnx-ue1-network aws_dns_primary (aws-dns-primary, plan step plan-dns-zones) is applied",
+        )
+
+    def test_cross_stack_reader_in_earlier_phase_fails(self):
+        files = workflow_files(("dns-zones", ["aws-dns-delegated"]), ("dns-apex", ["aws-dns-primary"]))
+        self.assert_errors(self.DNS_STACKS, files, "must be planned after fnx-ue1-network aws_dns_primary")
+
     def test_missing_workflows_fail(self):
         self.assert_errors(
             {}, {},

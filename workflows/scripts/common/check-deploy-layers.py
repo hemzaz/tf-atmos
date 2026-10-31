@@ -38,6 +38,11 @@ deploy-application.yaml and `full` in bootstrap.yaml, which deploy a subset
   - an instance declares (dependencies.components only) a same-stack instance
     that is applied later: in a later phase, or by a later step of its phase.
     Within one step Atmos applies in dependency order.
+  - (CROSS_STACK_AFTER) an instance of a reader root module is planned in the
+    same or an earlier phase than an instance, in any stack, of the root module
+    it reads by a cross-stack data lookup no dependency declares. This one is
+    judged on every non-abstract instance, enabled or not, so the order holds
+    before the instances are enabled.
 For deploy-full-stack.yaml, each plan-<layer> step's query must also be the
 query of its deploy-<layer> step and of the deploy-<layer> workflow's plan and
 deploy steps, so a single layer run selects what the full run selects.
@@ -72,6 +77,18 @@ LITERALS = {"true": True, "false": False, "null": None}
 # A dependencies.components entry with a `stack` other than its own, or any of
 # these context keys, names an instance in another stack: not ordered here.
 CROSS_STACK_CONTEXT_KEYS = ("namespace", "tenant", "environment", "stage")
+# (reader metadata.component, read metadata.component, why): the reader's plan
+# reads, in another stack (and account), what the read module creates, without
+# a !terraform.state read or a dependencies.components entry to order it. Every
+# instance of the reader must be planned in a strictly later phase than every
+# instance of the read module, so the read module is applied first.
+CROSS_STACK_AFTER = (
+    (
+        "aws-dns-delegated",
+        "aws-dns-primary",
+        "its plan looks up the apex zone aws-dns-primary creates (data aws_route53_zone.root_zone via aws.primary)",
+    ),
+)
 
 _spec = importlib.util.spec_from_file_location(
     "check_dependencies", pathlib.Path(__file__).with_name("check-dependencies.py")
@@ -297,6 +314,35 @@ def order_errors(stack_name: str, instances: dict, placed: dict, where: str, ord
     return errors
 
 
+def cross_stack_errors(stacks: dict, where: str, ordered: list[dict]) -> list[str]:
+    """CROSS_STACK_AFTER: every reader instance planned in a later phase than every read instance."""
+    def phase_indices(component_type: str) -> list[tuple[int, str]]:
+        found = []
+        for stack_name, stack in sorted(stacks.items()):
+            for name, instance in sorted(stack.get("components", {}).get("terraform", {}).items()):
+                metadata = instance.get("metadata") or {}
+                if metadata.get("component") != component_type or metadata.get("type") == "abstract":
+                    continue
+                found += [
+                    (i, f"{stack_name} {name}") for i, phase in enumerate(ordered) if selects(phase["plan"], name, instance)
+                ]
+        return found
+
+    errors = []
+    for reader, read, why in CROSS_STACK_AFTER:
+        read_phases = phase_indices(read)
+        if not read_phases:
+            continue
+        last, last_name = max(read_phases)
+        for index, name in phase_indices(reader):
+            if index <= last:
+                errors.append(
+                    f"{where}: {name} ({reader}, plan step {ordered[index]['name']}) must be planned after "
+                    f"{last_name} ({read}, plan step {ordered[last]['name']}) is applied: {why}"
+                )
+    return errors
+
+
 def check_workflow(stacks: dict, where: str, ordered: list[dict], coverage: bool) -> list[str]:
     errors = []
     for stack_name, stack in sorted(stacks.items()):
@@ -304,7 +350,7 @@ def check_workflow(stacks: dict, where: str, ordered: list[dict], coverage: bool
         prefix = f"{where}: {stack_name}: "
         placed, place_errors = place(instances, prefix, ordered, coverage)
         errors += place_errors + order_errors(stack_name, instances, placed, prefix, ordered)
-    return errors
+    return errors + cross_stack_errors(stacks, where, ordered)
 
 
 def check(stacks: dict, workflow_files: dict) -> list[str]:
