@@ -91,6 +91,9 @@ the last step.
    [Deploying a stack](#deploying-a-stack), "The accounts layer"). To adopt existing ones instead of
    creating them, set the instances' import ids first (`stacks/catalog/aws-organization`,
    `aws-organizational-unit` and `aws-account` defaults say how, and which plans to review).
+   Its last phase applies the management account's account-wide and us-east-1 settings; its
+   eu-west-1 ones are `fnx-ew1-root`'s, from deploy-full-stack's iam layer:
+   `atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root`.
 4. **Account IDs**: copy each member account's ID, the `account_id` output of
    `atmos terraform output aws-account/<account> -s fnx-gbl-root`, into
    `full_account_map.<account>` (the instance suffix is the map key; `prod-eu` too), and merge it.
@@ -320,8 +323,8 @@ Its phases, each planned, confirmed and applied from the saved plan, follow the 
 without its guardrails), `settings` (the management account's `aws-account-settings`). It runs the
 first-deploy preflight on `fnx-gbl-root` first, and after planning the organization
 `check-organization-plan.py`, which stops the run if the plan would disable a trusted service or
-policy type the live organization has (an import with a shorter list in the stack) or change its
-feature set. `check-deploy-layers.py` requires it to select every enabled instance of those root
+policy type the live organization has (an import with a shorter list in the stack), destroy it, or
+change its feature set other than the in-place `CONSOLIDATED_BILLING` -> `ALL` upgrade. `check-deploy-layers.py` requires it to select every enabled instance of those root
 modules and `deploy-full-stack.yaml` to select none.
 
 **Before `certificates`: delegate the stack's domain.** ACM validates in `network/main`'s `main`
