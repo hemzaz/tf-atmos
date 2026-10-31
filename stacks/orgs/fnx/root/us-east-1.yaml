@@ -109,13 +109,28 @@ components:
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue1-prod-ci-apply"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue2-prod-ci-apply"
-          # This stack's own state (backend/main) and the management account's
-          # global stack's (fnx-gbl-root: the accounts layer, deploy-accounts.yaml).
-          # No principals listed: the applying administrator only
-          # (stacks/catalog/backend/defaults.yaml).
+          # This stack's own state (backend/main), the management account's
+          # global stack's (fnx-gbl-root: the accounts layer, deploy-accounts.yaml)
+          # and the core accounts' stacks' (stacks/orgs/fnx/_defaults.yaml
+          # routes the core stages here). The applying administrator is always
+          # trusted (stacks/catalog/backend/defaults.yaml); a core stack is
+          # applied with credentials in its own account (the provider's
+          # allowed_account_ids), so each core account's
+          # OrganizationAccountAccessRole, which Organizations creates in every
+          # account it creates and which trusts the management account, is
+          # listed until E4's Identity Center roles replace it. This role also
+          # reaches the root stacks' state: a dedicated core role is E5's
+          # (docs/OPERATIONS.md, State backend).
           root_write:
             object_key_patterns:
               - "*/fnx-ue1-root/*"
               - "*/fnx-ue1-root-*"
               - "*/fnx-gbl-root/*"
               - "*/fnx-gbl-root-*"
+              - "*/fnx-ue1-audit/*"
+              - "*/fnx-ue1-audit-*"
+              - "*/fnx-ue1-network/*"
+              - "*/fnx-ue1-network-*"
+            allowed_principal_arns:
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/OrganizationAccountAccessRole"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/OrganizationAccountAccessRole"
