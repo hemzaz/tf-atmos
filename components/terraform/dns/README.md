@@ -48,7 +48,10 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   (in-VPC) query logging, which would stay in the stack region, is not modelled.
 - `<first zone>` is the alphabetically first query-logged zone, so adding a zone that sorts earlier
   renames (replaces) the policy and the alias, briefly cutting Route53's write permission. Set
-  `query_logging_name` once the zones are settled to pin the suffix. Setting it on an existing
+  `query_logging_name` once the zones are settled to pin the suffix: the AWS stacks'
+  `network/main` (catalog `main.yaml`, `main-prod-data-plane.yaml`) pins
+  `<settings.prefix>-main`, so moving its public zone to `external_zones` (E6b) keeps the name;
+  `network/services` keeps its derived one. Setting it on an existing
   stack is itself a one-time replace of the policy and the alias, so pin it before the first
   apply. A caller-supplied `cloudwatch_log_group_arn` must be in the
   zone's account (a precondition on the query log).
