@@ -27,7 +27,10 @@
 #   2. aws organizations list-roots (Roots[].PolicyTypes, Status ENABLED)
 #      -> add every Type to enabled_policy_types;
 #   3. plan, and apply only if the plan removes no principal and no policy
-#      type from aws_organizations_organization.this.
+#      type from aws_organizations_organization.this. deploy-accounts.yaml
+#      enforces it: after its org plan, check-organization-plan.py fails the
+#      run on any removal, a destroy, or a feature_set change other than the
+#      in-place CONSOLIDATED_BILLING -> ALL upgrade (feature_set, below).
 #
 # Destroy and replace are refused by the house lifecycle_override.tf
 # (prevent_destroy).
@@ -58,7 +61,10 @@ components:
         # organization conformance packs, Cloud Posse aws-config README),
         # GuardDuty, Security Hub, Inspector, Identity Center (sso) and IAM
         # Access Analyzer (E0c's access-analyzer/root delegation needs
-        # access-analyzer.amazonaws.com). Authoritative: see the import runbook.
+        # access-analyzer.amazonaws.com), and AWS Account Management
+        # (account.amazonaws.com: aws-account's in-place rename of a member
+        # account, PutAccountName, e.g. an imported one). Authoritative: see
+        # the import runbook.
         # Enabling trusted access only lets the service act in the
         # organization; each service is still enabled and delegated by its own
         # component (E4, E5), after this instance. The component adds
@@ -72,6 +78,7 @@ components:
           - inspector2.amazonaws.com
           - sso.amazonaws.com
           - access-analyzer.amazonaws.com
+          - account.amazonaws.com
         # Service control policies are enabled on the root now, so E3c only
         # adds and attaches policies; enabling the type attaches nothing but
         # the AWS-managed FullAWSAccess.

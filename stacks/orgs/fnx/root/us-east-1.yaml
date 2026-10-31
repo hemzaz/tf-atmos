@@ -109,9 +109,13 @@ components:
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue1-prod-ci-apply"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue2-prod-ci-apply"
-          # This stack's own state (backend/main). No principals listed: the
-          # applying administrator only (stacks/catalog/backend/defaults.yaml).
+          # This stack's own state (backend/main) and the management account's
+          # global stack's (fnx-gbl-root: the accounts layer, deploy-accounts.yaml).
+          # No principals listed: the applying administrator only
+          # (stacks/catalog/backend/defaults.yaml).
           root_write:
             object_key_patterns:
               - "*/fnx-ue1-root/*"
               - "*/fnx-ue1-root-*"
+              - "*/fnx-gbl-root/*"
+              - "*/fnx-gbl-root-*"

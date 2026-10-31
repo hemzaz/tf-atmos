@@ -7,11 +7,11 @@
 # accounts (E3b) and SCPs (E3c). Cloud Posse deploys these from core-gbl-root;
 # here the tenant stays fnx, so fnx-gbl-root (owner decision QE5).
 #
-# Its own stack, not fnx-ue1-root: deploying an org component needs real core
-# account IDs (check-first-deploy-inputs.py MAP_CONSUMERS is stack-scoped),
-# and fnx-ue1-root's backend cold start must not wait for them. Bootstrap
-# order: the backend cold start (fnx-ue1-root), then this stack, then the
-# backend's access_roles for the new accounts (E3e's deploy-accounts).
+# Its own stack, not fnx-ue1-root: the accounts layer runs between the
+# backend's cold start and the backend re-apply that trusts the new accounts.
+# Bootstrap order (docs/OPERATIONS.md): the backend cold start (fnx-ue1-root),
+# then this stack (`atmos workflow deploy -f deploy-accounts`), then copy the
+# new account IDs into settings.account_map and re-apply the backend.
 #
 # State: fnx-ue1-root's US bucket, through the backend's root role
 # (stacks/orgs/fnx/_defaults.yaml routes stage root there): the
@@ -19,24 +19,21 @@
 # (root/_defaults: github.actions_enabled false); the provider guard allows the
 # management account only (settings.environment.account_id).
 #
-# Every instance is metadata.enabled: false until E3e adds the `accounts`
-# deploy layer before `backend` and the deploy-accounts workflow, and enables
-# them in the same PR as this stack's key pair ("*/fnx-gbl-root/*",
-# "*/fnx-gbl-root-*") on root_write in fnx-ue1-root's backend/main
-# (check-state-keys.py fails a pattern no enabled instance's state matches).
-# Disabled, no deploy workflow selects them (check-deploy-layers.py COVERAGE)
-# and the preflight does not yet demand the core account IDs or check their
-# vars (account emails, import ids): enabling them makes it do both.
+# Enabled (E3e): the organization, its OUs and the management account's
+# settings; this stack's key pair ("*/fnx-gbl-root/*", "*/fnx-gbl-root-*") is
+# on root_write in fnx-ue1-root's backend/main. Still disabled, each with its
+# reason below: the member accounts (placeholder root-user emails) and the
+# SCPs (no exception yet for E4's Identity Center roles). An enabled
+# instance's vars go through the first-deploy preflight (import ids, emails).
 #
-# Deploy order (E3e): five phases, not one layer, because
-# check-deploy-layers.py fails a !terraform.state read of an instance in the
-# same or a later phase: 1. aws-organization; 2. the core and plat OUs;
-# 3. the eu OU (reads plat) and the core and plat SCPs (read their OU);
-# 4. the eu SCP (reads eu); 5. the accounts (read their OU). The SCPs come
-# before the accounts so no account is created in or moved into an OU
-# without its guardrails. Each reader already names its target in
-# dependencies.components, which check-dependencies.py holds once the
-# instances are enabled.
+# Deploy order (workflows/deploy-accounts.yaml): phases, not one layer,
+# because check-deploy-layers.py fails a !terraform.state read of an instance
+# planned in the same or a later phase: org (aws-organization); ous (core,
+# plat); ou-eu (the eu OU, reading plat, and the core and plat SCPs, reading
+# their OU); scp-eu (reading eu); accounts (reading their OU); settings. The
+# SCPs come before the accounts so no account is created in or moved into an
+# OU without its guardrails. Each reader names its target in
+# dependencies.components (check-dependencies.py).
 #
 # SCPs (E3c, catalog/aws-scp): one instance per policy and OU, attached to
 # OUs only, never the organization root (check-scp-policies.py). Before an
@@ -54,9 +51,8 @@
 #
 # Account settings (E3d, catalog/aws-account-settings/main): the management
 # account's alias and S3 account public access block, and its us-east-1
-# settings; fnx-ew1-root has its eu-west-1 ones. Disabled with the rest of
-# this stack; E3e enables it with them (it reads no other instance, so any
-# phase).
+# settings; fnx-ew1-root has its eu-west-1 ones. It reads no other instance:
+# deploy-accounts' last phase applies it, and deploy-full-stack's iam layer.
 # =============================================================================
 
 import:
@@ -76,21 +72,15 @@ settings:
 
 components:
   terraform:
-    aws-account-settings:
-      metadata:
-        enabled: false
-
     aws-organization:
       metadata:
         component: aws-organization
-        enabled: false
         inherits:
           - aws-organization/defaults
 
     aws-organizational-unit/core:
       metadata:
         component: aws-organizational-unit
-        enabled: false
         inherits:
           - aws-organizational-unit/defaults
       dependencies:
@@ -103,7 +93,6 @@ components:
     aws-organizational-unit/plat:
       metadata:
         component: aws-organizational-unit
-        enabled: false
         inherits:
           - aws-organizational-unit/defaults
       dependencies:
@@ -116,7 +105,6 @@ components:
     aws-organizational-unit/eu:
       metadata:
         component: aws-organizational-unit
-        enabled: false
         inherits:
           - aws-organizational-unit/defaults
       dependencies:
@@ -129,6 +117,13 @@ components:
     # Member accounts (E3b): one per settings.account_map key but root (see
     # catalog/aws-account). Core accounts in core, workload accounts in plat,
     # prod-eu in eu (under plat) for E3c's EU region allow-list.
+    #
+    # Disabled while account_email is a placeholder (example.com): enabling
+    # one is the PR that sets its real root-user address (or, to adopt an
+    # existing account, import_account_id with its current name and email).
+    # The preflight fails an enabled instance's example address and any two
+    # instances sharing one; deploy-accounts' accounts phase already selects
+    # them.
 
     aws-account/audit:
       metadata:
@@ -259,6 +254,15 @@ components:
     # Service control policies (E3c): one per policy and OU (catalog/aws-scp),
     # each policy named <tenant>-gbl-root-<instance>. Never the organization
     # root (organization_root_id) as a target.
+    #
+    # Disabled until E4: security-services excepts the CI apply roles and
+    # OrganizationAccountAccessRole by name, not yet the Identity Center
+    # permission-set roles (AWSReservedSSO_*) E4 creates (owner decision
+    # Evolution 4: OrganizationAccountAccessRole stays excepted until Identity
+    # Center is applied), and the region policies would bind accounts nobody
+    # has reviewed against them. Enabled before an account lands in its OU,
+    # they need no other change: deploy-accounts' ou-eu and scp-eu phases
+    # select them.
 
     aws-scp/baseline-core:
       metadata:
