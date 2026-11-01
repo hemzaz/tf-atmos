@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# account-map-bypass - the abstract of vendored components run without
+# account-map (Cloud Posse Evolution 4)
+# =============================================================================
+# Inherited (after vendored) by every vendored component that takes Cloud
+# Posse's static account map: account_map_enabled false and account_map, the
+# inputs of the account-map-bypass providers mixin (vendor.yaml *-mixins:
+# aws-dns-primary, aws-dns-delegated, aws-iam-role) and of the v2 components
+# that declare them themselves (access-analyzer). With it off, the provider uses
+# the run's own credentials (no account-map iam-roles hop) and the
+# account-verification mixin fails a run outside the account account_map maps
+# <tenant>-<stage> to.
+#
+# account_map is settings.static_account_map (stacks/orgs/fnx/_defaults.yaml),
+# repeated: Atmos passes a map from another setting only through !template,
+# which the plan sweep cannot synthesize, and one evaluation of toJson over
+# static_account_map's template values escapes the "prod-eu" quotes into a
+# template the second evaluation cannot parse. Same keys, same sources; the
+# preflight (check-first-deploy-inputs.py) fails a copy that differs, on every
+# instance, disabled ones included.
+# =============================================================================
+
+components:
+  terraform:
+    account-map-bypass:
+      metadata:
+        type: abstract
+      vars:
+        account_map_enabled: false
+        account_map:
+          full_account_map:
+            '{{ .settings.context.tenant }}-root': '{{ .settings.account_map.full_account_map.root }}'
+            '{{ .settings.context.tenant }}-audit': '{{ .settings.account_map.full_account_map.audit }}'
+            '{{ .settings.context.tenant }}-security': '{{ .settings.account_map.full_account_map.security }}'
+            '{{ .settings.context.tenant }}-network': '{{ .settings.account_map.full_account_map.network }}'
+            '{{ .settings.context.tenant }}-identity': '{{ .settings.account_map.full_account_map.identity }}'
+            '{{ .settings.context.tenant }}-artifacts': '{{ .settings.account_map.full_account_map.artifacts }}'
+            '{{ .settings.context.tenant }}-dev': '{{ .settings.account_map.full_account_map.dev }}'
+            '{{ .settings.context.tenant }}-staging': '{{ .settings.account_map.full_account_map.staging }}'
+            '{{ .settings.context.tenant }}-prod': '{{ .settings.account_map.full_account_map.prod }}'
+            '{{ .settings.context.tenant }}-prod-eu': '{{ index .settings.account_map.full_account_map "prod-eu" }}'
+          root_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.root_account_account_name }}'
+          identity_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.identity_account_account_name }}'
+          audit_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.audit_account_account_name }}'
+          iam_role_arn_templates:
+            dns-delegation: 'arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/{{ .settings.context.tenant }}-ue1-network-dns-delegation'
