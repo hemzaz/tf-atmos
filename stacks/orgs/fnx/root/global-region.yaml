@@ -7,9 +7,11 @@
 # accounts (E3b) and SCPs (E3c). Cloud Posse deploys these from core-gbl-root;
 # here the tenant stays fnx, so fnx-gbl-root (owner decision QE5).
 #
-# Its own stack, not fnx-ue1-root: deploying an org component needs real core
-# account IDs (check-first-deploy-inputs.py MAP_CONSUMERS is stack-scoped),
-# and fnx-ue1-root's backend cold start must not wait for them. Bootstrap
+# Its own stack, not fnx-ue1-root, so the backend cold start (fnx-ue1-root)
+# and this accounts layer, which creates the core accounts, each need only the
+# management account's ID: core account IDs come after this stack applies
+# (check-first-deploy-inputs.py MAP_CONSUMERS leaves the org components out,
+# so placeholder core IDs are notices here). Bootstrap
 # order: the backend cold start (fnx-ue1-root), then this stack, then the
 # backend's access_roles for the new accounts (E3e's deploy-accounts).
 #
@@ -25,8 +27,9 @@
 # "*/fnx-gbl-root-*") on root_write in fnx-ue1-root's backend/main
 # (check-state-keys.py fails a pattern no enabled instance's state matches).
 # Disabled, no deploy workflow selects them (check-deploy-layers.py COVERAGE)
-# and the preflight does not yet demand the core account IDs or check their
-# vars (account emails, import ids): enabling them makes it do both.
+# and the preflight does not yet check their vars: enabling them makes it
+# check their account emails and import ids (not the core account IDs, which
+# this stack creates).
 #
 # Deploy order (E3e): five phases, not one layer, because
 # check-deploy-layers.py fails a !terraform.state read of an instance in the
