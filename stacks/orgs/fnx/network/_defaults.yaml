@@ -2,12 +2,11 @@
 # =============================================================================
 # Network Account Defaults
 # =============================================================================
-# Cloud Posse's core "network" account (owner decision Q1): the shared
-# networking hub, the Transit Gateway hub (aws-tgw-hub) and the primary DNS
-# zones (aws-dns-primary), core-<region>-network in Cloud Posse's reference
-# architecture. Its components arrive in Wave E (E6); until then its stacks
-# hold no enabled instance (aws-account-settings, below, is disabled until
-# E3e).
+# Cloud Posse's core "network" account (owner decision Q1): the primary DNS
+# zones (aws-dns-primary, E6b) and, in a later wave, the Transit Gateway hub
+# (aws-tgw-hub; QE6 moved TGW out of Wave E), core-<region>-network in Cloud
+# Posse's reference architecture. Until E6b's instances land its stacks hold
+# no enabled instance (aws-account-settings, below, is disabled until E3e).
 #
 # Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
 # the tenant stays fnx, the account is the stage, the region code the

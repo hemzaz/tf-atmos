@@ -23,6 +23,12 @@ components:
         root_domain: "{{ .settings.environment.domain_name }}"
         create_root_zone: false
         multi_account_dns_delegation: false
+        # Pins the account-wide query-logging resource policy and key alias
+        # (route53-query-logging-<suffix>): derived from the first query-logged
+        # zone, they would be replaced when E6b moves the public zone to
+        # external_zones or adds one that sorts earlier. network/services, in
+        # the same account, keeps its own derived name.
+        query_logging_name: "{{ .settings.prefix }}-main"
         zones:
           main:
             name: "{{ .settings.environment.domain_name }}"
