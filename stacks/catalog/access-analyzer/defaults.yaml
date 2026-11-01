@@ -12,12 +12,14 @@
 #   2. access-analyzer/delegated-administrator in the security account, per
 #      region: the ORGANIZATION and ORGANIZATION_UNUSED_ACCESS analyzers.
 #      Not yet: the security account has no stack (Wave E).
-# account_map is the static map (account_map_enabled false, the CP default):
+# account_map is the static map (account_map_enabled false, the CP default),
+# from the abstract account-map-bypass (catalog/_base/account-map-bypass):
 # settings.static_account_map (stacks/orgs/fnx/_defaults.yaml), keys
 # <tenant>-<account>; account verification checks <tenant>-<stage> there.
 
 import:
   - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
 
 components:
   terraform:
@@ -27,29 +29,10 @@ components:
         type: abstract
         inherits:
           - vendored
+          - account-map-bypass
       vars:
         enabled: true
         name: access-analyzer
-        # settings.static_account_map (stacks/orgs/fnx/_defaults.yaml), repeated:
-        # Atmos passes a map from another setting only through !template, which
-        # the plan sweep cannot synthesize, and one evaluation of toJson over
-        # static_account_map's template values escapes the "prod-eu" quotes into a
-        # template the second evaluation cannot parse. Same keys, same sources.
-        account_map:
-          full_account_map:
-            '{{ .settings.context.tenant }}-root': '{{ .settings.account_map.full_account_map.root }}'
-            '{{ .settings.context.tenant }}-audit': '{{ .settings.account_map.full_account_map.audit }}'
-            '{{ .settings.context.tenant }}-security': '{{ .settings.account_map.full_account_map.security }}'
-            '{{ .settings.context.tenant }}-network': '{{ .settings.account_map.full_account_map.network }}'
-            '{{ .settings.context.tenant }}-identity': '{{ .settings.account_map.full_account_map.identity }}'
-            '{{ .settings.context.tenant }}-artifacts': '{{ .settings.account_map.full_account_map.artifacts }}'
-            '{{ .settings.context.tenant }}-dev': '{{ .settings.account_map.full_account_map.dev }}'
-            '{{ .settings.context.tenant }}-staging': '{{ .settings.account_map.full_account_map.staging }}'
-            '{{ .settings.context.tenant }}-prod': '{{ .settings.account_map.full_account_map.prod }}'
-            '{{ .settings.context.tenant }}-prod-eu': '{{ index .settings.account_map.full_account_map "prod-eu" }}'
-          root_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.root_account_account_name }}'
-          identity_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.identity_account_account_name }}'
-          audit_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.audit_account_account_name }}'
         delegated_administrator_account_name: "{{ .settings.context.tenant }}-security"
         accessanalyzer_service_principal: "access-analyzer.amazonaws.com"
         accessanalyzer_organization_enabled: false
