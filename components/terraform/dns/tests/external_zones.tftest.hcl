@@ -193,6 +193,16 @@ run "parent_zone_needs_a_signed_entry_and_a_known_key" {
   expect_failures = [var.external_zones]
 }
 
+run "parent_zone_must_not_be_a_private_zone" {
+  command = plan
+
+  variables {
+    external_zones = { delegated = { zone_id = "ZDELEGATED0000000000", dnssec_enabled = true, parent_zone = "internal" } }
+  }
+
+  expect_failures = [var.external_zones]
+}
+
 run "dns_account_needs_its_role" {
   command = plan
 

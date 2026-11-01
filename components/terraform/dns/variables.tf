@@ -128,9 +128,9 @@ variable "external_zones" {
 
   validation {
     condition = alltrue([
-      for k, z in var.external_zones : z.parent_zone == null || (z.dnssec_enabled && z.parent_zone != k && contains(concat(keys(var.zones), keys(var.external_zones)), coalesce(z.parent_zone, "-")))
+      for k, z in var.external_zones : z.parent_zone == null || (z.dnssec_enabled && z.parent_zone != k && contains(concat(keys(var.zones), keys(var.external_zones)), coalesce(z.parent_zone, "-")) && length(try(var.zones[z.parent_zone].vpc_associations, [])) == 0)
     ])
-    error_message = "external_zones.<key>.parent_zone must be another zones or external_zones key, on an entry with dnssec_enabled: it receives the zone's DS record."
+    error_message = "external_zones.<key>.parent_zone must be another public zones key or an external_zones key, on an entry with dnssec_enabled: it receives the zone's DS record (a private zone is never in the chain of trust)."
   }
 
   validation {
