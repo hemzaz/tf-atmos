@@ -180,8 +180,15 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           atmos workflow lint -f lint
+      # validate-all runs `terraform init` in every root module. Without a
+      # shared provider cache each one unpacks its own AWS provider and the
+      # runner runs out of disk partway through the list.
       - name: Validate config, stacks and root modules
-        run: atmos workflow validate-all -f validate-enhanced
+        env:
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          atmos workflow validate-all -f validate-enhanced
 
   actionlint:
     name: Actionlint
