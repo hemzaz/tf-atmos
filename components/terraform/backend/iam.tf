@@ -22,6 +22,16 @@
  * therefore trusted by the caller alone: that is the root_write role, the
  * only one that can write the backend's own (fnx-ue1-root) state.
  *
+ * Cold start: with access_role_principals_enabled = false every role trusts
+ * the caller alone. Cloud Posse's cold start applies aws-tfstate-backend with
+ * access_roles_enabled = false and enables the access roles once the accounts
+ * exist; here root_write must exist from the start (the root stacks' own
+ * backends, fnx-gbl-root's accounts layer included, assume it), so the roles
+ * are created and only their allowed_principal_arns wait: those name roles in
+ * accounts the accounts layer has not created yet, whose IDs are still
+ * placeholders (an account principal must never be a placeholder: that ID may
+ * belong to anyone). The re-apply after the accounts exist adds them.
+ *
  * KMS: the state key's policy delegates to IAM (account root only), so the
  * roles' own policies grant key use. Read: Decrypt. Write: also Encrypt and
  * GenerateDataKey, which S3 needs to write SSE-KMS objects.
@@ -41,8 +51,13 @@ data "aws_iam_session_context" "current" {
 locals {
   caller_arn = endswith(data.aws_iam_session_context.current.issuer_arn, ":root") ? null : data.aws_iam_session_context.current.issuer_arn
 
+  # access_role_principals_enabled = false (the cold start): every role trusts the caller alone,
+  # whatever allowed_principal_arns lists, since those accounts may not exist yet.
   access_role_principal_arns = {
-    for key, role in var.access_roles : key => sort(distinct(compact(concat(role.allowed_principal_arns, [local.caller_arn]))))
+    for key, role in var.access_roles : key => sort(distinct(compact(concat(
+      var.access_role_principals_enabled ? role.allowed_principal_arns : [],
+      [local.caller_arn]
+    ))))
   }
 
   # arn:<partition>:iam::<account>:root for every account an allowed principal lives in

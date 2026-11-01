@@ -21,6 +21,13 @@ components:
         # (stacks/orgs/fnx/_defaults.yaml), the same values every stack's
         # terraform.backend reads, so the backend and its readers agree.
         bucket_name: "{{ .settings.tfstate.bucket }}"
+        # The cold start (bootstrap.yaml backend-cold-start sets
+        # TFSTATE_COLD_START=true for its apply) runs before the accounts layer
+        # creates the accounts the access roles' allowed_principal_arns name, so
+        # every role then trusts only the caller (the component's
+        # access_role_principals_enabled). Re-applying the backend after their
+        # IDs are in settings.account_map (backend-only) adds those principals.
+        access_role_principals_enabled: '{{ ne (env "TFSTATE_COLD_START") "true" }}'
         # Cloud Posse tfstate-backend access_roles. The role names are what
         # stacks/orgs/fnx/_defaults.yaml assumes (terraform.backend.s3.assume_role);
         # the allowed principals and the state each role reaches
