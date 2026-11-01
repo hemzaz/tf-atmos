@@ -69,8 +69,14 @@
 # to gain instances, joined the compute layer in all 3 stacks); fnx-ue1-root
 # has only the backend layer.
 #
-# Every enabled, non-abstract instance of every stack must be selected by exactly
-# one layer, in that order. validate-all enforces it with
+# The accounts layer (the organization, its OUs, SCPs and member accounts, in
+# fnx-gbl-root) is not here: workflows/deploy-accounts.yaml deploys it in its
+# own phases, before the backend's access roles are re-applied for the new
+# accounts (docs/OPERATIONS.md). fnx-gbl-root's aws-account-settings is in the
+# iam layer below, as everywhere, and deploy-accounts applies it too.
+#
+# Every enabled, non-abstract instance of every stack but the accounts layer's
+# must be selected by exactly one layer, in that order. validate-all enforces it with
 # scripts/common/check-deploy-layers.py, so a new component type, or a new read
 # of an instance in the same or a later layer, fails there until a layer below
 # is changed.
