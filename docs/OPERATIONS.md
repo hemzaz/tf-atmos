@@ -86,7 +86,9 @@ the last step.
    access roles' principals name accounts that do not exist yet, so the cold start does not apply
    them (`TFSTATE_COLD_START=true`, the backend's `access_role_principals_enabled`) and every
    access role trusts only you.
-3. **Accounts layer**: `atmos workflow deploy -f deploy-accounts` (`fnx-gbl-root`, whose state goes
+3. **Accounts layer**: after replacing each member account's `account_email` (see
+   [First deploy inputs](#first-deploy-inputs), Account emails) and enabling the `fnx-gbl-root`
+   instances, `atmos workflow deploy -f deploy-accounts` (`fnx-gbl-root`, whose state goes
    through the US backend's root role): the organization, its OUs, SCPs and member accounts (see
    [Deploying a stack](#deploying-a-stack), "The accounts layer"). To adopt existing ones instead of
    creating them, set the instances' import ids first (`stacks/catalog/aws-organization`,

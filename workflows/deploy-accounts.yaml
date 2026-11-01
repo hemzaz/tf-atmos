@@ -76,10 +76,11 @@ workflows:
         type: shell
         command: atmos validate stacks
       # First-deploy preflight, fatal, before anything touches AWS: the
-      # management account ID, the core account IDs (every component here
-      # reads them, check-first-deploy-inputs.py MAP_CONSUMERS), placeholder
-      # OU/organization import ids and account emails, and one root-user email
-      # per account. docs/OPERATIONS.md#first-deploy-inputs.
+      # management account ID, placeholder OU/organization import ids and
+      # account emails, and one root-user email per account. Placeholder core
+      # account IDs are only notices here: this layer creates those accounts
+      # (check-first-deploy-inputs.py MAP_CONSUMERS leaves its components out).
+      # docs/OPERATIONS.md#first-deploy-inputs.
       - name: preflight
         type: shell
         command: >-
