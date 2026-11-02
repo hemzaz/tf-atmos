@@ -26,7 +26,9 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
 ## Notes
 
 - `network/services` deploys in its own `dns-zones` layer before the `dns` layer
-  (`deploy-full-stack`), because `network/main` reads its name servers.
+  (`deploy-full-stack`), because `network/main` reads its name servers. The `external_zones`
+  it signs come from `aws-dns-primary` (own `dns-apex` layer) and `aws-dns-delegated`
+  (`dns-zones`, after the apex zone its plan looks up).
 - `<d>` itself must be delegated from its parent domain manually, by the owner, before the first
   `deploy-certificates`; ACM validation hangs otherwise. See [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#deploying-a-stack).
 - Delegation NS records (from `parent_zone`, and the stacks' `services_delegation`) use a 30 s
