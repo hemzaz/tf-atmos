@@ -34,8 +34,10 @@ terraform:
   #   <role_prefix>-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
   #   <role_prefix>-prod-role       read/write, prod objects; prod's apply role only
   #   <role_prefix>-prod-read-role  read-only, prod objects; prod's plan role only
-  #   <role_prefix>-root-role       read/write, the backend-owning root stack's objects; the
-  #                                 administrator who applies backend/main only (read or write)
+  #   <role_prefix>-root-role       read/write, the root stacks' and the core stages' objects;
+  #                                 the administrator who applies backend/main, plus each
+  #                                 enabled core account's OrganizationAccountAccessRole until
+  #                                 E4 (so it reaches the root stacks' state until E5's core role)
   # The role is per stack, not per job, so a job picks it with an environment
   # variable: TFSTATE_ACCESS=read selects the stage's read-only role, anything
   # else its read/write one. The plan-only CI jobs (terraform-ci.yml plan,
@@ -45,11 +47,14 @@ terraform:
   # the core-account stages (audit, security, network, identity, artifacts;
   # E2), never the dev/staging roles
   # the CI apply roles hold; TFSTATE_ACCESS=read selects the root role for them
-  # too, as for root. The root role trusts only the management-account
-  # administrator, but the provider guard needs credentials in the core account:
-  # the PR adding a core stack's first instance (E5) adds that account's operator
-  # role to root_write's allowed_principal_arns with the stack's pattern pair,
-  # unless E4's aws-teams role supplies it.
+  # too, as for root. The provider guard needs credentials in the core account,
+  # so the PR enabling a core stack's first instance adds the stack's pattern
+  # pair and that account's OrganizationAccountAccessRole to root_write's
+  # allowed_principal_arns (audit and network so far) until E4's Identity Center
+  # roles replace it. A dedicated core_write role (E5), or removing the OAARs
+  # from root_write, must land before E4 grants any permission set in a core
+  # account: from then on a principal there that can edit OAAR's trust reaches
+  # the root stacks' state.
   #
   # TFSTATE_SOURCE=replica reads the bucket's cross-region replica instead
   # (<bucket>-replica in settings.tfstate.replica_region, backend/main's

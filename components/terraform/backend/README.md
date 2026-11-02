@@ -33,7 +33,12 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
 - `prod_read` / `prod_write` (`fnx-terraform-backend-prod-read-role` / `-prod-role`): the prod
   stacks' objects only, trusted by prod's plan / apply role only.
 - `root_write` (`fnx-terraform-backend-root-role`, EU `fnx-ew1-terraform-backend-root-role`): the
-  root stack's own objects, trusted by nobody but the administrator who applies `backend/main`.
+  root stacks' objects (`fnx-ue1-root`, `fnx-gbl-root`; EU `fnx-ew1-root`) and the core stages'
+  once they have instances (`fnx-ue1-audit`, `fnx-ue1-network`), trusted by the administrator who
+  applies `backend/main` and, until E4's Identity Center roles replace it, each such core
+  account's `OrganizationAccountAccessRole`. So that role also reaches the root stacks' state
+  until E5's dedicated core role splits it off, which must land before E4 grants any permission
+  set in a core account.
 
 `TFSTATE_ACCESS=read` selects the read role (run plans with `-lock=false`).
 
