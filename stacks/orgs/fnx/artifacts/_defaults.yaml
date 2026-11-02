@@ -5,8 +5,8 @@
 # Cloud Posse's core "artifacts" account (owner decision Q1): the shared store
 # of build artifacts the other accounts pull from (container registries, ECR in
 # Cloud Posse's reference architecture, core-<region>-artifacts there). No
-# Wave E item places a component here yet; until one does its stacks hold no
-# enabled instance (aws-account-settings, below, is disabled until E3e).
+# Wave E item places a component here yet; until one does its stacks hold only
+# aws-account-settings (below).
 #
 # Laid out like the management account (stacks/orgs/fnx/root/_defaults.yaml):
 # the tenant stays fnx, the account is the stage, the region code the
@@ -30,17 +30,12 @@ settings:
   github:
     actions_enabled: false
 
-# Account settings (E3d, catalog/aws-account-settings/main): this account's
-# alias, S3 account public access block and each stack's region settings.
-# Disabled until E3e: the account is created by
-# fnx-gbl-root's aws-account instance, and this stage's state goes through
-# fnx-ue1-root's root role, which until then trusts no principal in this
-# account (stacks/orgs/fnx/_defaults.yaml). E3e enables it, adding the
-# stack's pattern pair and the account's operator role to root_write. A
-# second region's stack of this account also imports main-standby, after
-# these defaults, so the account-wide settings stay with this one.
-components:
-  terraform:
-    aws-account-settings:
-      metadata:
-        enabled: false
+# Account settings (E3d, catalog/aws-account-settings/main, imported above):
+# this account's alias, S3 account public access block and each stack's
+# region settings. The account is created by fnx-gbl-root's aws-account
+# instance (docs/OPERATIONS.md, "Bootstrap order"). This stage's state goes
+# through fnx-ue1-root's root role, whose root_write holds each of its stacks'
+# pattern pair and trusts this account's OrganizationAccountAccessRole, the
+# first way in until E4's Identity Center roles. A second region's stack of
+# this account also imports main-standby, after these defaults, so the
+# account-wide settings stay with this one.
