@@ -2,14 +2,16 @@
 # =============================================================================
 # fnx-ue1-network - the network account's home-region stack
 # =============================================================================
-# No enabled instance yet: the primary DNS zones (aws-dns-primary, E6b) land
-# here; the Transit Gateway hub later (QE6). Its state goes to fnx-ue1-root's
-# bucket through the backend's root role (stacks/orgs/fnx/_defaults.yaml), which
-# trusts only the management-account
-# administrator, while the provider guard needs credentials in the network
-# account. So the first instance's PR adds to fnx-ue1-root's root_write this
-# stack's pattern pair (check-state-keys.py) and the network account's operator
-# role in allowed_principal_arns, unless E4's aws-teams role supplies it.
+# The US apex zone (aws-dns-primary), the house dns signing it (network/primary)
+# and one DNS delegation role per stage (aws-iam-role/dns-delegation-<stage>),
+# from orgs/fnx/network/_defaults (catalog/aws-dns-primary/main), all disabled
+# while the apex and account IDs are placeholders; the Transit Gateway hub
+# later (QE6). Its state goes to fnx-ue1-root's bucket through the backend's
+# root role (stacks/orgs/fnx/_defaults.yaml), which trusts only the
+# management-account administrator, while the provider guard needs credentials
+# in the network account. So the PR that enables the first instance adds to
+# fnx-ue1-root's root_write this stack's pattern pair (check-state-keys.py) and
+# the network account's operator role in allowed_principal_arns.
 # =============================================================================
 
 import:
