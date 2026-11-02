@@ -26,11 +26,17 @@ make by hand. NS delegation needs the deployed zone's name servers, so it only
 prints that step.
 
 A core-account stack (stage audit, security, network, identity or artifacts,
-whose account is its stage) is validated and left unwired: its state goes
-through the backend's root role (stacks/orgs/<tenant>/_defaults.yaml routes
-those stages there, with root), which no CI role assumes, and its pattern pair
-joins root_write with its first instance (check-state-keys.py fails a pair no
-enabled instance matches).
+whose account is its stage) has no CI role: its state goes through the
+backend's root role (stacks/orgs/<tenant>/_defaults.yaml routes those stages
+there, with root). Once its account is onboarded, its account's
+OrganizationAccountAccessRole (the first way in, until E4's Identity Center
+roles) in root_write's allowed_principal_arns, a reviewed hand edit with the
+account's first stack and its stage defaults' enabled aws-account-settings,
+its pattern pair joins root_write's object_key_patterns: every such stack has
+that enabled instance, so check-state-keys.py finds its state under the pair.
+A stack of an account not onboarded yet is validated and left unwired (a pair
+no enabled instance's state matches would fail check-state-keys.py); the hook
+never adds a principal to root_write.
 
 --root is the repository to edit (the tests' copies); by default this script's
 own, so a scratch copy's hook edits that copy. A concurrent run waits on a lock
@@ -157,6 +163,45 @@ def every_value(lines: list[str]) -> list[str]:
     return [scalar(line) for line in lines if line.strip().startswith("- ")]
 
 
+def operator_arn(account: str) -> str:
+    """A core account's OrganizationAccountAccessRole, as the root file writes it (a plain account key)."""
+    return f"arn:aws:iam::{{{{ .settings.account_map.full_account_map.{account} }}}}:role/OrganizationAccountAccessRole"
+
+
+def plan_core(text: str, account: str, stack: str) -> Optional[tuple[list[tuple[int, list[str]]], list[str]]]:
+    """A core stack's insertions into root_write (its pattern pair); None while its account's operator
+    role is not on root_write (the account is not onboarded)."""
+    lines = text.splitlines(keepends=True)
+    newline = "\r\n" if "\r\n" in text else "\n"
+    access = [i for i, line in enumerate(lines) if re.fullmatch(r"access_roles:", line.strip())]
+    if len(access) != 1:
+        fail(f"found {len(access)} access_roles: blocks, expected exactly one")
+    role = find(lines, access[0] + 1, block_end(lines, access[0]), r"root_write:", "root_write: roles under access_roles")
+    end = block_end(lines, role)
+    everywhere = every_value(lines)
+    inserts, done = [], []
+
+    key = find(lines, role + 1, end, r"allowed_principal_arns:", "allowed_principal_arns: lists in root_write")
+    found, _ = items(lines, key)
+    if operator_arn(account) not in [scalar(lines[i]) for i in found]:
+        return None
+
+    patterns_key = find(lines, role + 1, end, r"object_key_patterns:", "object_key_patterns: lists in root_write")
+    found, pad = items(lines, patterns_key)
+    present = [scalar(lines[i]) for i in found]
+    pair = [f"*/{stack}/*", f"*/{stack}-*"]
+    have = [p for p in pair if p in present]
+    if len(have) == 1:
+        fail(f"root_write has {have[0]!r} without its companion; add the pair by hand")
+    if not have:
+        for pattern in pair:
+            if pattern in everywhere:
+                fail(f"{pattern!r} is already in another list (another role's?)")
+        inserts.append((found[-1] if found else patterns_key, [f'{" " * pad}- "{p}"{newline}' for p in pair]))
+        done.append(f"state patterns {pair[0]} and {pair[1]} -> root_write")
+    return inserts, done
+
+
 def plan(text: str, stage: str, account: str, stack: str) -> tuple[list[tuple[int, list[str]]], list[str]]:
     """The insertions (after line index, new lines) and a description of each; Refused if unsafe."""
     lines = text.splitlines(keepends=True)
@@ -224,6 +269,14 @@ def apply(text: str, inserts: list[tuple[int, list[str]]]) -> str:
 
 
 def manual(path: str, stage: str, account: str, stack: str) -> str:
+    if stage in CORE_STAGES:
+        return "\n".join([
+            f"Wire {stack} by hand in {path}, under backend/main's vars.access_roles:",
+            f'  root_write.object_key_patterns: - "*/{stack}/*" and - "*/{stack}-*"',
+            f'  root_write.allowed_principal_arns: - "{operator_arn(account)}" (once per account)',
+            f"and remove the aws-account-settings metadata.enabled: false override in stacks/orgs/<tenant>/{stage}"
+            "/_defaults.yaml if it is there, then run check-state-keys.py (atmos workflow lint -f lint).",
+        ])
     prod = stage == "prod"
     anchor = "prod_state" if prod else "non_prod_state"
     read, write = ("prod_read", "prod_write") if prod else ("read", "write")
@@ -253,8 +306,8 @@ def exclusive(path: pathlib.Path):
 
 
 def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str, stack: str) -> Optional[list[str]]:
-    """Edit the owning backend's file; the changes made (empty: already wired, None: a core
-    stack, nothing to wire). Refused if unsafe."""
+    """Edit the owning backend's file; the changes made (empty: already wired, None: a core stack whose
+    account is not onboarded, nothing wired). Refused if unsafe."""
     account = validate(tenant, stage, account, region, stack)
     backend_region, _ = BACKENDS[account == "prod-eu"]
     rel = f"stacks/orgs/{tenant}/root/{backend_region}.yaml"
@@ -264,8 +317,6 @@ def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str,
     code = re.search(r"^ *environment: *([a-z0-9]*) *$", mixin.read_text(encoding="utf-8"), re.M)
     if not code or stack != f"{tenant}-{code.group(1)}-{stage}":
         fail(f"stack {stack!r} is not {tenant}-<{mixin.name}'s environment, {code and code.group(1)}>-{stage}")
-    if stage in CORE_STAGES:
-        return None
     # A symlinked root file is edited through the link, which stays a link.
     path = (root / rel).resolve()
     if not path.is_file():
@@ -274,9 +325,12 @@ def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str,
         # Bytes as they are: no newline translation.
         text = path.read_bytes().decode("utf-8")
         try:
-            inserts, done = plan(text, stage, account, stack)
+            planned = plan_core(text, account, stack) if stage in CORE_STAGES else plan(text, stage, account, stack)
         except Refused as error:
             raise Refused(f"{rel}: {error}\n{manual(rel, stage, account, stack)}") from None
+        if planned is None:
+            return None
+        inserts, done = planned
         if inserts:
             handle, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
             try:
@@ -296,6 +350,8 @@ def next_steps(tenant: str, stage: str, account: str, stack: str, changed: bool)
     if changed:
         steps.append(f"Next for {stack}: apply backend/main in {tenant}-{code}-root (its access roles"
                      " changed) before the stack's first init.")
+    if stage in CORE_STAGES:
+        return "\n".join(steps)
     steps += [
         f"Not automated for {stack}: before deploy layer certificates, delegate its",
         "settings.environment.domain_name to its network/main zone_name_servers.main",
@@ -318,17 +374,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"stack-wiring: refused, nothing written: {error}", file=sys.stderr)
         return 1
     if done is None:
-        print(f"stack-wiring: {args.stack} is a core-account stack: nothing to wire (its state goes"
-              " through the backend's root role, which no CI role assumes)")
-        print(f"Next for {args.stack}: its first instance's PR adds \"*/{args.stack}/*\" and"
-              f" \"*/{args.stack}-*\" to root_write in {args.tenant}-ue1-root's backend/main"
-              " (check-state-keys.py).")
+        rel = f"stacks/orgs/{args.tenant}/root/us-east-1.yaml"
+        print(f"stack-wiring: {args.stack} is a core-account stack whose account is not onboarded:"
+              " nothing wired (root_write does not trust its OrganizationAccountAccessRole yet)")
+        print(manual(rel, args.stage, args.account or args.stage, args.stack))
         return 0
     for line in done:
         print(f"stack-wiring: added {line}")
     if not done:
         print(f"stack-wiring: {args.stack} is already wired (nothing to add)")
-    print(next_steps(args.tenant, args.stage, args.account, args.stack, bool(done)))
+    steps = next_steps(args.tenant, args.stage, args.account, args.stack, bool(done))
+    if steps:
+        print(steps)
     return 0
 
 
