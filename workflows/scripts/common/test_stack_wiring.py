@@ -134,14 +134,51 @@ class Wire(Copy):
         self.assertEqual(self.text(US), self.committed[US])
         self.assertEqual(self.text(EU), self.committed[EU])
 
-    def test_core_stacks_are_validated_and_left_unwired(self) -> None:
-        for stage in wiring.CORE_STAGES:
-            for account in ("", stage):
-                for region, code in (("us-east-1", "ue1"), ("us-west-2", "uw2")):
-                    args = ("fnx", stage, account, region, f"fnx-{code}-{stage}")
-                    self.assertIsNone(self.wire(*args), args)
+    def test_committed_core_stacks_are_already_wired(self) -> None:
+        for stage in ("audit", "network", "security"):
+            self.assertEqual(self.wire("fnx", stage, "", "us-east-1", f"fnx-ue1-{stage}"), [], stage)
         self.assertEqual(self.text(US), self.committed[US])
         self.assertEqual(self.text(EU), self.committed[EU])
+
+    def test_core_stack_of_a_wired_account_adds_only_its_pair(self) -> None:
+        done = self.wire("fnx", "security", "", "us-west-2", "fnx-uw2-security")
+        self.assertEqual(len(done), 1, done)
+        added = [line for line in self.lines(US) if line not in self.committed[US].splitlines(keepends=True)]
+        self.assertEqual(added, pair("fnx-uw2-security"))
+        self.assertEqual(self.text(EU), self.committed[EU])
+        # A second run adds nothing.
+        self.assertEqual(self.wire("fnx", "security", "security", "us-west-2", "fnx-uw2-security"), [])
+
+    def test_core_stack_of_an_account_not_onboarded_is_left_unwired(self) -> None:
+        operator = ('              - "arn:aws:iam::{{ .settings.account_map.full_account_map.identity }}'
+                    ':role/OrganizationAccountAccessRole"\n')
+        stripped = "".join(line for line in self.committed[US].splitlines(keepends=True)
+                           if "fnx-ue1-identity" not in line and line != operator)
+        (self.root / US).write_text(stripped)
+        for region, code in (("us-east-1", "ue1"), ("us-west-2", "uw2")):
+            self.assertIsNone(self.wire("fnx", "identity", "", region, f"fnx-{code}-identity"))
+        self.assertEqual(self.text(US), stripped)
+        # Onboarded by hand (its operator role): the hook then adds each stack's pair, never the role.
+        audit = 'full_account_map.audit }}:role/OrganizationAccountAccessRole"\n'
+        text = stripped.replace(audit, audit + operator, 1)
+        (self.root / US).write_text(text)
+        self.assertEqual(len(self.wire("fnx", "identity", "", "us-west-2", "fnx-uw2-identity")), 1)
+        self.assertEqual(self.text(US).count(operator), 1)
+        root_write = self.text(US)[self.text(US).index("root_write:"):]
+        self.assertIn(pair("fnx-uw2-identity")[0], root_write)
+
+    def test_main_core_stack_not_onboarded(self) -> None:
+        stripped = "".join(line for line in self.committed[US].splitlines(keepends=True)
+                           if "fnx-ue1-artifacts" not in line
+                           and "full_account_map.artifacts }}:role/OrganizationAccountAccessRole" not in line)
+        (self.root / US).write_text(stripped)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "artifacts", "", "us-west-2",
+                                          "fnx-uw2-artifacts"]), 0)
+        self.assertIn("fnx-uw2-artifacts is a core-account stack whose account is not onboarded", out.getvalue())
+        self.assertIn("Wire fnx-uw2-artifacts by hand", out.getvalue())
+        self.assertEqual(self.text(US), stripped)
 
     def test_core_stages_are_the_backend_root_role_routing(self) -> None:
         # stacks/orgs/fnx/_defaults.yaml routes these stages (and root) to the
@@ -322,12 +359,12 @@ class Refuse(Copy):
     def test_main_core_stack(self) -> None:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "security", "", "us-east-1",
-                                          "fnx-ue1-security"]), 0)
-        self.assertIn("fnx-ue1-security is a core-account stack: nothing to wire", out.getvalue())
-        self.assertIn('"*/fnx-ue1-security/*" and "*/fnx-ue1-security-*" to root_write', out.getvalue())
+            self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "security", "", "us-west-2",
+                                          "fnx-uw2-security"]), 0)
+        self.assertIn("added stacks/orgs/fnx/root/us-east-1.yaml: state patterns */fnx-uw2-security/*"
+                      " and */fnx-uw2-security-* -> root_write", out.getvalue())
+        self.assertIn("apply backend/main in fnx-ue1-root", out.getvalue())
         self.assertNotIn("zone_name_servers", out.getvalue())
-        self.assertEqual(self.text(US), self.committed[US])
 
 
 if __name__ == "__main__":
