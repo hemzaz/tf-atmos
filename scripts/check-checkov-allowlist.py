@@ -25,6 +25,9 @@ import sys
 
 TF_1 = "Cloud Posse pins this registry module to an exact version in vendored code, not house code"
 DNSSEC = "signed and query-logged by the house dns external_zones mode, E6b"
+PERMSET = ("Cloud Posse's permission-set inline policy: Route 53 and EKS reads and writes take a '*' "
+           "resource (zones and clusters are account-wide); a permission set is an access boundary "
+           "the owner grants per group, not a workload role")
 ALLOWLIST = (
     # aws-dns-primary (vendor.yaml): the service domain's zone.
     (r"/aws-dns-primary/main\.tf", "CKV2_AWS_38", DNSSEC),
@@ -49,6 +52,14 @@ ALLOWLIST = (
     # providers mixin of the dns components and aws-iam-role (bypassed, still expanded).
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),
     (r"/account-map/modules/iam-roles/main\.tf", "CKV_TF_1", TF_1),
+    # aws-identity-center (vendor.yaml): permission sets and assignments (E4).
+    (r"/aws-identity-center/context\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-identity-center/main\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-identity-center/providers\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-identity-center/remote-state\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-identity-center/policy-DNSAdministratorAccess\.tf", "CKV_AWS_111", PERMSET),
+    (r"/aws-identity-center/policy-DNSAdministratorAccess\.tf", "CKV_AWS_356", PERMSET),
+    (r"/aws-identity-center/policy-ReadOnlyAccess\.tf", "CKV_AWS_356", PERMSET),
 )
 SOFT = {"LOW", "MEDIUM"}
 

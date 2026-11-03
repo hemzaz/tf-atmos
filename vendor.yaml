@@ -134,3 +134,11 @@ spec:
       targets:
         - "components/terraform/aws-iam-role"
       included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
+    # IAM Identity Center: permission sets, account assignments and group
+    # assignments, applied from the management account's global stack.
+    - component: aws-identity-center
+      source: "github.com/cloudposse-terraform-components/aws-identity-center.git//src?ref={{ .Version }}"
+      version: "v4.0.1"
+      targets:
+        - "components/terraform/aws-identity-center"
+      included_paths: ["**/*.tf", "**/*.md"]

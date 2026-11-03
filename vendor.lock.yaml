@@ -599,6 +599,95 @@ artifacts:
     order: 5
     included_paths:
       - '**/*.yaml'
+  e16a572db0445046ac2ad9ae281e41aa6d96027c40a1ec4068ef7e920cbcc7c4:
+    name: aws-identity-center
+    kind: remote
+    target: components/terraform/aws-identity-center
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-identity-center.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-identity-center.git//src
+      digest: sha256:1be992018156355a25fff795efacaac0e6b00df057558c24c4a8863945199b0f
+    files:
+      - path: CHANGELOG.md
+        type: file
+        mode: 420
+        sha256: 60917a2cf57618c9b5678ee35d0e286a7c6280b418c51a130157e0223308a42e
+      - path: MIGRATION.md
+        type: file
+        mode: 420
+        sha256: 2dc775d20d32e446e6952b2f181a30c841bc429d6c7d0bf6b6e50174603781e2
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 63a09e71aea52b4e3bc8c309af8e8482bc16195f2a014ae7ee18dd3e03690ffb
+      - path: additional-permission-sets.tf
+        type: file
+        mode: 420
+        sha256: 4f1aaa6e86a8a69e379853d3c66ae4d2df4c5326bd04e07d09902269544edd20
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: f19504c628e4daf28e52073775ca8c2eae8955577dda1e068bfed178acd131d5
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: e1d2b082226283a61485d83e0f0cb4f43f3522901ceedff2ea2b44f66698b23b
+      - path: policy-AdminstratorAccess.tf
+        type: file
+        mode: 420
+        sha256: c1e68d3dcdcc4f442696a1c2f7d3c8100b9f71a23543aafeeac1e0507c36a730
+      - path: policy-BillingAdministratorAccess.tf
+        type: file
+        mode: 420
+        sha256: eaccf985a23ebcdd37460ea83a691027a3053891c724b96c6faa5042dca933a0
+      - path: policy-BillingReadOnlyAccess.tf
+        type: file
+        mode: 420
+        sha256: 6fa87e6e1fd32f930be8fa283a2ec0a409693c0fb331ecfd58238faad448efea
+      - path: policy-DNSAdministratorAccess.tf
+        type: file
+        mode: 420
+        sha256: 1817be32f5eaf2e52206004623420ccb2011c4019ce73827e982760a85d5a917
+      - path: policy-PoweruserAccess.tf
+        type: file
+        mode: 420
+        sha256: 12a660970781098d0c03ea89d3b1768cfd8c56fc5876cf3411b6d8cf48ee7e67
+      - path: policy-ReadOnlyAccess.tf
+        type: file
+        mode: 420
+        sha256: 8d759651fd0a8115b4d1b7d5b2d41d15fa6f98c5651fd5dee54d11193749d456
+      - path: policy-RootAccess.tf
+        type: file
+        mode: 420
+        sha256: 64236b65dc0b4175c664815c83bb6b90ccb928b092bc2daf53e5619992317acc
+      - path: policy-TerraformAccess.tf
+        type: file
+        mode: 420
+        sha256: ed7e27af86b87b54a67beb7f15862e524099ccc3a9d3918196c66206bb6ff927
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 657b923f5c0e4b7ce92f23c7f77b192db676084f7b134b60d49cee950c1e8a56
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: e9e298b6e238de3c11909f755d8674570c6524b62f3b430ecdfcc45ae066f257
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 9a7574e0786ee6d99fd1e788ab19a4f36dae96dd5066dcfe35d2535c4a3795c0
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 691578968724cc1d451670e3906dda3d0256f4f870b6fec065648834ce6d8cd2
+    order: 14
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
   e35284ddeea3bcafae232da3e2e1f81a60feea13f1d57bdc05c47765976d60c7:
     name: aws-organization
     kind: remote
