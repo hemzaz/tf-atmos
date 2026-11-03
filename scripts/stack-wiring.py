@@ -6,7 +6,7 @@ Usage: stack-wiring.py [--root DIR] <tenant> <stage> <account> <region> <stack>
 The stack scaffold's `wire` hook (scaffolds/stack/scaffold.yaml) runs this after
 it writes stacks/orgs/<tenant>/<stage>/<region>.yaml. It edits the owning
 backend's file, stacks/orgs/<tenant>/root/us-east-1.yaml (fnx-ue1-root), or
-root/eu-west-1.yaml (fnx-ew1-root) for the prod-eu account, and adds what
+root/eu-west-1.yaml (fnx-ew1-root) for a stack in an EU region, and adds what
 check-state-keys.py and check-ci-state-roles.py require there:
   - the stack's exact state pattern pair, "*/<stack>/*" and "*/<stack>-*", to
     its stage's anchored list (`object_key_patterns: &non_prod_state` for dev
@@ -38,6 +38,12 @@ A stack of an account not onboarded yet is validated and left unwired (a pair
 no enabled instance's state matches would fail check-state-keys.py); the hook
 never adds a principal to root_write.
 
+The EU regions are the prod-eu account's (GDPR, B5), with one exception (owner,
+2026-11-03): a core stack of stage EU_CORE_STAGES in EU_CORE_REGIONS, in its own
+(shared) core account, whose state is the EU backend's. Every other core stage,
+EU region or account pairing is refused. check-data-residency.py still holds
+such a stack to EU-only regions, state and dependencies.
+
 --root is the repository to edit (the tests' copies); by default this script's
 own, so a scratch copy's hook edits that copy. A concurrent run waits on a lock
 on the backend file's directory.
@@ -63,7 +69,12 @@ PLATFORM_STAGES = ("dev", "staging", "prod")
 CORE_STAGES = ("audit", "security", "network", "identity", "artifacts")
 STAGES = PLATFORM_STAGES + CORE_STAGES
 ACCOUNTS = STAGES + ("prod-eu",)
-# Each owning backend's file and stack (the region code of its bucket's region).
+# The core stages with an EU stack, and its regions (E5a: the EU log archive and
+# security tooling). check-first-deploy-inputs.py reads these: the one list.
+EU_CORE_STAGES = ("audit", "security")
+EU_CORE_REGIONS = ("eu-west-1",)
+# Each owning backend's file and stack (the region code of its bucket's region),
+# by whether the stack's region is an EU one.
 BACKENDS = {False: ("us-east-1", "ue1"), True: ("eu-west-1", "ew1")}
 
 
@@ -88,8 +99,10 @@ def validate(tenant: str, stage: str, account: str, region: str, stack: str) -> 
         fail(f"account {account!r} does not belong to stage {stage!r} (its own, or prod-eu for prod)")
     if not REGION.fullmatch(region):
         fail(f"region {region!r} is not an AWS region")
-    if (account == "prod-eu") != region.startswith("eu-"):
-        fail(f"account {account!r} and region {region!r} disagree: the EU regions are exactly the prod-eu account's")
+    eu_core = stage in EU_CORE_STAGES and region in EU_CORE_REGIONS
+    if (account == "prod-eu") != region.startswith("eu-") and not eu_core:
+        fail(f"account {account!r} and region {region!r} disagree: the EU regions are exactly the prod-eu"
+             f" account's, and core stages {'/'.join(EU_CORE_STAGES)} in {'/'.join(EU_CORE_REGIONS)}")
     if not re.fullmatch(rf"{tenant}-[a-z]{{2}}[a-z]?[0-9]-{stage}", stack):
         fail(f"stack {stack!r} is not {tenant}-<region code>-{stage}")
     return account
@@ -168,9 +181,18 @@ def operator_arn(account: str) -> str:
     return f"arn:aws:iam::{{{{ .settings.account_map.full_account_map.{account} }}}}:role/OrganizationAccountAccessRole"
 
 
-def plan_core(text: str, account: str, stack: str) -> Optional[tuple[list[tuple[int, list[str]]], list[str]]]:
+def backend_file(tenant: str, region: str) -> str:
+    """The root file of the backend owning a stack's state: the EU one for an EU region."""
+    return f"stacks/orgs/{tenant}/root/{BACKENDS[region.startswith('eu-')][0]}.yaml"
+
+
+def plan_core(text: str, account: str, stack: str,
+              may_lack_principals: bool = False) -> Optional[tuple[list[tuple[int, list[str]]], list[str]]]:
     """A core stack's insertions into root_write (its pattern pair); None while its account's operator
-    role is not on root_write (the account is not onboarded)."""
+    role is not on root_write (the account is not onboarded). Only the EU backend's root_write may have
+    no principal list yet (fnx-ew1-root's, before its first core stack, trusts none:
+    may_lack_principals); a US root_write without one is refused, so a deleted key is never read as
+    "not onboarded"."""
     lines = text.splitlines(keepends=True)
     newline = "\r\n" if "\r\n" in text else "\n"
     access = [i for i, line in enumerate(lines) if re.fullmatch(r"access_roles:", line.strip())]
@@ -181,6 +203,9 @@ def plan_core(text: str, account: str, stack: str) -> Optional[tuple[list[tuple[
     everywhere = every_value(lines)
     inserts, done = [], []
 
+    if may_lack_principals and not any(
+            re.fullmatch(r"allowed_principal_arns:", lines[i].strip()) for i in range(role + 1, end)):
+        return None
     key = find(lines, role + 1, end, r"allowed_principal_arns:", "allowed_principal_arns: lists in root_write")
     found, _ = items(lines, key)
     if operator_arn(account) not in [scalar(lines[i]) for i in found]:
@@ -309,8 +334,7 @@ def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str,
     """Edit the owning backend's file; the changes made (empty: already wired, None: a core stack whose
     account is not onboarded, nothing wired). Refused if unsafe."""
     account = validate(tenant, stage, account, region, stack)
-    backend_region, _ = BACKENDS[account == "prod-eu"]
-    rel = f"stacks/orgs/{tenant}/root/{backend_region}.yaml"
+    rel = backend_file(tenant, region)
     mixin = root / "stacks" / "mixins" / "region" / f"{region}.yaml"
     if not mixin.is_file():
         fail(f"no region mixin {mixin}")
@@ -325,7 +349,8 @@ def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str,
         # Bytes as they are: no newline translation.
         text = path.read_bytes().decode("utf-8")
         try:
-            planned = plan_core(text, account, stack) if stage in CORE_STAGES else plan(text, stage, account, stack)
+            planned = (plan_core(text, account, stack, may_lack_principals=region.startswith("eu-"))
+                       if stage in CORE_STAGES else plan(text, stage, account, stack))
         except Refused as error:
             raise Refused(f"{rel}: {error}\n{manual(rel, stage, account, stack)}") from None
         if planned is None:
@@ -344,8 +369,8 @@ def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str,
     return [f"{rel}: {line}" for line in done]
 
 
-def next_steps(tenant: str, stage: str, account: str, stack: str, changed: bool) -> str:
-    _, code = BACKENDS[(account or stage) == "prod-eu"]
+def next_steps(tenant: str, stage: str, region: str, stack: str, changed: bool) -> str:
+    _, code = BACKENDS[region.startswith("eu-")]
     steps = []
     if changed:
         steps.append(f"Next for {stack}: apply backend/main in {tenant}-{code}-root (its access roles"
@@ -374,7 +399,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"stack-wiring: refused, nothing written: {error}", file=sys.stderr)
         return 1
     if done is None:
-        rel = f"stacks/orgs/{args.tenant}/root/us-east-1.yaml"
+        rel = backend_file(args.tenant, args.region)
         print(f"stack-wiring: {args.stack} is a core-account stack whose account is not onboarded:"
               " nothing wired (root_write does not trust its OrganizationAccountAccessRole yet)")
         print(manual(rel, args.stage, args.account or args.stage, args.stack))
@@ -383,7 +408,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"stack-wiring: added {line}")
     if not done:
         print(f"stack-wiring: {args.stack} is already wired (nothing to add)")
-    steps = next_steps(args.tenant, args.stage, args.account, args.stack, bool(done))
+    steps = next_steps(args.tenant, args.stage, args.region, args.stack, bool(done))
     if steps:
         print(steps)
     return 0

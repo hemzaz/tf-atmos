@@ -180,6 +180,55 @@ class Wire(Copy):
         self.assertIn("Wire fnx-uw2-artifacts by hand", out.getvalue())
         self.assertEqual(self.text(US), stripped)
 
+    def onboard_eu(self, *accounts: str) -> str:
+        """The EU file with root_write trusting these core accounts' operator roles (a hand edit)."""
+        anchor = '              - "*/fnx-ew1-root-*"\n'
+        principals = "            allowed_principal_arns:\n" + "".join(
+            f'              - "{wiring.operator_arn(account)}"\n' for account in accounts)
+        self.assertEqual(self.committed[EU].count(anchor), 1)
+        text = self.committed[EU].replace(anchor, anchor + principals)
+        (self.root / EU).write_text(text)
+        return text
+
+    def test_eu_core_stacks_are_unwired_until_onboarded(self) -> None:
+        # The committed EU root_write lists no principals: no core account is onboarded there.
+        for stage in wiring.EU_CORE_STAGES:
+            self.assertIsNone(self.wire("fnx", stage, "", "eu-west-1", f"fnx-ew1-{stage}"), stage)
+        self.assertEqual(self.text(EU), self.committed[EU])
+        self.assertEqual(self.text(US), self.committed[US])
+
+    def test_eu_core_stack_goes_to_the_eu_root_write(self) -> None:
+        onboarded = self.onboard_eu("audit")
+        done = self.wire("fnx", "audit", "", "eu-west-1", "fnx-ew1-audit")
+        self.assertEqual(done, ["stacks/orgs/fnx/root/eu-west-1.yaml: state patterns */fnx-ew1-audit/* and"
+                                " */fnx-ew1-audit-* -> root_write"])
+        self.assertEqual(self.text(EU), onboarded.replace(
+            '              - "*/fnx-ew1-root-*"\n',
+            '              - "*/fnx-ew1-root-*"\n' + "".join(pair("fnx-ew1-audit"))))
+        self.assertEqual(self.text(US), self.committed[US])
+        # Security's account is not on the EU root_write yet; once it is, its stack wires too.
+        self.assertIsNone(self.wire("fnx", "security", "", "eu-west-1", "fnx-ew1-security"))
+        self.onboard_eu("audit", "security")
+        self.assertEqual(len(self.wire("fnx", "security", "security", "eu-west-1", "fnx-ew1-security")), 1)
+        self.assertEqual(self.wire("fnx", "security", "", "eu-west-1", "fnx-ew1-security"), [])
+        self.assertEqual(self.text(US), self.committed[US])
+
+    def test_main_eu_core_stack(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "audit", "", "eu-west-1",
+                                          "fnx-ew1-audit"]), 0)
+        self.assertIn("fnx-ew1-audit is a core-account stack whose account is not onboarded", out.getvalue())
+        self.assertIn("Wire fnx-ew1-audit by hand in stacks/orgs/fnx/root/eu-west-1.yaml", out.getvalue())
+        self.assertNotIn("us-east-1.yaml", out.getvalue())
+        self.onboard_eu("audit")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "audit", "", "eu-west-1",
+                                          "fnx-ew1-audit"]), 0)
+        self.assertIn("added stacks/orgs/fnx/root/eu-west-1.yaml: state patterns */fnx-ew1-audit/*", out.getvalue())
+        self.assertIn("apply backend/main in fnx-ew1-root", out.getvalue())
+
     def test_core_stages_are_the_backend_root_role_routing(self) -> None:
         # stacks/orgs/fnx/_defaults.yaml routes these stages (and root) to the
         # backend's root role, which is why they get no CI role or pair here.
@@ -274,6 +323,15 @@ class Refuse(Copy):
         self.assertEqual(self.text(rel), self.before)
         return str(caught.exception)
 
+    def test_us_root_write_without_principals_is_refused_not_unonboarded(self) -> None:
+        # Only the EU root_write may lack a principal list; a US one that lost its key (a typo or a
+        # deletion) must fail, not read as "not onboarded" and exit 0.
+        key = ('            allowed_principal_arns:\n'
+               '              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}')
+        self.mutate(US, key, key.replace("allowed_principal_arns:", "allowed_principal_arn:"))
+        self.refused_unchanged(US, ("fnx", "audit", "", "us-west-2", "fnx-uw2-audit"),
+                               "allowed_principal_arns: lists in root_write")
+
     def test_missing_anchor_prints_the_manual_edit(self) -> None:
         self.mutate(US, "object_key_patterns: &non_prod_state", "object_key_patterns:")
         error = self.refused_unchanged(US, ("fnx", "dev", "", "us-west-2", "fnx-uw2-dev"),
@@ -331,11 +389,19 @@ class Refuse(Copy):
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-staging"), "stack"),
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-dev/../x"), "stack"),
             (("fnx", "dev", "", "us-west-2", "fnx-ew1-dev"), "environment"),
-            # Core stages: the account is the stage's own, never in the EU.
+            # Core stages: the account is the stage's own, in the EU only audit and
+            # security, only in eu-west-1 (EU_CORE_STAGES, EU_CORE_REGIONS).
             (("fnx", "root", "", "us-east-1", "fnx-ue1-root"), "stage"),
             (("fnx", "security", "audit", "us-east-1", "fnx-ue1-security"), "does not belong to stage"),
             (("fnx", "security", "prod-eu", "eu-west-1", "fnx-ew1-security"), "does not belong to stage"),
+            (("fnx", "audit", "security", "eu-west-1", "fnx-ew1-audit"), "does not belong to stage"),
             (("fnx", "identity", "", "eu-west-1", "fnx-ew1-identity"), "the EU regions are exactly"),
+            (("fnx", "network", "", "eu-west-1", "fnx-ew1-network"), "the EU regions are exactly"),
+            (("fnx", "artifacts", "", "eu-west-1", "fnx-ew1-artifacts"), "the EU regions are exactly"),
+            (("fnx", "audit", "", "eu-central-1", "fnx-ec1-audit"), "the EU regions are exactly"),
+            (("fnx", "security", "", "eu-central-1", "fnx-ec1-security"), "the EU regions are exactly"),
+            (("fnx", "staging", "", "eu-west-1", "fnx-ew1-staging"), "the EU regions are exactly"),
+            (("fnx", "audit", "", "eu-west-1", "fnx-ue1-audit"), "environment"),
             (("fnx", "audit", "", "us-east-1", "fnx-ue1-security"), "stack"),
             (("fnx", "network", "", "us-west-2", "fnx-ue1-network"), "environment"),
         ]
