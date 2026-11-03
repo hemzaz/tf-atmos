@@ -82,7 +82,9 @@ workflows:
       # management account ID, placeholder OU/organization import ids and
       # account emails, and one root-user email per account. Placeholder core
       # account IDs are only notices here: this layer creates those accounts
-      # (check-first-deploy-inputs.py MAP_CONSUMERS leaves its components out).
+      # (check-first-deploy-inputs.py MAP_CONSUMERS leaves its components out),
+      # until phase 7's aws-identity-center is enabled: it is a MAP_CONSUMER,
+      # so placeholder core account IDs become fatal here from then on.
       # docs/OPERATIONS.md#first-deploy-inputs.
       - name: preflight
         type: shell

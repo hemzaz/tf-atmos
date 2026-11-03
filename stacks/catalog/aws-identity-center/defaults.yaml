@@ -19,6 +19,10 @@
 # so check-data-residency.py has no rule to exempt (docs/OPERATIONS.md,
 # First-deploy inputs, Identity Center).
 #
+# No permission set here uses ABAC (aws:PrincipalTag/aws:ResourceTag
+# conditions), so the aws-account instances' tags.Account (root on the
+# management account's) grants nothing.
+#
 # account_map: the static map (account_map_enabled false, never the
 # account-map remote state: upstream's providers.tf bypasses it, and E4 vendors
 # no account-map), from the abstract account-map-bypass: full_account_map with
