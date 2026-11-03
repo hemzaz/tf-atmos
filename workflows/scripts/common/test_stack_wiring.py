@@ -186,10 +186,15 @@ class Wire(Copy):
         lines = self.committed[EU].splitlines(keepends=True)
         start = [i for i, line in enumerate(lines) if line.strip() == "root_write:"]
         self.assertEqual(len(start), 1)
-        tail = [line for line in lines[start[0]:]
-                if line.strip() != "allowed_principal_arns:" and "OrganizationAccountAccessRole" not in line
-                and not any(f"*/fnx-ew1-{stage}" in line for stage in wiring.EU_CORE_STAGES)]
-        text = "".join(lines[:start[0]] + tail)
+        # root_write's block ends at the next line indented no deeper than its key: only that block
+        # is stripped, whatever follows it in the file.
+        indent = len(lines[start[0]]) - len(lines[start[0]].lstrip())
+        end = next((i for i in range(start[0] + 1, len(lines)) if lines[i].strip()
+                    and len(lines[i]) - len(lines[i].lstrip()) <= indent), len(lines))
+        block = [line for line in lines[start[0]:end]
+                 if line.strip() != "allowed_principal_arns:" and "OrganizationAccountAccessRole" not in line
+                 and not any(f"*/fnx-ew1-{stage}" in line for stage in wiring.EU_CORE_STAGES)]
+        text = "".join(lines[:start[0]] + block + lines[end:])
         (self.root / EU).write_text(text)
         return text
 
