@@ -77,7 +77,10 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
   rejected, and so is upstream's `sso.amazonaws.com*/` form. Cloud Posse builds the same pattern from
   `allowed_permission_sets` through account-map; there is no account-map here, so the pattern is
   written out. `AWSReservedSSO_<set>_*` also matches a permission set whose name is `<set>_<more>`
-  in that account, so don't name a permission set after another one plus `_`.
+  in that account, so don't name a permission set after another one plus `_`. The pattern takes a
+  permission-set name of letters and digits only (Identity Center also allows `_+=,.@-`); a name
+  with other characters is rejected, not widened. The validation is the guard here, not the
+  operator: `ArnLike` and `ArnEquals` both honour `*` and `?` in a trusted ARN.
 - All the buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.
 - Replication (`s3_replication_enabled`, `replica_region`; Cloud Posse tfstate-backend's
   `s3_replication_enabled`): every object, `.tflock` files and delete markers included, goes to
