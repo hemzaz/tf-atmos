@@ -350,12 +350,22 @@ spec:
           # in an eu- region as GDPR-scoped (its tags must say gdpr, its state
           # stay in the EU backend), which only the prod-eu account's stacks
           # are: so no dev or staging stack in an EU region (derived from owner
-          # decision B5's residency rule).
+          # decision B5's residency rule). One exception (owner, 2026-11-03):
+          # a core stack of stage audit or security in eu-west-1, in its own
+          # shared core account, its state in the EU backend (the template's
+          # EU branch). The one list is scripts/stack-wiring.py's
+          # EU_CORE_STAGES/EU_CORE_REGIONS (the wire hook re-validates).
           eu() { case "$1" in eu-*) echo yes ;; *) echo no ;; esac; }
           gdpr=no
           [ "$account" != "prod-eu" ] || gdpr=yes
-          [ "$(eu "{{ .Answers.region }}")" = "$gdpr" ] \
-            || fail "account $account and region {{ .Answers.region }} disagree: the EU regions are exactly the prod-eu account's (GDPR)"
+          eu_core=no
+          {{- if eq .Answers.profile "core" }}
+            case "{{ .Answers.stage }}:{{ .Answers.region }}" in
+              audit:eu-west-1|security:eu-west-1) eu_core=yes ;;
+            esac
+          {{- end }}
+          [ "$eu_core" = yes ] || [ "$(eu "{{ .Answers.region }}")" = "$gdpr" ] \
+            || fail "account $account and region {{ .Answers.region }} disagree: the EU regions are exactly the prod-eu account's (GDPR), and core stages audit/security in eu-west-1"
           {{- if eq .Answers.profile "nonprod" }}
           # Only rendered for a nonprod stack, so a field its `when` hides
           # never reaches the shell.

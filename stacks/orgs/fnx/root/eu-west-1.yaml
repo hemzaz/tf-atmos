@@ -11,11 +11,11 @@
 # keys and roles never share a bucket, policy or name with the US ones.
 #
 # An EU stack points its settings.tfstate here, all of it
-# (stacks/orgs/fnx/_defaults.yaml). The bucket holds prod state only
+# (stacks/orgs/fnx/_defaults.yaml). The bucket holds prod state
 # (fnx-ew1-prod and its DR standby fnx-ec1-prod, both in the prod-eu
-# account), so this stack has the prod roles
-# (catalog/backend/roles/prod) and no read/write: check-state-keys.py fails a
-# role that matches no state.
+# account) and the EU core stacks' (fnx-ew1-audit, through root_write), so
+# this stack has the prod roles (catalog/backend/roles/prod) and no
+# read/write: check-state-keys.py fails a role that matches no state.
 #
 # Bootstrap (cold start, once), then the management account's eu-west-1
 # settings (aws-account-settings, below):
@@ -104,9 +104,22 @@ components:
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/OrganizationAccountAccessRole'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-apply'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-apply'
-          # This stack's own state (backend/main). No principals listed: the
-          # applying administrator only (stacks/catalog/backend/defaults.yaml).
+          # This stack's own state (backend/main) and the EU core stacks'
+          # (owner decision 2026-11-03: stages audit and security in
+          # eu-west-1, routed here by stacks/orgs/fnx/_defaults.yaml). The
+          # applying administrator is always trusted
+          # (stacks/catalog/backend/defaults.yaml); a core stack is applied
+          # with credentials in its own account, so that account's
+          # OrganizationAccountAccessRole is listed, as on fnx-ue1-root's
+          # root_write, until E4's Identity Center roles replace it. It also
+          # reaches this stack's state: the core_write split (E4c2) must cover
+          # this backend too before E4 grants any permission set in a core
+          # account (docs/OPERATIONS.md, State backend).
           root_write:
             object_key_patterns:
               - "*/fnx-ew1-root/*"
               - "*/fnx-ew1-root-*"
+              - "*/fnx-ew1-audit/*"
+              - "*/fnx-ew1-audit-*"
+            allowed_principal_arns:
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/OrganizationAccountAccessRole"
