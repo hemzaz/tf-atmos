@@ -6,12 +6,13 @@
 # and one DNS delegation role per stage (aws-iam-role/dns-delegation-<stage>),
 # from orgs/fnx/network/_defaults (catalog/aws-dns-primary/main), all disabled
 # while the apex and account IDs are placeholders; the Transit Gateway hub
-# later (QE6). Its state goes to fnx-ue1-root's bucket through the backend's
-# root role (stacks/orgs/fnx/_defaults.yaml), which trusts only the
-# management-account administrator, while the provider guard needs credentials
-# in the network account. So the PR that enables the first instance adds to
-# fnx-ue1-root's root_write this stack's pattern pair (check-state-keys.py) and
-# the network account's operator role in allowed_principal_arns.
+# later (QE6). One enabled instance: its stage defaults' aws-account-settings
+# (stacks/orgs/fnx/network/_defaults.yaml). Its state goes to fnx-ue1-root's
+# bucket through the backend's root role (stacks/orgs/fnx/_defaults.yaml),
+# whose root_write holds this stack's pattern pair (check-state-keys.py) and
+# trusts the network account's OrganizationAccountAccessRole: the provider
+# guard needs credentials in the network account, and that role is the way in
+# until E4's Identity Center roles.
 # =============================================================================
 
 import:
