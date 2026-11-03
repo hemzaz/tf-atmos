@@ -54,11 +54,11 @@ stack that depends on a GDPR-scoped one or names an `eu-` ARN in its vars.
 | `fnx-ue1-root` | `root/us-east-1.yaml` | management account: the US stacks' state backend (`backend/main`); not deployed by CI; plan-swept |
 | `fnx-ew1-root` | `root/eu-west-1.yaml` | management account: the EU stacks' state backend (`backend/main`, `eu-west-1`, replica `eu-central-1`) and the account's `eu-west-1` settings (`aws-account-settings`, deploy-full-stack's iam layer); not deployed by CI; plan-swept |
 | `fnx-gbl-root` | `root/global-region.yaml` | management account, global (`gbl`, Cloud Posse's global-region mixin): the accounts layer, deployed by `atmos workflow deploy -f deploy-accounts` after the backend cold start (docs/OPERATIONS.md, Bootstrap order): the Organization (`aws-organization`), its OUs (`aws-organizational-unit/core`, `/plat`, `/eu` under `plat`) and the management account's `aws-account-settings`; the member accounts (`aws-account/*`, until their real root-user emails) and SCPs (`aws-scp/*`, until E4's Identity Center roles) are disabled; not run by CI |
-| `fnx-ue1-security` | `security/us-east-1.yaml` | core security account (delegated admin of the org security services); no instances until Wave E5; not run by CI |
-| `fnx-ue1-audit` | `audit/us-east-1.yaml` | core audit account (log archive); no instances until Wave E5; not run by CI |
-| `fnx-ue1-network` | `network/us-east-1.yaml` | core network account (primary DNS zones, E6b; Transit Gateway hub later); no enabled instance yet; not run by CI |
-| `fnx-ue1-identity` | `identity/us-east-1.yaml` | core identity account (the teams people and automation assume roles from); no instances until Wave E4; not run by CI |
-| `fnx-ue1-artifacts` | `artifacts/us-east-1.yaml` | core artifacts account (shared build artifacts); no instances yet; not run by CI |
+| `fnx-ue1-security` | `security/us-east-1.yaml` | core security account (delegated admin of the org security services); `aws-account-settings` only (E3e), the rest in Wave E5; not run by CI |
+| `fnx-ue1-audit` | `audit/us-east-1.yaml` | core audit account (log archive); `aws-account-settings` only (E3e), the rest in Wave E5; not run by CI |
+| `fnx-ue1-network` | `network/us-east-1.yaml` | core network account (primary DNS zones, E6b; Transit Gateway hub later); `aws-account-settings` (E3e), primary DNS instances disabled until a real apex; not run by CI |
+| `fnx-ue1-identity` | `identity/us-east-1.yaml` | core identity account (the teams people and automation assume roles from); `aws-account-settings` only (E3e); not run by CI |
+| `fnx-ue1-artifacts` | `artifacts/us-east-1.yaml` | core artifacts account (shared build artifacts); `aws-account-settings` only (E3e); not run by CI |
 | `fnx-ue1-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
 | `fnx-ue1-local-localemu` | `local/us-east-1/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
 | `fnx-ue1-fixtures-<name>` | `fixtures/us-east-1/<name>.yaml` | one per `stacks/catalog/templates/` file, checked by CI, never deployed ([details](./docs/OPERATIONS.md#template-fixtures)) |
