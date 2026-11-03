@@ -1,0 +1,162 @@
+---
+##################################################
+# Catalog Configuration for IAM Identity Center
+##################################################
+# Vendored Cloud Posse aws-identity-center v4.0.1 (vendor.yaml, E4a1): the
+# human access of Cloud Posse's Evolution 4 (owner decision OQ1): permission
+# sets and account assignments, no aws-teams, no account-map. As its README
+# recommends, one instance in the management account's global stack
+# (fnx-gbl-root, Cloud Posse's core-gbl-root), not delegated to the identity
+# account, with the static account map (README "Basic Example").
+#
+# Identity Center itself is enabled by clickops in the management account
+# (README "Clickops"; no API creates an organization instance): the component
+# reads it (data.aws_ssoadmin_instances) and fails at plan without one. Its
+# home region is us-east-1, vars.region from the global-region mixin (owner
+# decision OQ6). That is a documented data-residency exemption for workforce
+# identity only: the directory holds staff names and emails, EU staff
+# included, in us-east-1; no customer data. fnx-gbl-root is not GDPR-scoped,
+# so check-data-residency.py has no rule to exempt (docs/OPERATIONS.md,
+# First-deploy inputs, Identity Center).
+#
+# account_map: the static map (account_map_enabled false, never the
+# account-map remote state: upstream's providers.tf bypasses it, and E4 vendors
+# no account-map), from the abstract account-map-bypass: full_account_map with
+# <tenant>-<account> keys and root_account_account_name <tenant>-root (OQ5).
+# account_assignments are keyed by those names. A key not in the map fails the
+# plan at local.account_map[...] (main.tf), but only after the Identity Center
+# data source, which the plan sweep never gets past; so the preflight
+# (check-first-deploy-inputs.py, lint) fails it, disabled instance included.
+#
+# No account-verification mixin: unlike the account-map-bypass providers mixin
+# components (aws-dns-*, aws-iam-role), this one keeps upstream's providers.tf,
+# and the stack's provider guard (terraform.providers.aws.allowed_account_ids,
+# stacks/orgs/fnx/_defaults.yaml) already refuses any account but the
+# management account, as for the other fnx-gbl-root components.
+#
+# Groups: the built-in Identity Center directory (OQ4), Cloud Posse's groups
+# created through `groups` (members are added in Identity Center, a
+# first-deploy input). An external IdP would move them to idp_groups.
+#
+# Permission sets: upstream creates its whole set (AdministratorAccess,
+# PowerUserAccess, ReadOnlyAccess, Billing*, DNSAdministratorAccess,
+# RootAccess) whenever the instance is enabled; only the assignments below
+# grant any. RootAccess stays unassigned (OQ8, deferred past E5). The
+# Terraform* sets come from the tf_access_* inputs below.
+#
+# Disabled in fnx-gbl-root until Identity Center is enabled and every account
+# it assigns exists with its real ID (the preflight's MAP_CONSUMERS makes
+# placeholder core accounts fatal for it), and until a core state role that
+# does not reach the root stacks' state replaces root-role below (E4c2,
+# core_write; docs/OPERATIONS.md, State backend): deploy-accounts' last phase
+# applies it.
+##################################################
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-identity-center/defaults:
+      metadata:
+        component: aws-identity-center
+        type: abstract
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: identity-center
+        # Explicit, though upstream's default: account-map is never enabled.
+        account_map_enabled: false
+        groups:
+          - Managers
+          - DevOps
+          - Developers
+          - BillingAdmin
+        # The Terraform permission sets (policy-TerraformAccess.tf): Plan,
+        # Apply and State on the backend below, and the same three, suffixed,
+        # per additional backend. House deviation: Cloud Posse has one state
+        # role per backend; here backend/main splits its access roles by stage
+        # (stacks/orgs/fnx/_defaults.yaml), and the EU stacks have their own
+        # backend in fnx-ew1-root, so the dev/staging write role is the main
+        # backend and prod, core and the EU backend are additional ones
+        # (TerraformApplyAccess-Prod, -Core, -Eu). Native S3 locking: no
+        # DynamoDB table. The backends' trust of these roles is E4c2's.
+        tf_access_bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
+        tf_access_role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-role"
+        tf_access_additional_backends:
+          prod:
+            bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
+            role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
+          # The core stages' state is on root-role today, which also reaches
+          # the root stacks' state: E4c2's core_write replaces it here.
+          core:
+            bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
+            role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-root-role"
+          # fnx-ew1-root's backend (the EU stacks' settings.tfstate, repeated:
+          # this stack reads only its own settings), its prod-eu write role.
+          eu:
+            bucket_arn: "arn:aws:s3:::{{ .settings.context.tenant }}-ew1-terraform-state"
+            role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.context.tenant }}-ew1-terraform-backend-prod-role"
+        # Who gets which set where (E4 plan, Design): Managers on
+        # AdministratorAccess everywhere; DevOps on AdministratorAccess except
+        # the management account; Developers on TerraformApplyAccess in dev,
+        # TerraformPlanAccess in staging and prod (each on its backend's set),
+        # TerraformStateAccess in the core accounts; BillingAdmin on
+        # BillingAdministratorAccess in the management account.
+        account_assignments:
+          '{{ .settings.context.tenant }}-root':
+            groups:
+              Managers: &administrator
+                permission_sets:
+                  - AdministratorAccess
+              BillingAdmin:
+                permission_sets:
+                  - BillingAdministratorAccess
+          '{{ .settings.context.tenant }}-audit':
+            groups: &core
+              Managers: *administrator
+              DevOps: *administrator
+              Developers:
+                permission_sets:
+                  - TerraformStateAccess-Core
+          '{{ .settings.context.tenant }}-security':
+            groups: *core
+          '{{ .settings.context.tenant }}-network':
+            groups: *core
+          '{{ .settings.context.tenant }}-identity':
+            groups: *core
+          '{{ .settings.context.tenant }}-artifacts':
+            groups: *core
+          '{{ .settings.context.tenant }}-dev':
+            groups:
+              Managers: *administrator
+              DevOps: *administrator
+              Developers:
+                permission_sets:
+                  - TerraformApplyAccess
+          '{{ .settings.context.tenant }}-staging':
+            groups:
+              Managers: *administrator
+              DevOps: *administrator
+              Developers:
+                permission_sets:
+                  - TerraformPlanAccess
+          '{{ .settings.context.tenant }}-prod':
+            groups:
+              Managers: *administrator
+              DevOps: *administrator
+              Developers:
+                permission_sets:
+                  - TerraformPlanAccess-Prod
+          '{{ .settings.context.tenant }}-prod-eu':
+            groups:
+              Managers: *administrator
+              DevOps: *administrator
+              Developers:
+                permission_sets:
+                  - TerraformPlanAccess-Eu
+        tags:
+          Component: "IdentityCenter"

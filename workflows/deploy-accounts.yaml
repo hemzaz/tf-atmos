@@ -14,7 +14,7 @@
 # settings.account_map, re-apply the backend (its access_roles name the new
 # accounts' roles), then the account stacks.
 #
-# Six phases, each planned, confirmed, then applied from the saved plan.
+# Seven phases, each planned, confirmed, then applied from the saved plan.
 # check-deploy-layers.py fails a !terraform.state read of an instance planned
 # in the same or a later phase (a phase plans everything before applying
 # anything), so a reader follows what it reads:
@@ -27,13 +27,16 @@
 #                     so no account lands in an OU without its guardrails
 #   6. settings       the management account's aws-account-settings (reads
 #                     nothing; deploy-full-stack's iam layer selects it too)
+#   7. identity-center aws-identity-center (E4a2): people's permission sets and
+#                     account assignments, after the accounts it assigns
+#                     (catalog/aws-identity-center; disabled, so no match yet)
 # A disabled instance is in no phase; an empty phase plans "No components
 # matched". check-deploy-layers.py (validate-all) requires this workflow to
 # select every enabled instance of the accounts layer's root modules
 # (ACCOUNTS_COMPONENTS), and deploy-full-stack.yaml to select none of them.
 workflows:
   deploy:
-    description: "Deploy the accounts layer of fnx-gbl-root: organization, OUs, SCPs, member accounts, then the management account's settings"
+    description: "Deploy the accounts layer of fnx-gbl-root: organization, OUs, SCPs, member accounts, the management account's settings, then Identity Center"
     # The default; -s on the command line wins over it. refuse-non-accounts
     # stops a stack without an aws-organization instance.
     stack: fnx-gbl-root
@@ -198,6 +201,20 @@ workflows:
       - name: deploy-settings
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "aws-account-settings"'
+
+      - name: plan-identity-center
+        type: atmos
+        command: terraform plan --query '.metadata.component == "aws-identity-center"'
+      - name: confirm_identity_center
+        type: confirm
+        prompt: Apply the Identity Center plan above (permission sets and who gets them in which account)?
+        default: false
+      - name: guard-identity-center
+        type: shell
+        command: test "{{ .steps.confirm_identity_center.value }}" = "true" || { echo "Deployment cancelled before Identity Center."; exit 1; }
+      - name: deploy-identity-center
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "aws-identity-center"'
       - name: next
         type: alert
         level: info

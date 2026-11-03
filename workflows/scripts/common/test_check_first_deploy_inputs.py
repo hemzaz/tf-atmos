@@ -236,6 +236,15 @@ class StackNoticeTest(unittest.TestCase):
             "component": "security-monitoring", "enabled": False, "security_email_subscriptions": []})
         self.assertEqual(self.notices(stacks, "fnx-ue1-dev"), [])
 
+    def test_enabled_identity_center_notes_its_home_region(self):
+        stacks = clean()
+        stacks["fnx-gbl-root"] = stack("root", MGMT, ic={"component": "aws-identity-center", "region": "us-east-1"})
+        notes = [f for f in preflight.check(stacks) if f.row == "Identity Center"]
+        self.assertEqual([(f.stack, f.level) for f in notes], [("fnx-gbl-root", "notice")])
+        self.assertIn("us-east-1", notes[0].detail)
+        stacks["fnx-gbl-root"] = stack("root", MGMT, ic={"component": "aws-identity-center", "enabled": False})
+        self.assertEqual([f for f in preflight.check(stacks) if f.row == "Identity Center"], [])
+
     def test_budget_notice_names_the_amount_and_the_tag_per_stack(self):
         stacks = clean()
         stacks["fnx-ew1-prod"] = stack("prod", "555555555555", cost_main={
@@ -393,6 +402,10 @@ class CoreAccountTest(unittest.TestCase):
         self.assertEqual(sorted(f.key.rsplit(".", 1)[-1] for f in found), ["audit", "identity"])
         self.assertTrue(all(f.stack == "repository" and f.row == "Account IDs" for f in found))
 
+    def test_placeholder_core_accounts_fail_for_identity_center(self):
+        found = errors(self.with_map("aws-identity-center", network="123456789012"), ["fnx-ue1-dev"])
+        self.assertEqual([f.key.rsplit(".", 1)[-1] for f in found], ["network"])
+
     def test_placeholder_core_accounts_are_a_notice_for_the_backend_bootstrap(self):
         stacks = self.with_map(audit="123456789012", artifacts=None)
         self.assertEqual(errors(stacks, ["fnx-ue1-root"]), [])
@@ -469,6 +482,7 @@ class StaticAccountMapTest(unittest.TestCase):
               "audit_account_account_name": "fnx-audit"}
 
     DRIFTED = {**STATIC, "audit_account_account_name": "fnx-security"}
+    MAPPED = next(iter(STATIC["full_account_map"]))
 
     def stacks(self, account_map, enabled=False):
         stacks = CoreAccountTest.with_map()
@@ -493,6 +507,19 @@ class StaticAccountMapTest(unittest.TestCase):
             with self.subTest(account_map=account_map):
                 self.assertEqual([(f.level, f.stack, f.key, f.row) for f in self.failures(self.stacks(account_map))],
                                  [("fatal", "fnx-ue1-root", "access-analyzer/root vars.account_map", "Account IDs")])
+
+    def test_an_assignment_to_an_unmapped_account_is_fatal_on_a_disabled_instance(self):
+        stacks = self.stacks(self.STATIC)
+        ic = inst("root", env("root", MGMT), component="aws-identity-center", enabled=False,
+                  account_map=self.STATIC, account_assignments={self.MAPPED: {}, "fnx-secruity": {}})
+        ic["settings"]["static_account_map"] = self.STATIC
+        stacks["fnx-ue1-root"]["components"]["terraform"]["aws-identity-center"] = ic
+        found = self.failures(stacks)
+        self.assertEqual([(f.level, f.key) for f in found],
+                         [("fatal", "aws-identity-center vars.account_assignments")])
+        self.assertTrue(found[0].detail.startswith("fnx-secruity not in"), found[0].detail)
+        ic["vars"]["account_assignments"] = {self.MAPPED: {}}
+        self.assertEqual(self.failures(stacks), [])
 
     def run_main(self, stacks, *argv):
         out = io.StringIO()
