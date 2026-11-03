@@ -344,6 +344,48 @@ class DataResidencyTest(unittest.TestCase):
         replica["dependencies"]["components"] = [{"component": "rds/main", "stack": "fnx-ue1-prod"}]
         self.assertEqual(residency.check(stacks), [])
 
+    # EU core stacks (stack-wiring.py's EU_CORE_STAGES, E5a1): the guards admit fnx-ew1-audit in the
+    # shared audit account, but this check holds it to the same rules as fnx-ew1-prod, unchanged.
+    @staticmethod
+    def audit_stacks(eu=None, us=None):
+        return {"fnx-ew1-audit": stack(**{"aws-account-settings": eu or instance()}),
+                "fnx-ue1-audit": stack(**{"aws-account-settings": us or instance(region="us-east-1", compliance=US)})}
+
+    def test_eu_audit_stack_with_eu_state_and_gdpr_tag_passes(self):
+        self.assertEqual(residency.check(self.audit_stacks()), [])
+
+    def test_eu_audit_stack_on_the_us_backend_fails(self):
+        eu = instance()
+        eu["settings"]["tfstate"] = {"region": "us-east-1", "replica_region": "us-east-2"}
+        eu["backend"] = eu["remote_state_backend"] = {"region": "us-east-1"}
+        self.assertEqual(residency.check(self.audit_stacks(eu=eu)), [
+            f"fnx-ew1-audit: aws-account-settings settings.tfstate.region is 'us-east-1', {OUTSIDE}",
+            f"fnx-ew1-audit: aws-account-settings settings.tfstate.replica_region is 'us-east-2', {OUTSIDE}",
+            f"fnx-ew1-audit: aws-account-settings backend.s3.region is 'us-east-1', {OUTSIDE}",
+            f"fnx-ew1-audit: aws-account-settings remote_state_backend.s3.region is 'us-east-1', {OUTSIDE}",
+        ])
+
+    def test_eu_audit_stack_without_gdpr_tag_fails(self):
+        self.assertEqual(residency.check(self.audit_stacks(eu=instance(compliance=US))), [
+            "fnx-ew1-audit: aws-account-settings is in a GDPR-scoped stack but its tags.Compliance does not "
+            "contain 'gdpr'",
+        ])
+
+    def test_eu_audit_stack_depending_on_the_us_audit_stack_fails(self):
+        eu = instance(deps=[{"component": "aws-account-settings", "stack": "fnx-ue1-audit"}])
+        self.assertEqual(residency.check(self.audit_stacks(eu=eu)), [
+            "fnx-ew1-audit: aws-account-settings depends on aws-account-settings in fnx-ue1-audit, "
+            "which is not GDPR-scoped",
+        ])
+
+    def test_us_audit_stack_depending_on_the_eu_audit_stack_fails(self):
+        us = instance(region="us-east-1", compliance=US,
+                      deps=[{"component": "aws-account-settings", "stack": "fnx-ew1-audit"}])
+        self.assertEqual(residency.check(self.audit_stacks(us=us)), [
+            "fnx-ue1-audit: aws-account-settings depends on aws-account-settings in fnx-ew1-audit, which is "
+            "GDPR-scoped: EU data may not be read outside the EU",
+        ])
+
     def test_us_stack_depending_on_itself_or_a_us_stack_passes(self):
         own = instance(region="us-east-1", compliance=US, deps=[{"component": "vpc"}])
         stacks = {"fnx-ue1-prod": stack(vpc=instance(region="us-east-1", compliance=US), **{"eks/main": own}),

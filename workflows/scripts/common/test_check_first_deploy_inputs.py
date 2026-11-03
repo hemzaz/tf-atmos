@@ -321,6 +321,43 @@ class AccountModelTest(unittest.TestCase):
         self.assertEqual({f.row for f in found}, {"Account IDs"})
         self.assertFalse(any("never share an account" in f.detail for f in found))
 
+    @staticmethod
+    def core_pair(stage, region="eu-west-1"):
+        """fnx-ue1-<stage> and its GDPR-scoped EU twin in <region>, both in the stage's core account."""
+        account = ACCOUNTS[stage]
+        eu = stack(stage, account, aws_account_settings={
+            "component": "aws-account-settings", "region": region, "tags": {"Compliance": "pci-sox-gdpr"}})
+        us = stack(stage, account, aws_account_settings={"component": "aws-account-settings",
+                                                          "region": "us-east-1"})
+        code = {"eu-west-1": "ew1", "eu-central-1": "ec1"}[region]
+        return {f"fnx-ue1-{stage}": us, f"fnx-{code}-{stage}": eu}
+
+    def shared(self, stacks, only=None):
+        return sorted(f.stack for f in errors(stacks, only) if "never share an account" in f.detail)
+
+    def test_eu_core_stacks_share_their_core_account(self):
+        for stage in ("audit", "security"):
+            with self.subTest(stage=stage):
+                self.assertEqual(errors({**clean(), **self.core_pair(stage)}), [])
+
+    def test_other_eu_core_stacks_or_regions_still_fail(self):
+        for stage, region in (("network", "eu-west-1"), ("identity", "eu-west-1"), ("artifacts", "eu-west-1"),
+                              ("audit", "eu-central-1"), ("security", "eu-central-1")):
+            with self.subTest(stage=stage, region=region):
+                stacks = {**clean(), **self.core_pair(stage, region)}
+                self.assertEqual(self.shared(stacks), sorted(n for n in stacks if n.endswith(f"-{stage}")))
+
+    def test_eu_audit_stack_sharing_a_workload_account_fails(self):
+        stacks = {**clean(), **self.core_pair("audit")}
+        stacks["fnx-ue1-dev"] = stack("dev", ACCOUNTS["audit"])
+        self.assertEqual(self.shared(stacks), ["fnx-ew1-audit", "fnx-ue1-dev"])
+        self.assertEqual(self.shared(stacks, ["fnx-ew1-audit"]), ["fnx-ew1-audit"])
+
+    def test_eu_prod_sharing_the_audit_account_still_fails(self):
+        stacks = {**clean(), **self.core_pair("audit")}
+        stacks["fnx-ew1-prod"] = self.eu_prod(ACCOUNTS["audit"])
+        self.assertEqual(self.shared(stacks), ["fnx-ew1-prod", "fnx-ue1-audit"])
+
     def test_placeholders_are_not_double_reported_as_shared(self):
         stacks = clean()
         for name, stage in (("fnx-ue1-dev", "dev"), ("fnx-ue1-staging", "staging")):

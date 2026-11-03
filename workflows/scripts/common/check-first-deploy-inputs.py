@@ -24,7 +24,9 @@ Errors (fatal unless --warn):
   - a workload account equal to the management account
   - two stages sharing an account (one account per stage)
   - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
-    region; EU prod, account prod-eu) sharing an account with a non-GDPR one
+    region; EU prod, account prod-eu) sharing an account with a non-GDPR one,
+    except an EU core stack (stack-wiring.py's EU_CORE_STAGES in EU_CORE_REGIONS)
+    and a stack of its own stage: one shared core account (owner, 2026-11-03)
   - in settings.account_map (one map, the same on every stack): a value that is
     not 12 digits, two core accounts (CORE_ACCOUNTS) sharing an ID, a workload
     account or a target stack's account_id in a core account; and a missing or
@@ -71,6 +73,12 @@ _spec = importlib.util.spec_from_file_location(
 )
 residency = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(residency)
+# stack-wiring.py's EU_CORE_STAGES and EU_CORE_REGIONS, the one list of the EU core stacks.
+_spec = importlib.util.spec_from_file_location(
+    "stack_wiring", pathlib.Path(__file__).resolve().parents[3] / "scripts" / "stack-wiring.py"
+)
+wiring = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(wiring)
 
 DOCS = "docs/OPERATIONS.md#first-deploy-inputs"
 # Never deployed to a real account: the emulator lanes and the template fixtures.
@@ -293,10 +301,20 @@ def account_findings(stacks: dict, targets: set) -> list:
     return findings
 
 
+def eu_core_pair(eu: dict, us: dict) -> bool:
+    """A GDPR-scoped EU core stack (a stage of stack-wiring.py's EU_CORE_STAGES, its EU regions all in
+    EU_CORE_REGIONS) and a non-GDPR stack of the same stage: one shared core account (owner, 2026-11-03)."""
+    stage = environment(eu).get("_stage")
+    regions = {str((i.get("vars") or {}).get("region") or "") for i in residency.instances(eu).values()}
+    return (stage in wiring.EU_CORE_STAGES and environment(us).get("_stage") == stage
+            and {r for r in regions if r.startswith("eu-")} <= set(wiring.EU_CORE_REGIONS))
+
+
 def residency_account_findings(stacks: dict, targets: set) -> list:
     """A GDPR-scoped workload stack (check-data-residency.py's scope) sharing an account with a
     non-GDPR one: EU prod is its own account (owner decision, B5), and the two stacks would both
-    create the account's singletons (the GitHub OIDC provider)."""
+    create the account's singletons (the GitHub OIDC provider). An EU core stack and a stack of its
+    own stage are the exception (eu_core_pair)."""
     findings, scoped, other = [], {}, {}
     for name in sorted(stacks):
         env = environment(stacks[name])
@@ -306,7 +324,8 @@ def residency_account_findings(stacks: dict, targets: set) -> list:
         (scoped if residency.gdpr_scoped(stacks[name]) else other).setdefault(account, []).append(name)
     for account, names in sorted(scoped.items()):
         for us in other.get(account, []):
-            for name, peer in [(n, us) for n in names] + [(us, n) for n in names]:
+            shared = [n for n in names if not eu_core_pair(stacks[n], stacks[us])]
+            for name, peer in [(n, us) for n in shared] + [(us, n) for n in shared]:
                 if name in targets:
                     findings.append(Finding(
                         "error", name, "settings.environment.account_id",
