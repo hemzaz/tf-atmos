@@ -347,6 +347,12 @@ class AccountModelTest(unittest.TestCase):
                 stacks = {**clean(), **self.core_pair(stage, region)}
                 self.assertEqual(self.shared(stacks), sorted(n for n in stacks if n.endswith(f"-{stage}")))
 
+    def test_gdpr_core_stack_without_an_eu_region_still_fails(self):
+        # An empty set of EU regions is no EU core stack: the share stays an error.
+        stacks = {**clean(), **self.core_pair("audit")}
+        stacks["fnx-ew1-audit"]["components"]["terraform"]["aws_account_settings"]["vars"]["region"] = "us-east-2"
+        self.assertEqual(self.shared(stacks), ["fnx-ew1-audit", "fnx-ue1-audit"])
+
     def test_eu_audit_stack_sharing_a_workload_account_fails(self):
         stacks = {**clean(), **self.core_pair("audit")}
         stacks["fnx-ue1-dev"] = stack("dev", ACCOUNTS["audit"])

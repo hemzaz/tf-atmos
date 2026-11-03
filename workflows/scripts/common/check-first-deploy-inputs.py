@@ -306,8 +306,9 @@ def eu_core_pair(eu: dict, us: dict) -> bool:
     EU_CORE_REGIONS) and a non-GDPR stack of the same stage: one shared core account (owner, 2026-11-03)."""
     stage = environment(eu).get("_stage")
     regions = {str((i.get("vars") or {}).get("region") or "") for i in residency.instances(eu).values()}
+    eu_regions = {r for r in regions if r.startswith("eu-")}
     return (stage in wiring.EU_CORE_STAGES and environment(us).get("_stage") == stage
-            and {r for r in regions if r.startswith("eu-")} <= set(wiring.EU_CORE_REGIONS))
+            and bool(eu_regions) and eu_regions <= set(wiring.EU_CORE_REGIONS))
 
 
 def residency_account_findings(stacks: dict, targets: set) -> list:

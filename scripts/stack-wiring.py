@@ -102,7 +102,7 @@ def validate(tenant: str, stage: str, account: str, region: str, stack: str) -> 
     eu_core = stage in EU_CORE_STAGES and region in EU_CORE_REGIONS
     if (account == "prod-eu") != region.startswith("eu-") and not eu_core:
         fail(f"account {account!r} and region {region!r} disagree: the EU regions are exactly the prod-eu"
-             f" account's, and core stages {'/'.join(EU_CORE_STAGES)}' own in {'/'.join(EU_CORE_REGIONS)}")
+             f" account's, and core stages {'/'.join(EU_CORE_STAGES)} in {'/'.join(EU_CORE_REGIONS)}")
     if not re.fullmatch(rf"{tenant}-[a-z]{{2}}[a-z]?[0-9]-{stage}", stack):
         fail(f"stack {stack!r} is not {tenant}-<region code>-{stage}")
     return account
@@ -186,10 +186,13 @@ def backend_file(tenant: str, region: str) -> str:
     return f"stacks/orgs/{tenant}/root/{BACKENDS[region.startswith('eu-')][0]}.yaml"
 
 
-def plan_core(text: str, account: str, stack: str) -> Optional[tuple[list[tuple[int, list[str]]], list[str]]]:
+def plan_core(text: str, account: str, stack: str,
+              may_lack_principals: bool = False) -> Optional[tuple[list[tuple[int, list[str]]], list[str]]]:
     """A core stack's insertions into root_write (its pattern pair); None while its account's operator
-    role is not on root_write (the account is not onboarded; a root_write without a principal list,
-    as fnx-ew1-root's before its first core stack, trusts none)."""
+    role is not on root_write (the account is not onboarded). Only the EU backend's root_write may have
+    no principal list yet (fnx-ew1-root's, before its first core stack, trusts none:
+    may_lack_principals); a US root_write without one is refused, so a deleted key is never read as
+    "not onboarded"."""
     lines = text.splitlines(keepends=True)
     newline = "\r\n" if "\r\n" in text else "\n"
     access = [i for i, line in enumerate(lines) if re.fullmatch(r"access_roles:", line.strip())]
@@ -200,7 +203,8 @@ def plan_core(text: str, account: str, stack: str) -> Optional[tuple[list[tuple[
     everywhere = every_value(lines)
     inserts, done = [], []
 
-    if not any(re.fullmatch(r"allowed_principal_arns:", lines[i].strip()) for i in range(role + 1, end)):
+    if may_lack_principals and not any(
+            re.fullmatch(r"allowed_principal_arns:", lines[i].strip()) for i in range(role + 1, end)):
         return None
     key = find(lines, role + 1, end, r"allowed_principal_arns:", "allowed_principal_arns: lists in root_write")
     found, _ = items(lines, key)
@@ -345,7 +349,8 @@ def wire(root: pathlib.Path, tenant: str, stage: str, account: str, region: str,
         # Bytes as they are: no newline translation.
         text = path.read_bytes().decode("utf-8")
         try:
-            planned = plan_core(text, account, stack) if stage in CORE_STAGES else plan(text, stage, account, stack)
+            planned = (plan_core(text, account, stack, may_lack_principals=region.startswith("eu-"))
+                       if stage in CORE_STAGES else plan(text, stage, account, stack))
         except Refused as error:
             raise Refused(f"{rel}: {error}\n{manual(rel, stage, account, stack)}") from None
         if planned is None:

@@ -323,6 +323,15 @@ class Refuse(Copy):
         self.assertEqual(self.text(rel), self.before)
         return str(caught.exception)
 
+    def test_us_root_write_without_principals_is_refused_not_unonboarded(self) -> None:
+        # Only the EU root_write may lack a principal list; a US one that lost its key (a typo or a
+        # deletion) must fail, not read as "not onboarded" and exit 0.
+        key = ('            allowed_principal_arns:\n'
+               '              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}')
+        self.mutate(US, key, key.replace("allowed_principal_arns:", "allowed_principal_arn:"))
+        self.refused_unchanged(US, ("fnx", "audit", "", "us-west-2", "fnx-uw2-audit"),
+                               "allowed_principal_arns: lists in root_write")
+
     def test_missing_anchor_prints_the_manual_edit(self) -> None:
         self.mutate(US, "object_key_patterns: &non_prod_state", "object_key_patterns:")
         error = self.refused_unchanged(US, ("fnx", "dev", "", "us-west-2", "fnx-uw2-dev"),
