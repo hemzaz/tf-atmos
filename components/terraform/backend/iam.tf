@@ -9,8 +9,18 @@
  * ARNs and the condition does the narrowing. That is what lets the backend
  * trust roles that do not exist yet (the CI roles of iam/ci are created
  * after this component, and a role named directly as a principal must exist
- * when the trust policy is written). The condition uses ArnEquals rather than
- * upstream's ArnLike because allowed_principal_arns may not contain wildcards.
+ * when the trust policy is written). The condition is ArnLike, as upstream:
+ * on an exact ARN it matches like ArnEquals, and it lets an Identity Center
+ * role be named by its reserved-path pattern (arn:aws:iam::<account>:role/
+ * aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<set>_*), whose hash suffix
+ * is unknown until the permission set is provisioned in that account.
+ * Upstream builds those patterns from allowed_permission_sets (account-map's
+ * roles-to-principals, with the wildcard after "sso.amazonaws.com" instead of
+ * after its "/") and accepts any other wildcard in allowed_principal_arns.
+ * Deviation: there is no account-map here, so the pattern is written into
+ * allowed_principal_arns, and the variable's validation admits no wildcard
+ * but that one pattern (one account, one permission set; only the region
+ * segment and the hash are wildcarded).
  *
  * Also as upstream, the principal running Terraform is always allowed
  * (`caller_arn` below): the administrator who bootstraps this component must
@@ -76,14 +86,14 @@ data "aws_iam_policy_document" "access_role_assume" {
     effect  = "Allow"
     actions = ["sts:AssumeRole", "sts:SetSourceIdentity", "sts:TagSession"]
 
-    # Any principal in these accounts, narrowed to exactly the allowed ARNs below
+    # Any principal in these accounts, narrowed to the allowed ARNs (and SSO patterns) below
     principals {
       type        = "AWS"
       identifiers = local.access_role_principal_accounts[each.key]
     }
 
     condition {
-      test     = "ArnEquals"
+      test     = "ArnLike"
       variable = "aws:PrincipalArn"
       values   = local.access_role_principal_arns[each.key]
     }

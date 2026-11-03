@@ -229,10 +229,10 @@ run "trust_is_limited_to_named_principals_and_the_caller" {
     condition = alltrue([
       for key in keys(var.access_roles) :
       one(data.aws_iam_policy_document.access_role_assume[key].statement).condition != null
-      && one(one(data.aws_iam_policy_document.access_role_assume[key].statement).condition).test == "ArnEquals"
+      && one(one(data.aws_iam_policy_document.access_role_assume[key].statement).condition).test == "ArnLike"
       && one(one(data.aws_iam_policy_document.access_role_assume[key].statement).condition).variable == "aws:PrincipalArn"
     ])
-    error_message = "Account-root principals are only acceptable when narrowed by an ArnEquals aws:PrincipalArn condition."
+    error_message = "Account-root principals are only acceptable when narrowed by an ArnLike aws:PrincipalArn condition (upstream's operator; on an exact ARN it matches like ArnEquals)."
   }
 
   assert {
@@ -342,6 +342,165 @@ run "rejects_account_root_principal" {
         role_name              = "fnx-terraform-backend-role"
         write_enabled          = true
         allowed_principal_arns = ["arn:aws:iam::222222222222:root"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_roles]
+}
+
+# Identity Center roles (E4c1): the one wildcard admitted is the reserved-path
+# pattern for one account and one permission set, with the hash (and the
+# optional region segment) wildcarded. Exact ARNs, an SSO role's included, still pass.
+run "accepts_identity_center_role_patterns" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name     = "fnx-terraform-backend-role"
+        write_enabled = true
+        allowed_principal_arns = [
+          "arn:aws:iam::222222222222:role/fnx-ue1-dev-ci-apply",
+          "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*",
+          "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_*",
+          "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_TerraformPlanAccess_0123456789abcdef",
+          "arn:aws:iam::333333333333:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*",
+        ]
+      }
+    }
+  }
+
+  assert {
+    condition = local.access_role_principal_arns["write"] == tolist(sort([
+      "arn:aws:iam::111111111111:role/admin",
+      "arn:aws:iam::222222222222:role/fnx-ue1-dev-ci-apply",
+      "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*",
+      "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_*",
+      "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_TerraformPlanAccess_0123456789abcdef",
+      "arn:aws:iam::333333333333:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*",
+    ]))
+    error_message = "An Identity Center role pattern for one account and permission set is trusted as written, beside the exact ARNs and the caller."
+  }
+
+  assert {
+    condition     = local.access_role_principal_accounts["write"] == tolist(["arn:aws:iam::111111111111:root", "arn:aws:iam::222222222222:root", "arn:aws:iam::333333333333:root"])
+    error_message = "A pattern's account (never a wildcard) becomes a trust principal, as an exact ARN's does."
+  }
+}
+
+# An account wildcard would trust that permission set in every account.
+run "rejects_identity_center_account_wildcard" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name              = "fnx-terraform-backend-role"
+        write_enabled          = true
+        allowed_principal_arns = ["arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_roles]
+}
+
+# A permission-set wildcard would trust every permission set in the account.
+run "rejects_identity_center_permission_set_wildcard" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name              = "fnx-terraform-backend-role"
+        write_enabled          = true
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_*_*"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_roles]
+}
+
+# A permission-set prefix is a permission-set wildcard too.
+run "rejects_identity_center_permission_set_prefix_wildcard" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name              = "fnx-terraform-backend-role"
+        write_enabled          = true
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_Terraform*_*"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_roles]
+}
+
+# The reserved path alone would trust every Identity Center role in the account.
+run "rejects_identity_center_wildcard_without_a_permission_set" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name              = "fnx-terraform-backend-role"
+        write_enabled          = true
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/*"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_roles]
+}
+
+# Outside /aws-reserved/sso.amazonaws.com/ a role of that name is not an Identity Center role.
+run "rejects_identity_center_wildcard_outside_the_reserved_path" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name              = "fnx-terraform-backend-role"
+        write_enabled          = true
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/AWSReservedSSO_TerraformApplyAccess_*"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_roles]
+}
+
+# Upstream's form (wildcard straight after sso.amazonaws.com) also matches other reserved paths.
+run "rejects_identity_center_wildcard_glued_to_the_service_path" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name              = "fnx-terraform-backend-role"
+        write_enabled          = true
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com*/AWSReservedSSO_TerraformApplyAccess_*"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_roles]
+}
+
+# ArnLike treats "?" as a wildcard too; only the trailing "_*" may stand for the hash.
+run "rejects_identity_center_single_character_wildcard" {
+  command = plan
+
+  variables {
+    access_roles = {
+      write = {
+        role_name              = "fnx-terraform-backend-role"
+        write_enabled          = true
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_TerraformApplyAccess_????????????????"]
       }
     }
   }
