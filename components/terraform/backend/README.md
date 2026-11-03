@@ -4,8 +4,8 @@ The Terraform state backend: the `fnx-terraform-state` S3 bucket (versioned, SSE
 key, TLS-only), log buckets, the state access roles, and, with `s3_replication_enabled`, a
 cross-region replica of the state bucket. Locking is S3-native `use_lockfile`; there
 is no DynamoDB table. Modelled on Cloud Posse `aws-tfstate-backend`'s `access_roles` (account-root
-trust narrowed by exact `aws:PrincipalArn`, so not-yet-created roles can be trusted; the applying
-caller is always trusted).
+trust narrowed by an `ArnLike` `aws:PrincipalArn` condition, so not-yet-created roles can be trusted;
+the applying caller is always trusted).
 
 ## Wiring
 
@@ -69,6 +69,15 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
   (`main`) would share its state keys (`vpc/fnx-ue1-dev-main/...`), and `check-state-keys.py` fails that.
 - Every `allowed_principal_arns` entry must name the account its role lives in; the committed ARNs
   use placeholder account IDs (see [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#first-deploy-inputs)).
+- `allowed_principal_arns` takes no wildcard except an Identity Center role by its reserved path:
+  `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<PermissionSet>_*`
+  (or `.../sso.amazonaws.com/<region>/AWSReservedSSO_<PermissionSet>_*`). The role's hash suffix is
+  only known once the permission set is provisioned in the account, so the pattern trusts that
+  permission set's role in that one account. A wildcard in the account or the permission-set name is
+  rejected, and so is upstream's `sso.amazonaws.com*/` form. Cloud Posse builds the same pattern from
+  `allowed_permission_sets` through account-map; there is no account-map here, so the pattern is
+  written out. `AWSReservedSSO_<set>_*` also matches a permission set whose name is `<set>_<more>`
+  in that account, so don't name a permission set after another one plus `_`.
 - All the buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.
 - Replication (`s3_replication_enabled`, `replica_region`; Cloud Posse tfstate-backend's
   `s3_replication_enabled`): every object, `.tflock` files and delete markers included, goes to

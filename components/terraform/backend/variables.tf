@@ -61,7 +61,10 @@ variable "access_roles" {
     the key. A read-only role may also list object versions and read the bucket's versioning and
     replication settings (the disaster-recovery checks, workflows/scripts/dr).
     `allowed_principal_arns` are the exact IAM role/user ARNs that may assume the role (trusted
-    through an `aws:PrincipalArn` condition, so they need not exist yet); the principal running
+    through an ArnLike `aws:PrincipalArn` condition, so they need not exist yet), or an Identity
+    Center role pattern for one account and permission set
+    (`arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<set>_*`, or with
+    the region segment instead of the first `*`), the only wildcard accepted; the principal running
     Terraform is always added, as upstream, so an empty list (upstream's default) trusts only
     that caller. By convention the keys are `read`, `prod_read`, `write`, `prod_write` and
     `root_write`, which the backend_read_role_arn, backend_prod_read_role_arn, backend_role_arn,
@@ -96,13 +99,18 @@ variable "access_roles" {
   validation {
     # An IAM role or user ARN with an account ID and no wildcard. "*" and account roots
     # would trust every principal (in an account); that is what this component replaces.
+    # The one exception is an Identity Center role by its reserved-path pattern: one
+    # account, one permission set, and only the optional region segment and the hash
+    # suffix wildcarded (the trust condition is ArnLike; iam.tf). An account or
+    # permission-set wildcard is still rejected.
     condition = alltrue(flatten([
       for role in values(var.access_roles) : [
         for arn in role.allowed_principal_arns :
-        can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[\\w+=,.@/-]+$", arn)) && !strcontains(arn, "*")
+        (can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[\\w+=,.@/-]+$", arn)) && !strcontains(arn, "*"))
+        || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/aws-reserved/sso\\.amazonaws\\.com/(\\*|[a-z0-9-]+/)AWSReservedSSO_[A-Za-z0-9]+_\\*$", arn))
       ]
     ]))
-    error_message = "allowed_principal_arns entries must be exact IAM role or user ARNs (arn:aws:iam::<account>:role/<name>); \"*\", wildcards and account roots (arn:aws:iam::<account>:root) are rejected."
+    error_message = "allowed_principal_arns entries must be exact IAM role or user ARNs (arn:aws:iam::<account>:role/<name>), or an Identity Center role pattern for one account and permission set (arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<PermissionSet>_*); any other \"*\" or wildcard and account roots (arn:aws:iam::<account>:root) are rejected."
   }
 }
 
