@@ -10,7 +10,9 @@
 #
 # There are no scanner baselines: the security-scan gate fails on every
 # finding that is not fixed or suppressed inline in the resource
-# (#checkov:skip=<ID>:<reason>, #trivy:ignore:<ID> <reason>).
+# (#checkov:skip=<ID>:<reason>, #trivy:ignore:<ID> <reason>); a trivy finding in a
+# registry module a vendored component calls, which cannot carry one, gets a
+# path-scoped entry with its reason in .trivyignore.yaml.
 #
 # One trivy gate, in security-scan, not also in lint: both CI jobs run on the
 # same changed paths (terraform-ci.yml `changes`), and security-scan already
@@ -644,7 +646,7 @@ workflows:
             type: shell
             command: >-
               cache=$(mktemp -d); trap 'rm -rf "$cache"' EXIT;
-              trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests'
+              trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests' --ignorefile .trivyignore.yaml
               --format sarif --output reports/trivy.sarif
               --severity HIGH,CRITICAL --exit-code 1 components/terraform
           # Checkov only knows check severities with a Prisma Cloud API key; without
@@ -743,7 +745,7 @@ workflows:
             type: shell
             command: >-
               cache=$(mktemp -d); trap 'rm -rf "$cache"' EXIT;
-              trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests'
+              trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests' --ignorefile .trivyignore.yaml
               --format sarif --output reports/trivy.sarif
               --severity HIGH,CRITICAL --exit-code 0 components/terraform
           - name: checkov

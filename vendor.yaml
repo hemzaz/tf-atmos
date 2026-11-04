@@ -142,3 +142,32 @@ spec:
       targets:
         - "components/terraform/aws-identity-center"
       included_paths: ["**/*.tf", "**/*.md"]
+    # The organization trail's log bucket (audit account) and the AWS Config
+    # delivery bucket (E5a3). Upstream providers.tf (account-map iam-roles) is
+    # excluded; each gets Cloud Posse's account-map-bypass mixins instead.
+    - component: aws-cloudtrail-bucket
+      source: "github.com/cloudposse-terraform-components/aws-cloudtrail-bucket.git//src?ref={{ .Version }}"
+      version: "v1.540.0"
+      targets:
+        - "components/terraform/aws-cloudtrail-bucket"
+      included_paths: ["**/*.tf", "**/*.md"]
+      excluded_paths: ["**/providers.tf"]
+    - component: aws-config-bucket
+      source: "github.com/cloudposse-terraform-components/aws-config-bucket.git//src?ref={{ .Version }}"
+      version: "v1.535.1"
+      targets:
+        - "components/terraform/aws-config-bucket"
+      included_paths: ["**/*.tf", "**/*.md"]
+      excluded_paths: ["**/providers.tf"]
+    - component: aws-cloudtrail-bucket-mixins
+      source: "github.com/cloudposse-terraform-components/mixins.git//src/mixins?ref={{ .Version }}"
+      version: "v0.5.0"
+      targets:
+        - "components/terraform/aws-cloudtrail-bucket"
+      included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
+    - component: aws-config-bucket-mixins
+      source: "github.com/cloudposse-terraform-components/mixins.git//src/mixins?ref={{ .Version }}"
+      version: "v0.5.0"
+      targets:
+        - "components/terraform/aws-config-bucket"
+      included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
