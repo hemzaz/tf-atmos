@@ -18,6 +18,8 @@
 # IDs. Inline in the argument: an override file cannot add a local or a
 # variable. module.this.id is the bucket name, as upstream's own statements use.
 module "cloudtrail_s3_bucket" {
+  #checkov:skip=CKV_TF_1:an override block carries no source; Terraform merges it into main.tf's, which pins Cloud Posse's registry module to an exact version
+  #checkov:skip=CKV_TF_2:an override block carries no source; Terraform merges it into main.tf's, which pins Cloud Posse's registry module to an exact version
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
