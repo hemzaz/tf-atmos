@@ -30,34 +30,39 @@ terraform:
   #
   # Access goes through one of the backend's access roles (Cloud Posse
   # tfstate-backend access_roles), split by stage (state objects "*/<stack>/*" and "*/<stack>-*"):
-  #   <role_prefix>-role            read/write, dev/staging objects; the dev/staging CI apply roles
-  #                                 and the dev/staging accounts' OrganizationAccountAccessRole
-  #                                 until E4 (each reaches both stages' state, as the apply roles do)
-  #   <role_prefix>-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
-  #   <role_prefix>-prod-role       read/write, prod objects; the prod stacks' apply roles and the
-  #                                 prod account's OrganizationAccountAccessRole until E4 (EU: prod-eu's)
-  #   <role_prefix>-prod-read-role  read-only, prod objects; prod's plan role only
-  #   <role_prefix>-root-role       read/write, the root stacks' and the core stages' objects;
-  #                                 the administrator who applies backend/main, plus each
-  #                                 enabled core account's OrganizationAccountAccessRole until
-  #                                 E4 (so it reaches the root stacks' state until E5's core role)
+  #   <role_prefix>-role            read/write, dev/staging objects; the dev/staging CI apply roles,
+  #                                 the dev/staging accounts' Identity Center TerraformApplyAccess and
+  #                                 AdministratorAccess roles, and their OrganizationAccountAccessRole
+  #                                 until Identity Center is applied (each reaches both stages' state,
+  #                                 as the apply roles do)
+  #   <role_prefix>-read-role       read-only, dev/staging objects; the dev/staging CI plan roles and
+  #                                 the dev/staging accounts' TerraformPlanAccess roles
+  #   <role_prefix>-prod-role       read/write, prod objects; the prod stacks' apply roles, the prod
+  #                                 account's TerraformApplyAccess-Prod and AdministratorAccess roles
+  #                                 (EU: prod-eu's, -Eu), and its OrganizationAccountAccessRole until
+  #                                 Identity Center is applied
+  #   <role_prefix>-prod-read-role  read-only, prod objects; prod's plan role and the prod account's
+  #                                 TerraformPlanAccess-Prod role (EU: -Eu)
+  #   <role_prefix>-core-role       read/write, the core stages' objects; each core account's
+  #                                 TerraformApplyAccess-Core role (EU: -EuCore) and, until Identity
+  #                                 Center is applied, its OrganizationAccountAccessRole
+  #   <role_prefix>-root-role       read/write, the root stacks' objects only; the administrator
+  #                                 who applies backend/main
   # The role is per stack, not per job, so a job picks it with an environment
   # variable: TFSTATE_ACCESS=read selects the stage's read-only role, anything
   # else its read/write one. The plan-only CI jobs (terraform-ci.yml plan,
   # drift-detection.yml) set it and plan with -lock=false: the read-only roles
   # cannot write a .tflock object. Applies (terraform-cd.yml) leave it unset.
-  # A stage "root" stack always gets the root role: no CI role touches it. So do
-  # the core-account stages (audit, security, network, identity, artifacts;
-  # E2), never the dev/staging roles
-  # the CI apply roles hold; TFSTATE_ACCESS=read selects the root role for them
-  # too, as for root. The provider guard needs credentials in the core account,
-  # so the PR enabling a core stack's first instance adds the stack's pattern
-  # pair and that account's OrganizationAccountAccessRole to root_write's
-  # allowed_principal_arns (stacks/orgs/fnx/root/us-east-1.yaml) until E4's
-  # Identity Center roles replace it. A dedicated core_write role (E5), or
-  # removing the OAARs from root_write, must land before E4 grants any permission
-  # set in a core account: from then on a principal there that can edit OAAR's
-  # trust reaches the root stacks' state.
+  # A stage "root" stack always gets the root role: no CI role touches it. The
+  # core-account stages (audit, security, network, identity, artifacts) get the
+  # core role, never the dev/staging roles the CI apply roles hold, nor the root
+  # role: a principal trusted in a core account never reaches the root stacks'
+  # state. TFSTATE_ACCESS=read selects the root or core role too (no read twin).
+  # The provider guard needs credentials in the core account, so the PR
+  # enabling a core stack's first instance adds the stack's pattern pair to
+  # core_write (stacks/orgs/fnx/root/us-east-1.yaml), whose principals are the
+  # core accounts' TerraformApplyAccess-Core roles and their
+  # OrganizationAccountAccessRole until Identity Center is applied.
   #
   # TFSTATE_SOURCE=replica reads the bucket's cross-region replica instead
   # (<bucket>-replica in settings.tfstate.replica_region, backend/main's
@@ -73,7 +78,7 @@ terraform:
       encrypt: true
       use_lockfile: true
       assume_role:
-        role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}{{ if has .settings.context.stage (list "root" "audit" "security" "network" "identity" "artifacts") }}-root{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
+        role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}{{ if eq .settings.context.stage "root" }}-root{{ else if has .settings.context.stage (list "audit" "security" "network" "identity" "artifacts") }}-core{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
 
   # Account guard: every stack's default AWS provider refuses to run in any
   # account but the stack's own (Atmos writes this into each component's
@@ -182,7 +187,7 @@ settings:
   # The state backend every stack's terraform.backend reads (above): the bucket
   # backend/main creates in fnx-ue1-root, its region and the name prefix of its
   # access roles (<role_prefix>-role, -read-role, -prod-role, -prod-read-role,
-  # -root-role), and stack, the stack that deploys backend/main (iam's
+  # -core-role, -root-role), and stack, the stack that deploys backend/main (iam's
   # dependency, catalog/iam). A stack keeps its state here, not in its own
   # region: a DR stack (fnx-ue2-prod) too. An EU stack overrides all of
   # settings.tfstate: bucket, region, replica_region (an EU region),

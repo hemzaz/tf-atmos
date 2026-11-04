@@ -102,12 +102,13 @@ variable "access_roles" {
     # The one exception is an Identity Center role by its reserved-path pattern: one
     # account, one permission set, and only the optional region segment and the hash
     # suffix wildcarded (the trust condition is ArnLike; iam.tf). An account or
-    # permission-set wildcard is still rejected.
+    # permission-set wildcard is still rejected. The set name is letters, digits and
+    # "-" (aws-identity-center's additional-backend sets, TerraformApplyAccess-Prod).
     condition = alltrue(flatten([
       for role in values(var.access_roles) : [
         for arn in role.allowed_principal_arns :
         (can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[\\w+=,.@/-]+$", arn)) && !strcontains(arn, "*"))
-        || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/aws-reserved/sso\\.amazonaws\\.com/(\\*|[a-z0-9-]+/)AWSReservedSSO_[A-Za-z0-9]+_\\*$", arn))
+        || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/aws-reserved/sso\\.amazonaws\\.com/(\\*|[a-z0-9-]+/)AWSReservedSSO_[A-Za-z0-9-]+_\\*$", arn))
       ]
     ]))
     error_message = "allowed_principal_arns entries must be exact IAM role or user ARNs (arn:aws:iam::<account>:role/<name>), or an Identity Center role pattern for one account and permission set (arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<PermissionSet>_*); any other \"*\" or wildcard and account roots (arn:aws:iam::<account>:root) are rejected."

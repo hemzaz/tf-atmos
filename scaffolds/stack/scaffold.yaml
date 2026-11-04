@@ -332,7 +332,7 @@ spec:
           [ "$account" = "{{ .Answers.stage }}" ] \
             || { [ "{{ .Answers.stage }}" = "prod" ] && [ "$account" = "prod-eu" ]; } \
             || fail "account $account does not belong to stage {{ .Answers.stage }} (its own, or prod-eu for prod)"
-          # The core accounts' stages (the backend's root-role routing in
+          # The core accounts' stages (the backend's core-role routing in
           # stacks/orgs/<tenant>/_defaults.yaml) take profile core, and only them.
           case "{{ .Answers.stage }}" in
             audit|security|network|identity|artifacts) core=yes ;;

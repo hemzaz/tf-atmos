@@ -32,6 +32,14 @@ iam/ci instance whose state that backend owns, in a stage that access role
 serves, of the matching kind. That fails a dev apply role trusted on prod_write,
 a stale ARN left behind by a rename, and a US CI role trusted by the EU backend.
 OPERATOR_ROLE_ARNS lists any non-CI role that happens to have that shape.
+
+An Identity Center role (":role/aws-reserved/sso.amazonaws.com/...AWSReservedSSO_<set>_...",
+the backend's reserved-path pattern) is a human, never a CI role. On each backend role it
+must be in an account whose state that role serves: the settings.environment.account_id of
+an instance whose backend assumes the role (a read role: its write twin, READ_ROLES), so a
+pattern for the wrong account cannot give one stage another's state. A TerraformPlanAccess*
+set goes only on a read role, any other set (TerraformApplyAccess*, AdministratorAccess)
+only on a write role (owner decision 2026-11-04).
 Exits 1 on any error.
 """
 import importlib.util
@@ -63,6 +71,13 @@ GRANT_VARS = {"plan": "ci_backend_read_role_arns", "apply": "ci_backend_write_ro
 CI_ROLE_ARN = re.compile(r"^arn:aws:iam::[^:]*:role/(?:.*/)?[^/]+-ci-(plan|apply)$")
 # Non-CI principals with a CI-role-shaped name, exempt from the reverse check. None today.
 OPERATOR_ROLE_ARNS: frozenset = frozenset()
+# An Identity Center role, exact or by the backend's pattern: (account, permission set).
+SSO_ROLE_ARN = re.compile(
+    r"^arn:aws[a-z-]*:iam::([^:]*):role/aws-reserved/sso\.amazonaws\.com/(?:[^/]*/)?\*?AWSReservedSSO_([A-Za-z0-9-]+)_"
+)
+PLAN_SET = "TerraformPlanAccess"
+# read role -> the write role its stages' backends assume (TFSTATE_ACCESS unset).
+READ_ROLES = {"read": "write", "prod_read": "prod_write"}
 
 
 def instances(stacks: dict):
@@ -132,6 +147,34 @@ def check_ci(where: str, instance: dict, stage: str, owner: backends.Backend, ex
     return errors
 
 
+def served_accounts(stacks: dict, owned: dict) -> dict:
+    """(bucket, access_roles key) -> the accounts of the instances whose backend assumes that role."""
+    accounts: dict = {}
+    for _, _, instance in instances(stacks):
+        owner = backends.owner_of(owned, instance)
+        settings = instance.get("settings") or {}
+        if owner is None or (settings.get("context") or {}).get("stage") == fixtures.FIXTURE_STAGE:
+            continue
+        key = backends.assumed_role_key(instance, owner)
+        accounts.setdefault((owner.bucket, key), set()).add((settings.get("environment") or {}).get("account_id"))
+    return accounts
+
+
+def check_sso(owner: backends.Backend, key: str, arn: str, accounts: dict) -> list[str]:
+    """An Identity Center principal on owner's access_roles.key: its set's kind and its account."""
+    account, permission_set = SSO_ROLE_ARN.match(arn).groups()
+    errors = []
+    if permission_set.startswith(PLAN_SET) != (key in READ_ROLES):
+        errors.append(f"{owner.where}: backend access_roles.{key} trusts permission set {permission_set} ({arn}): "
+                      f"{PLAN_SET}* sets go only on a read role ({', '.join(READ_ROLES)}), other sets only on "
+                      "a write role")
+    served = accounts.get((owner.bucket, READ_ROLES.get(key, key)), set())
+    if account not in served:
+        errors.append(f"{owner.where}: backend access_roles.{key} trusts {arn}, in account {account}, no account "
+                      f"of a stack whose state this role serves ({sorted(a for a in served if a)})")
+    return errors
+
+
 def check(stacks: dict) -> list[str]:
     owned, _ = backends.owned(stacks)  # owned()'s own errors are check-state-keys.py's to report
     if not owned:
@@ -154,9 +197,13 @@ def check(stacks: dict) -> list[str]:
                           f"'{backends.BACKEND_COMPONENT}' instance, so its CI roles cannot be checked")
             continue
         errors += check_ci(where, instance, stage, owner, expected)
+    accounts = served_accounts(stacks, owned)
     for bucket, owner in sorted(owned.items()):
         for key in sorted(owner.access_roles):
             for arn in (owner.access_roles[key] or {}).get("allowed_principal_arns") or []:
+                if SSO_ROLE_ARN.match(arn):
+                    errors += check_sso(owner, key, arn, accounts)
+                    continue
                 if arn in OPERATOR_ROLE_ARNS or not CI_ROLE_ARN.match(arn):
                     continue
                 if arn not in expected.get((bucket, key), {}):
@@ -176,7 +223,8 @@ def main() -> int:
         print(f"{len(errors)} CI state role problem(s)")
         return 1
     print("every iam/ci plan and apply role is trusted by its stage's read and write role of the backend "
-          "owning its state, and every CI-shaped trusted ARN is one of them")
+          "owning its state, every CI-shaped trusted ARN is one of them, and every Identity Center role is "
+          "trusted in an account the role serves, Plan sets on read roles only")
     return 0
 
 

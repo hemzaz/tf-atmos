@@ -24,6 +24,7 @@ def access_roles(**overrides):
         "prod_read": [arn("prod", "plan")],
         "prod_write": [arn("prod", "apply")],
         "root_write": [],
+        "core_write": [],
     }
     roles.update(overrides)
     return {key: {"role_name": ROLE_NAMES[key], "allowed_principal_arns": principals}
@@ -34,7 +35,7 @@ def access_roles(**overrides):
 ROLE_NAMES = {
     "read": "fnx-terraform-backend-read-role", "write": "fnx-terraform-backend-role",
     "prod_read": "fnx-terraform-backend-prod-read-role", "prod_write": "fnx-terraform-backend-prod-role",
-    "root_write": "fnx-terraform-backend-root-role",
+    "root_write": "fnx-terraform-backend-root-role", "core_write": "fnx-terraform-backend-core-role",
 }
 ASSUMED = {"dev": "write", "staging": "write", "prod": "prod_write"}
 
@@ -308,6 +309,77 @@ class CheckCiStateRolesTest(unittest.TestCase):
     def test_unresolvable_arn_fails(self):
         self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", prefix="bad name", apply=False)})),
                         "plan role: resolved an invalid role ARN")
+
+
+def sso(stage, permission_set):
+    """An Identity Center role pattern, as the root files write it."""
+    account = ACCOUNTS.get(stage, CORE_ACCOUNT)
+    return f"arn:aws:iam::{account}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_{permission_set}_*"
+
+
+CORE_ACCOUNT = "666666666666"
+
+
+def with_core(described):
+    """A core-account stack (stage security, no CI role) whose backend assumes core_write."""
+    described["fnx-ue1-security"] = {"components": {"terraform": {"aws-account-settings": {
+        "component": "aws-account-settings",
+        "backend": {"bucket": US_BUCKET, "assume_role": {"role_arn": role_arn(ROLE_NAMES["core_write"])}},
+        "settings": {"context": {"stage": "security"}, "environment": {"account_id": CORE_ACCOUNT}},
+    }}}}
+    return described
+
+
+class IdentityCenterRolesTest(unittest.TestCase):
+    assert_errors = CheckCiStateRolesTest.assert_errors
+    assert_has = CheckCiStateRolesTest.assert_has
+
+    def roles(self):
+        return access_roles(
+            read=[arn("dev", "plan"), arn("staging", "plan"), sso("dev", "TerraformPlanAccess")],
+            write=[arn("dev", "apply"), arn("staging", "apply"), sso("staging", "TerraformApplyAccess"),
+                   sso("dev", "AdministratorAccess")],
+            prod_read=[arn("prod", "plan"), sso("prod", "TerraformPlanAccess-Prod")],
+            prod_write=[arn("prod", "apply"), sso("prod", "TerraformApplyAccess-Prod")],
+            core_write=[sso("security", "TerraformApplyAccess-Core")],
+        )
+
+    def test_sets_on_their_stage_roles_pass(self):
+        self.assert_errors(with_core(stacks(roles=self.roles(), **today())))
+
+    def test_plan_set_on_a_write_role_and_apply_set_on_a_read_role_fail(self):
+        roles = self.roles()
+        roles["write"]["allowed_principal_arns"].append(sso("dev", "TerraformPlanAccess"))
+        roles["prod_read"]["allowed_principal_arns"].append(sso("prod", "AdministratorAccess"))
+        self.assert_errors(
+            with_core(stacks(roles=roles, **today())),
+            "access_roles.prod_read trusts permission set AdministratorAccess",
+            "access_roles.write trusts permission set TerraformPlanAccess",
+        )
+
+    def test_set_in_another_stages_account_fails(self):
+        roles = self.roles()
+        roles["prod_write"]["allowed_principal_arns"].append(sso("dev", "TerraformApplyAccess-Prod"))
+        roles["core_write"]["allowed_principal_arns"].append(sso("prod", "TerraformApplyAccess-Core"))
+        self.assert_errors(
+            with_core(stacks(roles=roles, **today())),
+            f"access_roles.core_write trusts {sso('prod', 'TerraformApplyAccess-Core')}, in account 444444444444, "
+            f"no account of a stack whose state this role serves (['{CORE_ACCOUNT}'])",
+            "access_roles.prod_write trusts arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/"
+            "*AWSReservedSSO_TerraformApplyAccess-Prod_*, in account 222222222222",
+        )
+
+    def test_set_on_a_role_no_stack_assumes_fails(self):
+        # Before any core stack assumes core_write, no account is served by it.
+        self.assert_has(stacks(roles=self.roles(), **today()),
+                        "access_roles.core_write trusts", "no account of a stack whose state this role serves ([])")
+
+    def test_identity_center_role_is_never_a_ci_role(self):
+        # An Identity Center role named like a CI role is still checked as a human.
+        roles = self.roles()
+        shaped = "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Ops-ci-apply_1"
+        roles["write"]["allowed_principal_arns"].append(shaped)
+        self.assert_errors(with_core(stacks(roles=roles, **today())))
 
 
 if __name__ == "__main__":

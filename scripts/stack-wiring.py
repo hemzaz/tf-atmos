@@ -27,16 +27,16 @@ prints that step.
 
 A core-account stack (stage audit, security, network, identity or artifacts,
 whose account is its stage) has no CI role: its state goes through the
-backend's root role (stacks/orgs/<tenant>/_defaults.yaml routes those stages
-there, with root). Once its account is onboarded, its account's
-OrganizationAccountAccessRole (the first way in, until E4's Identity Center
-roles) in root_write's allowed_principal_arns, a reviewed hand edit with the
+backend's core role (stacks/orgs/<tenant>/_defaults.yaml routes those stages
+there), never the root role. Once its account is onboarded, its account's
+OrganizationAccountAccessRole (the first way in, until Identity Center is
+applied) in core_write's allowed_principal_arns, a reviewed hand edit with the
 account's first stack and its stage defaults' enabled aws-account-settings,
-its pattern pair joins root_write's object_key_patterns: every such stack has
+its pattern pair joins core_write's object_key_patterns: every such stack has
 that enabled instance, so check-state-keys.py finds its state under the pair.
 A stack of an account not onboarded yet is validated and left unwired (a pair
 no enabled instance's state matches would fail check-state-keys.py); the hook
-never adds a principal to root_write.
+never adds a principal to core_write.
 
 The EU regions are the prod-eu account's (GDPR, B5), with one exception (owner,
 2026-11-03): a core stack of stage EU_CORE_STAGES in EU_CORE_REGIONS, in its own
@@ -64,8 +64,8 @@ from typing import Optional
 TENANT = re.compile(r"[a-z][a-z0-9]{1,9}")
 REGION = re.compile(r"[a-z]{2}-[a-z]+-[0-9]")
 PLATFORM_STAGES = ("dev", "staging", "prod")
-# The core-account stages: the backend's root-role routing list in
-# stacks/orgs/<tenant>/_defaults.yaml, minus root (a unit test pins the two).
+# The core-account stages: the backend's core-role routing list in
+# stacks/orgs/<tenant>/_defaults.yaml (a unit test pins the two).
 CORE_STAGES = ("audit", "security", "network", "identity", "artifacts")
 STAGES = PLATFORM_STAGES + CORE_STAGES
 ACCOUNTS = STAGES + ("prod-eu",)
@@ -188,17 +188,17 @@ def backend_file(tenant: str, region: str) -> str:
 
 def plan_core(text: str, account: str, stack: str,
               may_lack_principals: bool = False) -> Optional[tuple[list[tuple[int, list[str]]], list[str]]]:
-    """A core stack's insertions into root_write (its pattern pair); None while its account's operator
-    role is not on root_write (the account is not onboarded). Only the EU backend's root_write may have
+    """A core stack's insertions into core_write (its pattern pair); None while its account's operator
+    role is not on core_write (the account is not onboarded). Only the EU backend's core_write may have
     no principal list yet (fnx-ew1-root's, before its first core stack, trusts none:
-    may_lack_principals); a US root_write without one is refused, so a deleted key is never read as
+    may_lack_principals); a US core_write without one is refused, so a deleted key is never read as
     "not onboarded"."""
     lines = text.splitlines(keepends=True)
     newline = "\r\n" if "\r\n" in text else "\n"
     access = [i for i, line in enumerate(lines) if re.fullmatch(r"access_roles:", line.strip())]
     if len(access) != 1:
         fail(f"found {len(access)} access_roles: blocks, expected exactly one")
-    role = find(lines, access[0] + 1, block_end(lines, access[0]), r"root_write:", "root_write: roles under access_roles")
+    role = find(lines, access[0] + 1, block_end(lines, access[0]), r"core_write:", "core_write: roles under access_roles")
     end = block_end(lines, role)
     everywhere = every_value(lines)
     inserts, done = [], []
@@ -206,24 +206,24 @@ def plan_core(text: str, account: str, stack: str,
     if may_lack_principals and not any(
             re.fullmatch(r"allowed_principal_arns:", lines[i].strip()) for i in range(role + 1, end)):
         return None
-    key = find(lines, role + 1, end, r"allowed_principal_arns:", "allowed_principal_arns: lists in root_write")
+    key = find(lines, role + 1, end, r"allowed_principal_arns:", "allowed_principal_arns: lists in core_write")
     found, _ = items(lines, key)
     if operator_arn(account) not in [scalar(lines[i]) for i in found]:
         return None
 
-    patterns_key = find(lines, role + 1, end, r"object_key_patterns:", "object_key_patterns: lists in root_write")
+    patterns_key = find(lines, role + 1, end, r"object_key_patterns:", "object_key_patterns: lists in core_write")
     found, pad = items(lines, patterns_key)
     present = [scalar(lines[i]) for i in found]
     pair = [f"*/{stack}/*", f"*/{stack}-*"]
     have = [p for p in pair if p in present]
     if len(have) == 1:
-        fail(f"root_write has {have[0]!r} without its companion; add the pair by hand")
+        fail(f"core_write has {have[0]!r} without its companion; add the pair by hand")
     if not have:
         for pattern in pair:
             if pattern in everywhere:
                 fail(f"{pattern!r} is already in another list (another role's?)")
         inserts.append((found[-1] if found else patterns_key, [f'{" " * pad}- "{p}"{newline}' for p in pair]))
-        done.append(f"state patterns {pair[0]} and {pair[1]} -> root_write")
+        done.append(f"state patterns {pair[0]} and {pair[1]} -> core_write")
     return inserts, done
 
 
@@ -297,8 +297,8 @@ def manual(path: str, stage: str, account: str, stack: str) -> str:
     if stage in CORE_STAGES:
         return "\n".join([
             f"Wire {stack} by hand in {path}, under backend/main's vars.access_roles:",
-            f'  root_write.object_key_patterns: - "*/{stack}/*" and - "*/{stack}-*"',
-            f'  root_write.allowed_principal_arns: - "{operator_arn(account)}" (once per account)',
+            f'  core_write.object_key_patterns: - "*/{stack}/*" and - "*/{stack}-*"',
+            f'  core_write.allowed_principal_arns: - "{operator_arn(account)}" (once per account)',
             f"and remove the aws-account-settings metadata.enabled: false override in stacks/orgs/<tenant>/{stage}"
             "/_defaults.yaml if it is there, then run check-state-keys.py (atmos workflow lint -f lint).",
         ])
@@ -401,7 +401,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if done is None:
         rel = backend_file(args.tenant, args.region)
         print(f"stack-wiring: {args.stack} is a core-account stack whose account is not onboarded:"
-              " nothing wired (root_write does not trust its OrganizationAccountAccessRole yet)")
+              " nothing wired (core_write does not trust its OrganizationAccountAccessRole yet)")
         print(manual(rel, args.stage, args.account or args.stage, args.stack))
         return 0
     for line in done:
