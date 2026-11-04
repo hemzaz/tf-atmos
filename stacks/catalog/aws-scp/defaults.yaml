@@ -18,8 +18,9 @@
 # or literal target, a policy over the 5,120-character limit, an OU with more
 # than four of these (AWS's five per target includes FullAWSAccess, which every
 # OU keeps: these are deny lists, so FullAWSAccess is the Allow each level
-# needs), a NotAction or deny-all with no region or principal condition, a
-# misspelled condition key, a region list missing a global service, a stack in
+# needs), a NotAction or deny-all with no region or principal condition, an
+# Identity Center exception outside its reserved path, a role-name exception
+# no Deny protects from squatting, a misspelled condition key, a region list missing a global service, a stack in
 # a region its OU denies or denied a us-east-1 call its components make (the
 # relay, DNSSEC, query logging), and an EU account allowed data calls there.
 #
@@ -77,11 +78,26 @@ components:
     # disassociate actions of the other three (not the catalog's whole GuardDuty
     # list, which also denies routine finding triage).
     #
-    # Excepted: each stack's CI apply role (iam/ci: <stack>-ci-apply, which
-    # deploys these components) and OrganizationAccountAccessRole (the
-    # management account's way in, the core stacks' operator until E4). E4
-    # adds its Terraform role or permission set here. Service-linked roles
-    # (org auto-enable) are outside SCPs.
+    # Excepted (the shared &deploy_roles list): each stack's CI apply role
+    # (iam/ci: <stack>-ci-apply, which deploys these components),
+    # OrganizationAccountAccessRole (the management account's way in, the
+    # bootstrap and core stacks' operator until E3e's order retires it: dropping
+    # it before Identity Center is applied locks the core stacks out), and the
+    # Identity Center roles of the TerraformApplyAccess sets (-Prod, -Core and
+    # -Eu too) and AdministratorAccess (the break-glass), by their reserved path
+    # aws-reserved/sso.amazonaws.com/ (no region segment: the home region is
+    # us-east-1; the * admits the regional form). Identity Center creates these
+    # roles; IAM refuses a customer role named AWSReservedSSO_*.
+    # Service-linked roles (org auto-enable, and Identity Center's own, which
+    # creates the AWSReservedSSO_ roles) are outside SCPs.
+    #
+    # DenyProtectedRoleTampering closes role-name squatting: an exception by
+    # role name holds only while no one else can create or re-trust a role of
+    # that name, so only the same deploy roles may create, re-trust, re-policy,
+    # retag or delete the CI roles, OrganizationAccountAccessRole, or any role
+    # under aws-reserved/ (defence in depth for the SSO exception). The CI
+    # apply role keeps managing iam/ci (itself and ci-plan) through Terraform;
+    # OrganizationAccountAccessRole creates them at bootstrap.
     aws-scp/security-services-defaults:
       metadata:
         component: aws-scp
@@ -89,7 +105,7 @@ components:
         inherits:
           - aws-scp/defaults
       vars:
-        policy_description: "Deny disabling CloudTrail, Config, GuardDuty, Security Hub and Access Analyzer, except to the deploy roles"
+        policy_description: "Deny disabling CloudTrail, Config, GuardDuty, Security Hub and Access Analyzer, and changing the deploy roles, except to the deploy roles"
         policy_statements:
           - sid: "DenySecurityServicesTampering"
             effect: "Deny"
@@ -129,9 +145,37 @@ components:
             conditions:
               - test: "ArnNotLike"
                 variable: "aws:PrincipalArn"
-                values:
+                values: &deploy_roles
                   - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
                   - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-*"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+          - sid: "DenyProtectedRoleTampering"
+            effect: "Deny"
+            actions:
+              - "iam:CreateRole"
+              - "iam:DeleteRole"
+              - "iam:UpdateRole"
+              - "iam:UpdateRoleDescription"
+              - "iam:UpdateAssumeRolePolicy"
+              - "iam:PutRolePolicy"
+              - "iam:DeleteRolePolicy"
+              - "iam:AttachRolePolicy"
+              - "iam:DetachRolePolicy"
+              - "iam:PutRolePermissionsBoundary"
+              - "iam:DeleteRolePermissionsBoundary"
+              - "iam:TagRole"
+              - "iam:UntagRole"
+            resources:
+              - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
+              - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-plan"
+              - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+              - "arn:aws:iam::*:role/aws-reserved/*"
+            conditions:
+              - test: "ArnNotLike"
+                variable: "aws:PrincipalArn"
+                values: *deploy_roles
 
     # House region allow-lists. The NotAction list is AWS Control Tower's
     # Region deny control (GRREGIONDENY, controlreference/primary-region-deny-policy):

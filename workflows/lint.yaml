@@ -299,13 +299,15 @@ workflows:
       # against AWS before they are applied: OU reads only as targets (never the
       # root), valid JSON within 5,120 characters, at most four per OU, broad
       # denies conditioned, global services exempt from every region deny, the
-      # deploy roles excepted from the security-service deny, every stack's
+      # deploy roles (Identity Center's by the reserved path only) excepted
+      # from the security-service deny and their names protected, every stack's
       # account known, no stack in a region (or denied a us-east-1 call) its
       # account's OU denies, EU accounts kept out of us-east-1 (check-scp-policies.py).
       - name: check-scp-policies
         type: shell
         command: |
           set -eu
+          python3 -m unittest workflows/scripts/common/test_check_scp_policies.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
