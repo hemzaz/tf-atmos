@@ -48,12 +48,9 @@ ALLOWLIST = (
     # aws-iam-role (vendor.yaml): the network account's DNS delegation role (E6b).
     (r"/aws-iam-role/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-iam-role/main\.tf", "CKV_TF_1", TF_1),
-    # aws-cloudtrail-bucket and aws-config-bucket (vendor.yaml): the organization trail's log
-    # bucket and the AWS Config delivery bucket (E5a3).
+    # aws-cloudtrail-bucket (vendor.yaml): the organization trail's log bucket (E5a3).
     (r"/aws-cloudtrail-bucket/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-cloudtrail-bucket/main\.tf", "CKV_TF_1", TF_1),
-    (r"/aws-config-bucket/context\.tf", "CKV_TF_1", TF_1),
-    (r"/aws-config-bucket/main\.tf", "CKV_TF_1", TF_1),
     # account-map's iam-roles module (vendor.yaml), reached through the account-map-bypass
     # providers mixin of the dns components and aws-iam-role (bypassed, still expanded).
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),

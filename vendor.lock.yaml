@@ -189,45 +189,6 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
-  40f5df1979f36a66aba20ed879c4a7057915e7bdf10c5ef77e67e2ccae8ac29a:
-    name: aws-config-bucket
-    kind: remote
-    target: components/terraform/aws-config-bucket
-    source:
-      declared: github.com/cloudposse-terraform-components/aws-config-bucket.git//src
-      resolved: github.com/cloudposse-terraform-components/aws-config-bucket.git//src
-      digest: sha256:60a644a2e8d174071dd878ccefd9d4cbb55c92df198500b333ec701d37018d38
-    files:
-      - path: README.md
-        type: file
-        mode: 420
-        sha256: b238366663d4f1aab7d0475ae23410e9214b9490a8aa3de08a861aa456d712f9
-      - path: context.tf
-        type: file
-        mode: 420
-        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
-      - path: main.tf
-        type: file
-        mode: 420
-        sha256: 25057ff8f8d4d70a02157438e43ff016c479ac5bf185dd2947024dc905b08c20
-      - path: outputs.tf
-        type: file
-        mode: 420
-        sha256: 32ea58fa5c26cab707693475fe4ec19ed642c2d08fca768f4825237a9f4cbed2
-      - path: variables.tf
-        type: file
-        mode: 420
-        sha256: 37b1afe0e09e0a292b60ff08959db2620dc68f3ee43562e2aafa418fcf62facb
-      - path: versions.tf
-        type: file
-        mode: 420
-        sha256: 5707f75f392813415b9ef8753e00e96ee873c3f963e156b5371990fcd17e47ca
-    order: 17
-    included_paths:
-      - '**/*.tf'
-      - '**/*.md'
-    excluded_paths:
-      - '**/providers.tf'
   87b2573fac10b54afcddd575991fd8233d60e7e5d1deb4d1abcb06d46f916464:
     name: aws-iam-role
     kind: remote
@@ -293,27 +254,6 @@ artifacts:
         mode: 420
         sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
     order: 12
-    included_paths:
-      - providers-account-map-bypass.depth-1.tf
-      - account-verification.mixin.tf
-  941bfcd13be99b7568fadb6a00d08b3a387f1c100298dd8ae78e1a6074ac53e7:
-    name: aws-config-bucket-mixins
-    kind: remote
-    target: components/terraform/aws-config-bucket
-    source:
-      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
-      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
-      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
-    files:
-      - path: account-verification.mixin.tf
-        type: file
-        mode: 420
-        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
-      - path: providers-account-map-bypass.depth-1.tf
-        type: file
-        mode: 420
-        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
-    order: 18
     included_paths:
       - providers-account-map-bypass.depth-1.tf
       - account-verification.mixin.tf

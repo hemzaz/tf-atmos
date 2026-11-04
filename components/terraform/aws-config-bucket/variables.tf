@@ -51,8 +51,18 @@ variable "access_log_bucket_name" {
   description = "Name of the S3 bucket where s3 access log will be sent to"
 }
 
-variable "acl" {
+variable "kms_master_key_arn" {
   type        = string
-  description = "The canned ACL to apply. We recommend log-delivery-write for compatibility with AWS services"
-  default     = "log-delivery-write"
+  description = <<-EOT
+    ARN of the customer managed KMS key that encrypts the bucket (SSE-KMS). Required, no default:
+    a key ARN (arn:<partition>:kms:<region>:<account>:key/<id>), never an alias ARN or the
+    AWS managed aws/s3 key. Its key policy must let config.amazonaws.com use it for the delivering
+    accounts. House input (owner 2026-11-04); upstream has none and uses SSE-S3.
+    EOT
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:kms:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:key/[0-9a-zA-Z-]+$", var.kms_master_key_arn))
+    error_message = "kms_master_key_arn must be a customer managed KMS key ARN (arn:aws:kms:<region>:<12-digit account>:key/<key id>), not an alias ARN or the AWS managed aws/s3 key."
+  }
 }

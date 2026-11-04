@@ -21,6 +21,7 @@
 #
 
 module "this" {
+  #checkov:skip=CKV_TF_1:Cloud Posse's null-label context file, the registry module pinned to an exact version as upstream ships it
   source  = "cloudposse/label/null"
   version = "0.25.0" # requires Terraform >= 0.13.0
 
