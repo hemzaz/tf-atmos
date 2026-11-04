@@ -57,6 +57,12 @@
 # account's alias and S3 account public access block, and its us-east-1
 # settings; fnx-ew1-root has its eu-west-1 ones. It reads no other instance:
 # deploy-accounts' last phase applies it, and deploy-full-stack's iam layer.
+#
+# Identity Center (E4a2, catalog/aws-identity-center): permission sets and
+# account assignments for people (Cloud Posse Evolution 4), disabled until
+# Identity Center is enabled here and the accounts it assigns exist; the
+# catalog says what else it waits for. deploy-accounts' identity-center phase,
+# after the accounts.
 # =============================================================================
 
 import:
@@ -68,6 +74,7 @@ import:
   - catalog/aws-account/defaults
   - catalog/aws-scp/defaults
   - catalog/aws-account-settings/main
+  - catalog/aws-identity-center/defaults
 
 settings:
   context:
@@ -356,3 +363,14 @@ components:
         name: region-eu
         target_ids:
           - !terraform.state aws-organizational-unit/eu organizational_unit_id
+
+    # People's access (E4a2): Identity Center in the management account, not
+    # delegated (aws-identity-center README). Disabled: Identity Center is not
+    # enabled yet (clickops), the accounts it assigns do not exist, and the
+    # core state role is E4c2's (catalog/aws-identity-center/defaults).
+    aws-identity-center:
+      metadata:
+        component: aws-identity-center
+        enabled: false
+        inherits:
+          - aws-identity-center/defaults

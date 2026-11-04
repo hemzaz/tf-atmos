@@ -39,11 +39,15 @@ Fatal (a config bug, not a placeholder: always printed, exit 1 even with --warn)
     map) that differs from its settings.static_account_map, disabled and
     abstract instances included: the vars copy is repeated by hand, so lint
     fails on drift before the instance is enabled
+  - an instance's vars.account_assignments (aws-identity-center) keyed by an
+    account its vars.account_map lacks, disabled instances included
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
 protection, deploy tags, the GitHub App's private key and outside-collaborator
 approval, the cost-allocation tag), each stack's budget amount to confirm, and
-an enabled security-monitoring instance with no security_email_subscriptions.
+an enabled security-monitoring instance with no security_email_subscriptions,
+and an enabled aws-identity-center instance (Identity Center enabled by clickops
+in its home region).
 
 --cold-start (bootstrap.yaml backend-cold-start): a placeholder account ID in
 a backend instance's access_roles allowed_principal_arns is a notice, not an
@@ -199,6 +203,20 @@ def static_map_drift(stack: str, instance_name: str, spec: dict):
                    "Account IDs")
 
 
+def unmapped_assignments(stack: str, instance_name: str, spec: dict):
+    """The finding for an instance whose vars.account_assignments (aws-identity-center) names an account
+    its vars.account_map.full_account_map lacks, or None. Disabled instances too: the plan fails on
+    local.account_map[...] only after the Identity Center data source, which the plan sweep never reaches."""
+    variables = spec.get("vars") or {}
+    full = (variables.get("account_map") or {}).get("full_account_map") or {}
+    missing = sorted(set(variables.get("account_assignments") or {}) - set(full))
+    if not missing:
+        return None
+    return Finding("fatal", stack, f"{instance_name} vars.account_assignments",
+                   f"{', '.join(missing)} not in vars.account_map.full_account_map: an assignment names a "
+                   "<tenant>-<account> key of settings.static_account_map", "Account IDs")
+
+
 def cold_start_principal(component: str, path: str) -> bool:
     """A backend instance's access-role principal, which the cold start does not apply."""
     return component == "backend" and path.startswith("vars.access_roles.") and ".allowed_principal_arns[" in path
@@ -224,6 +242,7 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
     for instance_name, spec in sorted(instances(config).items()):
         spec = spec or {}
         add(static_map_drift(name, instance_name, spec))
+        add(unmapped_assignments(name, instance_name, spec))
         if not deployable(spec):
             continue
         variables = spec.get("vars") or {}
@@ -246,6 +265,11 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
             add(Finding("notice", name, f"{instance_name} vars.security_email_subscriptions",
                         "empty: GuardDuty, Security Hub and Inspector findings on its topic reach nobody until "
                         "an address is subscribed (and confirms)", "Alert recipients"))
+        if component == "aws-identity-center":
+            add(Finding("notice", name, f"{instance_name} vars.region",
+                        "Identity Center must be enabled (clickops, an organization instance) in the management "
+                        f"account in {variables.get('region')}, its home region, before this applies: the component "
+                        "reads the instance (aws_ssoadmin_instances) and fails at plan without one", "Identity Center"))
         if component == "cost-optimization":
             own = (variables.get("tags") or {}).get("Environment", "<Environment>")
             tags = list(dict.fromkeys([own, *(variables.get("budget_additional_environment_tags") or [])]))

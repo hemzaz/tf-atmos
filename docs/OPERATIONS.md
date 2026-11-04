@@ -13,6 +13,9 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: Cloud Posse's core accounts `root` (management), `audit` (log archive), `security`, `network`, `identity` and `artifacts` (stacks: `fnx-ue1-root`, `fnx-ue1-security`, `fnx-ue1-audit`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`), and the workload accounts `dev`, `staging`, `prod`, `prod-eu` (the EU prod account, `fnx-ew1-prod` and its DR stack `fnx-ec1-prod`; GDPR keeps it apart from `prod`). `settings.static_account_map` repeats the map with `<tenant>-<account>` keys (`fnx-security`), the static `account_map` input of Cloud Posse components; its values are templates over `full_account_map`, so a new account needs a line in both. Each stage's `settings.environment.account_id` (`fnx-ew1-prod`'s and `fnx-ec1-prod`'s from `prod-eu`), `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and `fnx-ew1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. A new account is added here by hand (the stack scaffold covers existing accounts only). The emulator and fixture stacks keep the emulator's `000000000000` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml`; to import an existing organization or OU (owner decision QE2), the `import_resource_id` of `aws-organization` (`o-...`) and of each `aws-organizational-unit/*` instance (`ou-...`) in `fnx-gbl-root` (`stacks/orgs/fnx/root/global-region.yaml`), null to create. Before applying an imported organization, follow the import runbook in `stacks/catalog/aws-organization/defaults.yaml`, and for its step 3 (the plan) run `atmos terraform plan aws-organization -s fnx-gbl-root -out=org.planfile`, then `atmos terraform show aws-organization -s fnx-gbl-root -json org.planfile | python3 workflows/scripts/common/check-organization-plan.py` from the repository root: it exits 1 if the plan would disable a trusted service or policy type the live organization has, or change `feature_set` other than the in-place `CONSOLIDATED_BILLING` -> `ALL` upgrade (every invited member account must accept that handshake before it completes), and apply only on exit 0 |
 | Account emails | `account_email` of each `aws-account/*` instance in `fnx-gbl-root`: the account's root-user address, unique across all of AWS and never reusable after the account closes. The `aws+{{ .settings.context.tenant }}-<account>@example.com` placeholders keep those instances `metadata.enabled: false`; replace only the domain and keep the `{{ .settings.context.tenant }}` template in the local part (a literal tenant-and-stage address fails lint's `old-stack-names` check; a line that must hold one ends with `# old-stack-names: allow`); an imported account keeps its current address (a changed one forces a replacement, which `prevent_destroy` refuses) |
+| Identity Center | enabled by hand (clickops: IAM Identity Center, Enable, an organization instance) in the management account in us-east-1, its home region (vars.region of `fnx-gbl-root`, the global-region mixin; owner decision OQ6): the `aws-identity-center` instance (`stacks/catalog/aws-identity-center/defaults.yaml`) reads it and fails at plan without one, and the preflight prints a notice while it is enabled. Not delegated to the identity account (Cloud Posse's README). us-east-1 is a documented data-residency exemption for workforce identity only: the directory holds staff names and emails, EU staff included, never customer data. The instance stays `metadata.enabled: false` until then, until every account it assigns has its real ID, and until E4c2's core state role replaces `root-role` in its `tf_access_additional_backends.core` |
+| SSO groups / IdP | the built-in Identity Center directory (owner decision OQ4): the instance creates Cloud Posse's groups `Managers`, `DevOps`, `Developers` and `BillingAdmin` (`groups`); add their members in Identity Center. Who gets which permission set in which account is `account_assignments` in the catalog file. An external IdP instead: its groups go in `idp_groups`, synced by SCIM |
+| SSO start URL | the AWS access portal URL Identity Center shows once enabled (`https://<id>.awsapps.com/start`): people sign in there; E4d1 puts it in `atmos.yaml` `auth` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
 | Domains | `settings.environment.domain_name` in each stack's file (`stacks/orgs/fnx/<stage>/<region>.yaml`); every zone, record, certificate and API domain derives from it (the US apex `fnx.example.com` in `stacks/orgs/fnx/network/_defaults.yaml`, each US stage `<stage>.<apex>`; `fnx-ew1-prod`: the EU apex placeholder `fnx-eu.example.com`, also its `acm/main` certificate's names; `fnx-ec1-prod` repeats it, its DR standby serving the same apex). The EU apex is its own registered domain, never under the US one, delegated at its own registrar to `fnx-ew1-prod`'s `network/main` (see [Deploying a stack](#deploying-a-stack)) |
@@ -52,6 +55,8 @@ the following, naming the stack, the key and the row above:
 - two stages sharing one account;
 - an EU (GDPR-scoped) stack sharing an account with a US one (`prod-eu` equal to `prod`);
 - an account map entry that is not 12 digits, or a stack whose map differs from the others';
+- an Identity Center `account_assignments` key that is not in its `account_map` (fatal even in lint:
+  the plan sweep stops at the Identity Center data source before the plan would);
 - a core account (`root`, `audit`, `security`, `network`, `identity`, `artifacts`) shared with
   another core account, a workload account or a stack's `account_id` in another role's core account;
 - a missing or placeholder core account, when a checked stack is a core account's own or deploys a
@@ -61,8 +66,9 @@ the following, naming the stack, the key and the row above:
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
 packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval,
-cost-allocation tags) as notices, and per stack its budget amount to confirm and an empty
-`security_email_subscriptions`. The `local` and `fixtures` stacks are exempt.
+cost-allocation tags) as notices, and per stack its budget amount to confirm, an empty
+`security_email_subscriptions` and an enabled Identity Center instance's home region. The `local`
+and `fixtures` stacks are exempt.
 `bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
 `backend-only`, `full`) before any AWS call, and so does `deploy-accounts.yaml`; the cold start
 passes `--cold-start`, which makes a placeholder account in the backend's access-role principals a
@@ -96,6 +102,10 @@ the last step.
    Its last phase applies the management account's account-wide and us-east-1 settings; its
    eu-west-1 ones are `fnx-ew1-root`'s, from deploy-full-stack's iam layer:
    `atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root`.
+   **Enable Identity Center in root** before its instance is enabled (its last phase,
+   `identity-center`): by hand in the management account, us-east-1 (First-deploy inputs,
+   Identity Center); it assigns the accounts this step creates, so it applies once their IDs are in
+   the map (step 4), in a second `deploy-accounts` run.
 4. **Account IDs**: copy each member account's ID, the `account_id` output of
    `atmos terraform output aws-account/<account> -s fnx-gbl-root`, into
    `full_account_map.<account>` (the instance suffix is the map key; `prod-eu` too), and merge it.
@@ -339,7 +349,8 @@ atmos workflow deploy -f deploy-accounts      # fnx-gbl-root
 Its phases, each planned, confirmed and applied from the saved plan, follow the state reads:
 `org` (`aws-organization`), `ous` (`core`, `plat`), `ou-eu` (the `eu` OU and every SCP but
 `region-eu`), `scp-eu`, `accounts` (`aws-account/*`, after the SCPs so no account lands in an OU
-without its guardrails), `settings` (the management account's `aws-account-settings`). It runs the
+without its guardrails), `settings` (the management account's `aws-account-settings`),
+`identity-center` (`aws-identity-center`, after the accounts it assigns). It runs the
 first-deploy preflight on `fnx-gbl-root` first, and after planning the organization
 `check-organization-plan.py`, which stops the run if the plan would disable a trusted service or
 policy type the live organization has (an import with a shorter list in the stack), destroy it, or
