@@ -15,7 +15,12 @@ instance (disabled ones too, which E3e enables):
     a misspelled aws:RequestedRegion denies in every region);
   - a region deny (a NotAction statement on aws:RequestedRegion) exempts every global
     service in GLOBAL_SERVICES, which are served from us-east-1;
-  - a Deny of a security service's disable actions excepts the deploy roles (PRINCIPALS);
+  - a Deny of a security service's disable actions excepts the deploy roles (PRINCIPALS,
+    a <tenant>-*-ci-apply pattern and the SSO_REQUIRED Identity Center sets);
+  - an Identity Center (AWSReservedSSO_) principal pattern names one permission set under
+    the reserved path role/aws-reserved/sso.amazonaws.com/ (SSO_ROLE), and every other
+    role-name exception of a policy (ArnNotLike aws:PrincipalArn) is a resource of a Deny
+    in that policy of SQUAT_ACTIONS (no one else can create or re-trust a role of that name);
   - no target has more than four (AWS allows five per target, FullAWSAccess included);
   - every stack's tags.Account is an aws-account instance (or in UNMATCHED_ACCOUNTS), and
     for its account's OU chain (the parent_id read of aws-account/<account>, an OU's
@@ -26,8 +31,9 @@ instance (disabled ones too, which E3e enables):
         DNSSEC keys, query logging, CloudFront log delivery);
       - an account whose stacks all run in eu- regions (B5) is denied every
         RESIDENCY_ACTIONS action in us-east-1.
-  A Deny with a non-region condition (a principal exception) is taken as not applying to
-  the deploy roles, which is what those conditions are for.
+  A Deny with an aws:Principal* condition (a principal exception) is taken as not applying to
+  the deploy roles, which is what those conditions are for; any other condition is taken as
+  possibly true, so the Deny applies.
 Usage: check-scp-policies.py < describe.json
 Exit 0 when clean, 1 on a finding, 2 on unreadable input.
 """
@@ -42,7 +48,8 @@ COMPONENT = "aws-scp"
 MAX_CHARS, MAX_PER_TARGET = 5120, 4
 READ = re.compile(r"^!terraform\.state\s+(\S+)\s+(\S+)$")
 REGION_KEY, PRINCIPAL_KEY = "aws:requestedregion", "aws:principalarn"
-KNOWN_KEYS = (REGION_KEY, PRINCIPAL_KEY, "aws:principalaccount", "aws:principalorgid", "aws:sourceaccount")
+KNOWN_KEYS = (REGION_KEY, PRINCIPAL_KEY, "aws:principalaccount", "aws:principalorgid", "aws:principalorgpaths",
+              "aws:sourceaccount", "aws:sourcearn", "aws:resourceaccount")
 # Global services a region deny must never deny (their requests carry us-east-1).
 GLOBAL_SERVICES = ("iam:*", "sts:*", "organizations:*", "route53:*", "route53domains:*",
                    "cloudfront:*", "acm:*", "wafv2:*", "kms:*", "budgets:*", "ce:*", "cur:*",
@@ -50,6 +57,16 @@ GLOBAL_SERVICES = ("iam:*", "sts:*", "organizations:*", "route53:*", "route53dom
 SECURITY_SERVICES = ("cloudtrail:", "config:", "guardduty:", "securityhub:", "access-analyzer:")
 PRINCIPALS = ("arn:aws:iam::*:role/OrganizationAccountAccessRole",)
 CI_APPLY = re.compile(r"^arn:aws:iam::\*:role/[a-z0-9]+-\*-ci-apply$")
+# An Identity Center role: one named permission set under the path only Identity Center
+# creates in (the * before the name admits the home region's path segment), any hash.
+# `<set>_*` is that one set; `<set>-*` also takes its per-backend variants (TerraformApplyAccess-Prod),
+# so only an SSO_REQUIRED set may end in `-*`.
+SSO_ROLE = re.compile(r"^arn:aws:iam::\*:role/aws-reserved/sso\.amazonaws\.com/\*?"
+                      r"AWSReservedSSO_([A-Za-z0-9]+)([_-])\*$")
+SSO_REQUIRED = ("AdministratorAccess", "TerraformApplyAccess")
+# What a principal needs to squat on, or take over, a role an exception names.
+SQUAT_ACTIONS = ("iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
+                 "iam:AttachRolePolicy", "iam:DeleteRole")
 # tags.Account values with no aws-account instance, and why no SCP reaches them.
 UNMATCHED_ACCOUNTS = {
     "root": "the management account, which SCPs never apply to",
@@ -136,7 +153,7 @@ def denies_region(st, region):
 
 def denies(st, action, region):
     """True when st denies the deploy roles action in region (see the module docstring)."""
-    if st.get("Effect") != "Deny" or any(k != REGION_KEY for k in condition_keys(st)):
+    if st.get("Effect") != "Deny" or any(k.startswith("aws:principal") for k in condition_keys(st)):
         return False
     match = any(fnmatch.fnmatchcase(action.lower(), p.lower())
                 for p in as_list(st.get("Action") or st.get("NotAction")))
@@ -145,8 +162,26 @@ def denies(st, action, region):
     return region_condition(st) is None or denies_region(st, region)
 
 
+def principal_exceptions(st):
+    """The aws:PrincipalArn values of a statement's ArnNotLike condition."""
+    keys = (st.get("Condition") or {}).get("ArnNotLike") or {}
+    return [v for key, values in keys.items() if key.lower() == PRINCIPAL_KEY for v in as_list(values)]
+
+
 def statement_findings(where, st):
     errs, actions = [], as_list(st.get("Action"))
+    for keys in (st.get("Condition") or {}).values():
+        for key, values in keys.items():
+            for v in as_list(values) if key.lower() == PRINCIPAL_KEY else []:
+                match = SSO_ROLE.match(v)
+                if "AWSReservedSSO_" in v and not match:
+                    errs.append(f"{where}: Identity Center principal {v!r} is not one named permission "
+                                "set under arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/ (a name "
+                                "outside that path, or any set, can be created or assumed by others)")
+                elif match and match.group(2) == "-" and match.group(1) not in SSO_REQUIRED:
+                    errs.append(f"{where}: Identity Center principal {v!r} ends in -*, which also takes "
+                                f"every {match.group(1)}-<x> set; only {', '.join(SSO_REQUIRED)} have "
+                                "per-backend variants")
     for key in condition_keys(st):
         near = difflib.get_close_matches(key, KNOWN_KEYS, n=1, cutoff=0.8)
         if key not in KNOWN_KEYS and near:
@@ -164,11 +199,26 @@ def statement_findings(where, st):
         if missing:
             errs.append(f"{where}: region deny does not exempt global service(s) {', '.join(missing)}")
     if cond is None and any(a.startswith(SECURITY_SERVICES) for a in actions):
-        allowed = ((st.get("Condition") or {}).get("ArnNotLike") or {}).get("aws:PrincipalArn") or []
-        if not (all(p in allowed for p in PRINCIPALS) and any(CI_APPLY.match(p) for p in allowed)):
+        allowed = principal_exceptions(st)
+        sets = {m.group(1) for m in map(SSO_ROLE.match, allowed) if m}
+        if not (all(p in allowed for p in PRINCIPALS) and any(CI_APPLY.match(p) for p in allowed)
+                and set(SSO_REQUIRED) <= sets):
             errs.append(f"{where}: denies security-service actions without the ArnNotLike aws:PrincipalArn "
-                        f"exception for <tenant>-*-ci-apply and {', '.join(PRINCIPALS)}")
+                        f"exception for <tenant>-*-ci-apply, {', '.join(PRINCIPALS)} and the Identity Center "
+                        f"sets {', '.join(SSO_REQUIRED)}")
     return errs
+
+
+def squat_findings(where, statements):
+    """Role-name exceptions (not Identity Center's) that no Deny of the same policy protects."""
+    protected = {r for st in statements if st.get("Effect") == "Deny"
+                 and all(a in as_list(st.get("Action")) for a in SQUAT_ACTIONS)
+                 for r in as_list(st.get("Resource"))}
+    names = {v for st in statements if st.get("Effect") == "Deny" for v in principal_exceptions(st)
+             if ":role/" in v and not SSO_ROLE.match(v)}
+    return [f"{where}: exception {v!r} is no resource of a Deny of {', '.join(SQUAT_ACTIONS)} in this "
+            "policy, so anyone who can create a role of that name escapes the deny"
+            for v in sorted(names - protected)]
 
 
 def target_findings(where, targets):
@@ -217,6 +267,7 @@ def check(stacks):
                 errs.append(f"{where}: policy is {size} characters, over AWS's {MAX_CHARS}")
             for i, st in enumerate(doc["Statement"]):
                 errs += statement_findings(f"{where} statement {st.get('Sid', i)}", st)
+            errs += squat_findings(where, doc["Statement"])
             for t in targets:
                 per_target.setdefault((stack, str(t)), []).append(name)
                 m = READ.match(str(t))
@@ -302,7 +353,7 @@ def main(argv):
         count = sum(1 for b in stacks.values() for c in terraform(b).values()
                     if c.get("component") == COMPONENT and (c.get("metadata") or {}).get("type") != "abstract")
         print(f"check-scp-policies: {count} SCP instance(s): OU targets only, valid and within limits, "
-              "broad denies conditioned, global services exempt, deploy roles excepted, every stack's "
+              "broad denies conditioned, global services exempt, deploy roles excepted and protected, every stack's "
               "account known, no stack in a denied region or denied a us-east-1 need, EU accounts kept "
               "out of us-east-1")
     return 1 if errs else 0
