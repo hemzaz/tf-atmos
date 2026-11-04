@@ -87,7 +87,9 @@ components:
     # -Eu too) and AdministratorAccess (the break-glass), by their reserved path
     # aws-reserved/sso.amazonaws.com/ (no region segment: the home region is
     # us-east-1; the * admits the regional form). Identity Center creates these
-    # roles; IAM refuses a customer role named AWSReservedSSO_*.
+    # roles through its service-linked role AWSServiceRoleForSSO, which alone
+    # writes under that path (Identity Center user guide, "Using service-linked
+    # roles"), and DenyProtectedRoleTampering below denies everyone else there.
     # Service-linked roles (org auto-enable, and Identity Center's own, which
     # creates the AWSReservedSSO_ roles) are outside SCPs.
     #

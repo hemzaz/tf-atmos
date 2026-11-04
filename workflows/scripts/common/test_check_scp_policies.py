@@ -76,6 +76,12 @@ class IdentityCenterExceptions(unittest.TestCase):
         self.assertEqual(len(errs), 1)
         self.assertIn("one named permission set", errs[0])
 
+    def test_dash_wildcard_only_on_required_sets(self):
+        # TerraformApplyAccess-* (its -Prod/-Core/-Eu variants) passes; another set's -* is too broad.
+        errs = check.statement_findings("s", security_deny(DEPLOY_ROLES + [SSO + "ReadOnlyAccess-*"]))
+        self.assertEqual(len(errs), 1)
+        self.assertIn("ends in -*", errs[0])
+
     def test_security_deny_without_identity_center_sets_fails(self):
         for missing in (SSO + "AdministratorAccess_*", SSO + "TerraformApplyAccess_*"):
             with self.subTest(missing=missing):

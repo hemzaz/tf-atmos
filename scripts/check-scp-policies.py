@@ -59,8 +59,10 @@ PRINCIPALS = ("arn:aws:iam::*:role/OrganizationAccountAccessRole",)
 CI_APPLY = re.compile(r"^arn:aws:iam::\*:role/[a-z0-9]+-\*-ci-apply$")
 # An Identity Center role: one named permission set under the path only Identity Center
 # creates in (the * before the name admits the home region's path segment), any hash.
+# `<set>_*` is that one set; `<set>-*` also takes its per-backend variants (TerraformApplyAccess-Prod),
+# so only an SSO_REQUIRED set may end in `-*`.
 SSO_ROLE = re.compile(r"^arn:aws:iam::\*:role/aws-reserved/sso\.amazonaws\.com/\*?"
-                      r"AWSReservedSSO_([A-Za-z0-9]+)[_-]\*$")
+                      r"AWSReservedSSO_([A-Za-z0-9]+)([_-])\*$")
 SSO_REQUIRED = ("AdministratorAccess", "TerraformApplyAccess")
 # What a principal needs to squat on, or take over, a role an exception names.
 SQUAT_ACTIONS = ("iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
@@ -171,10 +173,15 @@ def statement_findings(where, st):
     for keys in (st.get("Condition") or {}).values():
         for key, values in keys.items():
             for v in as_list(values) if key.lower() == PRINCIPAL_KEY else []:
-                if "AWSReservedSSO_" in v and not SSO_ROLE.match(v):
+                match = SSO_ROLE.match(v)
+                if "AWSReservedSSO_" in v and not match:
                     errs.append(f"{where}: Identity Center principal {v!r} is not one named permission "
                                 "set under arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/ (a name "
                                 "outside that path, or any set, can be created or assumed by others)")
+                elif match and match.group(2) == "-" and match.group(1) not in SSO_REQUIRED:
+                    errs.append(f"{where}: Identity Center principal {v!r} ends in -*, which also takes "
+                                f"every {match.group(1)}-<x> set; only {', '.join(SSO_REQUIRED)} have "
+                                "per-backend variants")
     for key in condition_keys(st):
         near = difflib.get_close_matches(key, KNOWN_KEYS, n=1, cutoff=0.8)
         if key not in KNOWN_KEYS and near:

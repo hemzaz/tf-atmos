@@ -43,8 +43,8 @@
 # OUs only, never the organization root (check-scp-policies.py). Before an
 # imported account already running workloads lands in an OU, check that it
 # uses no region the region-* policies deny, and that its deploy roles match
-# security-services' exception (<stack>-ci-apply, OrganizationAccountAccessRole;
-# E4 adds its own).
+# security-services' exception (<stack>-ci-apply, OrganizationAccountAccessRole,
+# the Identity Center TerraformApplyAccess/AdministratorAccess roles).
 #
 # OUs, Cloud Posse's reference architecture (aws-organizational-unit README):
 #   core  the core accounts (root stays at the organization root; audit,
@@ -266,11 +266,11 @@ components:
     # each policy named <tenant>-gbl-root-<instance>. Never the organization
     # root (organization_root_id) as a target.
     #
-    # Disabled until E4: security-services excepts the CI apply roles and
-    # OrganizationAccountAccessRole by name, not yet the Identity Center
-    # permission-set roles (AWSReservedSSO_*) E4 creates (owner decision
-    # Evolution 4: OrganizationAccountAccessRole stays excepted until Identity
-    # Center is applied), and the region policies would bind accounts nobody
+    # Disabled until Identity Center is applied: security-services excepts the
+    # CI apply roles, OrganizationAccountAccessRole and the Identity Center
+    # TerraformApplyAccess/AdministratorAccess roles (E4b1), and protects them
+    # (OrganizationAccountAccessRole stays excepted until Identity Center is
+    # applied, owner decision Evolution 4), and the region policies would bind accounts nobody
     # has reviewed against them. Enabled before an account lands in its OU,
     # they need no other change: deploy-accounts' ou-eu and scp-eu phases
     # select them.
