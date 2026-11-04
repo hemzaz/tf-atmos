@@ -102,6 +102,9 @@ CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts"
 MAP_CONSUMERS = frozenset({
     "aws-identity-center", "aws-teams", "aws-team-roles", "access-analyzer",
     "guardduty", "securityhub", "inspector2", "cloudtrail", "awsconfig",
+    # The audit buckets' delivery policies and the Config bucket key's policy
+    # list every account of their residency (E5a4).
+    "aws-cloudtrail-bucket", "aws-config-bucket",
 })
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
 # UUID's last group: the lookbehind is the whole 8-4-4-4 UUID prefix, so

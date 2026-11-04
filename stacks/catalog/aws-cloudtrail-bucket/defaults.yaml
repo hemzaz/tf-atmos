@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# cloudtrail-bucket - the audit account's CloudTrail log archive (E5a)
+# =============================================================================
+# Vendored Cloud Posse aws-cloudtrail-bucket v1.540.0 (vendor.yaml), with the
+# values of its README's catalog entry (365-day expiration, glacier 180,
+# noncurrent 180/30, versioning on). One bucket per residency (owner decision
+# QE7): the instance lives in fnx-ue1-audit (US accounts) and fnx-ew1-audit
+# (prod-eu); the null-label id carries the region code, so the names differ
+# (fnx-ue1-audit-cloudtrail, fnx-ew1-audit-cloudtrail).
+#
+# Who may deliver is decided in the component, not here:
+# components/terraform/aws-cloudtrail-bucket/policy_override.tf denies
+# cloudtrail.amazonaws.com and config.amazonaws.com any put outside the
+# region's residency (aws:SourceAccount, and aws:SourceArn for trails), from
+# vars.account_map (account-map-bypass) and vars.region. Cloud Posse's own
+# policy has no such condition. Owner decisions (E5a, 2026-11-03):
+#   - SSE-S3 (AES256, the Cloud Posse default); the trail's log files get the
+#     trail's KMS key in E5b.
+#   - Object lock off (Cloud Posse default). Turning it on later forces a new
+#     bucket: decide before the first apply.
+# Deviation: create_access_log_bucket true (Cloud Posse default false), so the
+# trail bucket's own server access is logged (CIS 3.6) to <id>-access-logs.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    cloudtrail-bucket/defaults:
+      metadata:
+        component: aws-cloudtrail-bucket
+        type: abstract
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: cloudtrail
+        lifecycle_rule_enabled: true
+        noncurrent_version_expiration_days: 180
+        noncurrent_version_transition_days: 30
+        standard_transition_days: 60
+        glacier_transition_days: 180
+        expiration_days: 365
+        versioning_enabled: true
+        sse_algorithm: AES256
+        object_lock_enabled: false
+        create_access_log_bucket: true
+        force_destroy: false
+        tags:
+          Component: "CloudTrailBucket"
+
+    # The instance (Cloud Posse's name). An audit stack imports this file
+    # (E5a5); the residency follows the stack's region.
+    cloudtrail-bucket:
+      metadata:
+        component: aws-cloudtrail-bucket
+        inherits:
+          - cloudtrail-bucket/defaults

@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# config-bucket in fnx-ue1-audit: the US AWS Config archive
+# =============================================================================
+# The key admits the recorders of every account but prod-eu (owner decision
+# QE7, E5a OQ4): AWS Config of prod-eu, and only it, delivers to the EU bucket
+# (main-eu.yaml). The shared accounts' (root, audit, security) eu-west-1
+# recorders also deliver there; their other regions deliver here.
+# =============================================================================
+
+import:
+  - catalog/aws-config-bucket/defaults
+
+components:
+  terraform:
+    kms/config-bucket:
+      metadata:
+        component: kms
+        inherits:
+          - kms/config-bucket/defaults
+      vars:
+        config_source_accounts:
+          - '{{ .settings.account_map.full_account_map.root }}'
+          - '{{ .settings.account_map.full_account_map.audit }}'
+          - '{{ .settings.account_map.full_account_map.security }}'
+          - '{{ .settings.account_map.full_account_map.network }}'
+          - '{{ .settings.account_map.full_account_map.identity }}'
+          - '{{ .settings.account_map.full_account_map.artifacts }}'
+          - '{{ .settings.account_map.full_account_map.dev }}'
+          - '{{ .settings.account_map.full_account_map.staging }}'
+          - '{{ .settings.account_map.full_account_map.prod }}'
+
+    config-bucket:
+      metadata:
+        component: aws-config-bucket
+        inherits:
+          - config-bucket/defaults
+      vars:
+        kms_master_key_arn: !terraform.state kms/config-bucket .key_arn
+      dependencies:
+        components:
+          - component: kms/config-bucket

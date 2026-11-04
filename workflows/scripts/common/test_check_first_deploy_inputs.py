@@ -554,6 +554,19 @@ class StaticAccountMapTest(unittest.TestCase):
         self.assertTrue(preflight.needs_core_accounts(enabled["fnx-ue1-root"]))
 
 
+class LogArchiveBucketsTest(unittest.TestCase):
+    """The audit buckets' delivery policies (E5a4) name every account in their residency."""
+
+    def test_an_enabled_bucket_needs_the_core_accounts(self):
+        for component in ("aws-cloudtrail-bucket", "aws-config-bucket"):
+            with self.subTest(component=component):
+                self.assertIn(component, preflight.MAP_CONSUMERS)
+                bucket = {"component": component}
+                self.assertTrue(preflight.needs_core_accounts(stack("dev", "222222222222", bucket=bucket)))
+                off = stack("dev", "222222222222", bucket={**bucket, "enabled": False})
+                self.assertFalse(preflight.needs_core_accounts(off))
+
+
 class OnlyStacksTest(unittest.TestCase):
     def test_only_limits_the_per_stack_checks(self):
         stacks = clean()

@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# config-bucket in fnx-ew1-audit: the EU AWS Config archive
+# =============================================================================
+# The key admits the recorders of prod-eu and of the shared accounts that have
+# an eu-west-1 stack (root, audit, security: owner decision 2026-11-03, E5a
+# OQ4), whose eu-west-1 configuration data stays in the EU. Every other
+# account delivers to the US bucket (main.yaml). A literal 12-digit account here
+# is invisible to check-data-residency.py: the list stays templated from
+# settings.account_map.
+# =============================================================================
+
+import:
+  - catalog/aws-config-bucket/defaults
+
+components:
+  terraform:
+    kms/config-bucket:
+      metadata:
+        component: kms
+        inherits:
+          - kms/config-bucket/defaults
+      vars:
+        config_source_accounts:
+          - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
+          - '{{ .settings.account_map.full_account_map.root }}'
+          - '{{ .settings.account_map.full_account_map.audit }}'
+          - '{{ .settings.account_map.full_account_map.security }}'
+
+    config-bucket:
+      metadata:
+        component: aws-config-bucket
+        inherits:
+          - config-bucket/defaults
+      vars:
+        kms_master_key_arn: !terraform.state kms/config-bucket .key_arn
+      dependencies:
+        components:
+          - component: kms/config-bucket

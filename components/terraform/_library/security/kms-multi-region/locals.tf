@@ -638,6 +638,34 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # AWS Config delivering snapshots and history to an S3 bucket encrypted with
+  # this key (aws-config-bucket), from the accounts in config_source_accounts
+  # (this one when empty). Config calls KMS as its service principal on behalf
+  # of the delivering account, so aws:SourceAccount names the recorders that
+  # may write: for the audit account's Config bucket this is the residency
+  # list, and a recorder outside it gets no data key, so its delivery fails.
+  # Region-independent (the bucket's region is the key's).
+  dynamic "statement" {
+    for_each = var.allow_config ? [1] : []
+
+    content {
+      sid       = "AllowConfigDelivery"
+      actions   = ["kms:Decrypt", "kms:GenerateDataKey*"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["config.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = length(var.config_source_accounts) > 0 ? distinct(var.config_source_accounts) : [data.aws_caller_identity.current.account_id]
+      }
+    }
+  }
+
   # CloudFront reading SSE-KMS objects through origin access control (an
   # origin bucket encrypted with this key): read-only, so kms:Decrypt only,
   # limited to this account's distributions (any of them: account-scoped, so

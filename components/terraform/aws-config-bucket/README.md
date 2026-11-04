@@ -13,8 +13,8 @@ A house copy of Cloud Posse's
 mixins (mixins v0.5.0) copied unchanged. It is not vendored: upstream hardcodes SSE-S3
 (`AES256`) and takes no key, and the owner chose a customer managed key (2026-11-04), which a
 `*_override.tf` cannot add. The deviations are listed at the top of `main.tf`: SSE-KMS with the
-required `kms_master_key_arn`, `enable_glacier_transition` wired through, and upstream's unused
-`acl` input dropped. Inputs, defaults and outputs are otherwise upstream's; diff against the
+required `kms_master_key_arn`, `enable_glacier_transition` wired through, TLS-only requests
+(`allow_ssl_requests_only`), and upstream's unused `acl` input dropped. Inputs, defaults and outputs are otherwise upstream's; diff against the
 upstream tag before a refresh.
 
 ## Wiring
@@ -40,6 +40,10 @@ upstream tag before a refresh.
   told apart statically; the catalog must name the house key.
 - S3 does not check the key when the bucket is created: a key the Config service may not use
   only shows up as failed Config deliveries. Prove the key policy before the recorders land.
+- No residency bucket policy: config-storage 1.0.2 declares a `policy` input but never uses it, so
+  the bucket policy is its own three Allows plus TLS-only. Residency is the key's: the catalog's
+  `kms/config-bucket` (`stacks/catalog/aws-config-bucket/`) lets `config.amazonaws.com` use it
+  only for the residency's accounts (`allow_config`, `config_source_accounts`).
 - `force_destroy` is `false`, as upstream.
 - S3 Bucket Keys stay off: config-storage 1.0.2 does not expose `bucket_key_enabled`, so each
   Config delivery is its own KMS request. Small at Config volumes; not worth dropping below
