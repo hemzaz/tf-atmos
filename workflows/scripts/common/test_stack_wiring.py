@@ -180,20 +180,49 @@ class Wire(Copy):
         self.assertIn("Wire fnx-uw2-artifacts by hand", out.getvalue())
         self.assertEqual(self.text(US), stripped)
 
+    def unonboarded_eu(self) -> str:
+        """The EU file as before its first core stack (written): root_write without its principal list
+        and the EU core stacks' pairs."""
+        lines = self.committed[EU].splitlines(keepends=True)
+        start = [i for i, line in enumerate(lines) if line.strip() == "root_write:"]
+        self.assertEqual(len(start), 1)
+        # root_write's block ends at the next line indented no deeper than its key: only that block
+        # is stripped, whatever follows it in the file.
+        indent = len(lines[start[0]]) - len(lines[start[0]].lstrip())
+        end = next((i for i in range(start[0] + 1, len(lines)) if lines[i].strip()
+                    and len(lines[i]) - len(lines[i].lstrip()) <= indent), len(lines))
+        block = [line for line in lines[start[0]:end]
+                 if line.strip() != "allowed_principal_arns:" and "OrganizationAccountAccessRole" not in line
+                 and not any(f"*/fnx-ew1-{stage}" in line for stage in wiring.EU_CORE_STAGES)]
+        text = "".join(lines[:start[0]] + block + lines[end:])
+        (self.root / EU).write_text(text)
+        return text
+
     def onboard_eu(self, *accounts: str) -> str:
         """The EU file with root_write trusting these core accounts' operator roles (a hand edit)."""
         anchor = '              - "*/fnx-ew1-root-*"\n'
         principals = "            allowed_principal_arns:\n" + "".join(
             f'              - "{wiring.operator_arn(account)}"\n' for account in accounts)
-        self.assertEqual(self.committed[EU].count(anchor), 1)
-        text = self.committed[EU].replace(anchor, anchor + principals)
+        base = self.unonboarded_eu()
+        self.assertEqual(base.count(anchor), 1)
+        text = base.replace(anchor, anchor + principals)
         (self.root / EU).write_text(text)
         return text
 
     def test_eu_core_stacks_are_unwired_until_onboarded(self) -> None:
-        # The committed EU root_write lists no principals: no core account is onboarded there.
+        # Before its first core stack the EU root_write lists no principals: no core account is
+        # onboarded there.
+        base = self.unonboarded_eu()
         for stage in wiring.EU_CORE_STAGES:
             self.assertIsNone(self.wire("fnx", stage, "", "eu-west-1", f"fnx-ew1-{stage}"), stage)
+        self.assertEqual(self.text(EU), base)
+        self.assertEqual(self.text(US), self.committed[US])
+
+    def test_committed_eu_root_write(self) -> None:
+        # E5a2: the audit account is onboarded on the EU backend and fnx-ew1-audit wired; the
+        # security account is not yet (E5c).
+        self.assertEqual(self.wire("fnx", "audit", "", "eu-west-1", "fnx-ew1-audit"), [])
+        self.assertIsNone(self.wire("fnx", "security", "", "eu-west-1", "fnx-ew1-security"))
         self.assertEqual(self.text(EU), self.committed[EU])
         self.assertEqual(self.text(US), self.committed[US])
 
@@ -214,6 +243,7 @@ class Wire(Copy):
         self.assertEqual(self.text(US), self.committed[US])
 
     def test_main_eu_core_stack(self) -> None:
+        self.unonboarded_eu()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "audit", "", "eu-west-1",
