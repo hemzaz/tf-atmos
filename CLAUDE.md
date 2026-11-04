@@ -47,8 +47,9 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 - Stage `fixtures` (`fnx-ue1-fixtures-<name>`) puts each catalog template under the checks and is
   never deployed; `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) relaxes a
   template until its port PR removes the entry.
-- 43 of the 48 hand-written root modules validate a non-empty `tags.Environment` (all but `backend`,
-  `dns`, `iam`, `kms`, `secretsmanager`); many use it in resource names.
+- 43 of the 49 hand-written root modules validate a non-empty `tags.Environment` (all but `backend`,
+  `dns`, `iam`, `kms`, `secretsmanager`, and `aws-config-bucket`, a house copy of a Cloud Posse
+  component that names from `vars.context` like the vendored ones); many use it in resource names.
 - A vendored component (`vendor.yaml`) names resources from the null-label `vars.context` of the
   abstract `vendored` (`stacks/catalog/_base/vendored.yaml`; `environment` is `settings.prefix`),
   which its catalog entry inherits, not `tags.Environment`, so that convention does not apply to it.

@@ -21,6 +21,27 @@ artifacts:
     included_paths:
       - providers-account-map-bypass.depth-1.tf
       - account-verification.mixin.tf
+  5bcbaae4952daaa7f24750f3f656bb344372688279abca3e06bf618ebaa67326:
+    name: aws-cloudtrail-bucket-mixins
+    kind: remote
+    target: components/terraform/aws-cloudtrail-bucket
+    source:
+      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
+    files:
+      - path: account-verification.mixin.tf
+        type: file
+        mode: 420
+        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
+      - path: providers-account-map-bypass.depth-1.tf
+        type: file
+        mode: 420
+        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
+    order: 16
+    included_paths:
+      - providers-account-map-bypass.depth-1.tf
+      - account-verification.mixin.tf
   8d3384db2b02f2039ac56766bbf59eecf5dd0f6598c9b987bd79b45e76196372:
     name: aws-account-settings
     kind: remote
@@ -443,6 +464,45 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+  dae3acd4066cbac5e333f7632372b8d5905d8b124f6d8a780852f06b183d3fce:
+    name: aws-cloudtrail-bucket
+    kind: remote
+    target: components/terraform/aws-cloudtrail-bucket
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-cloudtrail-bucket.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-cloudtrail-bucket.git//src
+      digest: sha256:607f0b2a6b3909f56f2405e0ac013311e2c441d54a52b481ed7dcd9409529c37
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 83bb614ce98a48da89b8d68c2a52d6af6f961c2cdcff5dea91aa21e9dbfa4d36
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 319f74743c7b9b369908b30d6a080f0a92ab28629e6f84b04c33e93c8ed26f07
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: ab9ffd2981e1a9ec144bf10afc7f3c4b41b7c6a2f23cc1955988ce535febfaf7
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 09b04b4ba2d0771bfba7f4aee76dabc0aca7be5683c64cdaf8a3f488aba44e3a
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 7dec7b8d6f998ee7299103edf1a48700a873802e68d92dfd5e446233bd6338c7
+    order: 15
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+    excluded_paths:
+      - '**/providers.tf'
   df22a7a4c7c22e067717ba4f0411e856071c53b63d03a5e86fe51cccedecbcd1:
     name: aws-scp-catalog
     kind: remote
