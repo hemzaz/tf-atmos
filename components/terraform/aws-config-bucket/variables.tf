@@ -62,7 +62,7 @@ variable "kms_master_key_arn" {
   nullable    = false
 
   validation {
-    condition     = can(regex("^arn:aws[a-z-]*:kms:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:key/[0-9a-zA-Z-]+$", var.kms_master_key_arn))
+    condition     = can(regex("^arn:aws(-[a-z]+)*:kms:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:key/[0-9a-zA-Z-]+$", var.kms_master_key_arn))
     error_message = "kms_master_key_arn must be a customer managed KMS key ARN (arn:aws:kms:<region>:<12-digit account>:key/<key id>), not an alias ARN or the AWS managed aws/s3 key."
   }
 }

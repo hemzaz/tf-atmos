@@ -61,6 +61,18 @@ run "rejects_aws_managed_alias" {
   expect_failures = [var.kms_master_key_arn]
 }
 
+# A null key is refused by nullable = false before any validation runs ("required variable may
+# not be set to null"), which expect_failures cannot capture, so it has no run here.
+run "rejects_bad_partition" {
+  command = plan
+
+  variables {
+    kms_master_key_arn = "arn:awsx:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+  }
+
+  expect_failures = [var.kms_master_key_arn]
+}
+
 run "rejects_empty" {
   command = plan
 

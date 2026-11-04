@@ -41,3 +41,6 @@ upstream tag before a refresh.
 - S3 does not check the key when the bucket is created: a key the Config service may not use
   only shows up as failed Config deliveries. Prove the key policy before the recorders land.
 - `force_destroy` is `false`, as upstream.
+- S3 Bucket Keys stay off: config-storage 1.0.2 does not expose `bucket_key_enabled`, so each
+  Config delivery is its own KMS request. Small at Config volumes; not worth dropping below
+  config-storage for.
