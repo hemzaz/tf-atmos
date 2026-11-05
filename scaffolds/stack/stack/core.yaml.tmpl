@@ -9,11 +9,11 @@
 # A core-account stack (owner decision QE5): no instance of its own; its stage
 # defaults' aws-account-settings is its one enabled instance until the core
 # components land. Its state goes to [[ $root ]]'s bucket
-# through the backend's root role (stacks/orgs/[[ .Config.tenant ]]/_defaults.yaml),
-# whose root_write trusts the management-account administrator and the
+# through the backend's core role (stacks/orgs/[[ .Config.tenant ]]/_defaults.yaml),
+# whose core_write trusts the management-account administrator and the
 # [[ .Config.stage ]] account's OrganizationAccountAccessRole, and its stage
 # defaults keep it out of every CI matrix (github.actions_enabled: false). The
-# scaffold's wire hook added this stack's pattern pair to root_write
+# scaffold's wire hook added this stack's pattern pair to core_write
 # (check-state-keys.py).
 [[- if $eu ]]
 #
@@ -22,7 +22,7 @@
 # same shared [[ .Config.stage ]] account: GDPR-scoped (check-data-residency.py),
 # so tagged Compliance "pci-sox-gdpr" and its state in the EU backend
 # ([[ $root ]], stacks/orgs/[[ .Config.tenant ]]/root/eu-west-1.yaml), whose
-# root_write trusts the [[ .Config.stage ]] account's OrganizationAccountAccessRole.
+# core_write trusts the [[ .Config.stage ]] account's OrganizationAccountAccessRole.
 [[- end ]]
 [[- if not $home ]]
 #

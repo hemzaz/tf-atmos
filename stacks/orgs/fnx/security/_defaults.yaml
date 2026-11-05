@@ -34,7 +34,7 @@ settings:
 # this account's alias, S3 account public access block and each stack's
 # region settings. The account is created by fnx-gbl-root's aws-account
 # instance (docs/OPERATIONS.md, "Bootstrap order"). This stage's state goes
-# through fnx-ue1-root's root role, whose root_write holds each of its stacks'
+# through fnx-ue1-root's core role, whose core_write holds each of its stacks'
 # pattern pair and trusts this account's OrganizationAccountAccessRole, the
 # first way in until E4's Identity Center roles. A second region's stack of
 # this account also imports main-standby, after these defaults, so the
