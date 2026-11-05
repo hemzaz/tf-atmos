@@ -159,8 +159,8 @@ It holds prod state (`fnx-ew1-prod` and its DR stack `fnx-ec1-prod`, both in the
 account, whose state stays in `eu-west-1` as `fnx-ue2-prod`'s stays in `us-east-1`) and the EU core
 stacks' (`fnx-ew1-audit`), so it has the `prod_read`, `prod_write`, `core_write` and `root_write`
 roles: the prod roles trust those two stacks' CI roles and the `prod-eu` account's
-`TerraformPlanAccess-Eu` / `TerraformApplyAccess-Eu` and `AdministratorAccess`; `core_write`
-trusts the audit account's `TerraformApplyAccess-EuCore`; and, until Identity Center is applied,
+`TerraformPlanAccess-Eu` / `AdministratorAccess`; `core_write` trusts the audit account's
+`AdministratorAccess`; and, until Identity Center is applied,
 `prod_write` and `core_write` trust the `prod-eu` and audit accounts' `OrganizationAccountAccessRole`.
 
 The backend workflows default to `fnx-ue1-root`; `-s fnx-ew1-root` runs them on the EU backend
@@ -183,19 +183,23 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 
 | Role (`access_roles` key) | Access | Trusted |
 |---------------------------|--------|---------|
-| `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles; the dev and staging accounts' `TerraformPlanAccess` |
-| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles; the dev and staging accounts' `TerraformApplyAccess` and `AdministratorAccess`, and their `OrganizationAccountAccessRole` until Identity Center is applied (step 6 of [Bootstrap order](#bootstrap-order)); like the apply roles, each reaches both stages' state |
+| `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles; staging's `TerraformPlanAccess` |
+| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles; dev's `TerraformApplyAccess` and both accounts' `AdministratorAccess`, and their `OrganizationAccountAccessRole` until Identity Center is applied (step 6 of [Bootstrap order](#bootstrap-order)); like the apply roles, each reaches both stages' state |
 | `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`, DR `fnx-ec1-prod`) | the prod stacks' CI plan roles; the prod account's `TerraformPlanAccess-Prod` (EU: `prod-eu`'s `-Eu`) |
-| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles; the prod account's `TerraformApplyAccess-Prod` and `AdministratorAccess` (EU: `prod-eu`'s, `-Eu`), and its `OrganizationAccountAccessRole` until Identity Center is applied |
-| `<role_prefix>-core-role` (`core_write`) | read/write, the core stages' state (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; EU: `fnx-ew1-audit`; read too, under `TFSTATE_ACCESS=read`) | no CI role; each core account's `TerraformApplyAccess-Core` (EU: `-EuCore`), and its `OrganizationAccountAccessRole` until Identity Center is applied |
+| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles; the prod account's `AdministratorAccess` (EU: `prod-eu`'s), and its `OrganizationAccountAccessRole` until Identity Center is applied |
+| `<role_prefix>-core-role` (`core_write`) | read/write, the core stages' state (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; EU: `fnx-ew1-audit`; read too, under `TFSTATE_ACCESS=read`) | no CI role; each core account's `AdministratorAccess`, and its `OrganizationAccountAccessRole` until Identity Center is applied |
 | `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) | only the applying administrator |
 
 Humans are Identity Center permission-set roles, trusted by their reserved-path pattern for one
 account and one set (`arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<set>_*`):
 the `TerraformPlanAccess*` sets on read roles only (`aws-identity-center`'s house
 `policy-TerraformPlanAccess_override.tf` points them at the read roles), every other set on write
-roles only, each in an account whose state that role holds (`check-ci-state-roles.py`).
-`TerraformStateAccess*` is trusted nowhere.
+roles only, each Terraform set on the role its policy assumes, each in an account whose state that
+role holds, and only a set that `account_assignments` assigns in that account; every write role
+also trusts some assigned set, CI apply role or `OrganizationAccountAccessRole`
+(`check-ci-state-roles.py`). `TerraformStateAccess*` is assigned and trusted nowhere. A human on a
+Plan set reaches only read roles, so runs with `TFSTATE_ACCESS=read` and `-lock=false`, as the CI
+plan jobs do: the stack backend then assumes the stage's read role.
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU:

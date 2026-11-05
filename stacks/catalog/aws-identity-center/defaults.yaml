@@ -85,14 +85,17 @@ components:
         # (stacks/orgs/fnx/_defaults.yaml), and the EU stacks have their own
         # backend in fnx-ew1-root, so the dev/staging write role is the main
         # backend and prod, core and the EU backend are additional ones
-        # (TerraformApplyAccess-Prod, -Core, -Eu, -EuCore). Native S3 locking:
-        # no DynamoDB table. Each backend trusts the Plan sets on its read
-        # roles only and the Apply sets on its write roles only
-        # (stacks/orgs/fnx/root/*.yaml), so the Plan sets assume a read role:
+        # (TerraformApplyAccess-Prod, -Core, -Eu). Native S3 locking: no
+        # DynamoDB table. Each backend trusts the Plan sets on its read roles
+        # only and the Apply sets on its write roles only, and only a set
+        # assigned below in that account (stacks/orgs/fnx/root/*.yaml,
+        # check-ci-state-roles.py), so the Plan sets assume a read role:
         # TerraformPlanAccess the main role's <role_prefix>-read-role twin,
         # TerraformPlanAccess-<Key> its backend's read_role_arn, a field the
-        # house policy-TerraformPlanAccess_override.tf adds (none for the core
-        # backends: the core stacks have no read role).
+        # house policy-TerraformPlanAccess_override.tf adds (none for core: the
+        # core stacks have no read role). The EU core stacks' core role
+        # (fnx-ew1-root) gets no set of its own: the core accounts'
+        # AdministratorAccess reaches it (owner decision 2026-11-05).
         tf_access_bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
         tf_access_role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-role"
         tf_access_additional_backends:
@@ -106,21 +109,19 @@ components:
             bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
             role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-core-role"
           # fnx-ew1-root's backend (the EU stacks' settings.tfstate, repeated:
-          # this stack reads only its own settings): its prod-eu roles (eu) and
-          # its core role, the EU core stacks' (eu-core).
+          # this stack reads only its own settings): its prod-eu roles.
           eu:
             bucket_arn: "arn:aws:s3:::{{ .settings.context.tenant }}-ew1-terraform-state"
             role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.context.tenant }}-ew1-terraform-backend-prod-role"
             read_role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.context.tenant }}-ew1-terraform-backend-prod-read-role"
-          eu-core:
-            bucket_arn: "arn:aws:s3:::{{ .settings.context.tenant }}-ew1-terraform-state"
-            role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.context.tenant }}-ew1-terraform-backend-core-role"
         # Who gets which set where (E4 plan, Design): Managers on
         # AdministratorAccess everywhere; DevOps on AdministratorAccess except
         # the management account; Developers on TerraformApplyAccess in dev,
         # TerraformPlanAccess in staging and prod (each on its backend's set),
-        # TerraformStateAccess in the core accounts; BillingAdmin on
-        # BillingAdministratorAccess in the management account.
+        # nothing in the core accounts (applied by Managers/DevOps with
+        # AdministratorAccess, which core_write trusts; owner decision
+        # 2026-11-05); BillingAdmin on BillingAdministratorAccess in the
+        # management account.
         account_assignments:
           '{{ .settings.context.tenant }}-root':
             groups:
@@ -134,9 +135,6 @@ components:
             groups: &core
               Managers: *administrator
               DevOps: *administrator
-              Developers:
-                permission_sets:
-                  - TerraformStateAccess-Core
           '{{ .settings.context.tenant }}-security':
             groups: *core
           '{{ .settings.context.tenant }}-network':

@@ -66,14 +66,16 @@ components:
         # aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<set>_*: the region
         # segment and the hash suffix are unknown until Identity Center
         # provisions the set there; customers cannot create a role under
-        # /aws-reserved/). Owner decision 2026-11-04: the Plan sets only on
-        # the stage's read role, the Apply sets only on its write role; a
-        # set's account is the stage's own (check-ci-state-roles.py). The
-        # stage's AdministratorAccess (Managers, DevOps) is on its write role
-        # too: it applies the stack's in-cluster components from inside the VPC
-        # (the eks break-glass, eks map_additional_iam_roles; E4c3/E4c4;
-        # check-cluster-api-ci.py fails a stack whose admin role is missing
-        # here).
+        # /aws-reserved/). Owner decisions 2026-11-04/05: the Plan sets only
+        # on the stage's read role, the Apply sets only on its write role, each
+        # set on the role its policy assumes, and only a set that
+        # aws-identity-center's account_assignments assigns in that account
+        # (no trusted-but-unassigned set); a set's account is the stage's own
+        # (check-ci-state-roles.py). Each account's AdministratorAccess
+        # (Managers, DevOps) is on its write role: the humans who apply its
+        # stacks, and in the workload accounts the eks break-glass (eks
+        # map_additional_iam_roles; E4c3/E4c4; check-cluster-api-ci.py fails a
+        # stack whose admin role is missing here).
         #
         # Each account's OrganizationAccountAccessRole stays beside them until
         # Identity Center is applied (deploy-accounts' identity-center phase,
@@ -95,7 +97,6 @@ components:
               - "*/fnx-ue1-staging/*"
               - "*/fnx-ue1-staging-*"
             allowed_principal_arns:
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformPlanAccess_*"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformPlanAccess_*"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-ue1-dev-ci-plan"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-ue1-staging-ci-plan"
@@ -115,8 +116,9 @@ components:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue2-prod-ci-plan"
           write:
             # Dev/staging state: their CI apply roles (master branch subject
-            # only, see iam/ci ci_apply_role_trusted_repos), each account's
-            # TerraformApplyAccess and AdministratorAccess, and its
+            # only, see iam/ci ci_apply_role_trusted_repos), dev's
+            # TerraformApplyAccess (Developers), each account's
+            # AdministratorAccess, and its
             # OrganizationAccountAccessRole until Identity Center is applied
             # (above). Accepted: write is not split by stage, so a dev
             # principal also reaches staging state and the reverse, as the CI
@@ -128,19 +130,17 @@ components:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-ue1-dev-ci-apply"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-ue1-staging-ci-apply"
           prod_write:
             # Prod state: ONLY prod's apply roles among the CI roles, the prod
-            # account's TerraformApplyAccess-Prod and AdministratorAccess
-            # (human break-glass, not PR code: D3 holds), and its
+            # account's AdministratorAccess (human break-glass, not PR code: D3
+            # holds), and its
             # OrganizationAccountAccessRole until Identity Center is applied.
             object_key_patterns: *prod_state
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/OrganizationAccountAccessRole"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Prod_*"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue1-prod-ci-apply"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue2-prod-ci-apply"
@@ -159,7 +159,8 @@ components:
           # routes the core stages here; E2 carry, owner decision: core_write).
           # A core stack is applied with credentials in its own account (the
           # provider's allowed_account_ids): each core account's
-          # TerraformApplyAccess-Core, and its OrganizationAccountAccessRole
+          # AdministratorAccess (Managers, DevOps; owner decision 2026-11-05),
+          # and its OrganizationAccountAccessRole
           # (which Organizations creates in every account it creates, trusting
           # the management account) until Identity Center is applied (above).
           # Neither reaches the root stacks' state (root_write).
@@ -181,8 +182,8 @@ components:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.identity }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.artifacts }}:role/OrganizationAccountAccessRole"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Core_*"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Core_*"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Core_*"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.identity }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Core_*"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.artifacts }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Core_*"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.identity }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.artifacts }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"

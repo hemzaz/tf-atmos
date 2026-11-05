@@ -19,8 +19,9 @@
 #
 # Terraform replaces every nested "statement" of an overridden data source, so
 # each document below restates upstream's statements (sids, actions, the S3
-# read and EC2DescribeRegions) with only the assumed role changed. Re-check
-# both against policy-TerraformAccess.tf after a vendor bump.
+# read and EC2DescribeRegions) with only the assumed role changed;
+# scripts/check-identity-center-override.py (lint) fails when a vendor bump
+# changes upstream's statements or the variable's fields.
 
 variable "tf_access_additional_backends" {
   type = map(object({

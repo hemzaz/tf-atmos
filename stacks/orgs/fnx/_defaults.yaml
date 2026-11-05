@@ -31,21 +31,20 @@ terraform:
   # Access goes through one of the backend's access roles (Cloud Posse
   # tfstate-backend access_roles), split by stage (state objects "*/<stack>/*" and "*/<stack>-*"):
   #   <role_prefix>-role            read/write, dev/staging objects; the dev/staging CI apply roles,
-  #                                 the dev/staging accounts' Identity Center TerraformApplyAccess and
+  #                                 dev's Identity Center TerraformApplyAccess role, both accounts'
   #                                 AdministratorAccess roles, and their OrganizationAccountAccessRole
   #                                 until Identity Center is applied (each reaches both stages' state,
   #                                 as the apply roles do)
   #   <role_prefix>-read-role       read-only, dev/staging objects; the dev/staging CI plan roles and
-  #                                 the dev/staging accounts' TerraformPlanAccess roles
+  #                                 staging's TerraformPlanAccess role
   #   <role_prefix>-prod-role       read/write, prod objects; the prod stacks' apply roles, the prod
-  #                                 account's TerraformApplyAccess-Prod and AdministratorAccess roles
-  #                                 (EU: prod-eu's, -Eu), and its OrganizationAccountAccessRole until
-  #                                 Identity Center is applied
+  #                                 account's AdministratorAccess role (EU: prod-eu's), and its
+  #                                 OrganizationAccountAccessRole until Identity Center is applied
   #   <role_prefix>-prod-read-role  read-only, prod objects; prod's plan role and the prod account's
   #                                 TerraformPlanAccess-Prod role (EU: -Eu)
   #   <role_prefix>-core-role       read/write, the core stages' objects; each core account's
-  #                                 TerraformApplyAccess-Core role (EU: -EuCore) and, until Identity
-  #                                 Center is applied, its OrganizationAccountAccessRole
+  #                                 AdministratorAccess role and, until Identity Center is applied,
+  #                                 its OrganizationAccountAccessRole
   #   <role_prefix>-root-role       read/write, the root stacks' objects only; the administrator
   #                                 who applies backend/main
   # The role is per stack, not per job, so a job picks it with an environment
@@ -61,7 +60,7 @@ terraform:
   # The provider guard needs credentials in the core account, so the PR
   # enabling a core stack's first instance adds the stack's pattern pair to
   # core_write (stacks/orgs/fnx/root/us-east-1.yaml), whose principals are the
-  # core accounts' TerraformApplyAccess-Core roles and their
+  # core accounts' AdministratorAccess roles and their
   # OrganizationAccountAccessRole until Identity Center is applied.
   #
   # TFSTATE_SOURCE=replica reads the bucket's cross-region replica instead

@@ -30,22 +30,23 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
 
 Humans are Identity Center permission-set roles (`stacks/catalog/aws-identity-center`), trusted by
 their reserved-path pattern for one account and one set: the `TerraformPlanAccess*` sets on read
-roles only, every other set on write roles only, each in an account whose stacks' state the role
-holds (`check-ci-state-roles.py`). Each account's `OrganizationAccountAccessRole` stays on its
+roles only, every other set on write roles only, each Terraform set on the role its policy assumes,
+each in an account whose stacks' state the role holds, and only a set `account_assignments` assigns
+in that account (`check-ci-state-roles.py`, which also fails a write role that trusts no assigned
+set, CI apply role or `OrganizationAccountAccessRole`). Each account's `OrganizationAccountAccessRole` stays on its
 stage's write role until Identity Center is applied; the PR enabling that instance removes it.
 
 - `read` / `write` (`fnx-terraform-backend-read-role` / `-role`): the dev and staging stacks'
-  objects, trusted by those stages' CI plan / apply roles and the dev and staging accounts'
-  `TerraformPlanAccess` / `TerraformApplyAccess` and `AdministratorAccess` (each reaches both
-  stages' state, as the apply roles do).
+  objects, trusted by those stages' CI plan / apply roles, staging's `TerraformPlanAccess` / dev's
+  `TerraformApplyAccess` (the sets assigned there), and both accounts' `AdministratorAccess` (each
+  reaches both stages' state, as the apply roles do).
 - `prod_read` / `prod_write` (`fnx-terraform-backend-prod-read-role` / `-prod-role`): the prod
   stacks' objects only, trusted by the prod stacks' plan / apply roles and the prod account's (EU:
-  `prod-eu`'s) `TerraformPlanAccess-Prod` / `TerraformApplyAccess-Prod` and `AdministratorAccess`
-  (EU: `-Eu`).
+  `prod-eu`'s) `TerraformPlanAccess-Prod` (EU: `-Eu`) / `AdministratorAccess`.
 - `core_write` (`fnx-terraform-backend-core-role`, EU `fnx-ew1-terraform-backend-core-role`): the
   core stages' objects (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`,
   `fnx-ue1-identity`, `fnx-ue1-artifacts`; EU `fnx-ew1-audit`), trusted by each core account's
-  `TerraformApplyAccess-Core` (EU: `-EuCore`). No read twin: `TFSTATE_ACCESS=read` selects it too.
+  `AdministratorAccess`. No read twin: `TFSTATE_ACCESS=read` selects it too.
 - `root_write` (`fnx-terraform-backend-root-role`, EU `fnx-ew1-terraform-backend-root-role`): the
   root stacks' objects only (`fnx-ue1-root`, `fnx-gbl-root`; EU `fnx-ew1-root`), trusted only by
   the administrator who applies `backend/main`. No principal of a core or workload account reaches it.

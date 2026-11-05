@@ -101,8 +101,8 @@ components:
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-plan'
           prod_write:
             # EU prod state: ONLY the EU prod stacks' apply roles among the CI
-            # roles, the prod-eu account's TerraformApplyAccess-Eu and
-            # AdministratorAccess (human break-glass, not PR code), and its
+            # roles, the prod-eu account's AdministratorAccess (human
+            # break-glass, not PR code), and its
             # OrganizationAccountAccessRole, the administrator's way into the
             # new account for its stacks' first deploy, until Identity Center
             # is applied (as fnx-ue1-root's; the PR enabling its instance
@@ -110,7 +110,6 @@ components:
             object_key_patterns: *prod_state
             allowed_principal_arns:
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/OrganizationAccountAccessRole'
-              - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Eu_*'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-apply'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-apply'
@@ -124,8 +123,8 @@ components:
           # and security in eu-west-1, routed here by
           # stacks/orgs/fnx/_defaults.yaml), as fnx-ue1-root's core_write: a
           # core stack is applied with credentials in its own account, so that
-          # account's TerraformApplyAccess-EuCore (the identity-center eu-core
-          # backend) and, until Identity Center is applied, its
+          # account's AdministratorAccess (owner decision 2026-11-05) and, until
+          # Identity Center is applied, its
           # OrganizationAccountAccessRole. Neither reaches this stack's state.
           core_write:
             object_key_patterns:
@@ -133,4 +132,4 @@ components:
               - "*/fnx-ew1-audit-*"
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/OrganizationAccountAccessRole"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-EuCore_*"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"

@@ -39,7 +39,16 @@ must be in an account whose state that role serves: the settings.environment.acc
 an instance whose backend assumes the role (a read role: its write twin, READ_ROLES), so a
 pattern for the wrong account cannot give one stage another's state. A TerraformPlanAccess*
 set goes only on a read role, any other set (TerraformApplyAccess*, AdministratorAccess)
-only on a write role (owner decision 2026-11-04).
+only on a write role (owner decision 2026-11-04). A Terraform* set goes only on the role
+its policy assumes, read from the aws-identity-center instance (tf_access_role_arn and
+tf_access_additional_backends; TerraformPlanAccess the read twin, -<Key> its read_role_arn,
+policy-TerraformPlanAccess_override.tf), so TerraformApplyAccess on core_write fails. And
+a trusted set must be one that instance's account_assignments assign in the pattern's
+account (owner, 2026-11-05: no trusted-but-unassigned set), disabled instance included.
+
+Every write role but root_write (write, prod_write, core_write, both backends) must
+trust at least one such assigned set, a CI apply role or an OrganizationAccountAccessRole,
+or no one but the administrator can apply its stacks.
 Exits 1 on any error.
 """
 import importlib.util
@@ -76,6 +85,11 @@ SSO_ROLE_ARN = re.compile(
     r"^arn:aws[a-z-]*:iam::([^:]*):role/aws-reserved/sso\.amazonaws\.com/(?:[^/]*/)?\*?AWSReservedSSO_([A-Za-z0-9-]+)_"
 )
 PLAN_SET = "TerraformPlanAccess"
+TERRAFORM_SETS = ("TerraformPlanAccess", "TerraformApplyAccess", "TerraformStateAccess")
+IC_COMPONENT = "aws-identity-center"
+OAAR = re.compile(r"^arn:aws[a-z-]*:iam::[0-9]{12}:role/OrganizationAccountAccessRole$")
+# The write roles every stack's apply needs someone on (root_write: the administrator alone).
+APPLY_ROLES = ("write", "prod_write", "core_write")
 # read role -> the write role its stages' backends assume (TFSTATE_ACCESS unset).
 READ_ROLES = {"read": "write", "prod_read": "prod_write"}
 
@@ -160,19 +174,65 @@ def served_accounts(stacks: dict, owned: dict) -> dict:
     return accounts
 
 
-def check_sso(owner: backends.Backend, key: str, arn: str, accounts: dict) -> list[str]:
-    """An Identity Center principal on owner's access_roles.key: its set's kind and its account."""
+def identity_center(stacks: dict) -> tuple[dict, dict]:
+    """({account ID: sets assigned there}, {Terraform set: role name its policy assumes, or None})
+    from the first non-abstract aws-identity-center instance, enabled or not; ({}, {}) without one."""
+    found = [instance for _, stack in sorted(stacks.items()) for instance in backends.instances(stack).values()
+             if instance.get("component") == IC_COMPONENT
+             and (instance.get("metadata") or {}).get("type") != "abstract"]
+    variables = (found[0].get("vars") or {}) if found else {}
+    ids = (variables.get("account_map") or {}).get("full_account_map") or {}
+    assigned: dict = {}
+    for name, assignment in (variables.get("account_assignments") or {}).items():
+        for kind in ("groups", "users"):
+            for principal in ((assignment or {}).get(kind) or {}).values():
+                assigned.setdefault(ids.get(name), set()).update((principal or {}).get("permission_sets") or [])
+    assumes: dict = {}
+    backends_by_suffix = {"": {"role_arn": variables.get("tf_access_role_arn")}}
+    for key, backend in (variables.get("tf_access_additional_backends") or {}).items():
+        backends_by_suffix["-" + "".join(part.title() for part in key.split("-"))] = backend or {}
+    for suffix, backend in backends_by_suffix.items():
+        write = backends.role_name_of(backend.get("role_arn"))
+        if not write:
+            continue
+        read = write[:-len("-role")] + "-read-role" if not suffix and write.endswith("-role") else \
+            backends.role_name_of(backend.get("read_role_arn"))
+        assumes.update({f"TerraformPlanAccess{suffix}": read, f"TerraformApplyAccess{suffix}": write,
+                        f"TerraformStateAccess{suffix}": write})
+    return assigned, assumes
+
+
+def check_sso(owner: backends.Backend, key: str, arn: str, accounts: dict, ic: tuple) -> list[str]:
+    """An Identity Center principal on owner's access_roles.key: its set's kind, role, assignment and account."""
     account, permission_set = SSO_ROLE_ARN.match(arn).groups()
+    assigned, assumes = ic
     errors = []
     if permission_set.startswith(PLAN_SET) != (key in READ_ROLES):
         errors.append(f"{owner.where}: backend access_roles.{key} trusts permission set {permission_set} ({arn}): "
                       f"{PLAN_SET}* sets go only on a read role ({', '.join(READ_ROLES)}), other sets only on "
                       "a write role")
+    role_name = (owner.access_roles.get(key) or {}).get("role_name")
+    if permission_set.startswith(TERRAFORM_SETS) and assumes.get(permission_set) != role_name:
+        target = assumes.get(permission_set)
+        errors.append(f"{owner.where}: backend access_roles.{key} trusts permission set {permission_set} ({arn}), "
+                      f"whose policy assumes {target or 'no state role'}, not this role ({role_name})")
+    if permission_set not in assigned.get(account, set()):
+        errors.append(f"{owner.where}: backend access_roles.{key} trusts {arn}, which {IC_COMPONENT}'s "
+                      f"account_assignments do not assign in account {account}")
     served = accounts.get((owner.bucket, READ_ROLES.get(key, key)), set())
     if account not in served:
         errors.append(f"{owner.where}: backend access_roles.{key} trusts {arn}, in account {account}, no account "
                       f"of a stack whose state this role serves ({sorted(a for a in served if a)})")
     return errors
+
+
+def applier(arn: str, ic: tuple) -> bool:
+    """Whether a write role's principal can apply: a set assigned in its account, a CI apply role or an OAAR."""
+    sso = SSO_ROLE_ARN.match(arn)
+    if sso:
+        return sso.group(2) in ic[0].get(sso.group(1), set())
+    ci_role = CI_ROLE_ARN.match(arn)
+    return bool(OAAR.match(arn)) or bool(ci_role and ci_role.group(1) == "apply")
 
 
 def check(stacks: dict) -> list[str]:
@@ -198,11 +258,17 @@ def check(stacks: dict) -> list[str]:
             continue
         errors += check_ci(where, instance, stage, owner, expected)
     accounts = served_accounts(stacks, owned)
+    ic = identity_center(stacks)
     for bucket, owner in sorted(owned.items()):
         for key in sorted(owner.access_roles):
-            for arn in (owner.access_roles[key] or {}).get("allowed_principal_arns") or []:
+            trusted = (owner.access_roles[key] or {}).get("allowed_principal_arns") or []
+            if key in APPLY_ROLES and not any(applier(arn, ic) for arn in trusted):
+                errors.append(f"{owner.where}: backend access_roles.{key} trusts no assigned Identity Center set, "
+                              "CI apply role or OrganizationAccountAccessRole, so only the administrator can apply "
+                              "the stacks whose state it holds")
+            for arn in trusted:
                 if SSO_ROLE_ARN.match(arn):
-                    errors += check_sso(owner, key, arn, accounts)
+                    errors += check_sso(owner, key, arn, accounts, ic)
                     continue
                 if arn in OPERATOR_ROLE_ARNS or not CI_ROLE_ARN.match(arn):
                     continue
