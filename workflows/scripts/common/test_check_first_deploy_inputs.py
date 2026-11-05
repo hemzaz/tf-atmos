@@ -566,6 +566,49 @@ class LogArchiveBucketsTest(unittest.TestCase):
                 off = stack("dev", "222222222222", bucket={**bucket, "enabled": False})
                 self.assertFalse(preflight.needs_core_accounts(off))
 
+    @staticmethod
+    def failures(stacks):
+        return [(f.level, f.key) for f in preflight.check(stacks, ["fnx-ue1-dev"]) if f.level in ("fatal", "error")]
+
+    def test_a_cloudtrail_bucket_policy_is_fatal_even_disabled(self):
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                stacks = clean()
+                bucket = {"component": "aws-cloudtrail-bucket", "enabled": enabled}
+                stacks["fnx-ue1-dev"] = stack("dev", "222222222222", bucket={**bucket, "policy": '{"Statement":[]}'})
+                self.assertIn(("fatal", "bucket vars.policy"), self.failures(stacks))
+                stacks["fnx-ue1-dev"] = stack("dev", "222222222222", bucket={**bucket, "policy": ""})
+                self.assertNotIn(("fatal", "bucket vars.policy"), self.failures(stacks))
+
+    FULL = {f"fnx-{k}": v for k, v in ACCOUNTS.items()}
+    US = sorted({v for k, v in ACCOUNTS.items() if k != "prod-eu"})
+
+    def config_stacks(self, key_accounts, enabled=False, **bucket_vars):
+        stacks = clean()
+        stacks["fnx-ue1-dev"] = stack(
+            "dev", "222222222222",
+            **{"kms/config-bucket": {"component": "kms", "enabled": enabled, "config_source_accounts": key_accounts},
+               "config-bucket": {"component": "aws-config-bucket", "enabled": enabled, "tenant": "fnx",
+                                 "account_map": {"full_account_map": self.FULL},
+                                 "kms_master_key_arn": "!terraform.state kms/config-bucket .key_arn", **bucket_vars}})
+        bucket = stacks["fnx-ue1-dev"]["components"]["terraform"]["config-bucket"]
+        bucket["settings"]["static_account_map"] = {"full_account_map": self.FULL}
+        return stacks
+
+    def test_a_derived_residency_equal_to_the_key_passes(self):
+        self.assertEqual(self.failures(self.config_stacks(self.US)), [])
+
+    def test_a_key_missing_an_account_of_the_derived_residency_is_fatal(self):
+        drift = ("fatal", "config-bucket vars.residency_account_ids")
+        self.assertEqual(self.failures(self.config_stacks(self.US[1:])), [drift])
+        self.assertEqual(self.failures(self.config_stacks(self.US + [ACCOUNTS["prod-eu"]], enabled=True)), [drift])
+
+    def test_an_explicit_residency_must_equal_the_key(self):
+        eu = [ACCOUNTS[k] for k in ("prod-eu", "root", "audit", "security")]
+        self.assertEqual(self.failures(self.config_stacks(eu, residency_account_ids=eu)), [])
+        self.assertEqual(self.failures(self.config_stacks(eu, residency_account_ids=eu[:3])),
+                         [("fatal", "config-bucket vars.residency_account_ids")])
+
 
 class OnlyStacksTest(unittest.TestCase):
     def test_only_limits_the_per_stack_checks(self):

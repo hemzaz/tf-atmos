@@ -10,13 +10,13 @@
 # (prod-eu and the shared accounts' eu-west-1 recorders), each with its own
 # kms/config-bucket key.
 #
-# Residency is enforced by the key, not a bucket policy: config-storage 1.0.2
-# declares a `policy` input but never uses it (main.tf builds the bucket policy
-# from its own statements only), so no Deny can be added to the bucket policy
-# without dropping below config-storage. The bucket is SSE-KMS under its
-# kms/config-bucket key, whose policy lets config.amazonaws.com use it only for
-# the residency's accounts (kms allow_config, aws:SourceAccount); a recorder of
-# any other account gets no data key and its delivery fails.
+# Residency is enforced twice (E5a4b). The bucket policy denies
+# config.amazonaws.com a put for an aws:SourceAccount outside the residency
+# (residency_account_ids) or under any key but the bucket's, so a recorder of
+# another account cannot deliver here even with its own s3KmsKeyArn. The
+# bucket is SSE-KMS under its kms/config-bucket key, whose policy lets
+# config.amazonaws.com use it only for the same accounts (kms allow_config,
+# config_source_accounts).
 # =============================================================================
 
 import:

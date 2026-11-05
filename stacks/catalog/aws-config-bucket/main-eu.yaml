@@ -7,7 +7,9 @@
 # OQ4), whose eu-west-1 configuration data stays in the EU. Every other
 # account delivers to the US bucket (main.yaml). A literal 12-digit account here
 # is invisible to check-data-residency.py: the list stays templated from
-# settings.account_map.
+# settings.account_map. One list (the &residency anchor) feeds the key's
+# config_source_accounts and the bucket policy's residency_account_ids
+# (E5a4b); the preflight (check-first-deploy-inputs.py) fails a difference.
 # =============================================================================
 
 import:
@@ -21,7 +23,7 @@ components:
         inherits:
           - kms/config-bucket/defaults
       vars:
-        config_source_accounts:
+        config_source_accounts: &residency
           - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
           - '{{ .settings.account_map.full_account_map.root }}'
           - '{{ .settings.account_map.full_account_map.audit }}'
@@ -34,6 +36,7 @@ components:
           - config-bucket/defaults
       vars:
         kms_master_key_arn: !terraform.state kms/config-bucket .key_arn
+        residency_account_ids: *residency
       dependencies:
         components:
           - component: kms/config-bucket

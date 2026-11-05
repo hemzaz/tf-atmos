@@ -6,6 +6,13 @@
 # QE7, E5a OQ4): AWS Config of prod-eu, and only it, delivers to the EU bucket
 # (main-eu.yaml). The shared accounts' (root, audit, security) eu-west-1
 # recorders also deliver there; their other regions deliver here.
+#
+# The bucket policy's residency is derived, not listed: residency_account_ids
+# is unset, so the component takes every account of vars.account_map (the
+# account-map-bypass abstract) but prod-eu, and a new account cannot be
+# missed (E5a4b). The key's list is written out (kms has no account map); the
+# preflight (check-first-deploy-inputs.py) fails it when it differs from the
+# bucket's derived residency.
 # =============================================================================
 
 import:

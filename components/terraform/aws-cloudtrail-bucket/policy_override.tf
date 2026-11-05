@@ -17,6 +17,8 @@
 # (check-first-deploy-inputs.py MAP_CONSUMERS) fails an apply with placeholder
 # IDs. Inline in the argument: an override file cannot add a local or a
 # variable. module.this.id is the bucket name, as upstream's own statements use.
+# This replaces the component's `policy` input, so a vars.policy is dropped; the
+# preflight fails one (fatal, disabled instances too): add a statement here.
 module "cloudtrail_s3_bucket" {
   #checkov:skip=CKV_TF_1:an override block carries no source; Terraform merges it into main.tf's, which pins Cloud Posse's registry module to an exact version
   #checkov:skip=CKV_TF_2:an override block carries no source; Terraform merges it into main.tf's, which pins Cloud Posse's registry module to an exact version
