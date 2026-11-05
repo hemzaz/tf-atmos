@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowLogDeliveryDataKeys", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics", "AllowCloudFront", "AllowLogDeliveryToS3"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowLogDeliveryDataKeys", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics", "AllowCloudFront", "AllowLogDeliveryToS3", "AllowConfigDelivery"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -447,6 +447,65 @@ run "cloudtrail_is_scoped_to_this_accounts_trails" {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowEventBridge", "AllowCloudWatchLogs", "AllowCloudWatchAlarmsSNSTopics"], try(s.Sid, ""))]) == 0
     error_message = "allow_cloudtrail must not grant other services anything."
   }
+}
+
+run "config_delivers_only_for_the_listed_accounts" {
+  command = plan
+
+  variables {
+    allow_config           = true
+    config_source_accounts = ["111111111111", "222222222222"]
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowConfigDelivery"]).Principal.Service == "config.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowConfigDelivery"]).Action) == toset(["kms:Decrypt", "kms:GenerateDataKey*"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowConfigDelivery"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = ["111111111111", "222222222222"] }
+      }
+    )
+    error_message = "AWS Config may use the key (kms:GenerateDataKey*, kms:Decrypt) only for the accounts in config_source_accounts (aws:SourceAccount)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowS3", "AllowSNS", "AllowCloudWatchLogs", "AllowCloudTrailEncryptLogs"], try(s.Sid, "")) || startswith(try(s.Sid, ""), "AllowEventBridge")]) == 0
+    error_message = "allow_config must not grant other services anything."
+  }
+}
+
+run "config_defaults_to_this_account" {
+  command = plan
+
+  variables {
+    allow_config = true
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowConfigDelivery"]).Condition == { StringEquals = { "aws:SourceAccount" = "123456789012" } }
+    error_message = "With no config_source_accounts, AWS Config may use the key only for this account."
+  }
+}
+
+run "config_source_accounts_must_be_account_ids" {
+  command = plan
+
+  variables {
+    allow_config           = true
+    config_source_accounts = ["prod-eu"]
+  }
+
+  expect_failures = [var.config_source_accounts]
+}
+
+run "config_source_accounts_need_allow_config" {
+  command = plan
+
+  variables {
+    config_source_accounts = ["111111111111"]
+  }
+
+  expect_failures = [var.config_source_accounts]
 }
 
 # --- #186: a replica must not copy the primary region's conditions ---

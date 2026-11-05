@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# config-bucket - the audit account's AWS Config archive, and its key (E5a)
+# =============================================================================
+# The house aws-config-bucket (components/terraform/aws-config-bucket, a copy
+# of Cloud Posse's v1.535.1 with a customer managed key), with the values of
+# Cloud Posse's README catalog entry (365-day expiration, glacier 180,
+# noncurrent 180/30). One bucket per residency (owner decision QE7):
+# main.yaml for fnx-ue1-audit (US accounts), main-eu.yaml for fnx-ew1-audit
+# (prod-eu and the shared accounts' eu-west-1 recorders), each with its own
+# kms/config-bucket key.
+#
+# Residency is enforced by the key, not a bucket policy: config-storage 1.0.2
+# declares a `policy` input but never uses it (main.tf builds the bucket policy
+# from its own statements only), so no Deny can be added to the bucket policy
+# without dropping below config-storage. The bucket is SSE-KMS under its
+# kms/config-bucket key, whose policy lets config.amazonaws.com use it only for
+# the residency's accounts (kms allow_config, aws:SourceAccount); a recorder of
+# any other account gets no data key and its delivery fails.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    config-bucket/defaults:
+      metadata:
+        component: aws-config-bucket
+        type: abstract
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: config
+        lifecycle_rule_enabled: true
+        noncurrent_version_expiration_days: 180
+        noncurrent_version_transition_days: 30
+        standard_transition_days: 60
+        glacier_transition_days: 180
+        enable_glacier_transition: true
+        expiration_days: 365
+        tags:
+          Component: "ConfigBucket"
+
+    # The bucket's key: root-account administration (the kms/defaults
+    # model), rotation on, and AWS Config only (no other service statement:
+    # the audit account runs none of kms/defaults' consumers, and
+    # allow_autoscaling_ebs would need an iam instance it does not have). Each
+    # instance sets config_source_accounts to its residency.
+    kms/config-bucket/defaults:
+      metadata:
+        component: kms
+        type: abstract
+      vars:
+        name_prefix: '{{ .atmos_stack }}-config-bucket'
+        alias_name: '{{ .settings.prefix }}-config-bucket'  # without the alias/ prefix
+        description: AWS Config delivery bucket (config-bucket)
+        key_spec: SYMMETRIC_DEFAULT
+        key_usage: ENCRYPT_DECRYPT
+        enable_key_rotation: true
+        rotation_period_in_days: 365
+        deletion_window_in_days: 30
+        enable_default_policy: true
+        allow_config: true

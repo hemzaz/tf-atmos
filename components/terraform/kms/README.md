@@ -34,7 +34,10 @@ use through their own IAM policies.
   which the prod keys set for `monitoring`'s RDS event subscriptions (`rds_event_subscription_enabled`),
   and `allow_billing_notifications` (AWS Budgets and Cost Anomaly Detection publishing to topics on
   the key), which `fnx-ew1-prod`'s key sets for `cost-optimization`'s `billing_notifications_sns_enabled`.
-  Prefer them over `key_service_users`, which has no conditions.
+  Prefer them over `key_service_users`, which has no conditions. `allow_config` (AWS Config
+  delivering to a bucket on the key, scoped by `aws:SourceAccount` to `config_source_accounts`,
+  this account when empty) is off in `kms/defaults`: only the audit stacks' `kms/config-bucket`
+  (`stacks/catalog/aws-config-bucket/`) sets it, with its residency's accounts.
 - The CI apply role gets key use via `iam`'s `ci_apply_kms_key_aliases` (by alias, because
   `iam/ci` applies in the layer before `kms/main`).
 - Replicas get their own region-scoped policy; the `key_policy` output is the primary's.

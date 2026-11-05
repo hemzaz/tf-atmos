@@ -12,6 +12,8 @@
 #     wires it; the module's default is the same true).
 #   - Upstream's acl input is dropped: config-storage hardcodes acl "private" and
 #     upstream never read it.
+#   - allow_ssl_requests_only is true (E5a4): config-storage defaults it to false
+#     and upstream never sets it, so the bucket would take plain-HTTP requests.
 # Everything else (inputs, defaults, outputs, naming from the null-label context)
 # is upstream's. Keep it close to upstream: diff against the tag before a refresh.
 module "config_bucket" {
@@ -30,6 +32,7 @@ module "config_bucket" {
   sse_algorithm                      = "aws:kms"
   standard_transition_days           = var.standard_transition_days
   access_log_bucket_name             = var.access_log_bucket_name
+  allow_ssl_requests_only            = true
 
   context = module.this.context
 }
