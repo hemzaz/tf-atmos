@@ -233,6 +233,14 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('bash workflows/scripts/common/deploy-component.sh "$component"', self.cd)
         self.assertIn('bash workflows/scripts/common/deploy-component.sh "$component" || exit 1', self.in_vpc)
 
+    def test_no_workflow_reads_changes_from_the_plan_exit_code(self):
+        """With ci.enabled Atmos maps -detailed-exitcode's 2 to 0: drift and deploy read the plan JSON."""
+        for name in ("terraform-cd.yml", "in-vpc.yml", "drift-detection.yml"):
+            text = (self.workflows / name).read_text()
+            self.assertNotIn("-- -detailed-exitcode", text, name)
+        for name in ("in-vpc.yml", "drift-detection.yml"):
+            self.assertIn("check-plan-destroys.py --changes-only", (self.workflows / name).read_text(), name)
+
 
 if __name__ == "__main__":
     unittest.main()
