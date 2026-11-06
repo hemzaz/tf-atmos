@@ -41,6 +41,12 @@ Fatal (a config bug, not a placeholder: always printed, exit 1 even with --warn)
     fails on drift before the instance is enabled
   - an instance's vars.account_assignments (aws-identity-center) keyed by an
     account its vars.account_map lacks, disabled instances included
+  - an aws-cloudtrail-bucket instance with a vars.policy (policy_override.tf
+    replaces it, so it would be silently dropped), disabled instances included
+  - an aws-config-bucket instance whose bucket-policy residency
+    (residency_account_ids, or vars.account_map but <tenant>-prod-eu) differs
+    from the config_source_accounts of the kms instance its key is read from,
+    disabled instances included
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
 protection, deploy tags, the GitHub App's private key and outside-collaborator
@@ -128,6 +134,8 @@ OPERATOR_ROLE = "-cross-account-operator"
 # 1.4.2 is a reserved placeholder tag: a real release must never be published as
 # ghcr.io/fnx-platform/<service>:1.4.2, or this check would keep flagging it.
 PLACEHOLDER_IMAGE_RE = re.compile(r"^ghcr\.io/fnx-platform/[a-z0-9-]+:1\.4\.2$")
+# An aws-config-bucket's key read as describe --process-functions=false leaves it.
+KEY_READ_RE = re.compile(r"^!terraform\.state\s+(\S+)\s+\.key_arn$")
 
 
 @dataclass(frozen=True)
@@ -220,6 +228,52 @@ def unmapped_assignments(stack: str, instance_name: str, spec: dict):
                    "<tenant>-<account> key of settings.static_account_map", "Account IDs")
 
 
+def component_of(spec: dict) -> str:
+    return spec.get("component") or (spec.get("metadata") or {}).get("component") or ""
+
+
+def ignored_cloudtrail_policy(stack: str, instance_name: str, spec: dict):
+    """The finding for an aws-cloudtrail-bucket instance with a vars.policy, or None: policy_override.tf
+    replaces the input with the residency Denys, so a value set here is silently dropped."""
+    if component_of(spec) != "aws-cloudtrail-bucket" or not (spec.get("vars") or {}).get("policy"):
+        return None
+    return Finding("fatal", stack, f"{instance_name} vars.policy",
+                   "ignored: components/terraform/aws-cloudtrail-bucket/policy_override.tf sets the module's "
+                   "policy (the residency Denys); add a statement there instead", "Account IDs")
+
+
+def config_residency(variables: dict) -> set:
+    """An aws-config-bucket instance's bucket-policy residency, as main.tf computes it: residency_account_ids,
+    or every account of vars.account_map.full_account_map but <tenant>-prod-eu."""
+    explicit = variables.get("residency_account_ids")
+    if explicit is not None:
+        return {str(account) for account in explicit}
+    full = (variables.get("account_map") or {}).get("full_account_map") or {}
+    return {str(account) for name, account in full.items() if name != f"{variables.get('tenant')}-prod-eu"}
+
+
+def config_key_drift(stack: str, config: dict) -> list:
+    """aws-config-bucket instances whose bucket-policy residency differs from the config_source_accounts
+    of the kms instance they read their key from (!terraform.state <kms> .key_arn), disabled ones too:
+    the bucket would admit an account the key refuses, or the other way round."""
+    findings, terraform = [], instances(config)
+    for instance_name, spec in sorted(terraform.items()):
+        spec = spec or {}
+        variables = spec.get("vars") or {}
+        read = KEY_READ_RE.match(str(variables.get("kms_master_key_arn") or ""))
+        if component_of(spec) != "aws-config-bucket" or not read or read.group(1) not in terraform:
+            continue
+        key_accounts = {str(a) for a in ((terraform[read.group(1)] or {}).get("vars") or {}).get(
+            "config_source_accounts") or []}
+        residency = config_residency(variables)
+        if key_accounts != residency:
+            findings.append(Finding(
+                "fatal", stack, f"{instance_name} vars.residency_account_ids",
+                f"bucket residency {sorted(residency)} differs from {read.group(1)} config_source_accounts "
+                f"{sorted(key_accounts)}: keep one list (stacks/catalog/aws-config-bucket/)", "Account IDs"))
+    return findings
+
+
 def cold_start_principal(component: str, path: str) -> bool:
     """A backend instance's access-role principal, which the cold start does not apply."""
     return component == "backend" and path.startswith("vars.access_roles.") and ".allowed_principal_arns[" in path
@@ -246,6 +300,7 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
         spec = spec or {}
         add(static_map_drift(name, instance_name, spec))
         add(unmapped_assignments(name, instance_name, spec))
+        add(ignored_cloudtrail_policy(name, instance_name, spec))
         if not deployable(spec):
             continue
         variables = spec.get("vars") or {}
@@ -289,6 +344,8 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
             add(Finding("notice", name, f"{instance_name} vars.user_pool_tier",
                         "PLUS is billed from the first monthly active user; confirm it is intended",
                         "Cognito feature plan"))
+    for finding in config_key_drift(name, config):
+        add(finding)
     if operator_roles:
         add(Finding("notice", name, "vars.trusted_principal_arns",
                     f"the <tenant>{OPERATOR_ROLE} role must exist in the management account (not checkable here)",

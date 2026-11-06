@@ -66,3 +66,22 @@ variable "kms_master_key_arn" {
     error_message = "kms_master_key_arn must be a customer managed KMS key ARN (arn:aws:kms:<region>:<12-digit account>:key/<key id>), not an alias ARN or the AWS managed aws/s3 key."
   }
 }
+
+variable "residency_account_ids" {
+  type        = list(string)
+  description = <<-EOT
+    Account IDs whose AWS Config may deliver to this bucket: the bucket policy denies
+    config.amazonaws.com every other aws:SourceAccount. null derives the US residency, every
+    account of account_map.full_account_map but <tenant>-prod-eu; an eu- region bucket must set
+    it. Keep it equal to the bucket key's config_source_accounts (the preflight fails a
+    difference). House input (E5a4b, owner 2026-11-05); upstream admits every account.
+    EOT
+  default     = null
+
+  validation {
+    condition = alltrue([
+      for id in(var.residency_account_ids == null ? [] : var.residency_account_ids) : can(regex("^[0-9]{12}$", id))
+    ])
+    error_message = "residency_account_ids must be 12-digit account IDs."
+  }
+}
