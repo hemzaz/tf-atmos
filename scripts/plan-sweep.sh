@@ -765,16 +765,25 @@ printf '%s\n' "-----------------------------------------------------------------
 # not locked fails init here, as it does in every other CI init. TF_CLI_ARGS_init
 # is unset above, so the flag is passed explicitly. With a lock entry to check
 # against, init installs from TF_PLUGIN_CACHE_DIR instead of downloading.
+#
+# Each component is initialised the first time a pair plans it, not all of
+# them up front: a sweep of a few stacks (a CI shard, `-s` locally) then inits
+# only the components those stacks use, and a component no swept stack uses
+# was never planned anyway.
+init_done=""
 init_failed=""
-for d in "$MIRROR"/components/terraform/*/; do
-  comp="$(basename "$d")"
-  case "$comp" in _*) continue ;; esac
-  ls "$d"*.tf >/dev/null 2>&1 || continue
+ensure_init() {
+  case " $init_done " in *" $1 "*) return 0 ;; esac
+  init_done="$init_done $1"
+  local d="$MIRROR/components/terraform/$1/"
+  # Top-level component directories only, as the up-front loop this replaced.
+  case "$1" in _* | */*) return 0 ;; esac
+  ls "$d"*.tf >/dev/null 2>&1 || return 0
   if ! (cd "$d" && terraform init -backend=false -input=false -lockfile=readonly) \
-    >"$WORK/init__$comp.log" 2>&1; then
-    init_failed="$init_failed $comp"
+    >"$WORK/init__$1.log" 2>&1; then
+    init_failed="$init_failed $1"
   fi
-done
+}
 
 # A known-broken fixture's failing pairs move from the failing counters to
 # known_broken once its stack is done, so they are printed but never fail the run.
@@ -840,10 +849,18 @@ for s in $STACKS; do
     # The describe has to happen BEFORE the directory is resolved: it is the
     # only thing that knows which terraform component this instance maps to.
     #
+    # It is the instance's section of the stack's cached describe stacks (above),
+    # not an `atmos describe component` per pair: that call was about a third of
+    # each pair's time, and the builder reads only vars, env, component and
+    # metadata, which both describes resolve identically (checked on every
+    # swept stack when this changed, 2026-11).
+    #
     # Two steps, each keeping its own stderr. They used to share one pipe whose
     # only message was "describe failed" -- even when it was the varfile
     # builder that failed, printing its traceback into the middle of the table.
-    if ! atmos describe component "$c" -s "$s" --process-functions=false --format json \
+    if ! python3 -B -c 'import json, sys
+section = json.load(open(sys.argv[1]))[sys.argv[2]]["components"]["terraform"][sys.argv[3]]
+json.dump(section, sys.stdout)' "$STACKS_DIR/$s.json" "$s" "$c" \
       >"$desc" 2>"$WORK/$tag.describe.err"; then
       printf '%-24s %-26s %s\n' "$s" "$c" "SKIP describe failed"
       head -2 "$WORK/$tag.describe.err" | cut -c1-160 | sed 's/^/        /'
@@ -905,6 +922,7 @@ for s in $STACKS; do
       continue
     fi
 
+    ensure_init "$comp"
     case " $init_failed " in
       *" $comp "*)
         printf '%-24s %-26s %s\n' "$s" "$c" "SKIP init failed ($comp)"
