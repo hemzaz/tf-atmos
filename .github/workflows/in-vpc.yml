@@ -205,9 +205,12 @@ jobs:
                 # Changes from the plan JSON, not -detailed-exitcode: with ci.enabled
                 # Atmos maps its 2 to 0 (check-plan-destroys.py: 0 changes, 3 none).
                 if [ "$rc" -eq 0 ]; then
+                  # set -e again after: GitHub runs `shell: bash` as bash -eo pipefail.
+                  set +e
                   atmos terraform show "$component" -s "$STACK" -json "$planfile" </dev/null \
                     | python3 workflows/scripts/common/check-plan-destroys.py --changes-only
                   status=("${PIPESTATUS[@]}")
+                  set -e
                   # A failed show is a failed plan, whatever the checker read.
                   [ "${status[0]}" -eq 0 ] || status[1]=1
                   case "${status[1]}" in 0) rc=2 ;; 3) rc=0 ;; *) rc=1 ;; esac
