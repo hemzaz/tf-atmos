@@ -240,6 +240,49 @@ jobs:
       - name: Atmos image pinned consistently
         run: bash scripts/sync-atmos-image.sh --check
 
+  # `atmos sweep --all` split into the legs of the plan-sweep matrix below:
+  # six balanced `-s <stacks>` legs, then --samples and --scaffold, the other
+  # two parts of --all. sweep-shards.py fails this job unless the legs' stacks
+  # are exactly the stacks --all sweeps, each once.
+  sweep-shards:
+    name: Plan sweep shards
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.scan == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.shards.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # git: the sweep command finds the repository root with git (see the
+      # plan-sweep job for the "dubious ownership" cause).
+      - id: shards
+        name: Split the stacks into balanced legs
+        run: |
+          set -eu
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # The guard refuses a stack list that is not plain names, and Atmos
+          # must pass its exit status 2 through (a finding is 1). Its stderr
+          # must be the guard's refusal, not another exit-2 cause (no git
+          # checkout, a missing tool). Checked once here, not in every leg.
+          rc=0
+          guard_err=$(mktemp)
+          atmos sweep -s 'x;id' 2> "$guard_err" || rc=$?
+          cat "$guard_err" >&2
+          if [ "$rc" != 2 ] || ! grep -qF "atmos sweep: refusing -s 'x;id'" "$guard_err"; then
+            echo "::error::atmos sweep -s 'x;id' exited $rc without the guard's refusal, want 2 and 'refusing -s'"
+            exit 1
+          fi
+          matrix=$(python3 -B workflows/scripts/common/sweep-shards.py)
+          printf '%s\n' "$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   plan-sweep:
     # The rung between `terraform validate` and the emulator lanes: bind each
     # stack's resolved variables to its component and plan. No AWS credentials
@@ -249,19 +292,21 @@ jobs:
     # with nothing having objected on the way. A pair that objects earlier is
     # a real finding; scripts/plan-sweep.sh exits 1 on it.
     #
-    # Deliberately not in the lint job: this plans 330+ pairs and is the slowest
+    # Deliberately not in the lint job: this plans 600+ pairs and is the slowest
     # gate in the file, and a lint failure should not hide a sweep failure or
-    # the other way round.
-    name: Plan sweep
-    needs: changes
+    # the other way round. One `atmos sweep --all` took 42-63 minutes by
+    # 2026-11, so it runs as a matrix of legs (sweep-shards, above). fail-fast
+    # off: every leg's findings are reported, not only the first leg's.
+    name: Plan sweep (${{ matrix.name }})
+    needs: [changes, sweep-shards]
     if: github.event_name != 'push' && needs.changes.outputs.scan == 'true'
     runs-on: ubuntu-latest
-    # Every PR sweeps every stack: 22+ stacks and their template stacks took
-    # 55-58 minutes by 2026-11 (Wave E core stacks), and one more stack
-    # (fnx-ew1-audit, #487) ran past 60 and was cancelled mid-sweep. 120 leaves
-    # room to grow; a hung plan otherwise holds a runner for the 6-hour default
-    # before anyone hears about it.
-    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.sweep-shards.outputs.matrix) }}
+    # A hung plan otherwise holds a runner for the 6-hour default before anyone
+    # hears about it.
+    timeout-minutes: 60
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
@@ -270,36 +315,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # One shared provider cache across ~90 `terraform init`s. Without it each
-      # pair redownloads the AWS provider and the job takes hours.
+      # One shared provider cache across the leg's `terraform init`s. Without it
+      # each component unpacks its own AWS provider. Outside the workspace: the
+      # samples and scaffold legs copy the untracked working tree.
       #
       # The sweep builds its mirror with `git ls-files`. The workspace is
       # created by the runner's user and the container runs as root, so git
       # refuses the repository as "dubious ownership" -- checkout's own
       # safe.directory entry goes into a temporary global config that later
       # steps never see -- and the sweep stops before planning anything.
-      - name: Plan every stack/component pair
+      - name: Plan the leg's stack/component pairs
         env:
+          SWEEP_ARGS: ${{ matrix.args }}
           TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          # The guard refuses a stack list that is not plain names, and Atmos
-          # must pass its exit status 2 through (a finding is 1). Its stderr
-          # must be the guard's refusal, not another exit-2 cause (no git
-          # checkout, a missing tool).
-          rc=0
-          guard_err=$(mktemp)
-          atmos sweep -s 'x;id' 2> "$guard_err" || rc=$?
-          cat "$guard_err" >&2
-          if [ "$rc" != 2 ] || ! grep -qF "atmos sweep: refusing -s 'x;id'" "$guard_err"; then
-            echo "::error::atmos sweep -s 'x;id' exited $rc without the guard's refusal, want 2 and 'refusing -s'"
-            exit 1
-          fi
           # From a subdirectory: the command must find its scripts from anywhere
           # in the repository (it moves to the root first).
           cd stacks
-          atmos sweep --all
+          # SWEEP_ARGS is "-s a,b,...", "--samples" or "--scaffold": split on
+          # the space on purpose; names are [a-z0-9-] (the guard refuses others).
+          # shellcheck disable=SC2086
+          atmos sweep $SWEEP_ARGS
 
   security-scan:
     name: Security scan
@@ -814,7 +852,7 @@ jobs:
   # that failed is in this list too. Add every new job to `needs`.
   gate:
     name: CI gate
-    needs: [changes, lint, actionlint, plan-sweep, security-scan, terraform-test, affected, plan, plan-in-vpc, emulator]
+    needs: [changes, lint, actionlint, sweep-shards, plan-sweep, security-scan, terraform-test, affected, plan, plan-in-vpc, emulator]
     if: always()
     runs-on: ubuntu-latest
     permissions: {}
