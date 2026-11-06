@@ -35,7 +35,7 @@
 # (a us-west-2 stack of each nonprod flavor with account_singletons=no beside
 # its account's committed stack, a us-west-2 core stack, the EU core stack
 # fnx-ew1-security (its account's operator role added to the EU backend's
-# root_write in the scratch copy first), and a prod primary +
+# core_write in the scratch copy first), and a prod primary +
 # standby pair,
 # fnx-ue1-prod with its DR in us-west-2 and the new standby fnx-uw2-prod, in
 # place of the committed ue1/ue2 pair: no other prod primary is generatable,
@@ -68,7 +68,7 @@ SWEEP="false"
 # The backends the wire hook edits; the real ones must never change.
 ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.yaml)
 # Core stacks whose account's OrganizationAccountAccessRole is in their
-# backend's root_write (stacks/orgs/fnx/root/us-east-1.yaml, eu-west-1.yaml
+# backend's core_write (stacks/orgs/fnx/root/us-east-1.yaml, eu-west-1.yaml
 # for the EU core stacks): their golden must report wired.
 ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security fnx-ue1-identity fnx-ue1-artifacts fnx-ew1-audit"
 
@@ -322,7 +322,7 @@ golden() {
     # The wire hook ran: it found the reference stack already wired, or a
     # core stack whose account is not onboarded yet, which it leaves unwired.
     # A core stack in ONBOARDED_CORE_STACKS must report wired, so one whose
-    # account lost its operator role from root_write fails here.
+    # account lost its operator role from core_write fails here.
     wired="is already wired"
     if [[ "$profile" == "core" ]] && [[ " $ONBOARDED_CORE_STACKS " != *" $stack "* ]] \
         && ! logged "$out/$stack.generate.log" "$stack $wired"; then
@@ -574,11 +574,11 @@ FRESH=(
     "fnx-ue2-prod|fnx-uw2-prod|region=us-west-2 region_code=uw2 az_ids=usw2-az1,usw2-az2,usw2-az3 vpc_cidr_main=10.26.0.0/16"
     # The EU backend: the prod-eu standby is wired into eu-west-1.yaml.
     "fnx-ec1-prod|fnx-ec1-prod|"
-    # A core account's second region: its pattern pair joins root_write (two
+    # A core account's second region: its pattern pair joins core_write (two
     # lines; the account's operator role is already there, from fnx-ue1-security).
     "fnx-ue1-security|fnx-uw2-security|region=us-west-2 region_code=uw2"
     # An EU core stack (audit/security in eu-west-1): its pair joins the EU
-    # backend's root_write, where the scratch setup below lists the security
+    # backend's core_write, where the scratch setup below lists the security
     # account's operator role (the hand edit of its first EU stack).
     "fnx-ue1-security|fnx-ew1-security|region=eu-west-1 region_code=ew1"
 )
@@ -593,12 +593,12 @@ rm stacks/orgs/fnx/prod/us-east-1.yaml stacks/orgs/fnx/prod/us-east-2.yaml stack
 grep -v -E '^ *- .*(fnx-ue1-prod|fnx-ue2-prod)' "$out/fresh.us.committed" > "$us_root"
 grep -v -E '^ *- .*fnx-ec1-prod' "$out/fresh.eu.committed" > "$eu_root"
 # fnx-ew1-security's account onboarded on the EU backend: its operator role
-# beside the audit account's on root_write (the only OAAR in that file).
+# beside the audit account's on core_write (the only OAAR in that file).
 cp "$eu_root" "$out/fresh.eu.unonboarded"
 sed '/full_account_map[.]audit }}:role[/]OrganizationAccountAccessRole"$/{p;s/[.]audit }}/.security }}/;}' \
     "$out/fresh.eu.unonboarded" > "$eu_root"
 if ! grep -q 'full_account_map[.]security }}:role/OrganizationAccountAccessRole"$' "$eu_root"; then
-    echo "ERROR fresh: could not add the security account's operator role to $eu_root's root_write" >&2
+    echo "ERROR fresh: could not add the security account's operator role to $eu_root's core_write" >&2
     failed="$failed fresh"
 fi
 cp "$us_root" "$out/fresh.us.base"
@@ -618,7 +618,7 @@ for case in "${FRESH[@]}"; do
         backend="us-east-1"
         [[ "$region" != eu-* ]] || backend="eu-west-1"
         if ! logged "$out/fresh.$stack.log" "stack-wiring: added stacks/orgs/fnx/root/$backend.yaml: state patterns */$stack/*"; then
-            echo "ERROR fresh $stack: the wire hook did not add the core stack's pair to root_write:" >&2
+            echo "ERROR fresh $stack: the wire hook did not add the core stack's pair to core_write:" >&2
             cat "$out/fresh.$stack.log" >&2
             fresh_ok=0
         else
@@ -636,7 +636,7 @@ done
 if [[ "$fresh_ok" -eq 1 ]]; then
     # The hook only adds lines: four per wired workload stack (its pattern
     # pair, its plan and apply role ARNs), two per core stack (its pair on
-    # root_write), everything else byte for byte.
+    # core_write), everything else byte for byte.
     added_lines=$((4 * wired_fresh + 2 * wired_core))
     diff "$out/fresh.us.base" "$us_root" > "$out/fresh.root.diff" || true
     diff "$out/fresh.eu.base" "$eu_root" >> "$out/fresh.root.diff" || true

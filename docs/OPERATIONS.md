@@ -13,7 +13,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: Cloud Posse's core accounts `root` (management), `audit` (log archive), `security`, `network`, `identity` and `artifacts` (stacks: `fnx-ue1-root`, `fnx-ue1-security`, `fnx-ue1-audit`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`), and the workload accounts `dev`, `staging`, `prod`, `prod-eu` (the EU prod account, `fnx-ew1-prod` and its DR stack `fnx-ec1-prod`; GDPR keeps it apart from `prod`). `settings.static_account_map` repeats the map with `<tenant>-<account>` keys (`fnx-security`), the static `account_map` input of Cloud Posse components; its values are templates over `full_account_map`, so a new account needs a line in both. Each stage's `settings.environment.account_id` (`fnx-ew1-prod`'s and `fnx-ec1-prod`'s from `prod-eu`), `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-root` and `fnx-ew1-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. A new account is added here by hand (the stack scaffold covers existing accounts only). The emulator and fixture stacks keep the emulator's `000000000000` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml`; to import an existing organization or OU (owner decision QE2), the `import_resource_id` of `aws-organization` (`o-...`) and of each `aws-organizational-unit/*` instance (`ou-...`) in `fnx-gbl-root` (`stacks/orgs/fnx/root/global-region.yaml`), null to create. Before applying an imported organization, follow the import runbook in `stacks/catalog/aws-organization/defaults.yaml`, and for its step 3 (the plan) run `atmos terraform plan aws-organization -s fnx-gbl-root -out=org.planfile`, then `atmos terraform show aws-organization -s fnx-gbl-root -json org.planfile | python3 workflows/scripts/common/check-organization-plan.py` from the repository root: it exits 1 if the plan would disable a trusted service or policy type the live organization has, or change `feature_set` other than the in-place `CONSOLIDATED_BILLING` -> `ALL` upgrade (every invited member account must accept that handshake before it completes), and apply only on exit 0 |
 | Account emails | `account_email` of each `aws-account/*` instance in `fnx-gbl-root`: the account's root-user address, unique across all of AWS and never reusable after the account closes. The `aws+{{ .settings.context.tenant }}-<account>@example.com` placeholders keep those instances `metadata.enabled: false`; replace only the domain and keep the `{{ .settings.context.tenant }}` template in the local part (a literal tenant-and-stage address fails lint's `old-stack-names` check; a line that must hold one ends with `# old-stack-names: allow`); an imported account keeps its current address (a changed one forces a replacement, which `prevent_destroy` refuses) |
-| Identity Center | enabled by hand (clickops: IAM Identity Center, Enable, an organization instance) in the management account in us-east-1, its home region (vars.region of `fnx-gbl-root`, the global-region mixin; owner decision OQ6): the `aws-identity-center` instance (`stacks/catalog/aws-identity-center/defaults.yaml`) reads it and fails at plan without one, and the preflight prints a notice while it is enabled. Not delegated to the identity account (Cloud Posse's README). us-east-1 is a documented data-residency exemption for workforce identity only: the directory holds staff names and emails, EU staff included, never customer data. The instance stays `metadata.enabled: false` until then, until every account it assigns has its real ID, and until E4c2's core state role replaces `root-role` in its `tf_access_additional_backends.core` |
+| Identity Center | enabled by hand (clickops: IAM Identity Center, Enable, an organization instance) in the management account in us-east-1, its home region (vars.region of `fnx-gbl-root`, the global-region mixin; owner decision OQ6): the `aws-identity-center` instance (`stacks/catalog/aws-identity-center/defaults.yaml`) reads it and fails at plan without one, and the preflight prints a notice while it is enabled. Not delegated to the identity account (Cloud Posse's README). us-east-1 is a documented data-residency exemption for workforce identity only: the directory holds staff names and emails, EU staff included, never customer data. The instance stays `metadata.enabled: false` until then, until every account it assigns has its real ID (its `tf_access_additional_backends.core` is the core state role, `core-role`, which never reaches the root stacks' state) |
 | SSO groups / IdP | the built-in Identity Center directory (owner decision OQ4): the instance creates Cloud Posse's groups `Managers`, `DevOps`, `Developers` and `BillingAdmin` (`groups`); add their members in Identity Center. Who gets which permission set in which account is `account_assignments` in the catalog file. An external IdP instead: its groups go in `idp_groups`, synced by SCIM |
 | SSO start URL | the AWS access portal URL Identity Center shows once enabled (`https://<id>.awsapps.com/start`): people sign in there; E4d1 puts it in `atmos.yaml` `auth` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
@@ -118,8 +118,10 @@ the last step.
    management account (a profile with `role_arn = arn:aws:iam::<account>:role/OrganizationAccountAccessRole`
    and the management-account `source_profile`): every provider runs only in its stack's own
    account (`allowed_account_ids`), and that role is the one principal of the account the state
-   backend trusts before CI exists (`root_write` for the core accounts, `write`/`prod_write` for
-   the workload accounts; E4's Identity Center roles replace it). The core stacks
+   backend trusts before CI exists (`core_write` for the core accounts, `write`/`prod_write` for
+   the workload accounts) until Identity Center is applied; the backends also trust each account's
+   Identity Center Terraform sets ([State backend](#state-backend)), and the PR enabling the
+   `aws-identity-center` instance removes the `OrganizationAccountAccessRole` entries. The core stacks
    (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`: today only their
    `aws-account-settings`), then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
    and [Deploying a stack](#deploying-a-stack).
@@ -153,10 +155,13 @@ The EU stacks keep their state in the EU (GDPR residency): `backend/main` in `fn
 `eu-central-1` on the EU state key's replica, roles `fnx-ew1-terraform-backend-*`. An EU stack
 overrides all of `settings.tfstate` to point there (`stack: fnx-ew1-root`), so it too is created
 first; `check-data-residency.py` fails one that names a non-EU region.
-It holds only prod state (`fnx-ew1-prod` and its DR stack `fnx-ec1-prod`, both in the `prod-eu`
-account, whose state stays in `eu-west-1` as `fnx-ue2-prod`'s stays in `us-east-1`), so it has the
-`prod_read`, `prod_write` and `root_write` roles, trusting those two stacks' CI roles and, on
-`prod_write` until E4, the `prod-eu` account's `OrganizationAccountAccessRole`.
+It holds prod state (`fnx-ew1-prod` and its DR stack `fnx-ec1-prod`, both in the `prod-eu`
+account, whose state stays in `eu-west-1` as `fnx-ue2-prod`'s stays in `us-east-1`) and the EU core
+stacks' (`fnx-ew1-audit`), so it has the `prod_read`, `prod_write`, `core_write` and `root_write`
+roles: the prod roles trust those two stacks' CI roles and the `prod-eu` account's
+`TerraformPlanAccess-Eu` / `AdministratorAccess`; `core_write` trusts the audit account's
+`AdministratorAccess`; and, until Identity Center is applied,
+`prod_write` and `core_write` trust the `prod-eu` and audit accounts' `OrganizationAccountAccessRole`.
 
 The backend workflows default to `fnx-ue1-root`; `-s fnx-ew1-root` runs them on the EU backend
 (the bucket and roles come from that stack's `settings.tfstate`):
@@ -176,13 +181,25 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 `<role_prefix>` (`settings.tfstate.role_prefix`, `fnx-terraform-backend`); the CI roles' ARNs
 (`iam/ci`) are built from it too.
 
-| Role (`access_roles` key) | Access | Trusted CI role |
-|---------------------------|--------|-----------------|
-| `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
-| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles, and the dev and staging accounts' `OrganizationAccountAccessRole` until E4's Identity Center roles (step 6 of [Bootstrap order](#bootstrap-order)); like the apply roles, each reaches both stages' state |
-| `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`, DR `fnx-ec1-prod`) | the prod stacks' CI plan roles |
-| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles, and the prod account's (EU: `prod-eu`'s) `OrganizationAccountAccessRole` until E4 |
-| `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) and the core stages' (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; read too, under `TFSTATE_ACCESS=read`) | none (the applying administrator, and each core account's `OrganizationAccountAccessRole`, which applies that account's stacks until E4's Identity Center roles; it also reaches the root stacks' state until E5's dedicated core role, which, or removing the OAARs, must land before E4 grants any permission set in a core account) |
+| Role (`access_roles` key) | Access | Trusted |
+|---------------------------|--------|---------|
+| `<role_prefix>-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles; staging's `TerraformPlanAccess` |
+| `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles; dev's `TerraformApplyAccess` and both accounts' `AdministratorAccess`, and their `OrganizationAccountAccessRole` until Identity Center is applied (step 6 of [Bootstrap order](#bootstrap-order)); like the apply roles, each reaches both stages' state |
+| `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`, DR `fnx-ec1-prod`) | the prod stacks' CI plan roles; the prod account's `TerraformPlanAccess-Prod` (EU: `prod-eu`'s `-Eu`) |
+| `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles; the prod account's `AdministratorAccess` (EU: `prod-eu`'s), and its `OrganizationAccountAccessRole` until Identity Center is applied |
+| `<role_prefix>-core-role` (`core_write`) | read/write, the core stages' state (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; EU: `fnx-ew1-audit`; read too, under `TFSTATE_ACCESS=read`) | no CI role; each core account's `AdministratorAccess`, and its `OrganizationAccountAccessRole` until Identity Center is applied |
+| `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) | only the applying administrator |
+
+Humans are Identity Center permission-set roles, trusted by their reserved-path pattern for one
+account and one set (`arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<set>_*`):
+the `TerraformPlanAccess*` sets on read roles only (`aws-identity-center`'s house
+`policy-TerraformPlanAccess_override.tf` points them at the read roles), every other set on write
+roles only, each Terraform set on the role its policy assumes, each in an account whose state that
+role holds, and only a set that `account_assignments` assigns in that account; every write role
+also trusts some assigned set, CI apply role or `OrganizationAccountAccessRole`
+(`check-ci-state-roles.py`). `TerraformStateAccess*` is assigned and trusted nowhere. A human on a
+Plan set reaches only read roles, so runs with `TFSTATE_ACCESS=read` and `-lock=false`, as the CI
+plan jobs do: the stack backend then assumes the stage's read role.
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU:
@@ -311,8 +328,8 @@ The `guard` hook refuses a stack that already exists and answers that disagree w
 name (stage defaults, region mixin, account, the DR pair, the account's singletons). After writing
 it, `verify` resolves the stack and `wire` (`scripts/stack-wiring.py`) adds its state pattern pair and
 CI role ARNs to the backend that owns its state (see [State backend](#state-backend)); a core stack
-gets no CI role (the backend's root role holds its state): its pair joins `root_write`, once its
-account is onboarded, that is once `root_write` trusts the account's `OrganizationAccountAccessRole`
+gets no CI role (the backend's core role holds its state): its pair joins `core_write`, once its
+account is onboarded, that is once `core_write` trusts the account's `OrganizationAccountAccessRole`
 (a reviewed hand edit with the account's first stack; the hook never adds a principal and otherwise
 prints the edit to make). Still by hand:
 

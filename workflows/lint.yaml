@@ -84,6 +84,15 @@ workflows:
                 set -- "$@" "${dir%/}"
               done
               python3 scripts/check-hcl-unary-newline.py "$@"
+          # aws-identity-center's house Plan-set override restates upstream's
+          # policy documents (only the assumed role changed), so a vendor bump
+          # that changes them fails here instead of being silently overridden.
+          - name: identity-center-override
+            type: shell
+            command: |
+              set -eu
+              python3 -m unittest workflows/scripts/common/test_check_identity_center_override.py
+              python3 scripts/check-identity-center-override.py
           # Vendored dirs match their vendor.lock.yaml receipt, unedited. --repull
           # (a pull from GitHub, which also proves the pin) runs only when the
           # change touches vendor.yaml, vendor.lock.yaml or a vendored dir, so an

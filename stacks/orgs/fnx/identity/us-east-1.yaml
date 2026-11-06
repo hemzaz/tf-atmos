@@ -6,7 +6,7 @@
 # aws-account-settings (stacks/orgs/fnx/identity/_defaults.yaml); it keeps only
 # its baseline (owner OQ2, Cloud Posse Evolution 4: Identity Center lives in
 # fnx-gbl-root, E4). Its state goes to fnx-ue1-root's bucket through
-# the backend's root role (stacks/orgs/fnx/_defaults.yaml), whose root_write
+# the backend's core role (stacks/orgs/fnx/_defaults.yaml), whose core_write
 # holds this stack's pattern pair (check-state-keys.py) and trusts the identity
 # account's OrganizationAccountAccessRole: the provider guard needs credentials
 # in the identity account, and that role is the way in until E4's Identity

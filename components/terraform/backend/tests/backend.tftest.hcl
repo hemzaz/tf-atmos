@@ -366,6 +366,7 @@ run "accepts_identity_center_role_patterns" {
           "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_*",
           "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_TerraformPlanAccess_0123456789abcdef",
           "arn:aws:iam::333333333333:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*",
+          "arn:aws:iam::333333333333:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Core_*",
         ]
       }
     }
@@ -378,9 +379,10 @@ run "accepts_identity_center_role_patterns" {
       "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*",
       "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_*",
       "arn:aws:iam::222222222222:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_TerraformPlanAccess_0123456789abcdef",
+      "arn:aws:iam::333333333333:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-Core_*",
       "arn:aws:iam::333333333333:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*",
     ]))
-    error_message = "An Identity Center role pattern for one account and permission set is trusted as written, beside the exact ARNs and the caller."
+    error_message = "An Identity Center role pattern for one account and permission set (a hyphenated additional-backend set too) is trusted as written, beside the exact ARNs and the caller."
   }
 
   assert {

@@ -164,8 +164,8 @@ class Wire(Copy):
         (self.root / US).write_text(text)
         self.assertEqual(len(self.wire("fnx", "identity", "", "us-west-2", "fnx-uw2-identity")), 1)
         self.assertEqual(self.text(US).count(operator), 1)
-        root_write = self.text(US)[self.text(US).index("root_write:"):]
-        self.assertIn(pair("fnx-uw2-identity")[0], root_write)
+        core_write = self.text(US)[self.text(US).index("core_write:"):]
+        self.assertIn(pair("fnx-uw2-identity")[0], core_write)
 
     def test_main_core_stack_not_onboarded(self) -> None:
         stripped = "".join(line for line in self.committed[US].splitlines(keepends=True)
@@ -181,12 +181,12 @@ class Wire(Copy):
         self.assertEqual(self.text(US), stripped)
 
     def unonboarded_eu(self) -> str:
-        """The EU file as before its first core stack (written): root_write without its principal list
+        """The EU file as before its first core stack (written): core_write without its principal list
         and the EU core stacks' pairs."""
         lines = self.committed[EU].splitlines(keepends=True)
-        start = [i for i, line in enumerate(lines) if line.strip() == "root_write:"]
+        start = [i for i, line in enumerate(lines) if line.strip() == "core_write:"]
         self.assertEqual(len(start), 1)
-        # root_write's block ends at the next line indented no deeper than its key: only that block
+        # core_write's block ends at the next line indented no deeper than its key: only that block
         # is stripped, whatever follows it in the file.
         indent = len(lines[start[0]]) - len(lines[start[0]].lstrip())
         end = next((i for i in range(start[0] + 1, len(lines)) if lines[i].strip()
@@ -199,8 +199,8 @@ class Wire(Copy):
         return text
 
     def onboard_eu(self, *accounts: str) -> str:
-        """The EU file with root_write trusting these core accounts' operator roles (a hand edit)."""
-        anchor = '              - "*/fnx-ew1-root-*"\n'
+        """The EU file with core_write trusting these core accounts' operator roles (a hand edit)."""
+        anchor = '          core_write:\n            object_key_patterns:\n'
         principals = "            allowed_principal_arns:\n" + "".join(
             f'              - "{wiring.operator_arn(account)}"\n' for account in accounts)
         base = self.unonboarded_eu()
@@ -210,7 +210,7 @@ class Wire(Copy):
         return text
 
     def test_eu_core_stacks_are_unwired_until_onboarded(self) -> None:
-        # Before its first core stack the EU root_write lists no principals: no core account is
+        # Before its first core stack the EU core_write lists no principals: no core account is
         # onboarded there.
         base = self.unonboarded_eu()
         for stage in wiring.EU_CORE_STAGES:
@@ -218,7 +218,7 @@ class Wire(Copy):
         self.assertEqual(self.text(EU), base)
         self.assertEqual(self.text(US), self.committed[US])
 
-    def test_committed_eu_root_write(self) -> None:
+    def test_committed_eu_core_write(self) -> None:
         # E5a2: the audit account is onboarded on the EU backend and fnx-ew1-audit wired; the
         # security account is not yet (E5c).
         self.assertEqual(self.wire("fnx", "audit", "", "eu-west-1", "fnx-ew1-audit"), [])
@@ -226,16 +226,15 @@ class Wire(Copy):
         self.assertEqual(self.text(EU), self.committed[EU])
         self.assertEqual(self.text(US), self.committed[US])
 
-    def test_eu_core_stack_goes_to_the_eu_root_write(self) -> None:
+    def test_eu_core_stack_goes_to_the_eu_core_write(self) -> None:
         onboarded = self.onboard_eu("audit")
         done = self.wire("fnx", "audit", "", "eu-west-1", "fnx-ew1-audit")
         self.assertEqual(done, ["stacks/orgs/fnx/root/eu-west-1.yaml: state patterns */fnx-ew1-audit/* and"
-                                " */fnx-ew1-audit-* -> root_write"])
-        self.assertEqual(self.text(EU), onboarded.replace(
-            '              - "*/fnx-ew1-root-*"\n',
-            '              - "*/fnx-ew1-root-*"\n' + "".join(pair("fnx-ew1-audit"))))
+                                " */fnx-ew1-audit-* -> core_write"])
+        anchor = '          core_write:\n            object_key_patterns:\n'
+        self.assertEqual(self.text(EU), onboarded.replace(anchor, anchor + "".join(pair("fnx-ew1-audit"))))
         self.assertEqual(self.text(US), self.committed[US])
-        # Security's account is not on the EU root_write yet; once it is, its stack wires too.
+        # Security's account is not on the EU core_write yet; once it is, its stack wires too.
         self.assertIsNone(self.wire("fnx", "security", "", "eu-west-1", "fnx-ew1-security"))
         self.onboard_eu("audit", "security")
         self.assertEqual(len(self.wire("fnx", "security", "security", "eu-west-1", "fnx-ew1-security")), 1)
@@ -259,13 +258,14 @@ class Wire(Copy):
         self.assertIn("added stacks/orgs/fnx/root/eu-west-1.yaml: state patterns */fnx-ew1-audit/*", out.getvalue())
         self.assertIn("apply backend/main in fnx-ew1-root", out.getvalue())
 
-    def test_core_stages_are_the_backend_root_role_routing(self) -> None:
-        # stacks/orgs/fnx/_defaults.yaml routes these stages (and root) to the
-        # backend's root role, which is why they get no CI role or pair here.
+    def test_core_stages_are_the_backend_core_role_routing(self) -> None:
+        # stacks/orgs/fnx/_defaults.yaml routes these stages to the backend's
+        # core role (root to the root role), which is why they get no CI role or
+        # read/write pair here.
         text = (REPO / "stacks/orgs/fnx/_defaults.yaml").read_text()
-        routed = re.search(r'has \.settings\.context\.stage \(list ((?:"[a-z-]+" ?)+)\)', text)
+        routed = re.search(r'has \.settings\.context\.stage \(list ((?:"[a-z-]+" ?)+)\) \}\}-core\{\{', text)
         self.assertIsNotNone(routed)
-        self.assertEqual(tuple(re.findall(r'"([a-z-]+)"', routed.group(1))), ("root",) + wiring.CORE_STAGES)
+        self.assertEqual(tuple(re.findall(r'"([a-z-]+)"', routed.group(1))), wiring.CORE_STAGES)
 
     def test_a_family_with_no_stack_yet_gets_its_first(self) -> None:
         stripped = "".join(line for line in self.committed[EU].splitlines(keepends=True)
@@ -353,14 +353,14 @@ class Refuse(Copy):
         self.assertEqual(self.text(rel), self.before)
         return str(caught.exception)
 
-    def test_us_root_write_without_principals_is_refused_not_unonboarded(self) -> None:
-        # Only the EU root_write may lack a principal list; a US one that lost its key (a typo or a
+    def test_us_core_write_without_principals_is_refused_not_unonboarded(self) -> None:
+        # Only the EU core_write may lack a principal list; a US one that lost its key (a typo or a
         # deletion) must fail, not read as "not onboarded" and exit 0.
         key = ('            allowed_principal_arns:\n'
                '              - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}')
         self.mutate(US, key, key.replace("allowed_principal_arns:", "allowed_principal_arn:"))
         self.refused_unchanged(US, ("fnx", "audit", "", "us-west-2", "fnx-uw2-audit"),
-                               "allowed_principal_arns: lists in root_write")
+                               "allowed_principal_arns: lists in core_write")
 
     def test_missing_anchor_prints_the_manual_edit(self) -> None:
         self.mutate(US, "object_key_patterns: &non_prod_state", "object_key_patterns:")
@@ -458,7 +458,7 @@ class Refuse(Copy):
             self.assertEqual(wiring.main(["--root", str(self.root), "fnx", "security", "", "us-west-2",
                                           "fnx-uw2-security"]), 0)
         self.assertIn("added stacks/orgs/fnx/root/us-east-1.yaml: state patterns */fnx-uw2-security/*"
-                      " and */fnx-uw2-security-* -> root_write", out.getvalue())
+                      " and */fnx-uw2-security-* -> core_write", out.getvalue())
         self.assertIn("apply backend/main in fnx-ue1-root", out.getvalue())
         self.assertNotIn("zone_name_servers", out.getvalue())
 

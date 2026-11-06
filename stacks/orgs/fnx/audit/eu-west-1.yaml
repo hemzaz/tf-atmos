@@ -5,11 +5,11 @@
 # A core-account stack (owner decision QE5): no instance of its own; its stage
 # defaults' aws-account-settings is its one enabled instance until the core
 # components land. Its state goes to fnx-ew1-root's bucket
-# through the backend's root role (stacks/orgs/fnx/_defaults.yaml),
-# whose root_write trusts the management-account administrator and the
+# through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
+# whose core_write trusts the management-account administrator and the
 # audit account's OrganizationAccountAccessRole, and its stage
 # defaults keep it out of every CI matrix (github.actions_enabled: false). The
-# scaffold's wire hook added this stack's pattern pair to root_write
+# scaffold's wire hook added this stack's pattern pair to core_write
 # (check-state-keys.py).
 #
 # An EU core stack (owner decision 2026-11-03: stages audit and security in
@@ -17,7 +17,7 @@
 # same shared audit account: GDPR-scoped (check-data-residency.py),
 # so tagged Compliance "pci-sox-gdpr" and its state in the EU backend
 # (fnx-ew1-root, stacks/orgs/fnx/root/eu-west-1.yaml), whose
-# root_write trusts the audit account's OrganizationAccountAccessRole.
+# core_write trusts the audit account's OrganizationAccountAccessRole.
 #
 # Not the account's home region (us-east-1, fnx-ue1-audit):
 # aws-account-settings/main-standby, after the stage defaults, leaves the
