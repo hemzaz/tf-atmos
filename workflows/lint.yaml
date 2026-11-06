@@ -149,6 +149,13 @@ workflows:
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_catalog_read_overrides.py
               python3 scripts/check-catalog-read-overrides.py
+          # CD's promotion gate (terraform-cd.yml: fail-fast with max-parallel 1)
+          # and prod destroy guard (deploy-component.sh, check-plan-destroys.py).
+          - name: cd-guards
+            type: shell
+            command: |
+              set -eu
+              python3 -m unittest workflows/scripts/common/test_check_plan_destroys.py
           # atmos.yaml validates stacks against the pinned
           # schemas/atmos/atmos-manifest.json, not a URL (cached in $TMPDIR and
           # corrupted there by concurrent runs). The pin must be the embedded

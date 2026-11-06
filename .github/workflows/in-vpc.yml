@@ -178,10 +178,17 @@ jobs:
           fi
           case "$MODE" in
             deploy)
+              # With base (terraform-cd.yml's push deploy): plan -> destroy
+              # check -> apply of that planfile, as the hosted instances
+              # (deploy-component.sh). Without (a dispatched deploy): as asked.
               while IFS= read -r component; do
                 [ -n "$component" ] || continue
                 echo "Deploying $component in $STACK"
-                atmos terraform deploy "$component" -s "$STACK" </dev/null || exit 1
+                if [ -n "$BASE_SHA" ]; then
+                  bash workflows/scripts/common/deploy-component.sh "$component" || exit 1
+                else
+                  atmos terraform deploy "$component" -s "$STACK" </dev/null || exit 1
+                fi
               done <<<"$components"
               mkdir -p in-vpc-marker && echo "$GITHUB_SHA" > in-vpc-marker/sha
               ;;
