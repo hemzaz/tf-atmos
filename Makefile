@@ -7,7 +7,7 @@
 	plan-component apply-component onboard onboard-custom list-stacks check-security \
 	setup-aws-backend-cold-start setup-aws-backend setup-aws-backend-dry-run \
 	validate-aws-setup bootstrap-environment cleanup-aws-backend import-resource \
-	rotate-certs state-ops clean update-docs
+	rotate-certs state-ops clean
 .DEFAULT_GOAL := help
 
 # =============================================================================
@@ -70,7 +70,7 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(CYAN)%-30s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST) | sort
 	@echo
 	@echo "$(WHITE)Quick Examples:$(NC)"
-	@echo "  $(GREEN)make validate STAGE=prod$(NC)"
+	@echo "  $(GREEN)make validate$(NC)"
 	@echo "  $(GREEN)make plan-component COMPONENT=vpc/main$(NC)"
 	@echo "  $(GREEN)make sweep STACK=fnx-ue1-dev$(NC)"
 	@echo "  $(GREEN)atmos list workflows$(NC)   # every Atmos workflow"
@@ -83,7 +83,7 @@ lint: ## Lint and format all code
 	@echo "$(BLUE)Linting and formatting code...$(NC)"
 	@atmos workflow lint -f lint
 
-validate: ## Validate all Terraform configurations
+validate: ## Validate config, stacks and every root module (STACK scopes only the describe step)
 	@echo "$(BLUE)Validating configurations for "$(call sq,$(STACK))"...$(NC)"
 	@atmos workflow validate -f validate -s $(call sq,$(STACK))
 
@@ -252,7 +252,3 @@ clean: ## Clean temporary files and caches
 	@find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find . -name "*.pyc" -delete 2>/dev/null || true
 	@echo "$(GREEN)✅ Cleanup complete$(NC)"
-
-update-docs: ## Regenerate component README docs (terraform-docs pre-commit hook)
-	@echo "$(BLUE)Updating documentation...$(NC)"
-	@pre-commit run terraform_docs --all-files

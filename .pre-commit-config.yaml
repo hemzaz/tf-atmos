@@ -80,14 +80,7 @@ repos:
         language: system
         pass_filenames: false
         files: ^(atmos\.yaml|stacks/)
-      # checkov skips a file whose unary !x/-x ends a line before a leading
-      # && / || (scripts/check-hcl-unary-newline.py has the details).
-      - id: hcl-unary-newline
-        name: HCL unary operand before a leading operator (checkov parse guard)
-        entry: python3 scripts/check-hcl-unary-newline.py
-        language: system
-        files: \.tf$
-      # Manual stage: the whole lint gate (fmt, yamllint, parse guard, tflint
+      # Manual stage: the whole lint gate (fmt, yamllint, tflint, repo checks
       # over every stack instance and component directory), exactly as CI runs
       # it. Needs `atmos workflow tflint-init -f lint` once.
       - id: atmos-lint

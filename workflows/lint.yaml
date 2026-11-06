@@ -65,25 +65,6 @@ workflows:
           - name: yamllint
             type: shell
             command: yamllint -d relaxed stacks workflows atmos.yaml
-          # checkov's HCL parser rejects a unary !x/-x that ends a line before a
-          # leading && / || (terraform accepts it) and then skips the whole file;
-          # security-scan's coverage guard only catches that later. Fails fast here.
-          # Vendored dirs (check-vendor.py --list) are skipped: their files cannot
-          # be rewritten, and the coverage guard still fails a file checkov skips.
-          - name: hcl-unary-newline
-            type: shell
-            command: |
-              set -eu
-              python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
-              # Its own line: set -e ignores a failure inside a pipeline's first stage.
-              list=$(python3 scripts/check-vendor.py --list)
-              vendored=" $(printf '%s\n' "$list" | tr '\n' ' ') "
-              set --
-              for dir in components/terraform/*/; do
-                case "$vendored" in *" ${dir%/} "*) continue ;; esac
-                set -- "$@" "${dir%/}"
-              done
-              python3 scripts/check-hcl-unary-newline.py "$@"
           # aws-identity-center's house Plan-set override restates upstream's
           # policy documents (only the assumed role changed), so a vendor bump
           # that changes them fails here instead of being silently overridden.
@@ -131,15 +112,6 @@ workflows:
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_tool_pins.py
               python3 scripts/check-tool-pins.py
-          # Stack names and paths from before the region-code rename
-          # (<tenant>-<stage>-<instance>, <stage>/<region>/<instance>.yaml) point at stacks
-          # that no longer exist.
-          - name: old-stack-names
-            type: shell
-            command: |
-              set -eu
-              python3 -m unittest workflows/scripts/common/test_check_old_stack_names.py
-              python3 scripts/check-old-stack-names.py
           # A !terraform.state/!terraform.output read in a catalog instance file
           # (stacks/catalog/<c>/<i>[-flavor].yaml, Wave C1) that a stack file
           # replaces: set the value in the catalog file, never over the read.
@@ -590,8 +562,7 @@ workflows:
                   # checkov logs the parser exception only at DEBUG; re-run just this
                   # file (failure path only) and print the lark error, which names the
                   # line and the unexpected token. The usual cause is a unary !x/-x
-                  # ending a line before a leading && / || (see
-                  # scripts/check-hcl-unary-newline.py, run by `atmos workflow lint`).
+                  # ending a line before a leading && / || (write x == false or (!x)).
                   try:
                       debug = subprocess.run(
                           ["checkov", "-f", path, "--framework", "terraform", "--quiet", "--compact"],

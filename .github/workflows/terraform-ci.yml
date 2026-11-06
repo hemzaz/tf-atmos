@@ -72,6 +72,12 @@ on:
 
 permissions: {}
 
+# A newer push to a PR cancels that PR's older run. Push-to-master and merge-queue
+# runs get a group unique to the run (its id), so they are never cancelled.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Every `terraform init` (Atmos runs one before plan/apply/output) refuses to
 # change the committed .terraform.lock.hcl: a provider that is not locked fails
 # instead of floating. Regenerate locks: atmos workflow providers-lock -f providers.
@@ -91,6 +97,7 @@ jobs:
       contents: read
     outputs:
       terraform: ${{ steps.filter.outputs.terraform }}
+      scan: ${{ steps.filter.outputs.scan }}
       emulator: ${{ steps.filter.outputs.emulator }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
@@ -101,6 +108,9 @@ jobs:
       # terraform: the former `paths:` filter of this workflow, plus the Makefile
       # (lint's scaffold-stack-reader runs its recipes), templates/ (stack-samples
       # and the sweep check templates/stacks) and scaffolds/ (stack-scaffold).
+      # scan: terraform minus *.md, for the plan sweep and security scan: a PR that
+      # only edits a README under components/ or scripts/ changes nothing they
+      # evaluate. Lint and the docs checks keep the terraform filter.
       # emulator: the former `paths:` filter of emulator.yml, plus this file,
       # which now calls it.
       # workflows: any workflow file, for actionlint (the workflows are not in
@@ -120,18 +130,22 @@ jobs:
             changed=$(git diff --no-renames --name-only "$BASE_SHA" HEAD)
             printf 'Changed since %s:\n%s\n' "$BASE_SHA" "$changed"
             match() { if printf '%s\n' "$changed" | grep -Eq "$1"; then echo true; else echo false; fi; }
+            match_code() { if printf '%s\n' "$changed" | grep -Ev '\.md$' | grep -Eq "$1"; then echo true; else echo false; fi; }
             terraform=$(match "$terraform_re")
+            scan=$(match_code "$terraform_re")
             emulator=$(match "$emulator_re")
             workflows=$(match "$workflows_re")
           else
             echo "::notice::No usable base commit (${BASE_SHA:-none}); running every job."
             terraform=true
+            scan=true
             emulator=true
             workflows=true
           fi
-          echo "terraform=$terraform emulator=$emulator workflows=$workflows"
+          echo "terraform=$terraform scan=$scan emulator=$emulator workflows=$workflows"
           {
             echo "terraform=$terraform"
+            echo "scan=$scan"
             echo "emulator=$emulator"
             echo "workflows=$workflows"
           } >> "$GITHUB_OUTPUT"
@@ -240,7 +254,7 @@ jobs:
     # the other way round.
     name: Plan sweep
     needs: changes
-    if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
+    if: github.event_name != 'push' && needs.changes.outputs.scan == 'true'
     runs-on: ubuntu-latest
     # Every PR sweeps every stack: 22+ stacks and their template stacks took
     # 55-58 minutes by 2026-11 (Wave E core stacks), and one more stack
@@ -290,7 +304,7 @@ jobs:
   security-scan:
     name: Security scan
     needs: changes
-    if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
+    if: github.event_name != 'push' && needs.changes.outputs.scan == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
