@@ -6,7 +6,8 @@
 #     the stack's other instances, on its self-hosted runners in the VPC
 #     (in-vpc.yml, the github-runners component; docs/OPERATIONS.md).
 #   workflow_dispatch (default branch only): plan or deploy one known stack
-#     (optionally one component).
+#     (optionally one component). A dispatched deploy applies as asked, with
+#     neither guard below: plan first.
 # Credentials: Cloud Posse's GitOps model. The jobs use NO GitHub Environment,
 # so the OIDC token's sub is repo:<org>/<repo>:ref:refs/heads/<default branch> -
 # the only subject each stack's CI apply role trusts (iam/ci
@@ -16,7 +17,18 @@
 # repo-scoped role variable is needed.
 # THERE IS NO MANUAL APPROVAL: every push to the default branch that affects a
 # stack deploys it, production included (owner decision). Review happens on the
-# pull request; merging is the approval.
+# pull request; merging is the approval. Two guards in the push deploy:
+#   - Promotion gate: the hosted deploys (deploy-affected) run one stack at a
+#     time in promotion order, and the first failure cancels every later one
+#     (dev failing stops staging, prod and the DR standbys; a primary failing
+#     stops its standby). The in-VPC deploys (deploy-in-vpc) run after ALL
+#     hosted deploys, gated the same way among themselves only: a dev
+#     in-cluster failure comes after prod's hosted instances have applied.
+#   - Destroy guard: each instance is planned, its planfile checked, and that
+#     planfile applied (deploy-component.sh). In a prod stack or DR standby a
+#     plan that deletes or replaces a resource fails unless a commit being
+#     deployed carries `Allow-Destroy: <component>/<stack>:<address>`
+#     (check-plan-destroys.py); other stages get a warning in the job summary.
 # Destroy is intentionally not exposed here: use
 # `atmos workflow destroy -f destroy-environment` (typed confirmation).
 #
@@ -204,8 +216,18 @@ jobs:
       contents: read
       id-token: write
       statuses: write
+    # Promotion gate: the matrix is in promotion order (ci-stacks.py: dev,
+    # staging, prod, a DR standby right after its primary) and runs one leg at
+    # a time, so fail-fast cancels only legs that have not started: no apply in
+    # progress is ever cancelled (the failed leg was the only one running).
+    # Every later-promoted stack waits for the next push; its deployed/<stack>
+    # tag has not moved, so that run deploys everything since. Chosen over
+    # per-stage jobs chained with needs: (the matrix stays derived from the
+    # stacks, no edit for a new stage or stack) and over each leg querying
+    # earlier legs' results (needs a token and the API). It also stops
+    # unrelated later legs (the EU pair after a ue1 dev failure): fix and push.
     strategy:
-      fail-fast: false
+      fail-fast: true
       max-parallel: 1
       matrix: ${{ fromJson(needs.affected-stacks.outputs.matrix) }}
     env:
@@ -231,6 +253,9 @@ jobs:
       # One deploy per instance, in same-stack dependency order, stopping at
       # the first failure (a later instance may read its state), so the
       # deploy marker below is recorded only when every instance applied.
+      # Each is plan -> destroy check -> apply of that planfile
+      # (deploy-component.sh; the Allow-Destroy: trailers are read from
+      # every commit in base..GITHUB_SHA, all of which this leg deploys).
       # Not `deploy --affected`: it cannot skip the actions_enabled: false
       # instances nor leave the in-vpc ones to deploy-in-vpc (Atmos 1.229
       # rejects --query with --affected). Cloud Posse's
@@ -248,7 +273,7 @@ jobs:
           while IFS= read -r component; do
             [ -n "$component" ] || continue
             echo "Deploying $component in $STACK"
-            atmos terraform deploy "$component" -s "$STACK" </dev/null
+            bash workflows/scripts/common/deploy-component.sh "$component"
           done <<<"$components"
       - name: Record successful deploy
         run: mkdir -p deployed && echo "$GITHUB_SHA" > deployed/sha
@@ -261,7 +286,8 @@ jobs:
   # Each stack's in-cluster instances, on its self-hosted runners in the VPC,
   # after its hosted instances (in-vpc.yml requires the stack's deployed-<stack>
   # marker, so a stack whose hosted deploy failed is not continued here). One
-  # entry at a time, in promotion order.
+  # entry at a time, in promotion order, with the same promotion gate
+  # (fail-fast) as deploy-affected.
   deploy-in-vpc:
     name: Deploy in-VPC ${{ matrix.stack }} (${{ matrix.label }})
     needs: [affected-stacks, deploy-affected]
@@ -271,7 +297,7 @@ jobs:
       id-token: write
       statuses: write
     strategy:
-      fail-fast: false
+      fail-fast: true
       max-parallel: 1
       matrix: ${{ fromJson(needs.affected-stacks.outputs.in_vpc) }}
     # No `secrets: inherit`: in-vpc.yml uses only github.token.

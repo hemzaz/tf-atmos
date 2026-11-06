@@ -178,10 +178,17 @@ jobs:
           fi
           case "$MODE" in
             deploy)
+              # With base (terraform-cd.yml's push deploy): plan -> destroy
+              # check -> apply of that planfile, as the hosted instances
+              # (deploy-component.sh). Without (a dispatched deploy): as asked.
               while IFS= read -r component; do
                 [ -n "$component" ] || continue
                 echo "Deploying $component in $STACK"
-                atmos terraform deploy "$component" -s "$STACK" </dev/null || exit 1
+                if [ -n "$BASE_SHA" ]; then
+                  bash workflows/scripts/common/deploy-component.sh "$component" || exit 1
+                else
+                  atmos terraform deploy "$component" -s "$STACK" </dev/null || exit 1
+                fi
               done <<<"$components"
               mkdir -p in-vpc-marker && echo "$GITHUB_SHA" > in-vpc-marker/sha
               ;;
@@ -192,9 +199,22 @@ jobs:
               clean=() drifted=() failed=() n=0
               while IFS= read -r component; do
                 [ -n "$component" ] || continue
-                rc=0 n=$((n + 1))
-                atmos terraform plan "$component" -s "$STACK" --skip-planfile --hide no-changes \
-                  -- -detailed-exitcode -lock=false </dev/null 2>&1 | tee "drift-logs/$n.log" || rc=$?
+                rc=0 n=$((n + 1)) planfile="$RUNNER_TEMP/drift-$n.planfile"
+                atmos terraform plan "$component" -s "$STACK" --hide no-changes \
+                  -- -out="$planfile" -lock=false </dev/null 2>&1 | tee "drift-logs/$n.log" || rc=$?
+                # Changes from the plan JSON, not -detailed-exitcode: with ci.enabled
+                # Atmos maps its 2 to 0 (check-plan-destroys.py: 0 changes, 3 none).
+                if [ "$rc" -eq 0 ]; then
+                  # set -e again after: GitHub runs `shell: bash` as bash -eo pipefail.
+                  set +e
+                  atmos terraform show "$component" -s "$STACK" -json "$planfile" </dev/null \
+                    | python3 workflows/scripts/common/check-plan-destroys.py --changes-only
+                  status=("${PIPESTATUS[@]}")
+                  set -e
+                  # A failed show is a failed plan, whatever the checker read.
+                  [ "${status[0]}" -eq 0 ] || status[1]=1
+                  case "${status[1]}" in 0) rc=2 ;; 3) rc=0 ;; *) rc=1 ;; esac
+                fi
                 case "$rc" in
                   0) clean+=("$component") ;;
                   2) drifted+=("$component=drift-logs/$n.log") ;;

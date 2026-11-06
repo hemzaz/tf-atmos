@@ -69,6 +69,11 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   issue in the reason (skips don't show as code-scanning alerts, so the issue is the only
   tracker). Vendored code cannot be edited: a checkov finding there gets a (file, check, reason)
   entry in `scripts/check-checkov-allowlist.py`, which fails on unlisted findings and stale entries.
+- CD fails a prod or DR-standby deploy whose plan deletes or replaces a resource unless a deployed
+  commit ends with `Allow-Destroy: <component>/<stack>:<address>` (one per change, scoped only;
+  `check-plan-destroys.py`). A PR that intends one must say so in its squash commit message.
+- With `ci.enabled` (atmos.yaml) Atmos maps `plan -detailed-exitcode`'s exit 2 to 0: decide
+  "has changes" from `terraform show -json` of a planfile (`check-plan-destroys.py --changes-only`).
 - Every root module commits `.terraform.lock.hcl` and every init uses `-lockfile=readonly`: after
   a `required_providers` change run `atmos workflow providers-lock -f providers` and commit the locks.
 

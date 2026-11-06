@@ -527,6 +527,23 @@ is the fallback for moves configuration cannot express. A moved-only change must
 object: an inline attribute promoted to a resource, a `ForceNew` replacement, or an instance
 switched to a different root module (import instead).
 
+CD deploys the affected stacks' hosted instances one stack at a time in promotion order (dev,
+staging, prod, each DR standby right after its primary) and stops at the first failure: the later
+stacks wait for the next push, which deploys everything since their `deployed/<stack>` tag. The
+[in-cluster components](#in-cluster-components) deploy after every stack's hosted instances, gated
+the same way among themselves only, so a dev in-cluster failure does not stop prod's hosted
+deploy. Each instance is planned,
+the planfile checked, and that same planfile applied (`deploy-component.sh`; no plan is carried
+from the PR). In a prod stack or DR standby, a plan that deletes or replaces a resource fails the
+deploy before anything is applied, unless a commit being deployed (any commit since the stack's
+tag) ends its message with one trailer per change, the address exactly as the plan prints it:
+`Allow-Destroy: <component>/<stack>:<address>`, e.g.
+`Allow-Destroy: s3-bucket/logs/fnx-ue1-prod:aws_s3_bucket.this["logs"]` (a bare address is not
+accepted: Cloud Posse addresses repeat across components). A deposed object's delete (the leftover of a
+failed create-before-destroy replace, which was itself gated) is applied with a warning only. Whether a plan changes anything is read from its JSON: with `ci.enabled` Atmos maps
+`plan -detailed-exitcode`'s exit 2 to 0. On a squash merge, put the trailers at the end of the squash commit message.
+Other stages only warn in the job summary. A dispatched deploy has neither guard: plan it first.
+
 A renamed output or variable breaks its stacks silently: Atmos writes an undeclared var into the
 varfile and Terraform drops it with a warning, and a `!terraform.state` read of a missing output
 yields null. `check-dependencies.py` (validate-all) fails both, so rename the stack side in the
@@ -723,9 +740,8 @@ vaults and the state bucket's replication) and the same for `fnx-ue2-prod`. CD d
 (`ci-stacks.py`), not the stack names. That order also validates `fnx-ue2-prod`'s `acm/main`
 (`api.<domain>`): it writes no validation record (`process_domain_validation_options: false`) and
 waits on the one `fnx-ue1-prod`'s `acm/main` writes for its `*.api.<domain>` SAN, the same CNAME
-in one account. CD deploys with fail-fast false, so if the primary's `acm/main` fails on a first
-deploy, the DR `acm/main` still runs and fails after the 45 minute validation timeout: fix the
-primary and re-run. Each region's `apigateway/main` health check has a
+in one account. CD stops at the first failed stack, so if the primary's `acm/main` fails on a
+first deploy, the standby is not deployed in that run: fix the primary and push again. Each region's `apigateway/main` health check has a
 `HealthCheckStatus` alarm in us-east-1 on `ue1-main-alarms`. Both alarms and that topic live in
 us-east-1 (Route 53 publishes health check metrics only there), so a us-east-1 outage silences
 them; the DNS failover itself does not depend on them. The signal outside us-east-1 is
