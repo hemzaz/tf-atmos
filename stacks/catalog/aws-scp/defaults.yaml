@@ -83,8 +83,8 @@ components:
     # OrganizationAccountAccessRole (the management account's way in, the
     # bootstrap and core stacks' operator until E3e's order retires it: dropping
     # it before Identity Center is applied locks the core stacks out), and the
-    # Identity Center roles of the TerraformApplyAccess sets (-Prod, -Core and
-    # -Eu too) and AdministratorAccess (the break-glass), by their reserved path
+    # Identity Center roles of the TerraformApplyAccess sets (-Prod and -Eu
+    # too) and AdministratorAccess (the break-glass), by their reserved path
     # aws-reserved/sso.amazonaws.com/ (no region segment: the home region is
     # us-east-1; the * admits the regional form). Identity Center creates these
     # roles through its service-linked role AWSServiceRoleForSSO, which alone

@@ -66,6 +66,55 @@ class CheckIdentityCenterOverrideTest(unittest.TestCase):
   }''')
         self.assertIn("statement TerraformStateBackendAssumeRole block:condition", guard.check(self.dir)[0])
 
+    def test_upstream_second_condition_block_fails(self) -> None:
+        # Bad: upstream has two condition blocks, the override only the last one; a dict keyed by block
+        # name kept one condition per statement and passed this (E4c2b).
+        anchor = '"${var.tf_access_bucket_arn}/*"]\n  }'
+        condition = '''
+    condition {
+      test     = "StringEquals"
+      variable = "aws:PrincipalOrgID"
+      values   = ["%s"]
+    }'''
+        for name, values in ((guard.OVERRIDE, ["o-b"]), (guard.UPSTREAM, ["o-a", "o-b"])):
+            blocks = "".join(condition % value for value in values)
+            self.mutate(name, anchor, '"${var.tf_access_bucket_arn}/*"]' + blocks + "\n  }")
+        errors = guard.check(self.dir)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("statement TerraformStateBackendS3BucketReadOnly block:condition", errors[0])
+
+    def test_reordered_condition_blocks_pass(self) -> None:
+        # Positive control: the same two condition blocks, in another order, are the same statement.
+        anchor = '"${var.tf_access_bucket_arn}/*"]\n  }'
+        condition = '''
+    condition {
+      test     = "StringEquals"
+      variable = "aws:PrincipalOrgID"
+      values   = ["%s"]
+    }'''
+        for name, values in ((guard.OVERRIDE, ["o-b", "o-a"]), (guard.UPSTREAM, ["o-a", "o-b"])):
+            blocks = "".join(condition % value for value in values)
+            self.mutate(name, anchor, '"${var.tf_access_bucket_arn}/*"]' + blocks + "\n  }")
+        self.assertEqual(guard.check(self.dir), [])
+
+    def test_upstream_dynamic_statement_for_each_changed_fails(self) -> None:
+        # Bad: the same dynamic statement in both, but upstream changes its for_each.
+        anchor = '"${var.tf_access_bucket_arn}/*"]\n  }'
+        dynamic = '''
+  dynamic "statement" {
+    for_each = %s
+    content {
+      sid       = "Extra"
+      actions   = ["s3:GetObject"]
+      resources = ["*"]
+    }
+  }'''
+        for name, for_each in ((guard.OVERRIDE, "[1]"), (guard.UPSTREAM, "local.enabled ? [1] : []")):
+            self.mutate(name, anchor, anchor + "\n" + dynamic % for_each)
+        errors = guard.check(self.dir)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("statement Extra dynamic.attr:for_each", errors[0])
+
     def test_assumed_role_is_the_one_allowed_difference(self) -> None:
         self.mutate(guard.OVERRIDE, '-read-role"]', '-other-role"]')
         self.assertEqual(guard.check(self.dir), [])

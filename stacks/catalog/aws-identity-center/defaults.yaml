@@ -84,18 +84,17 @@ components:
         # role per backend; here backend/main splits its access roles by stage
         # (stacks/orgs/fnx/_defaults.yaml), and the EU stacks have their own
         # backend in fnx-ew1-root, so the dev/staging write role is the main
-        # backend and prod, core and the EU backend are additional ones
-        # (TerraformApplyAccess-Prod, -Core, -Eu). Native S3 locking: no
+        # backend and prod and the EU backend are additional ones
+        # (TerraformApplyAccess-Prod, -Eu). Native S3 locking: no
         # DynamoDB table. Each backend trusts the Plan sets on its read roles
         # only and the Apply sets on its write roles only, and only a set
         # assigned below in that account (stacks/orgs/fnx/root/*.yaml,
         # check-ci-state-roles.py), so the Plan sets assume a read role:
         # TerraformPlanAccess the main role's <role_prefix>-read-role twin,
         # TerraformPlanAccess-<Key> its backend's read_role_arn, a field the
-        # house policy-TerraformPlanAccess_override.tf adds (none for core: the
-        # core stacks have no read role). The EU core stacks' core role
-        # (fnx-ew1-root) gets no set of its own: the core accounts'
-        # AdministratorAccess reaches it (owner decision 2026-11-05).
+        # house policy-TerraformPlanAccess_override.tf adds. The core stacks'
+        # core_write (both backends) gets no set of its own: the core
+        # accounts' AdministratorAccess reaches it (owner decision 2026-11-05).
         tf_access_bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
         tf_access_role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-role"
         tf_access_additional_backends:
@@ -103,11 +102,6 @@ components:
             bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
             role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
             read_role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
-          # The core stages' state: core_write, which never reaches the root
-          # stacks' state (root-role).
-          core:
-            bucket_arn: "arn:aws:s3:::{{ .settings.tfstate.bucket }}"
-            role_arn: "arn:aws:iam::{{ .settings.account_map.full_account_map.root }}:role/{{ .settings.tfstate.role_prefix }}-core-role"
           # fnx-ew1-root's backend (the EU stacks' settings.tfstate, repeated:
           # this stack reads only its own settings): its prod-eu roles.
           eu:

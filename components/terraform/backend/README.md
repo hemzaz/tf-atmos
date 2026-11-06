@@ -87,7 +87,7 @@ stage's write role until Identity Center is applied; the PR enabling that instan
   written out. `AWSReservedSSO_<set>_*` also matches a permission set whose name is `<set>_<more>`
   in that account, so don't name a permission set after another one plus `_`. The pattern takes a
   permission-set name of letters, digits and `-` only (aws-identity-center names its
-  additional-backend sets `TerraformApplyAccess-Prod`, `-Core`, ...; Identity Center also allows
+  additional-backend sets `TerraformApplyAccess-Prod`, `-Eu`, ...; Identity Center also allows
   `_+=,.@`); a name with other characters is rejected, not widened. The validation is the guard here, not the
   operator: `ArnLike` and `ArnEquals` both honour `*` and `?` in a trusted ARN.
 - All the buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.
