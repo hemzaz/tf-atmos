@@ -54,9 +54,6 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   abstract `vendored` (`stacks/catalog/_base/vendored.yaml`; `environment` is `settings.prefix`),
   which its catalog entry inherits, not `tags.Environment`, so that convention does not apply to it.
   Never edit its files: house edits go in a `*_override.tf`.
-- checkov's HCL parser rejects a unary `!x`/`-x` that ends a line before a line starting with a binary
-  operator (`&&`, `||`, ...) and skips the file: write `x == false` or `(!x)`. The lint step
-  `hcl-unary-newline` (`scripts/check-hcl-unary-newline.py`) catches it.
 - CI runs in the `ghcr.io/cloudposse/atmos` Linux container; shell that works on macOS may not.
 - `schemas.atmos.manifest` must stay a repo file (`schemas/atmos/atmos-manifest.json`), never a URL:
   Atmos caches a URL at `$TMPDIR/atmos-manifest.json`, and a cache left with trailing bytes fails
