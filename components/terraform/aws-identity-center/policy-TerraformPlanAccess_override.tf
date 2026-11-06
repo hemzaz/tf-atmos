@@ -14,8 +14,7 @@
 #   - TerraformPlanAccess-<Key>: the additional backend's read_role_arn, a field
 #     this override adds (optional, no default: an override's type keeps the
 #     base declaration's optional() defaults, so an omitted field is null); a
-#     backend without one (core: its stacks have no read role) gets no state
-#     role to assume.
+#     backend without one gets no state role to assume.
 #
 # Terraform replaces every nested "statement" of an overridden data source, so
 # each document below restates upstream's statements (sids, actions, the S3

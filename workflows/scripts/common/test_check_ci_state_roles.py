@@ -435,9 +435,46 @@ class IdentityCenterRolesTest(unittest.TestCase):
         # Without the OAAR (the PR enabling Identity Center removes it), HIGH-1's core_write lets nobody in.
         roles = self.roles(core_write=[sso("security", "TerraformApplyAccess-Core")])
         self.assert_has(self.described(roles),
-                        "access_roles.core_write trusts no assigned Identity Center set, CI apply role or "
-                        "OrganizationAccountAccessRole")
+                        "access_roles.core_write trusts no assigned Identity Center set whose policy assumes it, "
+                        "CI apply role or OrganizationAccountAccessRole")
         self.assert_has(self.described(self.roles(core_write=[])), "access_roles.core_write trusts no assigned")
+
+    def test_assigned_set_whose_policy_does_not_assume_the_role_is_no_applier(self):
+        # Bad: core_write's only principal is a set assigned in security whose policy never assumes it
+        # (BillingAdministratorAccess has no sts:AssumeRole; TerraformApplyAccess assumes the write role).
+        assigned = {**ASSIGNED, "security": ["BillingAdministratorAccess", "TerraformApplyAccess"]}
+        for permission_set in ("BillingAdministratorAccess", "TerraformApplyAccess"):
+            roles = self.roles(core_write=[sso("security", permission_set)])
+            self.assert_has(self.described(roles, assigned),
+                            "access_roles.core_write trusts no assigned Identity Center set whose policy assumes it")
+
+    def test_sets_that_assume_any_role_or_the_role_itself_are_appliers(self):
+        # PowerUserAccess may assume any role; TerraformApplyAccess-Prod's policy assumes prod_write itself.
+        assigned = {**ASSIGNED, "security": ["PowerUserAccess"], "prod": ["TerraformApplyAccess-Prod"]}
+        roles = self.roles(core_write=[sso("security", "PowerUserAccess")], prod_read=[arn("prod", "plan")],
+                           prod_write=[sso("prod", "TerraformApplyAccess-Prod")])
+        errors = check_ci_state_roles.check(self.described(roles, assigned))
+        self.assertFalse(any("trusts no assigned" in error for error in errors), errors)
+
+    def test_account_id_shared_by_several_account_map_keys_fails(self):
+        # Bad: fnx-network shares security's ID, so the two accounts' assignments merge.
+        described = self.described()
+        ic = described["fnx-gbl-root"]["components"]["terraform"]["aws-identity-center"]
+        ic["vars"]["account_map"]["full_account_map"]["fnx-network"] = CORE_ACCOUNT
+        self.assert_has(described, f"in account {CORE_ACCOUNT}, which account_map keys ['fnx-network', "
+                                   "'fnx-security'] share")
+
+    def test_shared_placeholder_account_id_is_exempt(self):
+        # Every account holds the placeholder until the first deploy (check-first-deploy-inputs.py fails it).
+        placeholder = "123456789012"
+        described = self.described()
+        ic = described["fnx-gbl-root"]["components"]["terraform"]["aws-identity-center"]
+        ic["vars"]["account_map"]["full_account_map"].update({"fnx-a": placeholder, "fnx-b": placeholder})
+        backend_roles = described["fnx-ue1-root"]["components"]["terraform"]["backend/main"]["vars"]["access_roles"]
+        backend_roles["write"]["allowed_principal_arns"].append(
+            f"arn:aws:iam::{placeholder}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*")
+        errors = check_ci_state_roles.check(described)
+        self.assertFalse(any("share" in error for error in errors), errors)
 
     def test_no_identity_center_instance_assigns_nothing(self):
         described = with_core(stacks(roles=self.roles(), **today()))

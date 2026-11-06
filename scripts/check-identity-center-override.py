@@ -10,10 +10,11 @@ terraform_plan_access_additional, so the TerraformPlanAccess* sets assume a back
 role. Terraform replaces every nested "statement" of an overridden block, so the override
 restates upstream's statements, and a vendor bump that adds, drops or changes one would be
 silently undone. This compares the two, statement by statement (keyed by sid, plain or
-dynamic "statement" content): the same sids, and in each the same attributes and nested
-blocks, whitespace and trailing commas aside, except the assumed role (the "resources" of
-TerraformStateBackendAssumeRole), the one intended change. It also requires the override's
-tf_access_additional_backends type to keep every upstream field, unchanged, and add only
+dynamic "statement" content, and the dynamic's own for_each): the same sids, and in each
+the same attributes and the same list of each nested block (every condition and principals
+block, not one per name), whitespace and trailing commas aside, except the assumed role (the
+"resources" and dynamic for_each of TerraformStateBackendAssumeRole), the one intended
+change. It also requires the override's tf_access_additional_backends type to keep every upstream field, unchanged, and add only
 read_role_arn. A tests/ directory cannot live in the vendored dir (check-vendor.py allows
 only *_override.tf and the lock file there), so this guard is a lint step, not a tftest.
 Exits 1 on any difference.
@@ -26,6 +27,8 @@ UPSTREAM = "policy-TerraformAccess.tf"
 OVERRIDE = "policy-TerraformPlanAccess_override.tf"
 DOCUMENTS = ("terraform_plan_access", "terraform_plan_access_additional")
 ASSUME_SID = "TerraformStateBackendAssumeRole"
+# The intended change: the assumed role, and the dynamic for_each that skips a backend without one.
+ASSUME_CHANGES = {"attr:resources", "dynamic.attr:for_each"}
 ADDED_FIELDS = {"read_role_arn"}
 
 
@@ -81,18 +84,26 @@ def normalized(text: str) -> str:
 
 
 def statements(document: str) -> dict:
-    """sid -> {child name: normalized text} of every statement (plain, or a dynamic one's content)."""
+    """sid -> {child name: sorted normalized texts} of every statement (plain, or a dynamic one's content,
+    plus the dynamic's own for_each/iterator as 'dynamic.<name>'). A list per name, so a second condition
+    or principals block is compared, not collapsed into one."""
     found = {}
     for name, body in children(document):
+        outer = {}
         if name == "dynamic:statement":
-            content = dict(children(body)).get("block:content")
-            if content is None:
-                raise ValueError("dynamic statement without content")
-            body = content
+            dynamic = children(body)
+            content = [text for child, text in dynamic if child == "block:content"]
+            if len(content) != 1:
+                raise ValueError("dynamic statement without one content block")
+            outer = {"dynamic." + child: [normalized(text)] for child, text in dynamic if child != "block:content"}
+            body = content[0]
         elif name != "block:statement":
             continue
-        parts = {child: normalized(text) for child, text in children(body)}
-        sid = parts.get("attr:sid", "").strip('"')
+        parts = dict(outer)
+        for child, text in children(body):
+            parts.setdefault(child, []).append(normalized(text))
+        parts = {child: sorted(texts) for child, texts in parts.items()}
+        sid = (parts.get("attr:sid") or [""])[0].strip('"')
         if not sid or sid in found:
             raise ValueError(f"statement without a unique literal sid: {parts}")
         found[sid] = parts
@@ -117,7 +128,7 @@ def check(directory: pathlib.Path) -> list[str]:
             errors.append(f"{document}: statement sids {sorted(ours)} in {OVERRIDE}, {sorted(theirs)} upstream")
         for sid in sorted(set(theirs) & set(ours)):
             keys = set(theirs[sid]) | set(ours[sid])
-            for key in sorted(keys - ({"attr:resources"} if sid == ASSUME_SID else set())):
+            for key in sorted(keys - (ASSUME_CHANGES if sid == ASSUME_SID else set())):
                 if theirs[sid].get(key) != ours[sid].get(key):
                     errors.append(f"{document}: statement {sid} {key}: {ours[sid].get(key)!r} in {OVERRIDE}, "
                                   f"{theirs[sid].get(key)!r} upstream")

@@ -603,6 +603,18 @@ class LogArchiveBucketsTest(unittest.TestCase):
         self.assertEqual(self.failures(self.config_stacks(self.US[1:])), [drift])
         self.assertEqual(self.failures(self.config_stacks(self.US + [ACCOUNTS["prod-eu"]], enabled=True)), [drift])
 
+    def test_a_key_missing_an_account_is_fatal_under_placeholder_ids(self):
+        # Bad: every account holds the placeholder ID, and the key lists one account fewer than the residency
+        # (a set of IDs collapsed both to {123456789012} and passed; E5a4b LOW).
+        placeholder = {name: "123456789012" for name in self.FULL}
+        stacks = self.config_stacks(["123456789012"] * (len(placeholder) - 2))
+        bucket = stacks["fnx-ue1-dev"]["components"]["terraform"]["config-bucket"]
+        bucket["vars"]["account_map"] = bucket["settings"]["static_account_map"] = {"full_account_map": placeholder}
+        self.assertIn(("fatal", "config-bucket vars.residency_account_ids"), self.failures(stacks))
+        kms = stacks["fnx-ue1-dev"]["components"]["terraform"]["kms/config-bucket"]
+        kms["vars"]["config_source_accounts"] = ["123456789012"] * (len(placeholder) - 1)
+        self.assertNotIn(("fatal", "config-bucket vars.residency_account_ids"), self.failures(stacks))
+
     def test_an_explicit_residency_must_equal_the_key(self):
         eu = [ACCOUNTS[k] for k in ("prod-eu", "root", "audit", "security")]
         self.assertEqual(self.failures(self.config_stacks(eu, residency_account_ids=eu)), [])

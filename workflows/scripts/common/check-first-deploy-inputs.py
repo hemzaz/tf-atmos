@@ -242,20 +242,22 @@ def ignored_cloudtrail_policy(stack: str, instance_name: str, spec: dict):
                    "policy (the residency Denys); add a statement there instead", "Account IDs")
 
 
-def config_residency(variables: dict) -> set:
+def config_residency(variables: dict) -> list:
     """An aws-config-bucket instance's bucket-policy residency, as main.tf computes it: residency_account_ids,
-    or every account of vars.account_map.full_account_map but <tenant>-prod-eu."""
+    or every account of vars.account_map.full_account_map but <tenant>-prod-eu. One entry per account, not
+    a set of IDs: the placeholder ID every account holds until the first deploy would collapse them."""
     explicit = variables.get("residency_account_ids")
     if explicit is not None:
-        return {str(account) for account in explicit}
+        return sorted(str(account) for account in explicit)
     full = (variables.get("account_map") or {}).get("full_account_map") or {}
-    return {str(account) for name, account in full.items() if name != f"{variables.get('tenant')}-prod-eu"}
+    return sorted(str(account) for name, account in full.items() if name != f"{variables.get('tenant')}-prod-eu")
 
 
 def config_key_drift(stack: str, config: dict) -> list:
     """aws-config-bucket instances whose bucket-policy residency differs from the config_source_accounts
     of the kms instance they read their key from (!terraform.state <kms> .key_arn), disabled ones too:
-    the bucket would admit an account the key refuses, or the other way round."""
+    the bucket would admit an account the key refuses, or the other way round. The lists are compared
+    entry by entry (one per account), so a key missing an account still differs under placeholder IDs."""
     findings, terraform = [], instances(config)
     for instance_name, spec in sorted(terraform.items()):
         spec = spec or {}
@@ -263,14 +265,15 @@ def config_key_drift(stack: str, config: dict) -> list:
         read = KEY_READ_RE.match(str(variables.get("kms_master_key_arn") or ""))
         if component_of(spec) != "aws-config-bucket" or not read or read.group(1) not in terraform:
             continue
-        key_accounts = {str(a) for a in ((terraform[read.group(1)] or {}).get("vars") or {}).get(
-            "config_source_accounts") or []}
+        key_accounts = sorted(str(a) for a in ((terraform[read.group(1)] or {}).get("vars") or {}).get(
+            "config_source_accounts") or [])
         residency = config_residency(variables)
         if key_accounts != residency:
             findings.append(Finding(
                 "fatal", stack, f"{instance_name} vars.residency_account_ids",
-                f"bucket residency {sorted(residency)} differs from {read.group(1)} config_source_accounts "
-                f"{sorted(key_accounts)}: keep one list (stacks/catalog/aws-config-bucket/)", "Account IDs"))
+                f"bucket residency {residency} differs from {read.group(1)} config_source_accounts "
+                f"{key_accounts}: keep one list, one entry per account (stacks/catalog/aws-config-bucket/)",
+                "Account IDs"))
     return findings
 
 
