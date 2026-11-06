@@ -456,6 +456,24 @@ class IdentityCenterRolesTest(unittest.TestCase):
         errors = check_ci_state_roles.check(self.described(roles, assigned))
         self.assertFalse(any("trusts no assigned" in error for error in errors), errors)
 
+    def test_set_whose_assumed_role_is_unresolvable_is_no_applier(self):
+        # Bad: TerraformApplyAccess-Core's backend is gone from tf_access_additional_backends, and core_write
+        # has no role_name, so None == None must not make the set an applier.
+        assigned = {**ASSIGNED, "security": ["TerraformApplyAccess-Core"]}
+        roles = self.roles(core_write=[sso("security", "TerraformApplyAccess-Core")])
+        roles["core_write"]["role_name"] = None
+        described = self.described(roles, assigned)
+        ic = described["fnx-gbl-root"]["components"]["terraform"]["aws-identity-center"]
+        del ic["vars"]["tf_access_additional_backends"]["core"]
+        self.assert_has(described, "access_roles.core_write trusts no assigned Identity Center set")
+
+    def test_placeholder_accounts_match_the_first_deploy_preflight(self):
+        spec = importlib.util.spec_from_file_location(
+            "check_first_deploy_inputs", pathlib.Path(__file__).with_name("check-first-deploy-inputs.py"))
+        preflight = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(preflight)
+        self.assertEqual(check_ci_state_roles.PLACEHOLDER_ACCOUNTS, preflight.PLACEHOLDER_ACCOUNTS)
+
     def test_account_id_shared_by_several_account_map_keys_fails(self):
         # Bad: fnx-network shares security's ID, so the two accounts' assignments merge.
         described = self.described()

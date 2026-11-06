@@ -94,7 +94,8 @@ IC_COMPONENT = "aws-identity-center"
 # Sets whose policy may assume any role (sts:AssumeRole on *): AWS managed AdministratorAccess
 # and PowerUserAccess (all but iam/organizations/account).
 ASSUME_ANY_SETS = ("AdministratorAccess", "PowerUserAccess")
-# AWS documentation placeholder account IDs (check-first-deploy-inputs.py PLACEHOLDER_ACCOUNTS).
+# AWS documentation placeholder account IDs: check-first-deploy-inputs.py's PLACEHOLDER_ACCOUNTS, repeated
+# (importing that module loads two more scripts); test_check_ci_state_roles.py pins the two equal.
 PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
 OAAR = re.compile(r"^arn:aws[a-z-]*:iam::[0-9]{12}:role/OrganizationAccountAccessRole$")
 # The write roles every stack's apply needs someone on (root_write: the administrator alone).
@@ -249,8 +250,8 @@ def applier(arn: str, ic: tuple, role_name: str) -> bool:
     sso = SSO_ROLE_ARN.match(arn)
     if sso:
         account, permission_set = sso.groups()
-        assumes = permission_set in ASSUME_ANY_SETS or (
-            permission_set.startswith(("TerraformApplyAccess", "TerraformStateAccess")) and ic[1].get(permission_set) == role_name)
+        aimed = bool(role_name) and ic[1].get(permission_set) == role_name
+        assumes = permission_set in ASSUME_ANY_SETS or (permission_set.startswith(TERRAFORM_SETS[1:]) and aimed)
         return assumes and permission_set in ic[0].get(account, set())
     ci_role = CI_ROLE_ARN.match(arn)
     return bool(OAAR.match(arn)) or bool(ci_role and ci_role.group(1) == "apply")

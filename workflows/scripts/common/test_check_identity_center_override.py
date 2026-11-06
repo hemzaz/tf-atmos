@@ -83,6 +83,20 @@ class CheckIdentityCenterOverrideTest(unittest.TestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("statement TerraformStateBackendS3BucketReadOnly block:condition", errors[0])
 
+    def test_reordered_condition_blocks_pass(self) -> None:
+        # Positive control: the same two condition blocks, in another order, are the same statement.
+        anchor = '"${var.tf_access_bucket_arn}/*"]\n  }'
+        condition = '''
+    condition {
+      test     = "StringEquals"
+      variable = "aws:PrincipalOrgID"
+      values   = ["%s"]
+    }'''
+        for name, values in ((guard.OVERRIDE, ["o-b", "o-a"]), (guard.UPSTREAM, ["o-a", "o-b"])):
+            blocks = "".join(condition % value for value in values)
+            self.mutate(name, anchor, '"${var.tf_access_bucket_arn}/*"]' + blocks + "\n  }")
+        self.assertEqual(guard.check(self.dir), [])
+
     def test_upstream_dynamic_statement_for_each_changed_fails(self) -> None:
         # Bad: the same dynamic statement in both, but upstream changes its for_each.
         anchor = '"${var.tf_access_bucket_arn}/*"]\n  }'
