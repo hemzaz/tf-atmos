@@ -539,8 +539,8 @@ deploy before anything is applied, unless a commit being deployed (any commit si
 tag) ends its message with one trailer per change, the address exactly as the plan prints it:
 `Allow-Destroy: <component>/<stack>:<address>`, e.g.
 `Allow-Destroy: s3-bucket/logs/fnx-ue1-prod:aws_s3_bucket.this["logs"]` (a bare address is not
-accepted: Cloud Posse addresses repeat across components). A deposed object's cleanup needs no
-trailer. Whether a plan changes anything is read from its JSON: with `ci.enabled` Atmos maps
+accepted: Cloud Posse addresses repeat across components). A deposed object's delete (the leftover of a
+failed create-before-destroy replace, which was itself gated) is applied with a warning only. Whether a plan changes anything is read from its JSON: with `ci.enabled` Atmos maps
 `plan -detailed-exitcode`'s exit 2 to 0. On a squash merge, put the trailers at the end of the squash commit message.
 Other stages only warn in the job summary. A dispatched deploy has neither guard: plan it first.
 

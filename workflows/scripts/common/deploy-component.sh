@@ -31,12 +31,16 @@ rm -f "${planfile}"
 atmos terraform plan "${component}" -s "${STACK}" -- -out="${planfile}" -lock-timeout=10m </dev/null \
   || { echo "::error::${component} in ${STACK}: plan failed"; exit 1; }
 
-rc=0
+# Each side's own status: pipefail alone would report the checker's 3 (no
+# changes) even when show failed after printing a plan.
+set +e
 atmos terraform show "${component}" -s "${STACK}" -json "${planfile}" </dev/null \
   | python3 workflows/scripts/common/check-plan-destroys.py \
-      --stack "${STACK}" --component "${component}" --base "${BASE_SHA}" \
-  || rc=$?
-case "${rc}" in
+      --stack "${STACK}" --component "${component}" --base "${BASE_SHA}"
+status=("${PIPESTATUS[@]}")
+set -e
+[ "${status[0]}" -eq 0 ] || { echo "::error::${component} in ${STACK}: show failed (exit ${status[0]})"; exit 1; }
+case "${status[1]}" in
   0) atmos terraform deploy "${component}" -s "${STACK}" --planfile "${planfile}" </dev/null ;;
   3) ;; # no changes: nothing to apply
   *) exit 1 ;;

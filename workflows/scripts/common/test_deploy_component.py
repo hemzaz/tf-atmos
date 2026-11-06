@@ -23,7 +23,7 @@ case "$1 $2" in
   "terraform plan")
     for arg in "$@"; do case "$arg" in -out=*) touch "${arg#-out=}" ;; esac; done
     exit "${FAKE_PLAN_RC:-0}" ;;
-  "terraform show") echo "Initializing the backend..."; cat "$FAKE_PLAN" ;;
+  "terraform show") echo "Initializing the backend..."; cat "$FAKE_PLAN"; exit "${FAKE_SHOW_RC:-0}" ;;
   "describe component") echo "{\\"settings\\": $FAKE_SETTINGS}" ;;
   "terraform deploy") exit 0 ;;
   *) exit 99 ;;
@@ -57,13 +57,14 @@ class DeployComponentTest(unittest.TestCase):
         return subprocess.check_output(
             ["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args], text=True)
 
-    def run_script(self, document, stage="prod", plan_rc=0):
+    def run_script(self, document, stage="prod", plan_rc=0, show_rc=0):
         (self.dir / "plan.json").write_text(json.dumps(document) + "\n")
         log = self.dir / "atmos.log"
         log.write_text("")
         env = {
             "PATH": f"{self.dir / 'bin'}:{os.environ['PATH']}",
             "FAKE_LOG": str(log), "FAKE_PLAN": str(self.dir / "plan.json"), "FAKE_PLAN_RC": str(plan_rc),
+            "FAKE_SHOW_RC": str(show_rc),
             "FAKE_SETTINGS": json.dumps({"context": {"stage": stage}}),
             "STACK": STACK, "BASE_SHA": self.base, "GITHUB_SHA": "HEAD", "RUNNER_TEMP": str(self.dir / "tmp"),
         }
@@ -96,6 +97,12 @@ class DeployComponentTest(unittest.TestCase):
         code, calls, out = self.run_script(plan(("aws_db_instance.this", ["delete"])), stage="dev")
         self.assertEqual((code, calls), (0, ["plan", "show", "deploy"]), out)
         self.assertIn("::warning", out)
+
+    def test_a_failed_show_fails_even_after_printing_a_no_change_plan(self):
+        """pipefail alone would report the checker's 3 (no changes) and mark the stack deployed."""
+        code, calls, out = self.run_script(plan(("a.n", ["no-op"])), show_rc=1)
+        self.assertEqual((code, calls), (1, ["plan", "show"]), out)
+        self.assertIn("show failed", out)
 
     def test_plan_error_fails(self):
         code, calls, out = self.run_script(plan(), plan_rc=1)
