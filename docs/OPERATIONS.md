@@ -527,15 +527,21 @@ is the fallback for moves configuration cannot express. A moved-only change must
 object: an inline attribute promoted to a resource, a `ForceNew` replacement, or an instance
 switched to a different root module (import instead).
 
-CD deploys the affected stacks one at a time in promotion order (dev, staging, prod, each DR
-standby right after its primary) and stops at the first failure: the later stacks wait for the
-next push, which deploys everything since their `deployed/<stack>` tag. Each instance is planned,
+CD deploys the affected stacks' hosted instances one stack at a time in promotion order (dev,
+staging, prod, each DR standby right after its primary) and stops at the first failure: the later
+stacks wait for the next push, which deploys everything since their `deployed/<stack>` tag. The
+[in-cluster components](#in-cluster-components) deploy after every stack's hosted instances, gated
+the same way among themselves only, so a dev in-cluster failure does not stop prod's hosted
+deploy. Each instance is planned,
 the planfile checked, and that same planfile applied (`deploy-component.sh`; no plan is carried
 from the PR). In a prod stack or DR standby, a plan that deletes or replaces a resource fails the
 deploy before anything is applied, unless a commit being deployed (any commit since the stack's
-tag) ends its message with one trailer per address, exactly as the plan prints it:
-`Allow-Destroy: aws_s3_bucket.this["logs"]`, or `Allow-Destroy: <component>/<stack>:<address>`
-for one instance. On a squash merge, put the trailers at the end of the squash commit message.
+tag) ends its message with one trailer per change, the address exactly as the plan prints it:
+`Allow-Destroy: <component>/<stack>:<address>`, e.g.
+`Allow-Destroy: s3-bucket/logs/fnx-ue1-prod:aws_s3_bucket.this["logs"]` (a bare address is not
+accepted: Cloud Posse addresses repeat across components). A deposed object's cleanup needs no
+trailer. Whether a plan changes anything is read from its JSON: with `ci.enabled` Atmos maps
+`plan -detailed-exitcode`'s exit 2 to 0. On a squash merge, put the trailers at the end of the squash commit message.
 Other stages only warn in the job summary. A dispatched deploy has neither guard: plan it first.
 
 A renamed output or variable breaks its stacks silently: Atmos writes an undeclared var into the

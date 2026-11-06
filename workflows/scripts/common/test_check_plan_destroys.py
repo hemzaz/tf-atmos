@@ -21,14 +21,33 @@ PROD = {"context": {"stage": "prod"}}
 STANDBY = {"context": {"stage": "prod"}, "dr": {"standby_of": "fnx-ue1-prod"}}
 DEV = {"context": {"stage": "dev"}}
 BUCKET = 'aws_s3_bucket.this["logs"]'
+ALLOW_BUCKET = f"{COMPONENT}/{STACK}:{BUCKET}"
 
 
 def change(address, *actions, mode="managed", **extra):
     return {"address": address, "mode": mode, "change": {"actions": list(actions)}, **extra}
 
 
-def plan(*changes):
-    return {"format_version": "1.2", "resource_changes": list(changes)}
+def plan(*changes, outputs=None):
+    document = {"format_version": "1.2", "resource_changes": list(changes)}
+    if outputs is not None:
+        document["output_changes"] = outputs
+    return document
+
+
+class LoadPlanTest(unittest.TestCase):
+    def test_json_log_lines_before_the_plan_are_skipped(self):
+        text = '{"@level":"info","@message":"Terraform 1.16"}\n{"not": "a plan"}\n' + json.dumps(plan()) + "\n"
+        self.assertEqual(guard.load_plan(text), plan())
+
+    def test_a_plan_with_planned_values_only_loads(self):
+        document = {"format_version": "1.2", "planned_values": {"root_module": {}}}
+        self.assertEqual(guard.load_plan(json.dumps(document)), document)
+
+    def test_non_plan_json_is_rejected(self):
+        for text in ('{"format_version": "1.2"}', '{"resource_changes": []}', "[]", "Error: no planfile"):
+            with self.assertRaises(ValueError, msg=text):
+                guard.load_plan(text)
 
 
 class DestroysTest(unittest.TestCase):
@@ -37,15 +56,32 @@ class DestroysTest(unittest.TestCase):
             change("a.x", "delete"), change("a.y", "delete", "create"), change("a.z", "create", "delete"),
             change("a.c", "create"), change("a.u", "update"), change("a.n", "no-op"), change("a.f", "forget"),
         ))
-        self.assertEqual([address for address, _ in found], ["a.x", "a.y", "a.z"])
+        self.assertEqual([address for address, _, _ in found], ["a.x", "a.y", "a.z"])
 
     def test_data_reads_and_an_empty_plan_are_not_destroys(self):
         self.assertEqual(guard.destroys(plan(change("data.a.b", "read", mode="data"))), [])
         self.assertEqual(guard.destroys({"format_version": "1.2"}), [])
 
-    def test_a_deposed_object_names_its_key(self):
-        found = guard.destroys(plan(change("a.x", "delete", deposed="00aa")))
-        self.assertEqual(found[0][0], "a.x (deposed 00aa)")
+    def test_a_moved_block_is_not_a_delete(self):
+        moved = change("aws_s3_bucket.new", "no-op", previous_address="aws_s3_bucket.old")
+        self.assertEqual(guard.destroys(plan(moved)), [])
+
+
+class HasChangesTest(unittest.TestCase):
+    def test_no_op_and_reads_only_is_no_change(self):
+        self.assertFalse(guard.has_changes(plan(change("a.n", "no-op"), change("data.a.b", "read", mode="data"))))
+        self.assertFalse(guard.has_changes(plan(outputs={"id": {"actions": ["no-op"]}})))
+        self.assertFalse(guard.has_changes({"format_version": "1.2", "planned_values": {}}))
+
+    def test_any_other_action_an_output_change_a_move_or_an_import_is_a_change(self):
+        for document in (
+            plan(change("a.u", "update")),
+            plan(change("a.f", "forget")),
+            plan(outputs={"id": {"actions": ["update"]}}),
+            plan(change("a.new", "no-op", previous_address="a.old")),
+            plan({"address": "a.i", "mode": "managed", "change": {"actions": ["no-op"], "importing": {"id": "x"}}}),
+        ):
+            self.assertTrue(guard.has_changes(document), document)
 
 
 class ProtectedTest(unittest.TestCase):
@@ -62,33 +98,40 @@ class CheckTest(unittest.TestCase):
     def test_prod_destroy_without_a_trailer_fails(self):
         errors, notes = guard.check(plan(change(BUCKET, "delete")), STACK, COMPONENT, PROD, set())
         self.assertEqual(len(errors), 1)
-        self.assertIn(f"Allow-Destroy: {BUCKET}", errors[0])
+        self.assertIn(f"Allow-Destroy: {ALLOW_BUCKET}", errors[0])
         self.assertEqual(notes, [])
 
     def test_prod_replace_without_a_trailer_fails(self):
         errors, _ = guard.check(plan(change("aws_kms_key.this", "create", "delete")), STACK, COMPONENT, STANDBY, set())
         self.assertIn("replace", errors[0])
 
-    def test_plain_and_scoped_trailers_allow(self):
-        for allow in (BUCKET, f"{COMPONENT}/{STACK}:{BUCKET}"):
-            errors, notes = guard.check(plan(change(BUCKET, "delete")), STACK, COMPONENT, PROD, {allow})
-            self.assertEqual(errors, [], allow)
-            self.assertIn("allowed", notes[0])
+    def test_the_scoped_trailer_allows(self):
+        errors, notes = guard.check(plan(change(BUCKET, "delete")), STACK, COMPONENT, PROD, {ALLOW_BUCKET})
+        self.assertEqual(errors, [])
+        self.assertEqual(notes[0][0], "notice")
 
-    def test_a_trailer_for_another_address_or_stack_does_not_allow(self):
-        for allow in ('aws_s3_bucket.this["other"]', f"{COMPONENT}/fnx-ue2-prod:{BUCKET}", "aws_s3_bucket.this"):
+    def test_a_bare_address_or_another_scope_does_not_allow(self):
+        for allow in (BUCKET, 'aws_s3_bucket.this["other"]', f"{COMPONENT}/fnx-ue2-prod:{BUCKET}",
+                      f"s3-bucket/other/{STACK}:{BUCKET}"):
             errors, _ = guard.check(plan(change(BUCKET, "delete")), STACK, COMPONENT, PROD, {allow})
             self.assertEqual(len(errors), 1, allow)
 
     def test_each_address_needs_its_own_trailer(self):
-        errors, notes = guard.check(plan(change("a.x", "delete"), change("a.y", "delete")), STACK, COMPONENT, PROD, {"a.x"})
+        errors, notes = guard.check(plan(change("a.x", "delete"), change("a.y", "delete")), STACK, COMPONENT, PROD,
+                                    {f"{COMPONENT}/{STACK}:a.x"})
         self.assertEqual((len(errors), len(notes)), (1, 1))
         self.assertIn("a.y", errors[0])
+
+    def test_a_deposed_delete_only_warns(self):
+        errors, notes = guard.check(plan(change(BUCKET, "delete", deposed="00aa")), STACK, COMPONENT, PROD, set())
+        self.assertEqual(errors, [])
+        self.assertEqual(notes[0][0], "warning")
+        self.assertIn("deposed", notes[0][1])
 
     def test_non_prod_only_reports(self):
         errors, notes = guard.check(plan(change(BUCKET, "delete")), "fnx-ue1-dev", COMPONENT, DEV, set())
         self.assertEqual(errors, [])
-        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0][0], "warning")
 
     def test_no_changes_pass(self):
         self.assertEqual(guard.check(plan(), STACK, COMPONENT, PROD, set()), ([], []))
@@ -116,9 +159,9 @@ class TrailersTest(unittest.TestCase):
 
 
 class MainTest(unittest.TestCase):
-    def run_main(self, text, settings, allows=frozenset()):
+    def run_main(self, text, settings=PROD, allows=frozenset(), argv=None):
         out = io.StringIO()
-        argv = ["check-plan-destroys.py", "--stack", STACK, "--component", COMPONENT, "--base", "b", "--head", "h"]
+        argv = argv or ["x", "--stack", STACK, "--component", COMPONENT, "--base", "b", "--head", "h"]
         with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdin", io.StringIO(text)), \
                 mock.patch.object(guard, "component_settings", return_value=settings), \
                 mock.patch.object(guard, "trailers", return_value=set(allows)), \
@@ -127,22 +170,32 @@ class MainTest(unittest.TestCase):
         return code, out.getvalue()
 
     def test_log_lines_before_the_json_are_skipped_and_a_blocked_destroy_fails(self):
-        code, out = self.run_main("Initializing...\n" + json.dumps(plan(change(BUCKET, "delete"))) + "\n", PROD)
+        code, out = self.run_main("Initializing...\n" + json.dumps(plan(change(BUCKET, "delete"))) + "\n")
         self.assertEqual(code, 1)
         self.assertIn("::error title=Destroy not allowed::", out)
 
-    def test_allowed_destroy_passes_with_a_notice(self):
-        code, out = self.run_main(json.dumps(plan(change(BUCKET, "delete"))), PROD, {BUCKET})
+    def test_allowed_destroy_applies_with_a_notice(self):
+        code, out = self.run_main(json.dumps(plan(change(BUCKET, "delete"))), allows={ALLOW_BUCKET})
         self.assertEqual(code, 0, out)
         self.assertIn("::notice", out)
 
-    def test_dev_destroy_passes_with_a_warning(self):
+    def test_dev_destroy_applies_with_a_warning(self):
         code, out = self.run_main(json.dumps(plan(change(BUCKET, "delete"))), DEV)
         self.assertEqual(code, 0, out)
         self.assertIn("::warning", out)
 
-    def test_no_json_fails_closed(self):
-        self.assertEqual(self.run_main("Error: no planfile\n", PROD)[0], 2)
+    def test_no_changes_exits_3(self):
+        self.assertEqual(self.run_main(json.dumps(plan(change("a.n", "no-op"))))[0], guard.NO_CHANGES)
+
+    def test_changes_only_mode(self):
+        argv = ["x", "--changes-only"]
+        self.assertEqual(self.run_main(json.dumps(plan(change("a.u", "update"))), argv=argv)[0], 0)
+        self.assertEqual(self.run_main(json.dumps(plan()), argv=argv)[0], guard.NO_CHANGES)
+        self.assertEqual(self.run_main("Error\n", argv=argv)[0], 2)
+
+    def test_no_plan_json_fails_closed(self):
+        self.assertEqual(self.run_main("Error: no planfile\n")[0], 2)
+        self.assertEqual(self.run_main('{"@level":"error"}\n')[0], 2)
 
     def test_a_failed_describe_fails_closed(self):
         out = io.StringIO()
@@ -155,7 +208,8 @@ class MainTest(unittest.TestCase):
     def test_summary_is_written(self):
         with tempfile.NamedTemporaryFile("r", suffix=".md") as summary:
             argv = ["x", "--stack", STACK, "--component", COMPONENT, "--base", "b"]
-            with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdin", io.StringIO(json.dumps(plan(change(BUCKET, "delete"))))), \
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch("sys.stdin", io.StringIO(json.dumps(plan(change(BUCKET, "delete"))))), \
                     mock.patch.object(guard, "component_settings", return_value=DEV), \
                     mock.patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": summary.name}), \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -174,7 +228,6 @@ class WorkflowTest(unittest.TestCase):
             body = self.cd.split(f"\n  {job}:\n", 1)[1].split("\n  mark-deployed:\n", 1)[0]
             body = body.split("\n  deploy-in-vpc:\n", 1)[0]
             self.assertIn("fail-fast: true\n      max-parallel: 1\n", body, job)
-        self.assertNotIn("fail-fast: false\n      max-parallel: 1\n      matrix: ${{ fromJson(needs.affected", self.cd)
 
     def test_push_deploys_go_through_the_guarded_script(self):
         self.assertIn('bash workflows/scripts/common/deploy-component.sh "$component"', self.cd)

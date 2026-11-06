@@ -155,7 +155,7 @@ workflows:
             type: shell
             command: |
               set -eu
-              python3 -m unittest workflows/scripts/common/test_check_plan_destroys.py
+              python3 -m unittest workflows/scripts/common/test_check_plan_destroys.py workflows/scripts/common/test_deploy_component.py
           # atmos.yaml validates stacks against the pinned
           # schemas/atmos/atmos-manifest.json, not a URL (cached in $TMPDIR and
           # corrupted there by concurrent runs). The pin must be the embedded

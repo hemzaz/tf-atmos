@@ -18,14 +18,17 @@
 # THERE IS NO MANUAL APPROVAL: every push to the default branch that affects a
 # stack deploys it, production included (owner decision). Review happens on the
 # pull request; merging is the approval. Two guards in the push deploy:
-#   - Promotion gate: stacks deploy one at a time in promotion order, and the
-#     first failure cancels every later one (dev failing stops staging, prod
-#     and the DR standbys; a primary failing stops its standby).
+#   - Promotion gate: the hosted deploys (deploy-affected) run one stack at a
+#     time in promotion order, and the first failure cancels every later one
+#     (dev failing stops staging, prod and the DR standbys; a primary failing
+#     stops its standby). The in-VPC deploys (deploy-in-vpc) run after ALL
+#     hosted deploys, gated the same way among themselves only: a dev
+#     in-cluster failure comes after prod's hosted instances have applied.
 #   - Destroy guard: each instance is planned, its planfile checked, and that
 #     planfile applied (deploy-component.sh). In a prod stack or DR standby a
 #     plan that deletes or replaces a resource fails unless a commit being
-#     deployed carries `Allow-Destroy: <address>` (check-plan-destroys.py);
-#     other stages get a warning in the job summary.
+#     deployed carries `Allow-Destroy: <component>/<stack>:<address>`
+#     (check-plan-destroys.py); other stages get a warning in the job summary.
 # Destroy is intentionally not exposed here: use
 # `atmos workflow destroy -f destroy-environment` (typed confirmation).
 #
