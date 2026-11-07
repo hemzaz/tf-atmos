@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# aws-config - one AWS Config recorder per stack (account x region) (E5b)
+# =============================================================================
+# Vendored Cloud Posse aws-config v3.1.1 (vendor.yaml) with the values of its
+# README's catalog entry. It takes its own static account_map
+# (account-map-bypass; no providers mixin: it would collide), so
+# central_resource_collector_account and the account verification are keys of
+# that map. Owner decisions (E5b plan, 2026-11-07):
+#   - The account's home region collects its global resources (IAM):
+#     eu-west-1 for prod-eu, us-east-1 for every other account. Every other
+#     region records regional types only, with the collector's role.
+#   - OQ-B: <tenant>-security aggregates (aws-config/security in main.yaml);
+#     every recorder authorizes it in its collector region.
+#   - OQ-E: the bucket is the residency's audit-stack config-bucket, named
+#     from config_bucket_env/_stage by
+#     components/terraform/aws-config/remote-state_override.tf (no remote state
+#     read, no bucket name typed). A GDPR-scoped stack (an eu- region:
+#     check-data-residency.py) delivers to fnx-ew1-audit, the rest to
+#     fnx-ue1-audit; the E5a bucket policies and key deny any other pairing.
+# The SNS topic Cloud Posse always creates uses alias/aws/sns (its default).
+# The variants a stack's aws-config instance inherits are in main.yaml.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-config/defaults:
+      metadata:
+        component: aws-config
+        type: abstract
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: aws-config
+        default_scope: account
+        az_abbreviation_type: fixed
+        global_resource_collector_region: '{{ if eq .settings.environment.account "prod-eu" }}eu-west-1{{ else }}us-east-1{{ end }}'
+        central_resource_collector_account: '{{ .settings.context.tenant }}-security'
+        # The residency from the region code, as in catalog/aws-cloudtrail
+        # (eu- codes, and only those, start with "e").
+        config_bucket_env: '{{ if hasPrefix "e" .settings.context.environment }}ew1{{ else }}ue1{{ end }}'
+        config_bucket_stage: audit
+        create_iam_role: false
+        sns_encryption_key_id: "alias/aws/sns"
+        conformance_packs: []
+        tags:
+          Component: "AWSConfig"
+      dependencies:
+        components:
+          - component: config-bucket
+            stack: '{{ .settings.context.tenant }}-{{ if hasPrefix "e" .settings.context.environment }}ew1{{ else }}ue1{{ end }}-audit'
