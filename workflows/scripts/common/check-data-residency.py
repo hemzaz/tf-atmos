@@ -38,6 +38,19 @@ of a stack that is not GDPR-scoped may join it (set global_replication_group_id 
 the primary's, to a literal id ending in its suffix, or while depending on the primary).
 EXEMPTIONS lists the (instance pattern, field) pairs that may name one region the rules
 above forbid there.
+Every deployable trail and recorder (metadata.component in LOG_ARCHIVES: the vendored
+aws-cloudtrail and aws-config), in any stack, delivers to its residency's log archive: its
+bucket environment and stage vars (CP remote-state; the house remote-state_override.tf
+computes the bucket from them, owner OQ-E) name stage "audit" and, with the tenant, a stack
+holding that bucket instance (cloudtrail-bucket, config-bucket) that is GDPR-scoped iff its
+own stack is (fnx-ew1-audit, else fnx-ue1-audit), which it lists in dependencies.components.
+No other vars key containing "bucket" may be set: a literal bucket name would bypass this.
+Scoped exemption (owner OQ-A/OQ-B, 2026-11-07), not coded because no stack var shows it: the
+shared accounts (root, audit, security) keep one multi-region trail in their US home stack,
+delivering to the US archive, so it also records their eu-west-1 control-plane events; and
+the US Config aggregator in fnx-ue1-security (all regions, CP-hardcoded) aggregates those
+accounts' eu-west-1 recorders. Both are core-account control-plane metadata, not EU personal
+data; a GDPR-scoped stack's own trail or recorder still delivers only to the EU archive.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
 
@@ -88,6 +101,29 @@ EXEMPTIONS: tuple = (
     Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
     Exemption("apigateway/main", "vars.health_check_regions", "ap-southeast-1", _CHECKERS),
 )
+
+
+class LogArchive(NamedTuple):
+    bucket_component: str  # the bucket's metadata.component in the audit stack
+    component_var: str  # vars naming the bucket instance, its environment, stage and tenant
+    component_default: str
+    environment_var: str
+    stage_var: str
+    tenant_var: Optional[str]  # None: the tenant comes from the context (vars.tenant)
+
+
+# component -> the log archive its CP remote-state reads (variables.tf of each, vendored).
+LOG_ARCHIVES: dict = {
+    "aws-cloudtrail": LogArchive(
+        "aws-cloudtrail-bucket", "cloudtrail_bucket_component_name", "cloudtrail-bucket",
+        "cloudtrail_bucket_environment_name", "cloudtrail_bucket_stage_name", None,
+    ),
+    "aws-config": LogArchive(
+        "aws-config-bucket", "config_bucket_component_name", "config-bucket",
+        "config_bucket_env", "config_bucket_stage", "config_bucket_tenant",
+    ),
+}
+AUDIT_STAGE = "audit"
 
 
 US_PARENT = "an EU zone may not hang off, or write into, a zone in a US account"
@@ -282,6 +318,7 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             errors += outside_reader_errors(stack_name, name, instance, scoped, exemptions)
     errors += global_datastore_errors(stacks, scoped)
+    errors += log_archive_errors(stacks, scoped)
     return list(dict.fromkeys(errors))
 
 
@@ -341,6 +378,52 @@ def global_datastore_errors(stacks: dict, scoped: set) -> list[str]:
                             f"{stack_name}: {joiner} joins {primary_stack} {name}'s Global Datastore ({suffix}) "
                             "outside the GDPR scope: EU cache data may not be replicated outside the EU"
                         )
+    return errors
+
+
+def log_archive_errors(stacks: dict, scoped: set) -> list[str]:
+    """A trail or recorder (LOG_ARCHIVES) that names a literal bucket, or an archive outside its residency."""
+    errors = []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            archive = LOG_ARCHIVES.get((instance.get("metadata") or {}).get("component") or name)
+            if archive is None:
+                continue
+            errors += archive_errors(stacks, scoped, stack_name, name, instance, archive)
+    return errors
+
+
+def archive_errors(stacks: dict, scoped: set, stack_name: str, name: str, instance: dict, archive: LogArchive) -> list[str]:
+    where, variables = f"{stack_name}: {name}", instance.get("vars") or {}
+    wiring = {archive.component_var, archive.environment_var, archive.stage_var, archive.tenant_var}
+    errors = [
+        f"{where} sets vars.{key}: the log archive bucket is computed from {archive.environment_var} and "
+        f"{archive.stage_var} (remote-state_override.tf), never named"
+        for key in sorted(variables)
+        if "bucket" in key and key not in wiring
+    ]
+    component = variables.get(archive.component_var) or archive.component_default
+    environment, stage = variables.get(archive.environment_var), variables.get(archive.stage_var)
+    tenant = (variables.get(archive.tenant_var) if archive.tenant_var else None) or variables.get("tenant")
+    if stage != AUDIT_STAGE:
+        errors.append(f"{where} vars.{archive.stage_var} is {stage!r}: the log archive is in stage {AUDIT_STAGE!r}")
+    if not all(isinstance(v, str) and v for v in (tenant, environment, stage)):
+        return errors + [f"{where} sets no tenant, vars.{archive.environment_var} or vars.{archive.stage_var}: "
+                         "its log archive stack cannot be checked"]
+    target = f"{tenant}-{environment}-{stage}"
+    bucket = instances(stacks.get(target) or {}).get(component)
+    if bucket is None or ((bucket.get("metadata") or {}).get("component") or component) != archive.bucket_component:
+        errors.append(f"{where} delivers to {component} in {target}, which holds no {archive.bucket_component} "
+                      f"instance {component}")
+    residency = "GDPR-scoped" if stack_name in scoped else "not GDPR-scoped"
+    if (target in scoped) != (stack_name in scoped):
+        errors.append(f"{where} delivers to {target}, but its stack is {residency}: a trail or recorder delivers "
+                      "to its residency's archive (EU iff GDPR-scoped)")
+    if not any(
+        isinstance(dep, dict) and dep.get("component") == component and (dep.get("stack") or stack_name) == target
+        for dep in (instance.get("dependencies") or {}).get("components") or []
+    ):
+        errors.append(f"{where} does not list {{component: {component}, stack: {target}}} in dependencies.components")
     return errors
 
 

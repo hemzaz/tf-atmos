@@ -241,7 +241,8 @@ workflows:
         command: >-
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "cognito"
+          or .metadata.component == "awsconfig" or .metadata.component == "aws-cloudtrail"
+          or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm_security
@@ -257,6 +258,7 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
+          or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf"
@@ -628,7 +630,8 @@ workflows:
         command: >-
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "cognito"
+          or .metadata.component == "awsconfig" or .metadata.component == "aws-cloudtrail"
+          or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm
@@ -644,6 +647,7 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
+          or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf"

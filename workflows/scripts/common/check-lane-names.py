@@ -26,7 +26,12 @@ it cannot be checked. Within a group this fails:
     GitHub OIDC provider, the Auto Scaling service-linked role, the
     multi-region CloudTrail trail, CloudTrail's global-service-event
     recording, AWS Config's global-resource recording, the IAM account alias
-    and the S3 account public access block);
+    and the S3 account public access block), whichever component creates it:
+    the hand-written cloudtrail and awsconfig and the vendored aws-cloudtrail
+    (multi-region with global events unless set false, CP defaults) and
+    aws-config (its global-resource collector, the instance whose
+    global_resource_collector_region is its stack's region, or unset:
+    REGION_SINGLETONS) count as one;
     stage fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
@@ -90,7 +95,9 @@ NOT_PRIMARY = {("alb-controller-ingress-group", "cluster_name"), ("lambda", "ali
 # tags.Environment (or a name built from it): both are account-wide (S3 names
 # are global and carry no region). Not iam (its names are RAW_NAMES), backend
 # (built from its bucket name) or apigateway-account (its role name carries the
-# region).
+# region). Nor the vendored aws-cloudtrail and aws-config: they name their IAM
+# roles from the null-label id (vars.context), whose environment is the region
+# code, not from tags.Environment.
 ACCOUNT_WIDE_COMPONENTS = frozenset({
     "alb", "apigateway", "awsconfig", "backup", "batch", "cloudtrail", "cost-optimization", "ec2", "ecs-service", "eks",
     "eks-addons", "external-secrets", "firehose", "github-runners", "glue", "lambda", "monitoring", "rds",
@@ -121,15 +128,24 @@ SINGLETONS = {
     # account's global-service events: a regional trail sets it false.
     ("cloudtrail", "include_global_service_events", True): "CloudTrail global-service-event recording",
     ("awsconfig", "include_global_resource_types", True): "AWS Config global-resource recording",
+    # The vendored Cloud Posse trail defaults both to true (variables.tf).
+    ("aws-cloudtrail", "is_multi_region_trail", True): "multi-region CloudTrail trail",
+    ("aws-cloudtrail", "include_global_service_events", True): "CloudTrail global-service-event recording",
     # aws-account-settings' account-wide settings: its account's first stack
     # sets them (catalog/aws-account-settings/main), the others turn them off
     # (main-standby).
     ("aws-account-settings", "account_alias_enabled", True): "IAM account alias",
     ("aws-account-settings", "s3_block_public_access_enabled", True): "S3 account public access block",
 }
+# (component, var) -> account singleton it creates when var is its stack's
+# vars.region (or unset): the vendored aws-config records global resource types
+# (IAM) only in its global_resource_collector_region.
+REGION_SINGLETONS = {
+    ("aws-config", "global_resource_collector_region"): "AWS Config global-resource recording",
+}
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
 # region (IAM is global within an account).
-ACCOUNT_WIDE = {"IAM role", "IAM policy", "IAM CI role prefix", *SINGLETONS.values()}
+ACCOUNT_WIDE = {"IAM role", "IAM policy", "IAM CI role prefix", *SINGLETONS.values(), *REGION_SINGLETONS.values()}
 # vars keys whose values are names global across accounts and regions.
 GLOBAL_KEYS = {"bucket_name", "assets_bucket_name", "domain_prefix"}
 
@@ -188,6 +204,9 @@ def created(instance: dict, stage) -> list[tuple]:
         for (comp, gate, default), resource in SINGLETONS.items():
             if comp == component and variables.get(gate, default) is True:
                 out.append((resource, "(one per account)", f"vars.{gate}"))
+        for (comp, key), resource in REGION_SINGLETONS.items():
+            if comp == component and variables.get(key, variables.get("region")) == variables.get("region"):
+                out.append((resource, "(one per account)", f"vars.{key}"))
     if component == "secretsmanager":
         out += [("secret", secret, "vars.secrets") for secret in secret_names(variables)]
     return out
