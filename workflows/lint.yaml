@@ -244,7 +244,9 @@ workflows:
           fi
           echo "tflint: all component directories clean"
       # The stack checks: each runs its unit tests, then reads one shared
-      # `atmos describe stacks` document (one describe, not one per check).
+      # `atmos describe stacks` document (one describe, not one per check;
+      # check-inherited-state-reads below keeps its own, since it needs
+      # --include-empty-stacks).
       # Every check runs even after another fails; the step lists the failed
       # ones and exits 1. check-state-keys, check-lane-names,
       # check-secret-attributes, check-cluster-api-ci, check-ci-state-roles and

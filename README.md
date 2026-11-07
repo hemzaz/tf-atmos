@@ -83,7 +83,7 @@ atmos list stacks                                   # also: list components, lis
 atmos describe component vpc/main -s fnx-ue1-dev --process-functions=false
 atmos validate stacks                               # offline
 atmos workflow tflint-init -f lint                  # once
-atmos workflow lint -f lint                         # fmt, yamllint, TFLint and ~30 repo consistency checks
+atmos workflow lint -f lint                         # fmt, yamllint, TFLint and the lint-side repo checks
 atmos workflow security-scan -f lint                # Trivy + Checkov gate (any HIGH/CRITICAL not suppressed inline)
 atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
 atmos sweep -s fnx-ue1-dev                          # plan with resolved variables, no AWS account needed (--help)

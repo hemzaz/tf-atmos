@@ -300,7 +300,8 @@ def manual(path: str, stage: str, account: str, stack: str) -> str:
             f'  core_write.object_key_patterns: - "*/{stack}/*" and - "*/{stack}-*"',
             f'  core_write.allowed_principal_arns: - "{operator_arn(account)}" (once per account)',
             f"and remove the aws-account-settings metadata.enabled: false override in stacks/orgs/<tenant>/{stage}"
-            "/_defaults.yaml if it is there, then run check-state-keys.py (atmos workflow validate-all -f validate-enhanced).",
+            "/_defaults.yaml if it is there, then run:",
+            "  atmos describe stacks --process-functions=false --format json | python3 workflows/scripts/common/check-state-keys.py",
         ])
     prod = stage == "prod"
     anchor = "prod_state" if prod else "non_prod_state"
@@ -310,7 +311,9 @@ def manual(path: str, stage: str, account: str, stack: str) -> str:
         f'  {read}.object_key_patterns (&{anchor}): - "*/{stack}/*" and - "*/{stack}-*"',
         f"  {read}.allowed_principal_arns: - {arn(account, stack, 'plan')[1]}",
         f"  {write}.allowed_principal_arns: - {arn(account, stack, 'apply')[1]}",
-        "then run check-state-keys.py and check-ci-state-roles.py (atmos workflow validate-all -f validate-enhanced).",
+        "then run (validate-all runs both too):",
+        "  atmos describe stacks --process-functions=false --format json | python3 workflows/scripts/common/check-state-keys.py",
+        "  atmos describe stacks --process-functions=false --format json | python3 workflows/scripts/common/check-ci-state-roles.py",
     ])
 
 
