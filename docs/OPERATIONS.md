@@ -123,7 +123,8 @@ the last step.
    Identity Center Terraform sets ([State backend](#state-backend)), and the PR enabling the
    `aws-identity-center` instance removes the `OrganizationAccountAccessRole` entries. The core stacks
    (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`: today only their
-   `aws-account-settings`), then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
+   `aws-account-settings`, plus the log archive in `fnx-ue1-audit` and, with `-s fnx-ew1-audit`, the
+   EU one), then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
    and [Deploying a stack](#deploying-a-stack).
 
 **An imported account without `OrganizationAccountAccessRole`.** Organizations creates that role

@@ -53,6 +53,9 @@
 # whose lambda instances read s3/lambda-artifacts .bucket_id; sqs and sns share it
 # (they read only kms/main; an s3 instance notifying a queue names it rather than
 # reading its state); so do kinesis and dynamodb, which also read only kms/main.
+# The audit stacks' log archive (aws-cloudtrail-bucket, reading nothing, and
+# aws-config-bucket, reading its kms/config-bucket key) is storage too, before
+# the trails and recorders (security) that deliver to it.
 # github-runners (reading the vpc and kms/main) is in connectivity, before the eks instances (compute) that admit its security group.
 # glue (compute) reads the buckets; athena (platform) reads glue, and firehose
 # (data) reads glue, kinesis and the buckets. stepfunctions (platform) follows
@@ -168,7 +171,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
-          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"
+          or .metadata.component == "aws-cloudtrail-bucket" or .metadata.component == "aws-config-bucket"'
       - name: confirm_storage
         type: confirm
         prompt: Apply the storage layer plan above?
@@ -180,7 +184,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
-          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"
+          or .metadata.component == "aws-cloudtrail-bucket" or .metadata.component == "aws-config-bucket"'
       - name: plan-networking
         type: atmos
         command: terraform plan --query '.metadata.component == "vpc"'
@@ -521,7 +526,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
 
   deploy-storage:
-    description: "Deploy the storage layer: S3 buckets, SQS queues, SNS topics, Kinesis streams and DynamoDB tables (they read kms/main), such as the lambda package bucket compute reads"
+    description: "Deploy the storage layer: S3 buckets, SQS queues, SNS topics, Kinesis streams and DynamoDB tables (they read kms/main), such as the lambda package bucket compute reads, and the audit stacks' log archive buckets (config-bucket reads kms/config-bucket)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -529,7 +534,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
-          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"
+          or .metadata.component == "aws-cloudtrail-bucket" or .metadata.component == "aws-config-bucket"'
       - name: confirm
         type: confirm
         prompt: Deploy the storage layer?
@@ -541,7 +547,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
-          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"
+          or .metadata.component == "aws-cloudtrail-bucket" or .metadata.component == "aws-config-bucket"'
 
   deploy-networking:
     description: "Deploy the networking layer: VPCs"

@@ -2,13 +2,24 @@
 [[- $home := eq .Config.region "us-east-1" -]]
 [[- $eu := hasPrefix "eu-" .Config.region -]]
 [[- $root := printf "%s-%s-root" .Config.tenant (ternary "ew1" "ue1" $eu) -]]
+[[- $archive := and (eq .Config.stage "audit") (or $home $eu) -]]
 ---
 # =============================================================================
 # [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
 # =============================================================================
+[[- if $archive ]]
+# A core-account stack (owner decision QE5): its stage defaults'
+# aws-account-settings, and the [[ ternary "EU" "US" $eu ]] log archive (E5a, one per residency,
+# owner decision QE7): the cloudtrail-bucket, config-bucket and its
+# kms/config-bucket key from the imported catalogs (aws-config-bucket/[[ ternary "main-eu" "main" $eu ]]
+# for the [[ ternary "EU" "US" $eu ]] delivery accounts). The key is in the kms layer, the buckets in
+# the storage layer (workflows/deploy-full-stack.yaml).
+# Its state
+[[- else ]]
 # A core-account stack (owner decision QE5): no instance of its own; its stage
 # defaults' aws-account-settings is its one enabled instance until the core
-# components land. Its state goes to [[ $root ]]'s bucket
+# components land. Its state
+[[- end ]] goes to [[ $root ]]'s bucket
 # through the backend's core role (stacks/orgs/[[ .Config.tenant ]]/_defaults.yaml),
 # whose core_write trusts the management-account administrator and the
 # [[ .Config.stage ]] account's OrganizationAccountAccessRole, and its stage
@@ -39,6 +50,10 @@ import:
   - orgs/[[ .Config.tenant ]]/[[ .Config.stage ]]/_defaults
 [[- if not $home ]]
   - catalog/aws-account-settings/main-standby
+[[- end ]]
+[[- if $archive ]]
+  - catalog/aws-cloudtrail-bucket/defaults
+  - catalog/aws-config-bucket/[[ ternary "main-eu" "main" $eu ]]
 [[- end ]]
 [[- if $eu ]]
 
