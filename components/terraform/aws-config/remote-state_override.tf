@@ -34,13 +34,15 @@ module "config_bucket" {
 # aws-config. The catalog variants that record outside the collector region
 # set iam_role_arn instead (main-region: !terraform.state of the home stack;
 # main-eu-core: the role's convention ARN), which main.tf prefers over this
-# read, so the read is never needed. The default is that same ARN, empty when
-# unset, so nothing reaches the backend.
+# read, so the read is never needed. The default is that same ARN, null when
+# unset: a recorder outside the collector region with no iam_role_arn then fails
+# at plan (main.tf joins a null), as upstream's missing-state read would, instead
+# of planning role_arn = "" and failing only at apply.
 module "global_collector_region" {
   #checkov:skip=CKV_TF_1:an override block sets no source; its source is the vendored remote-state.tf registry module, pinned exactly there
   #checkov:skip=CKV_TF_2:an override block sets no source; its source is the vendored remote-state.tf registry module, pinned exactly there
   bypass = true
   defaults = {
-    aws_config_iam_role = var.iam_role_arn != null ? var.iam_role_arn : ""
+    aws_config_iam_role = var.iam_role_arn
   }
 }
