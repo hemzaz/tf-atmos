@@ -45,6 +45,16 @@ workflows:
       - name: refuse-fixtures
         type: shell
         command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
+      # First-deploy preflight, fatal, before anything touches AWS (as in
+      # deploy-full-stack.yaml deploy): fails while the stack holds a placeholder
+      # account ID, domain or alert address, or a placeholder core account.
+      # docs/OPERATIONS.md#first-deploy-inputs.
+      - name: preflight
+        type: shell
+        command: >-
+          atmos describe stacks --process-functions=false --format json
+          | python3 workflows/scripts/common/check-first-deploy-inputs.py
+          --stacks '{{ .steps.stack.value }}'
       # Read-only: plan and print, so the prompt below confirms a plan the
       # operator has seen.
       - name: plan
