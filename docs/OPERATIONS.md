@@ -206,12 +206,12 @@ plan jobs do: the stack backend then assumes the stage's read role.
   `root/eu-west-1.yaml`). A new stack's
   `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles go there (iam/ci's `ci_role_name_prefix`):
   the stack scaffold adds them ([Adding a stack](#adding-a-stack)), by hand otherwise; so does
-  any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
-  and `validate-all`) fails a CI role that its stage's read or write role, of the backend owning its
+  any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in
+  `validate-all`) fails a CI role that its stage's read or write role, of the backend owning its
   state bucket, does not trust, or that may assume another role (`ci_backend_*_role_arn`).
 - Each stack's state is an exact pattern pair on its stage's roles, `*/<stack>/*` and
   `*/<stack>-*` (`stacks/orgs/fnx/root/us-east-1.yaml`; EU: `root/eu-west-1.yaml`): a new stack's pair goes
-  there before its first `init`; the stack scaffold adds it, by hand otherwise. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against
+  there before its first `init`; the stack scaffold adds it, by hand otherwise. `check-state-keys.py` (in `validate-all`) evaluates those patterns against
   every state key, requiring exactly its stage's roles to match it, and every backend region
   equal to `backend/main`'s.
   `s3:ListBucket` is bucket-wide, so every role sees key names across stages, never contents.
@@ -465,7 +465,7 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
   label cannot starve the master job that started the runner. Runners have no Auto Scaling
   permission: each leaves by deleting its own lease parameter, and the pool's `jit` function ends
   it (github-runners README).
-- `check-cluster-api-ci.py` (lint, validate-all) fails an in-vpc instance whose label has no runner
+- `check-cluster-api-ci.py` (validate-all) fails an in-vpc instance whose label has no runner
   pool, or whose clusters do not admit the pool's security group; a pool missing from its
   stack's `iam/ci` `ci_runner_pool_names`; and an instance whose providers exec a command
   (`aws eks get-token`) without its tool in `dependencies.tools` (the atmos image has no aws CLI). An instance with
@@ -562,7 +562,7 @@ still reports it); to sweep it, narrow the entry to the checks that still fail.
 
 Templates ship non-prod values for their databases and caches and leave the prod ones to the
 importing stack (each template's ENVIRONMENT-SPECIFIC OVERRIDES). `check-prod-protection.py` (in
-`lint` and `validate-all`) fails a stage `prod` rds instance that is not `environment: prod`,
+`validate-all`) fails a stage `prod` rds instance that is not `environment: prod`,
 Multi-AZ, deletion-protected (`deletion_protection`, `prevent_destroy`), without a final snapshot
 or with under 7 days of backups, and a prod elasticache instance without failover across AZs (at
 least 2 nodes) or with under 7 days of snapshots, and a prod cognito pool without

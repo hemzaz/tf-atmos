@@ -34,36 +34,13 @@ workflows:
       #  - every deployable instance maps to a component directory that exists.
       #    `atmos validate stacks` and validate-all both pass when it does not,
       #    because neither maps instances back to directories.
-      # Plus check-state-keys.py: every s3-backend instance's state key is
-      # matched by exactly its stage's backend access roles.
+      # Plus the stack checks below, the only run of each (lint runs the
+      # others): one `atmos describe stacks` document for all of them, every
+      # check run even after another fails, the failed ones listed. The unit
+      # tests of every check (lint's included) run first;
+      # LANE_NAMES_STACKS_JSON turns on test_check_lane_names.py's
+      # real-stacks test.
       - name: check-dependencies
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest discover -s workflows/scripts/common -p 'test_*.py'
-          stacks_json="$(mktemp)"
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-dependencies.py components/terraform < "$stacks_json"
-          python3 workflows/scripts/common/check-state-keys.py < "$stacks_json"
-          # A lane shares no resource name with its stage stack or another lane.
-          python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
-          # Every dns record, acm domain/SAN and apigateway custom domain sits
-          # inside the zone it is written to (zone_id followed to its dns zone).
-          python3 workflows/scripts/common/check-domains.py < "$stacks_json"
-          # Every secretsmanager secrets entry key is declared by variables.tf.
-          python3 workflows/scripts/common/check-secret-attributes.py components/terraform < "$stacks_json"
-          # Every instance that needs a private EKS API is off hosted runners.
-          python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
-          # Every iam/ci plan/apply role is trusted by its stage's backend roles.
-          python3 workflows/scripts/common/check-ci-state-roles.py < "$stacks_json"
-          # Every prod rds/elasticache/cognito instance keeps its data-loss protections.
-          python3 workflows/scripts/common/check-prod-protection.py components/terraform < "$stacks_json"
-      # deploy-full-stack, deploy-application (deploy-app) and bootstrap (full)
-      # plan a whole phase before applying it: every deployable instance must be
-      # in exactly one deploy-full-stack layer, and an instance must be planned
-      # only after every instance whose state it reads is applied (a new
-      # component type, or a new read inside a layer, fails here).
-      - name: check-deploy-layers
         type: shell
         command: |
           set -eu
@@ -72,7 +49,58 @@ workflows:
           trap 'rm -f "$stacks_json" "$workflows_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           atmos describe workflows --output all --format json > "$workflows_json"
-          python3 workflows/scripts/common/check-deploy-layers.py "$stacks_json" "$workflows_json"
+          LANE_NAMES_STACKS_JSON="$stacks_json" python3 -m unittest discover -s workflows/scripts/common -p 'test_*.py'
+          failed=""
+          # check <name> <check command...>: the check reads the JSON on stdin.
+          check() {
+            name=$1
+            shift
+            echo "== $name"
+            if "$@" < "$stacks_json"; then
+              return 0
+            fi
+            echo "$name FAILED"
+            failed="$failed $name"
+          }
+          check check-dependencies python3 workflows/scripts/common/check-dependencies.py components/terraform
+          # Every s3-backend instance's state key is matched by exactly its
+          # stage's backend access roles ("*/<stack>/*" and "*/<stack>-*" per
+          # stack, stacks/orgs/fnx/root/us-east-1.yaml).
+          check check-state-keys python3 workflows/scripts/common/check-state-keys.py
+          # Stacks of one account and region (a stage stack and its lanes,
+          # settings.context.name) and the instances in them may not create the
+          # same name, tags.Environment, account singleton or secret.
+          check check-lane-names python3 workflows/scripts/common/check-lane-names.py
+          # Every dns record, acm domain/SAN and apigateway custom domain sits
+          # inside the zone it is written to (zone_id followed to its dns zone).
+          check check-domains python3 workflows/scripts/common/check-domains.py
+          # secretsmanager types `secrets` as map(object), whose conversion
+          # drops an undeclared attribute silently: every entry key is declared
+          # by variables.tf.
+          check check-secret-attributes python3 workflows/scripts/common/check-secret-attributes.py components/terraform
+          # Every instance with a kubernetes/helm/kubectl provider runs on the
+          # in-VPC runners (or has GitHub Actions off), every runner pool is
+          # well-formed and in iam/ci, and every eks admin role is trusted by
+          # its state write role (docs/OPERATIONS.md, "In-cluster components").
+          check check-cluster-api-ci python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform
+          # Every iam/ci plan/apply role is trusted by its stage's backend
+          # roles and may assume no other role.
+          check check-ci-state-roles python3 workflows/scripts/common/check-ci-state-roles.py
+          # Every prod rds/elasticache instance keeps its data-loss protections
+          # (deletion protection, Multi-AZ/failover, final snapshot, 7+ days of
+          # backups), and every prod cognito pool its deletion protection.
+          check check-prod-protection python3 workflows/scripts/common/check-prod-protection.py components/terraform
+          # deploy-full-stack, deploy-application (deploy-app) and bootstrap
+          # (full) plan a whole phase before applying it: every deployable
+          # instance must be in exactly one deploy-full-stack layer, and an
+          # instance must be planned only after every instance whose state it
+          # reads is applied (a new component type, or a new read inside a
+          # layer, fails here).
+          check check-deploy-layers python3 workflows/scripts/common/check-deploy-layers.py "$stacks_json" "$workflows_json"
+          if [ -n "$failed" ]; then
+            echo "stack checks failed:$failed"
+            exit 1
+          fi
       - name: list-stacks
         type: shell
         command: atmos list stacks

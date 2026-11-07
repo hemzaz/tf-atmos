@@ -428,7 +428,7 @@ class InstanceTest(unittest.TestCase):
 
 
 class RealStacksTest(unittest.TestCase):
-    """No false positives on the repository's stacks: the lint step check-lane-names sets
+    """No false positives on the repository's stacks: validate-all's check-dependencies step sets
     $LANE_NAMES_STACKS_JSON to its `atmos describe stacks` JSON."""
 
     def test_real_stacks_pass(self):

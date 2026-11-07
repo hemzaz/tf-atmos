@@ -150,8 +150,13 @@ jobs:
             echo "workflows=$workflows"
           } >> "$GITHUB_OUTPUT"
 
+  # lint and validate-all run as two parallel jobs (one serial job was the
+  # critical path of the PR checks, 17 min). The six stack checks both
+  # workflows ran (check-state-keys, -lane-names, -secret-attributes,
+  # -cluster-api-ci, -ci-state-roles, -prod-protection) run once, in
+  # validate-all's check-dependencies step.
   lint:
-    name: Lint & validate
+    name: Lint
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
@@ -194,13 +199,32 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           atmos workflow lint -f lint
+
+  # Needs none of lint's setup (tflint, make, full history, VENDOR_BASE_SHA):
+  # its tools (terraform, yamllint, yq) install from validate-all's
+  # dependencies.tools without a token.
+  validate:
+    name: Validate
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # validate-all runs `terraform init` in every root module. Without a
       # shared provider cache each one unpacks its own AWS provider and the
       # runner runs out of disk partway through the list.
       - name: Validate config, stacks and root modules
         env:
           TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
+        # safe.directory: the same "dubious ownership" cause as security-scan.
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
           atmos workflow validate-all -f validate-enhanced
 
@@ -852,7 +876,7 @@ jobs:
   # that failed is in this list too. Add every new job to `needs`.
   gate:
     name: CI gate
-    needs: [changes, lint, actionlint, sweep-shards, plan-sweep, security-scan, terraform-test, affected, plan, plan-in-vpc, emulator]
+    needs: [changes, lint, validate, actionlint, sweep-shards, plan-sweep, security-scan, terraform-test, affected, plan, plan-in-vpc, emulator]
     if: always()
     runs-on: ubuntu-latest
     permissions: {}

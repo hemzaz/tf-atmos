@@ -33,7 +33,7 @@ Posse's null-label id order. `environment` is the region code (`ue1`, set by
 `stacks/mixins/region/*`), `stage` the account tier, and the optional `settings.context.name` a lane
 within a stage (fixtures, emulator lanes, the `templates/stacks` samples). A lane deploys beside its
 stage stack in the same account and region: its names carry the lane (below), and
-`check-lane-names.py` (lint) fails two stacks or instances of one account and region that create the same name (and IAM/S3 names across the regions of one account). The
+`check-lane-names.py` (validate-all) fails two stacks or instances of one account and region that create the same name (and IAM/S3 names across the regions of one account). The
 `templates/stacks` samples are such lanes: `scripts/check-stack-samples.sh` copies them in and runs
 the stack checks (lint) and the plan sweep (`atmos sweep --samples`) over them. Only files under `stacks/orgs/` are stack manifests;
 each real stack is one file, `<stage>/<region>.yaml`, that imports its catalog instances and keeps
@@ -83,7 +83,7 @@ atmos list stacks                                   # also: list components, lis
 atmos describe component vpc/main -s fnx-ue1-dev --process-functions=false
 atmos validate stacks                               # offline
 atmos workflow tflint-init -f lint                  # once
-atmos workflow lint -f lint                         # fmt, yamllint, TFLint and ~30 repo consistency checks
+atmos workflow lint -f lint                         # fmt, yamllint, TFLint and the lint-side repo checks
 atmos workflow security-scan -f lint                # Trivy + Checkov gate (any HIGH/CRITICAL not suppressed inline)
 atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
 atmos sweep -s fnx-ue1-dev                          # plan with resolved variables, no AWS account needed (--help)
