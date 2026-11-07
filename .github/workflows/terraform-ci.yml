@@ -358,8 +358,8 @@ jobs:
           # From a subdirectory: the command must find its scripts from anywhere
           # in the repository (it moves to the root first).
           cd stacks
-          # SWEEP_ARGS is "-s a,b,...", "--samples" or "--scaffold": split on
-          # the space on purpose; names are [a-z0-9-] (the guard refuses others).
+          # SWEEP_ARGS is "-s a,b,...", "--samples" or "--scaffold --part K/N":
+          # split on spaces on purpose; names are [a-z0-9-] (the guard refuses others).
           # shellcheck disable=SC2086
           atmos sweep $SWEEP_ARGS
 

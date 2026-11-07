@@ -5,8 +5,10 @@
 
 Prints one JSON object, {"include": [{"name": ..., "args": ...}, ...]}: N legs of
 `-s <stacks>` that together hold exactly the stacks plan-sweep.sh's default sweeps
-(ci-stacks.py --plan-sweep), then `--samples` and `--scaffold`, the other two parts
-of --all. A leg's args are passed to `atmos sweep` as they are.
+(ci-stacks.py --plan-sweep), then `--samples` and SCAFFOLD_LEGS legs of
+`--scaffold --part K/N`, the other two parts of --all (each scaffold leg generates
+every fresh stack and plans its part of them; check-stack-scaffold.sh splits them
+with balance() below). A leg's args are passed to `atmos sweep` as they are.
 
 Stacks are balanced by the pairs each plans (its deployable terraform instances),
 not by stack count: a core stack plans a handful, a workload stack fifty. Greedy
@@ -28,6 +30,8 @@ ci_stacks = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci_stacks)
 
 DEFAULT_CHUNKS = 6
+# The fresh scaffold stacks plan ~180 pairs, ~11 min in one leg.
+SCAFFOLD_LEGS = 3
 FIXTURE_PREFIX = "fnx-ue1-fixtures-"
 
 
@@ -70,7 +74,9 @@ def parity_errors(expected: list, chunks: list) -> list:
 
 def matrix(chunks: list) -> dict:
     legs = [{"name": f"stacks {i + 1}/{len(chunks)}", "args": "-s " + ",".join(chunk)} for i, chunk in enumerate(chunks)]
-    legs += [{"name": "samples", "args": "--samples"}, {"name": "scaffold", "args": "--scaffold"}]
+    legs.append({"name": "samples", "args": "--samples"})
+    legs += [{"name": f"scaffold {i}/{SCAFFOLD_LEGS}", "args": f"--scaffold --part {i}/{SCAFFOLD_LEGS}"}
+             for i in range(1, SCAFFOLD_LEGS + 1)]
     return {"include": legs}
 
 
