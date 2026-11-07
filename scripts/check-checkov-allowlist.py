@@ -28,6 +28,9 @@ DNSSEC = "signed and query-logged by the house dns external_zones mode, E6b"
 PERMSET = ("Cloud Posse's permission-set inline policy: Route 53 and EKS reads and writes take a '*' "
            "resource (zones and clusters are account-wide); a permission set is an access boundary "
            "the owner grants per group, not a workload role")
+TRAIL_KEY = ("Cloud Posse's trail KMS key policy: in a key policy '*' is the key itself; kms:* goes "
+             "to the owning account root (the AWS default key policy) and the service statements "
+             "are bound by the kms:EncryptionContext trail or log-group ARN of this account")
 ALLOWLIST = (
     # aws-dns-primary (vendor.yaml): the service domain's zone.
     (r"/aws-dns-primary/main\.tf", "CKV2_AWS_38", DNSSEC),
@@ -51,6 +54,23 @@ ALLOWLIST = (
     # aws-cloudtrail-bucket (vendor.yaml): the organization trail's log bucket (E5a3).
     (r"/aws-cloudtrail-bucket/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-cloudtrail-bucket/main\.tf", "CKV_TF_1", TF_1),
+    # aws-cloudtrail (vendor.yaml): each account's multi-region trail (E5b).
+    (r"/aws-cloudtrail/cloudtrail-kms-key\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-cloudtrail/context\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-cloudtrail/main\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-cloudtrail/remote-state\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-cloudtrail/cloudtrail-cloudwatch-logs\.tf", "CKV_AWS_356",
+     "Cloud Posse's trail log-delivery role: logs:DescribeLogGroups/DescribeLogStreams are "
+     "list actions with no resource-level scope; its write actions are scoped to the trail's "
+     "own log group"),
+    (r"/aws-cloudtrail/cloudtrail-kms-key\.tf", "CKV_AWS_109", TRAIL_KEY),
+    (r"/aws-cloudtrail/cloudtrail-kms-key\.tf", "CKV_AWS_111", TRAIL_KEY),
+    (r"/aws-cloudtrail/cloudtrail-kms-key\.tf", "CKV_AWS_356", TRAIL_KEY),
+    # aws-config (vendor.yaml): each account's AWS Config recorder and the aggregator (E5b).
+    (r"/aws-config/context\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-config/main\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-config/remote-state\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-config/modules/org-conformance-pack/context\.tf", "CKV_TF_1", TF_1),
     # account-map's iam-roles module (vendor.yaml), reached through the account-map-bypass
     # providers mixin of the dns components and aws-iam-role (bypassed, still expanded).
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),

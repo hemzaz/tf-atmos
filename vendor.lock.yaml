@@ -21,6 +21,27 @@ artifacts:
     included_paths:
       - providers-account-map-bypass.depth-1.tf
       - account-verification.mixin.tf
+  3ddc25737ba0e9849368a279785eb23a56e2ba9d07e0bf5584b6285b2f4807ea:
+    name: aws-cloudtrail-mixins
+    kind: remote
+    target: components/terraform/aws-cloudtrail
+    source:
+      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
+    files:
+      - path: account-verification.mixin.tf
+        type: file
+        mode: 420
+        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
+      - path: providers-account-map-bypass.depth-1.tf
+        type: file
+        mode: 420
+        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
+    order: 18
+    included_paths:
+      - providers-account-map-bypass.depth-1.tf
+      - account-verification.mixin.tf
   5bcbaae4952daaa7f24750f3f656bb344372688279abca3e06bf618ebaa67326:
     name: aws-cloudtrail-bucket-mixins
     kind: remote
@@ -189,6 +210,57 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+  30da79e92e539ab9b04a7cc19856e33354d5ffd41fd0784378f1f90c810593ea:
+    name: aws-cloudtrail
+    kind: remote
+    target: components/terraform/aws-cloudtrail
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-cloudtrail.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-cloudtrail.git//src
+      digest: sha256:186c2a9ebcb2e26a79000b715e7e30abc743bce2dcd7e9c4ee10aa18769bb72c
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 64c0b8129a85839252797af7122a498f36fbee544690a1866092d71e4a800668
+      - path: cloudtrail-cloudwatch-logs.tf
+        type: file
+        mode: 420
+        sha256: af7150bd22e9f4e07e33575b975e637cf30efa69cee24394e5447d716cd56d35
+      - path: cloudtrail-kms-key.tf
+        type: file
+        mode: 420
+        sha256: 9a3423856e01bc47cd67c8eb2ac936009d9660c53e7e25216f0b2702968b051f
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 887f9e97413c2e7bd2968fe089edf3fce8fdb11b9d1e2d3f7ad61999dff02cb7
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: ac11de623eaccc9336cf45ee8d18a53d59b9d90e885944dd340d60eb4925dade
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: f99a71a56f13dcfbfbeb669d1a4116d9250c051cb1c0d79607383cff1cffc459
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 9bf24394ad9873b1873d94c3e313a82e6ba5725420dfa3b0b400e1750392d04d
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 53da435e1cf43765ee3d12d2d747dc3bf442ea1fbe9662509ba475ac59c868c6
+    order: 17
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+    excluded_paths:
+      - '**/providers.tf'
   87b2573fac10b54afcddd575991fd8233d60e7e5d1deb4d1abcb06d46f916464:
     name: aws-iam-role
     kind: remote
@@ -236,6 +308,79 @@ artifacts:
       - '**/*.md'
     excluded_paths:
       - '**/providers.tf'
+  94fe5c9548de9db03460032bcb4786b2a6083b4ace3580e3edd14a749eea3cc2:
+    name: aws-config
+    kind: remote
+    target: components/terraform/aws-config
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-config.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-config.git//src
+      digest: sha256:6260eabc296122f4e9df68eb0bdfc95e9f777a7de9f24c43de2366de40101bae
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 8ec26311a201bbeecbc36dbf8577e2e4221a6254bc21e2d9856297ce536e638e
+      - path: account-verification.tf
+        type: file
+        mode: 420
+        sha256: 8926ae1c96c16020c97ff984d73b61c41546e7162d85a124d07f3ea79819f554
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 3db707fbd2a1fd0e641b700b6deee65403146c8b666c9ce8ec7de1fbfaf1018d
+      - path: modules/org-conformance-pack/README.md
+        type: file
+        mode: 420
+        sha256: a346f951570ff1daf0ef7297aab4bd7e13755614be149f5de134d911b84805a0
+      - path: modules/org-conformance-pack/context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: modules/org-conformance-pack/main.tf
+        type: file
+        mode: 420
+        sha256: 86feb50f3ba07b240bfda7690c96096203f5e0fdee4cab7fedc7c43313e2224f
+      - path: modules/org-conformance-pack/outputs.tf
+        type: file
+        mode: 420
+        sha256: e0459881717be890f25d23650384c859b2bf75bf95e3499a7737778bf4233bde
+      - path: modules/org-conformance-pack/variables.tf
+        type: file
+        mode: 420
+        sha256: c5cb47adb2e63415b07037d1a66b56f230b9c78ce66b3a7c29244433870270bb
+      - path: modules/org-conformance-pack/versions.tf
+        type: file
+        mode: 420
+        sha256: 375b907febc3f18bc153ee26790adb97d847f9bf7578ca6e3ba6cace7a21e265
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: cfd8342e3009503fb0d9d5cc57937a4fa01ec9bf68590dcf999e9f120a20c8f7
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 5e05e357987c1b29a1e1a909ab24f2bb616bed21f5bd4b9d9123869e33d89025
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: 0eb4b9147bf68df82f15d29b573918d5819abe6bd63a8662cdd8f0682dc00d66
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 7fdddc7fc29f16e778de0206111b1e5201f8bed9b1d6a98008a0bf8ff7253c94
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 16385f8473a8cb761adcd2bcebee2bde78e1ccba4b9a834942582cb9a21e5f7a
+    order: 19
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
   95e418cfcec359f48bd723abb3185864dfc4fe55a858263ef50b169af2a5076c:
     name: aws-dns-delegated-mixins
     kind: remote

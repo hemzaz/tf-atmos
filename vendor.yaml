@@ -160,3 +160,29 @@ spec:
       targets:
         - "components/terraform/aws-cloudtrail-bucket"
       included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
+    # Each account's multi-region trail into the audit account's
+    # aws-cloudtrail-bucket (E5b). Upstream providers.tf (account-map iam-roles)
+    # is excluded; it gets Cloud Posse's account-map-bypass mixins instead.
+    - component: aws-cloudtrail
+      source: "github.com/cloudposse-terraform-components/aws-cloudtrail.git//src?ref={{ .Version }}"
+      version: "v1.539.0"
+      targets:
+        - "components/terraform/aws-cloudtrail"
+      included_paths: ["**/*.tf", "**/*.md"]
+      excluded_paths: ["**/providers.tf"]
+    - component: aws-cloudtrail-mixins
+      source: "github.com/cloudposse-terraform-components/mixins.git//src/mixins?ref={{ .Version }}"
+      version: "v0.5.0"
+      targets:
+        - "components/terraform/aws-cloudtrail"
+      included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
+    # Each account's AWS Config recorder into the audit account's
+    # aws-config-bucket, and the security account's aggregator (E5b). Vendored
+    # unedited with its providers.tf: it takes its own account_map
+    # (account_map_enabled false), so it gets no providers mixin.
+    - component: aws-config
+      source: "github.com/cloudposse-terraform-components/aws-config.git//src?ref={{ .Version }}"
+      version: "v3.1.1"
+      targets:
+        - "components/terraform/aws-config"
+      included_paths: ["**/*.tf", "**/*.md"]
