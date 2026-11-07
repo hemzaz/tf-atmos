@@ -191,6 +191,77 @@ class GroupTest(unittest.TestCase):
         self.assertIn("both create the CloudTrail global-service-event recording '(one per account)' in account dev",
                       errors[0])
 
+    def test_vendored_trail_and_config_one_per_account_pass(self):
+        # One multi-region trail in the home stack; every region records, globals only in the collector region.
+        self.assertEqual(self.errors({
+            "fnx-ue1-prod": stack(**{
+                "cloudtrail": instance("ue1", component="aws-cloudtrail", stage="prod"),
+                "aws-config": instance("ue1", component="aws-config", stage="prod",
+                                       global_resource_collector_region="us-east-1"),
+            }),
+            "fnx-ue2-prod": stack(**{"aws-config": instance(
+                "ue2", component="aws-config", stage="prod", region="us-east-2",
+                global_resource_collector_region="us-east-1")}),
+        }), [])
+
+    def test_second_vendored_trail_in_an_account_fails_through_its_defaults(self):
+        # Neither instance sets is_multi_region_trail or include_global_service_events: CP defaults both true.
+        errors = self.errors({
+            "fnx-ue1-prod": stack(**{"cloudtrail": instance("ue1", component="aws-cloudtrail", stage="prod")}),
+            "fnx-ue2-prod": stack(**{"cloudtrail": instance(
+                "ue2", component="aws-cloudtrail", stage="prod", region="us-east-2")}),
+        })
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("fnx-ue2-prod: cloudtrail vars.is_multi_region_trail (us-east-2) and fnx-ue1-prod: cloudtrail "
+                      "vars.is_multi_region_trail (us-east-1) both create the multi-region CloudTrail trail", errors[0])
+        self.assertIn("both create the CloudTrail global-service-event recording '(one per account)' in account prod",
+                      errors[1])
+
+    def test_vendored_trail_beside_the_hand_written_trail_fails(self):
+        # The E5b5 swap: both trails in one stack are two multi-region trails of the account.
+        errors = self.errors({"fnx-ue1-dev": stack(**{
+            "cloudtrail/main": instance("ue1", component="cloudtrail"),
+            "cloudtrail": instance("ue1", component="aws-cloudtrail", is_multi_region_trail=True,
+                                   include_global_service_events=False),
+        })})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("fnx-ue1-dev: cloudtrail/main vars.is_multi_region_trail and fnx-ue1-dev: cloudtrail "
+                      "vars.is_multi_region_trail both create the multi-region CloudTrail trail", errors[0])
+
+    def test_regional_vendored_trail_in_a_second_region_passes(self):
+        self.assertEqual(self.errors({
+            "fnx-ue1-dev": stack(**{"cloudtrail": instance("ue1", component="aws-cloudtrail")}),
+            "fnx-uw2-dev": stack(**{"cloudtrail": instance(
+                "uw2", component="aws-cloudtrail", region="us-west-2", is_multi_region_trail=False,
+                include_global_service_events=False)}),
+        }), [])
+
+    def test_two_config_collectors_in_an_account_fail(self):
+        # The standby names its own region (and the third leaves it unset): three global-resource collectors.
+        errors = self.errors({
+            "fnx-ue1-prod": stack(**{"aws-config": instance(
+                "ue1", component="aws-config", stage="prod", global_resource_collector_region="us-east-1")}),
+            "fnx-ue2-prod": stack(**{"aws-config": instance(
+                "ue2", component="aws-config", stage="prod", region="us-east-2",
+                global_resource_collector_region="us-east-2")}),
+            "fnx-uw2-prod": stack(**{"aws-config": instance(
+                "uw2", component="aws-config", stage="prod", region="us-west-2")}),
+        })
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("fnx-ue2-prod: aws-config vars.global_resource_collector_region (us-east-2) and fnx-ue1-prod: "
+                      "aws-config vars.global_resource_collector_region (us-east-1) both create the AWS Config "
+                      "global-resource recording '(one per account)' in account prod", errors[0])
+        self.assertIn("fnx-uw2-prod: aws-config", errors[1])
+
+    def test_config_collector_beside_the_hand_written_recorder_fails(self):
+        # The E5b6 swap: awsconfig's global types and aws-config's collector are one recording.
+        errors = self.errors({"fnx-ue1-dev": stack(**{
+            "awsconfig/main": instance("ue1", component="awsconfig"),
+            "aws-config": instance("ue1", component="aws-config", global_resource_collector_region="us-east-1"),
+        })})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both create the AWS Config global-resource recording", errors[0])
+
     def test_account_settings_in_a_second_region_without_its_account_wide_settings_passes(self):
         # fnx-ue2-prod imports catalog/aws-account-settings/main-standby.
         self.assertEqual(self.errors({

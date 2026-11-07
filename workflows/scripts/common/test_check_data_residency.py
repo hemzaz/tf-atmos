@@ -491,5 +491,215 @@ class DataResidencyTest(unittest.TestCase):
         ])
 
 
+def archived(component, env, region="eu-west-1", compliance=EU, deps=None, account=None, account_id=None,
+             **extra_vars):
+    """An aws-cloudtrail/aws-config instance delivering to fnx-<env>-audit, listed as its dependency.
+
+    An aws-config instance is its account's global-resource collector unless extra_vars say otherwise.
+    """
+    bucket, env_var, stage_var = {
+        "aws-cloudtrail": ("cloudtrail-bucket", "cloudtrail_bucket_environment_name", "cloudtrail_bucket_stage_name"),
+        "aws-config": ("config-bucket", "config_bucket_env", "config_bucket_stage"),
+    }[component]
+    if deps is None:
+        deps = [{"component": bucket, "stack": f"fnx-{env}-audit"}]
+    if component == "aws-config":
+        extra_vars = {"global_resource_collector_region": region, **extra_vars}
+    spec = instance(region, compliance, deps, tenant="fnx", **{env_var: env, stage_var: "audit"}, **extra_vars)
+    spec["metadata"] = {"component": component}
+    if account:
+        spec["settings"]["environment"] = {"account": account, "account_id": account_id or "123456789012"}
+    return spec
+
+
+def eu_core_recorder(account, **extra_vars):
+    """A shared account's eu-west-1 recorder: its collector is the US home stack's (OQ-A)."""
+    return archived("aws-config", "ew1", account=account, global_resource_collector_region="us-east-1",
+                    iam_role_arn=f"arn:aws:iam::123456789012:role/fnx-ue1-{account}-aws-config-config", **extra_vars)
+
+
+def audit_stacks():
+    def bucket(component, region, compliance):
+        spec = instance(region, compliance)
+        spec["metadata"] = {"component": component}
+        return spec
+
+    return {
+        "fnx-ue1-audit": stack(**{
+            "cloudtrail-bucket": bucket("aws-cloudtrail-bucket", "us-east-1", US),
+            "config-bucket": bucket("aws-config-bucket", "us-east-1", US),
+        }),
+        "fnx-ew1-audit": stack(**{
+            "cloudtrail-bucket": bucket("aws-cloudtrail-bucket", "eu-west-1", EU),
+            "config-bucket": bucket("aws-config-bucket", "eu-west-1", EU),
+        }),
+    }
+
+
+class LogArchiveTest(unittest.TestCase):
+    """aws-cloudtrail and aws-config deliver to their residency's audit stack (owner OQ-A, OQ-E)."""
+
+    def check(self, **stacks):
+        return residency.check({**audit_stacks(), **stacks})
+
+    def test_trails_and_recorders_delivering_to_their_residency_pass(self):
+        self.assertEqual(self.check(**{
+            "fnx-ue1-prod": stack(**{
+                "cloudtrail": archived("aws-cloudtrail", "ue1", "us-east-1", US),
+                "aws-config": archived("aws-config", "ue1", "us-east-1", US, config_bucket_tenant=""),
+            }),
+            "fnx-ew1-prod": eu_stack(**{
+                "cloudtrail": archived("aws-cloudtrail", "ew1"),
+                "aws-config": archived("aws-config", "ew1", config_bucket_tenant="fnx"),
+            }),
+            # A shared account's EU recorder delivers to the EU archive and leaves IAM to its US home
+            # stack's collector (OQ-A: its trail stays US too).
+            "fnx-ew1-root": eu_stack(**{"aws-config": eu_core_recorder("root")}),
+            "fnx-ue1-root": stack(**{
+                "cloudtrail": archived("aws-cloudtrail", "ue1", "us-east-1", US, account="root"),
+                "aws-config": archived("aws-config", "ue1", "us-east-1", US, account="root"),
+            }),
+        }), [])
+
+    def test_us_collector_region_without_a_us_collector_in_the_account_fails(self):
+        # prod-eu's stacks are all GDPR-scoped; and root's US home stack here holds no collector.
+        no_collector = archived("aws-config", "ue1", "us-east-1", US, account="root",
+                                global_resource_collector_region="us-west-2", iam_role_arn="arn:aws:iam::1:role/x")
+        errors = self.check(**{
+            "fnx-ew1-prod": eu_stack(**{"aws-config": eu_core_recorder("prod-eu")}),
+            "fnx-ew1-root": eu_stack(**{"aws-config": eu_core_recorder("root")}),
+            "fnx-ue1-root": stack(**{"aws-config": no_collector}),
+        })
+        self.assertEqual(errors, [
+            f"fnx-ew1-prod: aws-config vars.global_resource_collector_region is 'us-east-1', {OUTSIDE}",
+            f"fnx-ew1-root: aws-config vars.global_resource_collector_region is 'us-east-1', {OUTSIDE}",
+        ])
+
+    def test_recorder_outside_its_collector_region_needs_the_collectors_role(self):
+        errors = self.check(**{
+            "fnx-ue2-prod": stack(**{"aws-config": archived(
+                "aws-config", "ue1", "us-east-2", US, global_resource_collector_region="us-east-1")}),
+            "fnx-uw2-prod": stack(**{"aws-config": archived(
+                "aws-config", "ue1", "us-west-2", US, global_resource_collector_region="us-east-1",
+                iam_role_arn="arn:aws:iam::123456789012:role/r", create_iam_role=True)}),
+        })
+        self.assertEqual(errors, [
+            f"fnx-{s}-prod: aws-config records outside its global_resource_collector_region, so it sets iam_role_arn "
+            "to the collector's role and not create_iam_role" for s in ("ue2", "uw2")
+        ])
+
+    def aggregator_stacks(self, delegated):
+        """US security aggregator, a US account (prod, 111) and an all-GDPR account (prod-eu, 222)."""
+        return {
+            "fnx-ue1-security": stack(**{"aws-config": archived(
+                "aws-config", "ue1", "us-east-1", US, account="security", account_id="333333333333",
+                central_resource_collector_account="fnx-security", delegated_accounts=delegated)}),
+            "fnx-ue1-prod": stack(**{"aws-config": archived(
+                "aws-config", "ue1", "us-east-1", US, account="prod", account_id="111111111111",
+                central_resource_collector_account="fnx-security")}),
+            "fnx-ew1-prod": eu_stack(**{"aws-config": archived(
+                "aws-config", "ew1", account="prod-eu", account_id="222222222222",
+                central_resource_collector_account="fnx-security")}),
+        }
+
+    def test_us_aggregator_over_an_all_gdpr_account_fails(self):
+        self.assertEqual(self.check(**self.aggregator_stacks(["111111111111", "333333333333"])), [])
+        self.assertEqual(self.check(**self.aggregator_stacks(["111111111111", "222222222222"])), [
+            "fnx-ue1-security: aws-config delegated_accounts lists 222222222222, an account whose stacks are all "
+            "GDPR-scoped: its Config data may not be aggregated outside the EU",
+        ])
+        self.assertEqual(self.check(**self.aggregator_stacks(None)), [
+            "fnx-ue1-security: aws-config leaves delegated_accounts unset, so it aggregates every account, including "
+            "prod-eu, whose stacks are all GDPR-scoped",
+        ])
+
+    def test_aggregator_ids_shared_with_another_account_are_skipped(self):
+        # Today every account carries the placeholder id: it cannot be told apart, so no noise.
+        stacks = self.aggregator_stacks(["123456789012"])
+        for spec in (s["components"]["terraform"]["aws-config"] for s in stacks.values()):
+            spec["settings"]["environment"]["account_id"] = "123456789012"
+        self.assertEqual(self.check(**stacks), [])
+
+    def test_us_bucket_environment_in_a_gdpr_stack_fails(self):
+        errors = self.check(**{"fnx-ew1-prod": eu_stack(**{"cloudtrail": archived("aws-cloudtrail", "ue1")})})
+        self.assertIn("fnx-ew1-prod: cloudtrail delivers to fnx-ue1-audit, but its stack is GDPR-scoped: a trail or "
+                      "recorder delivers to its residency's archive (EU iff GDPR-scoped)", errors)
+        self.assertEqual(len(errors), 2, errors)  # and the dependency on a US stack
+
+    def test_eu_bucket_environment_in_a_us_stack_fails(self):
+        errors = self.check(**{"fnx-ue1-prod": stack(**{
+            "aws-config": archived("aws-config", "ew1", "us-east-1", US)})})
+        self.assertIn("fnx-ue1-prod: aws-config delivers to fnx-ew1-audit, but its stack is not GDPR-scoped: a trail "
+                      "or recorder delivers to its residency's archive (EU iff GDPR-scoped)", errors)
+        self.assertEqual(len(errors), 2, errors)  # and the US stack reading an EU one
+
+    def test_literal_bucket_name_fails(self):
+        errors = self.check(**{
+            "fnx-ue1-prod": stack(**{"cloudtrail": archived(
+                "aws-cloudtrail", "ue1", "us-east-1", US, s3_bucket_name="fnx-ue1-audit-cloudtrail")}),
+            "fnx-ew1-prod": eu_stack(**{"aws-config": archived(
+                "aws-config", "ew1", config_bucket_arn="arn:aws:s3:::fnx-ew1-audit-config")}),
+        })
+        self.assertEqual(errors, [
+            "fnx-ew1-prod: aws-config sets vars.config_bucket_arn: the log archive bucket is computed from "
+            "config_bucket_env and config_bucket_stage (remote-state_override.tf), never named",
+            "fnx-ue1-prod: cloudtrail sets vars.s3_bucket_name: the log archive bucket is computed from "
+            "cloudtrail_bucket_environment_name and cloudtrail_bucket_stage_name (remote-state_override.tf), never named",
+        ])
+
+    def test_another_stage_or_a_missing_bucket_fails(self):
+        trail = archived("aws-cloudtrail", "ue1", "us-east-1", US, deps=[{"component": "cloudtrail-bucket",
+                                                                            "stack": "fnx-ue1-root"}])
+        trail["vars"]["cloudtrail_bucket_stage_name"] = "root"
+        errors = self.check(**{"fnx-ue1-prod": stack(cloudtrail=trail)})
+        self.assertEqual(errors, [
+            "fnx-ue1-prod: cloudtrail vars.cloudtrail_bucket_stage_name is 'root': the log archive is in stage 'audit'",
+            "fnx-ue1-prod: cloudtrail delivers to cloudtrail-bucket in fnx-ue1-root, which holds no "
+            "aws-cloudtrail-bucket instance cloudtrail-bucket",
+        ])
+
+    def test_wrong_bucket_instance_or_tenant_fails(self):
+        errors = self.check(**{"fnx-ue1-prod": stack(**{
+            "aws-config": archived("aws-config", "ue1", "us-east-1", US,
+                                   deps=[{"component": "cloudtrail-bucket", "stack": "fnx-ue1-audit"}],
+                                   config_bucket_component_name="cloudtrail-bucket"),
+            "aws-config/other": archived("aws-config", "ue1", "us-east-1", US, config_bucket_tenant="acme"),
+        })})
+        self.assertEqual(errors, [
+            "fnx-ue1-prod: aws-config delivers to cloudtrail-bucket in fnx-ue1-audit, which holds no "
+            "aws-config-bucket instance cloudtrail-bucket",
+            "fnx-ue1-prod: aws-config/other delivers to config-bucket in acme-ue1-audit, which holds no "
+            "aws-config-bucket instance config-bucket",
+            "fnx-ue1-prod: aws-config/other does not list {component: config-bucket, stack: acme-ue1-audit} in "
+            "dependencies.components",
+        ])
+
+    def test_missing_dependency_or_environment_fails(self):
+        no_env = archived("aws-cloudtrail", "ue1", "us-east-1", US)
+        del no_env["vars"]["cloudtrail_bucket_environment_name"]
+        del no_env["vars"]["cloudtrail_bucket_stage_name"]  # one error, not a stage error beside it
+        context_tenant = archived("aws-cloudtrail", "ue1", "us-east-1", US, context={"tenant": "fnx"})
+        del context_tenant["vars"]["tenant"]  # null-label module.this.tenant
+        errors = self.check(**{"fnx-ue1-prod": stack(**{
+            "cloudtrail": archived("aws-cloudtrail", "ue1", "us-east-1", US, deps=[]),
+            "cloudtrail/other": no_env,
+            "cloudtrail/context": context_tenant,
+        })})
+        self.assertEqual(errors, [
+            "fnx-ue1-prod: cloudtrail does not list {component: cloudtrail-bucket, stack: fnx-ue1-audit} in "
+            "dependencies.components",
+            "fnx-ue1-prod: cloudtrail/other sets no tenant, vars.cloudtrail_bucket_environment_name or "
+            "vars.cloudtrail_bucket_stage_name: its log archive stack cannot be checked",
+        ])
+
+    def test_hand_written_and_disabled_trails_are_not_checked(self):
+        hand_written = instance("us-east-1", US, s3_bucket_name="fnx-trail")
+        hand_written["metadata"] = {"component": "cloudtrail"}
+        disabled = archived("aws-cloudtrail", "ew1", "us-east-1", US, deps=[])
+        disabled["metadata"]["enabled"] = False
+        self.assertEqual(self.check(**{"fnx-ue1-prod": stack(**{"cloudtrail/main": hand_written,
+                                                                 "cloudtrail": disabled})}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

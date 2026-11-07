@@ -38,6 +38,28 @@ of a stack that is not GDPR-scoped may join it (set global_replication_group_id 
 the primary's, to a literal id ending in its suffix, or while depending on the primary).
 EXEMPTIONS lists the (instance pattern, field) pairs that may name one region the rules
 above forbid there.
+Every deployable trail and recorder (metadata.component in LOG_ARCHIVES: the vendored
+aws-cloudtrail and aws-config), in any stack, delivers to its residency's log archive: its
+bucket environment and stage vars (CP remote-state; the house remote-state_override.tf
+computes the bucket from them, owner OQ-E) name stage "audit" and, with the tenant, a stack
+holding that bucket instance (cloudtrail-bucket, config-bucket) that is GDPR-scoped iff its
+own stack is (fnx-ew1-audit, else fnx-ue1-audit), which it lists in dependencies.components.
+No other vars key containing "bucket" may be set: a literal bucket name would bypass this.
+A recorder outside its global_resource_collector_region takes the collector's role: it sets
+iam_role_arn and not create_iam_role. A non-GDPR stack's Config aggregator (the aws-config
+instance of the central_resource_collector_account in its collector region) lists in
+delegated_accounts no account whose stacks are all GDPR-scoped (by settings.environment
+.account_id; an id another account also carries, like the placeholder, cannot be told apart and
+is skipped), nor leaves it unset (CP then aggregates the whole account_map) while one exists.
+Scoped exemption (owner OQ-A/OQ-B, 2026-11-07): the shared accounts (root, audit, security)
+record IAM and keep their one multi-region trail in their US home stack, so a GDPR-scoped
+stack's aws-config may name, in vars.global_resource_collector_region, the region of the
+collector a non-GDPR stack of its own account (settings.environment.account) holds; prod-eu,
+whose stacks are all GDPR-scoped, may not. Not coded, as no stack var shows it: those trails
+(US archive) also record the accounts' eu-west-1 control-plane events, and the US aggregator
+in fnx-ue1-security (all regions, CP-hardcoded) aggregates their eu-west-1 recorders. All of it
+is core-account control-plane metadata, not EU personal data; a GDPR-scoped stack's own trail
+or recorder still delivers only to the EU archive.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
 
@@ -88,6 +110,29 @@ EXEMPTIONS: tuple = (
     Exemption("apigateway/main", "vars.health_check_regions", "us-east-1", _CHECKERS),
     Exemption("apigateway/main", "vars.health_check_regions", "ap-southeast-1", _CHECKERS),
 )
+
+
+class LogArchive(NamedTuple):
+    bucket_component: str  # the bucket's metadata.component in the audit stack
+    component_var: str  # vars naming the bucket instance, its environment, stage and tenant
+    component_default: str
+    environment_var: str
+    stage_var: str
+    tenant_var: Optional[str]  # None: the tenant comes from the context (vars.tenant)
+
+
+# component -> the log archive its CP remote-state reads (variables.tf of each, vendored).
+LOG_ARCHIVES: dict = {
+    "aws-cloudtrail": LogArchive(
+        "aws-cloudtrail-bucket", "cloudtrail_bucket_component_name", "cloudtrail-bucket",
+        "cloudtrail_bucket_environment_name", "cloudtrail_bucket_stage_name", None,
+    ),
+    "aws-config": LogArchive(
+        "aws-config-bucket", "config_bucket_component_name", "config-bucket",
+        "config_bucket_env", "config_bucket_stage", "config_bucket_tenant",
+    ),
+}
+AUDIT_STAGE = "audit"
 
 
 US_PARENT = "an EU zone may not hang off, or write into, a zone in a US account"
@@ -230,10 +275,17 @@ def zone_errors(where: str, name: str, instance: dict, scoped: set, holders: dic
     return errors
 
 
-def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exemptions: tuple, holders: Optional[dict] = None) -> list[str]:
+def check_instance(
+    stack_name: str, name: str, instance: dict, scoped: set, exemptions: tuple, holders: Optional[dict] = None,
+    collectors: frozenset = frozenset(),
+) -> list[str]:
     errors = []
     where = f"{stack_name}: {name}"
+    home = (account_of(instance), (instance.get("vars") or {}).get("global_resource_collector_region"))
     for field, region in regions(instance):
+        if field == "vars.global_resource_collector_region" and component_of(name, instance) == "aws-config" \
+                and home in collectors:
+            continue  # OQ-A: a shared account's collector is in its US home stack
         if not region.startswith(EU_PREFIX) and not exempt(name, field, region, exemptions):
             errors.append(f"{where} {field} is {region!r}, outside the EU, in a GDPR-scoped stack")
     if not tagged_gdpr(instance):
@@ -274,14 +326,15 @@ def check_instance(stack_name: str, name: str, instance: dict, scoped: set, exem
 def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
     errors = []
     scoped = {name for name, stack in stacks.items() if gdpr_scoped(stack)}
-    holders = zone_holders(stacks)
+    holders, collectors = zone_holders(stacks), us_collectors(stacks, scoped)
     for stack_name in sorted(scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
-            errors += check_instance(stack_name, name, instance, scoped, exemptions, holders)
+            errors += check_instance(stack_name, name, instance, scoped, exemptions, holders, collectors)
     for stack_name in sorted(set(stacks) - scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             errors += outside_reader_errors(stack_name, name, instance, scoped, exemptions)
     errors += global_datastore_errors(stacks, scoped)
+    errors += log_archive_errors(stacks, scoped)
     return list(dict.fromkeys(errors))
 
 
@@ -341,6 +394,107 @@ def global_datastore_errors(stacks: dict, scoped: set) -> list[str]:
                             f"{stack_name}: {joiner} joins {primary_stack} {name}'s Global Datastore ({suffix}) "
                             "outside the GDPR scope: EU cache data may not be replicated outside the EU"
                         )
+    return errors
+
+
+def log_archive_errors(stacks: dict, scoped: set) -> list[str]:
+    """A trail or recorder (LOG_ARCHIVES) that names a literal bucket, or an archive outside its residency."""
+    errors = []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            archive = LOG_ARCHIVES.get(component_of(name, instance))
+            if archive is None:
+                continue
+            errors += archive_errors(stacks, scoped, stack_name, name, instance, archive)
+    return errors + aggregator_errors(stacks, scoped)
+
+
+def component_of(name: str, instance: dict) -> str:
+    return instance.get("component") or (instance.get("metadata") or {}).get("component") or name
+
+
+def account_of(instance: dict) -> Optional[str]:
+    return ((instance.get("settings") or {}).get("environment") or {}).get("account")
+
+
+def us_collectors(stacks: dict, scoped: set) -> frozenset:
+    """(account, region) of every aws-config global-resource collector in a stack that is not GDPR-scoped."""
+    return frozenset(
+        (account_of(instance), variables.get("region"))
+        for stack_name in set(stacks) - scoped
+        for name, instance in instances(stacks[stack_name]).items()
+        for variables in [instance.get("vars") or {}]
+        if component_of(name, instance) == "aws-config"
+        and variables.get("global_resource_collector_region") == variables.get("region")
+    )
+
+
+def aggregator_errors(stacks: dict, scoped: set) -> list[str]:
+    """A non-GDPR stack's Config aggregator over an account whose stacks are all GDPR-scoped (owner OQ-B)."""
+    ids: dict = {}  # account -> ({ids outside the GDPR scope}, {ids inside})
+    for stack_name, stack in stacks.items():
+        for instance in instances(stack).values():
+            env = (instance.get("settings") or {}).get("environment") or {}
+            if env.get("account"):
+                ids.setdefault(env["account"], (set(), set()))[stack_name in scoped].add(str(env.get("account_id")))
+    eu = sorted(a for a, (outside, inside) in ids.items() if inside and not outside)
+    shared = set().union(set(), *(o | i for a, (o, i) in ids.items() if a not in eu))
+    eu_ids = set().union(set(), *(ids[a][1] for a in eu)) - shared
+    errors = []
+    for stack_name in sorted(set(stacks) - scoped):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            variables, where = instance.get("vars") or {}, f"{stack_name}: {name}"
+            central = f"{variables.get('tenant')}-{account_of(instance)}"
+            if component_of(name, instance) != "aws-config" or variables.get("central_resource_collector_account") != central \
+                    or variables.get("global_resource_collector_region") != variables.get("region"):
+                continue
+            if variables.get("delegated_accounts") is None and eu:
+                errors.append(f"{where} leaves delegated_accounts unset, so it aggregates every account, including "
+                              f"{', '.join(eu)}, whose stacks are all GDPR-scoped")
+            errors += [
+                f"{where} delegated_accounts lists {account_id}, an account whose stacks are all GDPR-scoped: "
+                "its Config data may not be aggregated outside the EU"
+                for account_id in sorted({str(a) for a in variables.get("delegated_accounts") or []} & eu_ids)
+            ]
+    return errors
+
+
+def archive_errors(stacks: dict, scoped: set, stack_name: str, name: str, instance: dict, archive: LogArchive) -> list[str]:
+    where, variables = f"{stack_name}: {name}", instance.get("vars") or {}
+    wiring = {archive.component_var, archive.environment_var, archive.stage_var, archive.tenant_var}
+    errors = [
+        f"{where} sets vars.{key}: the log archive bucket is computed from {archive.environment_var} and "
+        f"{archive.stage_var} (remote-state_override.tf), never named"
+        for key in sorted(variables)
+        if "bucket" in key and key not in wiring
+    ]
+    component = variables.get(archive.component_var) or archive.component_default
+    environment, stage = variables.get(archive.environment_var), variables.get(archive.stage_var)
+    tenant = ((variables.get(archive.tenant_var) if archive.tenant_var else None) or variables.get("tenant")
+              or (variables.get("context") or {}).get("tenant"))
+    if archive.bucket_component == "aws-config-bucket" and variables.get("global_resource_collector_region") != \
+            variables.get("region") and (not variables.get("iam_role_arn") or flag_on(variables.get("create_iam_role"))):
+        errors.append(f"{where} records outside its global_resource_collector_region, so it sets iam_role_arn to the "
+                      "collector's role and not create_iam_role")
+    if not all(isinstance(v, str) and v for v in (tenant, environment, stage)):
+        return errors + [f"{where} sets no tenant, vars.{archive.environment_var} or vars.{archive.stage_var}: "
+                         "its log archive stack cannot be checked"]
+    if stage != AUDIT_STAGE:
+        errors.append(f"{where} vars.{archive.stage_var} is {stage!r}: the log archive is in stage {AUDIT_STAGE!r}")
+    target = f"{tenant}-{environment}-{stage}"
+    bucket = instances(stacks.get(target) or {}).get(component)
+    if bucket is None or ((bucket.get("metadata") or {}).get("component") or component) != archive.bucket_component:
+        errors.append(f"{where} delivers to {component} in {target}, which holds no {archive.bucket_component} "
+                      f"instance {component}")
+    residency = "GDPR-scoped" if stack_name in scoped else "not GDPR-scoped"
+    if (target in scoped) != (stack_name in scoped):
+        errors.append(f"{where} delivers to {target}, but its stack is {residency}: a trail or recorder delivers "
+                      "to its residency's archive (EU iff GDPR-scoped)")
+    if not any(
+        isinstance(dep, dict) and dep.get("component") == component and (dep.get("stack") or stack_name) == target
+        for dep in (instance.get("dependencies") or {}).get("components") or []
+    ):
+        errors.append(f"{where} does not list {{component: {component}, stack: {target}}} in dependencies.components")
     return errors
 
 
