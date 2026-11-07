@@ -113,6 +113,24 @@ workflows:
         name: refuse-fixtures
         type: shell
         command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
+      # First-deploy preflight, fatal, before anything touches AWS (as in
+      # bootstrap.yaml full): fails while the stack still holds a placeholder
+      # account ID, domain or alert address, or, for a core stack or one
+      # deploying a MAP_CONSUMERS component, a placeholder core account.
+      # deploy-kms, deploy-storage and deploy-security start with it too.
+      # docs/OPERATIONS.md#first-deploy-inputs.
+      - &preflight-targets
+        name: preflight_targets
+        type: atmos
+        command: describe stacks --process-functions=false --format json --query 'keys | join(",")'
+        output: none
+      - &preflight
+        name: preflight
+        type: shell
+        command: >-
+          atmos describe stacks --process-functions=false --format json
+          | python3 workflows/scripts/common/check-first-deploy-inputs.py
+          --stacks '{{ .steps.preflight_targets.value }}'
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.
@@ -505,6 +523,8 @@ workflows:
     steps:
       - *fixtures-stages
       - *refuse-fixtures
+      - *preflight-targets
+      - *preflight
       - name: kms_instances
         type: atmos
         command: >-
@@ -530,6 +550,8 @@ workflows:
     steps:
       - *fixtures-stages
       - *refuse-fixtures
+      - *preflight-targets
+      - *preflight
       - name: plan
         type: atmos
         command: >-
@@ -599,6 +621,8 @@ workflows:
     steps:
       - *fixtures-stages
       - *refuse-fixtures
+      - *preflight-targets
+      - *preflight
       - name: plan
         type: atmos
         command: >-

@@ -20,6 +20,11 @@ workflows:
       - name: refuse-fixtures
         type: shell
         command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
+      # The audit stacks hold the organization's log archive: destroying
+      # kms/config-bucket schedules the Config archive key's deletion. Never here.
+      - name: refuse-audit
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *audit*) echo "Refusing an audit stack (the log archive and its KMS key)."; exit 1 ;; esac
       - name: preview
         type: atmos
         command: terraform destroy -s {{ .steps.stack.value }} --dry-run

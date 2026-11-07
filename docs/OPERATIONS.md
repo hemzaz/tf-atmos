@@ -70,7 +70,9 @@ cost-allocation tags) as notices, and per stack its budget amount to confirm, an
 `security_email_subscriptions` and an enabled Identity Center instance's home region. The `local`
 and `fixtures` stacks are exempt.
 `bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
-`backend-only`, `full`) before any AWS call, and so does `deploy-accounts.yaml`; the cold start
+`backend-only`, `full`) before any AWS call, and so do `deploy-accounts.yaml` and
+`deploy-full-stack.yaml` (`deploy`, `deploy-kms`, `deploy-storage`, `deploy-security`; the other
+single-layer runs skip it); the cold start
 passes `--cold-start`, which makes a placeholder account in the backend's access-role principals a
 notice (it applies none of them). `atmos workflow lint` runs it with `--warn`: it
 never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
@@ -122,7 +124,8 @@ the last step.
    the workload accounts) until Identity Center is applied; the backends also trust each account's
    Identity Center Terraform sets ([State backend](#state-backend)), and the PR enabling the
    `aws-identity-center` instance removes the `OrganizationAccountAccessRole` entries. The core stacks
-   (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`: today only their
+   (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`, whose preflight fails while a
+   core account ID is a placeholder: today only their
    `aws-account-settings`, plus the log archive in `fnx-ue1-audit` and, with `-s fnx-ew1-audit`, the
    EU one), then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
    and [Deploying a stack](#deploying-a-stack).
