@@ -2,9 +2,12 @@
 # =============================================================================
 # fnx-ue1-audit - the audit account's home-region stack
 # =============================================================================
-# No instance of its own, and one enabled instance: its stage defaults'
-# aws-account-settings (stacks/orgs/fnx/audit/_defaults.yaml); the US
-# log-archive components (E5) land here. Its state goes to fnx-ue1-root's
+# Its stage defaults' aws-account-settings
+# (stacks/orgs/fnx/audit/_defaults.yaml), and the US log archive (E5a, one per residency, owner decision QE7): the
+# cloudtrail-bucket, config-bucket and its kms/config-bucket key from the
+# imported catalogs (aws-config-bucket/main for the US delivery accounts). The
+# key is in the kms layer, the buckets in the storage layer
+# (workflows/deploy-full-stack.yaml). Its state goes to fnx-ue1-root's
 # bucket through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
 # whose core_write holds this stack's pattern pair (check-state-keys.py) and
 # trusts the audit account's OrganizationAccountAccessRole: the provider guard
@@ -16,3 +19,5 @@ import:
   - catalog/_base/defaults
   - mixins/region/us-east-1
   - orgs/fnx/audit/_defaults
+  - catalog/aws-cloudtrail-bucket/defaults
+  - catalog/aws-config-bucket/main

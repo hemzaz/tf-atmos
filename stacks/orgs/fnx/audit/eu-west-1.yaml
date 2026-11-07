@@ -2,9 +2,13 @@
 # =============================================================================
 # fnx-ew1-audit - the audit account's eu-west-1 stack
 # =============================================================================
-# A core-account stack (owner decision QE5): no instance of its own; its stage
-# defaults' aws-account-settings is its one enabled instance until the core
-# components land. Its state goes to fnx-ew1-root's bucket
+# A core-account stack (owner decision QE5): its stage defaults'
+# aws-account-settings, and the EU log archive (E5a, one per residency,
+# owner decision QE7): the cloudtrail-bucket, config-bucket and its
+# kms/config-bucket key from the imported catalogs (aws-config-bucket/main-eu
+# for the EU delivery accounts). The key is in the kms layer, the buckets in
+# the storage layer (workflows/deploy-full-stack.yaml).
+# Its state goes to fnx-ew1-root's bucket
 # through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
 # whose core_write trusts the management-account administrator and the
 # audit account's OrganizationAccountAccessRole, and its stage
@@ -30,6 +34,8 @@ import:
   - mixins/region/eu-west-1
   - orgs/fnx/audit/_defaults
   - catalog/aws-account-settings/main-standby
+  - catalog/aws-cloudtrail-bucket/defaults
+  - catalog/aws-config-bucket/main-eu
 
 vars:
   tags:
