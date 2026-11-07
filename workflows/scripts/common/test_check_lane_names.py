@@ -336,8 +336,9 @@ class ComponentSetTest(unittest.TestCase):
     roles/policies or an Environment-named S3 bucket."""
 
     ROOT = pathlib.Path(__file__).resolve().parents[3] / "components" / "terraform"
-    # iam: names are RAW_NAMES; backend: names built from its bucket name; apigateway-account: role name carries the region.
-    EXCLUDED = {"iam", "backend", "apigateway-account"}
+    # iam: names are RAW_NAMES; backend: names built from its bucket name; apigateway-account: role name carries the region;
+    # aws-cloudtrail: vendored, names its role from the null-label id (vars.context, region code included), not tags.Environment.
+    EXCLUDED = {"iam", "backend", "apigateway-account", "aws-cloudtrail"}
 
     def scan(self, pattern):
         regex = re.compile(pattern)
