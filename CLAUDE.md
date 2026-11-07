@@ -21,8 +21,8 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 
 - `atmos describe stacks`/`describe component` need `--process-functions=false`; otherwise Atmos
   evaluates `!terraform.state` and needs live AWS state.
-- validate-all runs `terraform init`/`validate` serially over every root module: set
-  `TF_PLUGIN_CACHE_DIR` first.
+- validate-all runs `terraform init`/`validate` over every root module, `TF_VALIDATE_JOBS` at a
+  time (default: CPU count, at most 4 in CI and 2 locally; set 1 on a loaded machine): set `TF_PLUGIN_CACHE_DIR` first.
 - `terraform validate` skips `variable` validation blocks. Prove a validation change with
   `atmos sweep` or an emulator lane, including a deliberately bad value.
 - A new `!terraform.state` read needs the target in the reader's `dependencies.components`
