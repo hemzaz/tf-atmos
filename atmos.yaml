@@ -179,6 +179,10 @@ commands:
               echo "atmos sweep: --part goes with --scaffold only." >&2
               exit 2
             fi
+            if [ "${SWEEP_PART%/*}" -gt "${SWEEP_PART#*/}" ]; then
+              printf 'atmos sweep: refusing --part %s: want K <= N.\n' "'$SWEEP_PART'" >&2
+              exit 2
+            fi
             ;;
           *)
             printf 'atmos sweep: refusing --part %s: want K/N, single digits.\n' "'$SWEEP_PART'" >&2

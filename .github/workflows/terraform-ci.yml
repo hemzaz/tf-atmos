@@ -265,8 +265,9 @@ jobs:
         run: bash scripts/sync-atmos-image.sh --check
 
   # `atmos sweep --all` split into the legs of the plan-sweep matrix below:
-  # six balanced `-s <stacks>` legs, then --samples and --scaffold, the other
-  # two parts of --all. sweep-shards.py fails this job unless the legs' stacks
+  # six balanced `-s <stacks>` legs, then --samples and SCAFFOLD_LEGS
+  # `--scaffold --part K/N` legs, the other two parts of --all. sweep-shards.py
+  # fails this job unless the legs' stacks
   # are exactly the stacks --all sweeps, each once.
   sweep-shards:
     name: Plan sweep shards

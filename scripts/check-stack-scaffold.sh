@@ -154,7 +154,9 @@ REFUSALS=(
 scratch="$(mktemp -d)"
 # The goldens' copies, beside the scratch copy (outside any git work tree too).
 jobs_root="$(mktemp -d)"
-trap 'rm -rf "$scratch" "$jobs_root"' EXIT
+# Stop any golden job still running before its directory is removed.
+golden_pids=()
+trap 'kill ${golden_pids[@]+"${golden_pids[@]}"} 2>/dev/null || true; rm -rf "$scratch" "$jobs_root"' EXIT
 real_roots="$(cd "$REPO_ROOT" && cksum "${ROOT_FILES[@]}")"
 
 # The working tree minus ignored files (as check-stack-samples.sh); outside a
@@ -435,7 +437,10 @@ if ! [[ "$jobs_max" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR STACK_SCAFFOLD_JOBS='$jobs_max': want a positive integer" >&2
     exit 1
 fi
-[[ -n "${STACK_SCAFFOLD_JOBS:-}" ]] || (( jobs_max <= 4 )) || jobs_max=4
+# Default cap: 4 in CI, 2 locally (keeps a laptop responsive); STACK_SCAFFOLD_JOBS overrides.
+jobs_cap=2
+[[ -z "${CI:-}" ]] || jobs_cap=4
+[[ -n "${STACK_SCAFFOLD_JOBS:-}" ]] || (( jobs_max <= jobs_cap )) || jobs_max=$jobs_cap
 # running: how many golden jobs are still running (bash reaps finished ones).
 running() {
     local pid n=0
