@@ -104,15 +104,16 @@ class MainTest(unittest.TestCase):
             rc = shards.main()
         return rc, out.getvalue(), err.getvalue()
 
-    def test_matrix_is_the_plan_sweep_stacks_then_samples_and_scaffold(self):
+    def test_matrix_is_the_plan_sweep_stacks_then_samples_and_scaffold_parts(self):
         rc, out, _ = self.run_main(["--chunks", "3"])
         self.assertEqual(rc, 0)
         legs = json.loads(out)["include"]
-        self.assertEqual([leg["args"] for leg in legs[-2:]], ["--samples", "--scaffold"])
-        swept = [s for leg in legs[:-2] for s in leg["args"].removeprefix("-s ").split(",")]
+        self.assertEqual([leg["args"] for leg in legs[-4:]],
+                         ["--samples", "--scaffold --part 1/3", "--scaffold --part 2/3", "--scaffold --part 3/3"])
+        swept = [s for leg in legs[:-4] for s in leg["args"].removeprefix("-s ").split(",")]
         self.assertEqual(sorted(swept), sorted(shards.ci_stacks.plan_sweep_stacks(STACKS)))
         self.assertNotIn("fnx-ue1-local-sandbox", swept)
-        self.assertEqual(len(legs), 5)
+        self.assertEqual(len(legs), 7)
 
     def test_a_split_that_drops_a_stack_fails_the_job(self):
         rc, out, err = self.run_main([], balance=lambda names, weights, chunks: [names[1:]])

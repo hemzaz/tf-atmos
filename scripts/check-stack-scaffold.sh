@@ -51,11 +51,18 @@
 # A residue edit to a reference stack must update its template or .env in the
 # same PR, or this fails.
 #
-# Usage: scripts/check-stack-scaffold.sh [--sweep]
+# Each golden runs in its own copy of the scratch copy (it deletes and
+# regenerates its stack file, and Atmos resolves the whole stacks tree), up to
+# STACK_SCAFFOLD_JOBS at once (default: the CPU count, at most 4); each
+# golden's output is printed whole, in file order. The rest runs serially.
+#
+# Usage: scripts/check-stack-scaffold.sh [--sweep [K/N]]
 # --sweep (atmos sweep --scaffold) runs only the fresh-stack end to end, then
 # scripts/plan-sweep.sh on the fresh stacks its default would select (ci-stacks.py
 # --plan-sweep: a CI-disabled stack with nothing to plan is skipped with a
-# ::notice::); lint runs the rest.
+# ::notice::); lint runs the rest. With K/N (atmos sweep --scaffold --part K/N)
+# it plans only part K of those stacks split into N parts balanced by their
+# pairs (sweep-shards.py's split), so N legs together plan each exactly once.
 # Needs atmos, python3 and yamllint (and, for --sweep, plan-sweep's tools).
 # Exit 0 when every golden regenerates identically, every refusal is refused
 # and the fresh stacks pass, 1 otherwise.
@@ -65,6 +72,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWEEP="false"
 [[ "${1:-}" == "--sweep" ]] && SWEEP="true"
+SWEEP_PART="${2:-}"
+if [[ -n "$SWEEP_PART" ]] && { [[ "$SWEEP" != "true" ]] || ! [[ "$SWEEP_PART" =~ ^([1-9])/([1-9])$ ]] \
+    || (( BASH_REMATCH[1] > BASH_REMATCH[2] )); }; then
+    echo "ERROR part '$SWEEP_PART': want --sweep K/N with 1 <= K <= N <= 9" >&2
+    exit 1
+fi
 # The backends the wire hook edits; the real ones must never change.
 ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.yaml)
 # Core stacks whose account's OrganizationAccountAccessRole is in their
@@ -139,7 +152,11 @@ REFUSALS=(
 )
 
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+# The goldens' copies, beside the scratch copy (outside any git work tree too).
+jobs_root="$(mktemp -d)"
+# Stop any golden job still running before its directory is removed.
+golden_pids=()
+trap 'kill ${golden_pids[@]+"${golden_pids[@]}"} 2>/dev/null || true; rm -rf "$scratch" "$jobs_root"' EXIT
 real_roots="$(cd "$REPO_ROOT" && cksum "${ROOT_FILES[@]}")"
 
 # The working tree minus ignored files (as check-stack-samples.sh); outside a
@@ -415,14 +432,52 @@ clean_since() {
 }
 
 if [[ "$SWEEP" == "false" ]]; then
+jobs_max="${STACK_SCAFFOLD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
+if ! [[ "$jobs_max" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR STACK_SCAFFOLD_JOBS='$jobs_max': want a positive integer" >&2
+    exit 1
+fi
+# Default cap: 4 in CI, 2 locally (keeps a laptop responsive); STACK_SCAFFOLD_JOBS overrides.
+jobs_cap=2
+[[ -z "${CI:-}" ]] || jobs_cap=4
+[[ -n "${STACK_SCAFFOLD_JOBS:-}" ]] || (( jobs_max <= jobs_cap )) || jobs_max=$jobs_cap
+# running: how many golden jobs are still running (bash reaps finished ones).
+running() {
+    local pid n=0
+    for pid in ${golden_pids[@]+"${golden_pids[@]}"}; do
+        ! kill -0 "$pid" 2>/dev/null || n=$((n + 1))
+    done
+    echo "$n"
+}
+echo "== goldens ($jobs_max at a time)"
+golden_names=()
+golden_pids=()
 for env in scaffolds/stack-golden/*.env; do
     goldens=$((goldens + 1))
     stack="$(basename "$env" .env)"
-    files_list > "$out/files.before"
-    golden "$env" || failed="$failed $stack"
-    # Leave the committed file, and nothing a run wrote, for the next golden.
-    [[ ! -f "$out/$stack.committed.yaml" ]] || cp "$out/$stack.committed.yaml" "$file"
-    clean_since "$out/files.before"
+    while [[ "$(running)" -ge "$jobs_max" ]]; do sleep 1; done
+    # Its own copy of the scratch copy (without our files), its own out dir.
+    (
+        job="$jobs_root/$stack"
+        mkdir "$job"
+        cp -pR "$scratch/." "$job"
+        rm -rf "$job/${out##*/}"
+        cd "$job"
+        out="$(mktemp -d "$job/.check-stack-scaffold.XXXXXX")"
+        mkdir "$out/roots"
+        for root_file in "${ROOT_FILES[@]}"; do
+            cp "$root_file" "$out/roots/${root_file##*/}"
+        done
+        golden "$env" || exit 1
+    ) > "$jobs_root/$stack.log" 2>&1 &
+    golden_names+=("$stack")
+    golden_pids+=("$!")
+done
+for i in "${!golden_pids[@]}"; do
+    rc=0
+    wait "${golden_pids[$i]}" || rc=$?
+    cat "$jobs_root/${golden_names[$i]}.log"
+    [[ "$rc" -eq 0 ]] || failed="$failed ${golden_names[$i]}"
 done
 if [[ "$goldens" -eq 0 ]]; then
     echo "ERROR no scaffolds/stack-golden/*.env" >&2
@@ -706,17 +761,30 @@ if [[ "$fresh_ok" -eq 1 && "$SWEEP" == "true" ]]; then
     # --plan-sweep's rule, over every resolved stack): a hosted-CI-disabled
     # stack with nothing to plan (the fresh core stack) is skipped with its
     # ::notice::; anything else it refuses fails here, as it fails the sweep.
-    if ! swept="$(python3 -B - "$out/fresh.json" "${fresh[@]}" <<'PY'
+    # With K/N, part K of them split as sweep-shards.py splits the stack legs.
+    if ! swept="$(python3 -B - "$out/fresh.json" "$SWEEP_PART" "${fresh[@]}" <<'PY'
 import importlib.util, json, sys
-spec = importlib.util.spec_from_file_location("ci_stacks", "workflows/scripts/common/ci-stacks.py")
-ci = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ci)
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+ci = load("ci_stacks", "workflows/scripts/common/ci-stacks.py")
 stacks = json.load(open(sys.argv[1]))
 try:
     selected = set(ci.plan_sweep_stacks(stacks))
 except ValueError as error:
     sys.exit(f"::error::{error}")
-print(" ".join(name for name in sys.argv[2:] if name in selected))
+names = [name for name in sys.argv[3:] if name in selected]
+if sys.argv[2]:
+    part, parts = map(int, sys.argv[2].split("/"))
+    shards = load("sweep_shards", "workflows/scripts/common/sweep-shards.py")
+    chunks = shards.balance(names, {n: shards.weight(stacks[n]) for n in names}, parts)
+    if len(chunks) != parts or sorted(n for c in chunks for n in c) != sorted(names):
+        sys.exit(f"::error::{len(names)} fresh stacks do not split into {parts} non-empty parts")
+    print(f"part {part}/{parts}: " + " | ".join(" ".join(c) for c in chunks), file=sys.stderr)
+    names = chunks[part - 1]
+print(" ".join(names))
 PY
 )"; then
         echo "ERROR fresh: ci-stacks.py's plan-sweep selection failed" >&2
@@ -744,7 +812,7 @@ if [[ -n "$failed" ]]; then
     exit 1
 fi
 if [[ "$SWEEP" == "true" ]]; then
-    echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks, and plan-sweep passes the ${#swept_list[@]} it selects (${swept_list[*]})"
+    echo "OK: the ${#fresh[@]} fresh stacks pass the stack checks, and plan-sweep passes the ${#swept_list[@]} it selects${SWEEP_PART:+ in part $SWEEP_PART} (${swept_list[*]})"
 else
     echo "IDENTICAL: the stack scaffold regenerates all $goldens golden stacks (normal and raw, imports in their committed order, the root backends untouched); $refused bad answer sets are refused; the ${#fresh[@]} fresh stacks (${fresh[*]}) are wired by the hook and pass every stack check"
 fi

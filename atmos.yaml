@@ -100,7 +100,7 @@ commands:
       Plan stack/component pairs against their resolved variables, with no AWS
       account. With no flag: every real stack and template fixture. -s: only
       these stacks. --samples: the templates/stacks samples. --scaffold: fresh
-      stacks from the stack scaffold. --all: all three, in that order (CI).
+      stacks from the stack scaffold (--part K/N: only part K of N). --all: all three, in that order (CI).
       Exit status: 1 on a finding, 2 on a usage error or a missing or broken tool;
       Atmos's own flag and argument errors (e.g. an unknown flag) exit 1.
     verbose: false
@@ -117,6 +117,9 @@ commands:
         type: bool
         default: false
         description: Sweep fresh scaffold stacks (scripts/check-stack-scaffold.sh --sweep)
+      - name: part
+        description: "With --scaffold: plan only part K/N of the fresh stacks (CI's scaffold legs)"
+        default: ""
       - name: all
         type: bool
         default: false
@@ -142,6 +145,8 @@ commands:
         value: "{{ .Flags.scaffold }}"
       - key: SWEEP_ALL
         value: "{{ .Flags.all }}"
+      - key: SWEEP_PART
+        value: "{{ .Flags.part }}"
     steps:
       - |
         set -eu
@@ -167,10 +172,27 @@ commands:
             fi
             ;;
         esac
+        case "$SWEEP_PART" in
+          '') ;;
+          [1-9]/[1-9])
+            if [ "$SWEEP_SCAFFOLD" != true ]; then
+              echo "atmos sweep: --part goes with --scaffold only." >&2
+              exit 2
+            fi
+            if [ "${SWEEP_PART%/*}" -gt "${SWEEP_PART#*/}" ]; then
+              printf 'atmos sweep: refusing --part %s: want K <= N.\n' "'$SWEEP_PART'" >&2
+              exit 2
+            fi
+            ;;
+          *)
+            printf 'atmos sweep: refusing --part %s: want K/N, single digits.\n' "'$SWEEP_PART'" >&2
+            exit 2
+            ;;
+        esac
         if [ "$SWEEP_SAMPLES" = true ]; then
           bash scripts/check-stack-samples.sh --sweep
         elif [ "$SWEEP_SCAFFOLD" = true ]; then
-          bash scripts/check-stack-scaffold.sh --sweep
+          bash scripts/check-stack-scaffold.sh --sweep ${SWEEP_PART:+"$SWEEP_PART"}
         elif [ "$SWEEP_ALL" = true ]; then
           bash scripts/plan-sweep.sh
           bash scripts/check-stack-samples.sh --sweep
