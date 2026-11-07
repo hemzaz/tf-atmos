@@ -243,66 +243,33 @@ workflows:
             exit 1
           fi
           echo "tflint: all component directories clean"
-      # Each state bucket's backend roles are split by stage with S3 key patterns, a
-      # "*/<stack>/*" and "*/<stack>-*" pair per stack
-      # (stacks/orgs/fnx/root/us-east-1.yaml); this evaluates them against
-      # every s3-backend state key in that bucket and fails one not matched by
-      # exactly its stage's roles. Also run by validate-all (validate-enhanced.yaml).
-      - name: check-state-keys
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_state_keys.py workflows/scripts/common/test_backends.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-state-keys.py < "$stacks_json"
-      # Stacks of one account and region (a stage stack and its lanes,
-      # settings.context.name) and the instances in them may not create the
-      # same name, tags.Environment, account singleton or secret.
-      - name: check-lane-names
-        type: shell
-        command: |
-          set -eu
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          LANE_NAMES_STACKS_JSON="$stacks_json" python3 -m unittest workflows/scripts/common/test_check_lane_names.py
-          python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
-      # EU personal data lives only in EU stacks: a gdpr-tagged or eu- stack is
-      # tagged gdpr, names only eu- regions (vars and their ARNs, state, backends,
-      # providers) and depends only on GDPR-scoped stacks, and no other stack depends
-      # on or references a GDPR-scoped one (dependencies, eu- ARNs in vars), outside
-      # EXEMPTIONS.
-      - name: check-data-residency
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_data_residency.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-data-residency.py < "$stacks_json"
-      # Service control policies (aws-scp in fnx-gbl-root) cannot be planned
-      # against AWS before they are applied: OU reads only as targets (never the
-      # root), valid JSON within 5,120 characters, at most four per OU, broad
-      # denies conditioned, global services exempt from every region deny, the
-      # deploy roles (Identity Center's by the reserved path only) excepted
-      # from the security-service deny and their names protected, every stack's
-      # account known, no stack in a region (or denied a us-east-1 call) its
-      # account's OU denies, EU accounts kept out of us-east-1 (check-scp-policies.py).
-      - name: check-scp-policies
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_scp_policies.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 scripts/check-scp-policies.py < "$stacks_json"
-      # A DR standby shares its primary's account and has no budget: the
-      # primary's cost-optimization budget_additional_environment_tags lists
-      # each standby's settings.prefix. A primary's settings.dr.region is its
+      # The stack checks: each runs its unit tests, then reads one shared
+      # `atmos describe stacks` document (one describe, not one per check).
+      # Every check runs even after another fails; the step lists the failed
+      # ones and exits 1. check-state-keys, check-lane-names,
+      # check-secret-attributes, check-cluster-api-ci, check-ci-state-roles and
+      # check-prod-protection run in validate-all's check-dependencies step
+      # (validate-enhanced.yaml), not here.
+      #
+      # check-data-residency: EU personal data lives only in EU stacks: a
+      # gdpr-tagged or eu- stack is tagged gdpr, names only eu- regions (vars
+      # and their ARNs, state, backends, providers) and depends only on
+      # GDPR-scoped stacks, and no other stack depends on or references a
+      # GDPR-scoped one (dependencies, eu- ARNs in vars), outside EXEMPTIONS.
+      #
+      # check-scp-policies: Service control policies (aws-scp in fnx-gbl-root)
+      # cannot be planned against AWS before they are applied: OU reads only as
+      # targets (never the root), valid JSON within 5,120 characters, at most
+      # four per OU, broad denies conditioned, global services exempt from
+      # every region deny, the deploy roles (Identity Center's by the reserved
+      # path only) excepted from the security-service deny and their names
+      # protected, every stack's account known, no stack in a region (or denied
+      # a us-east-1 call) its account's OU denies, EU accounts kept out of
+      # us-east-1 (check-scp-policies.py).
+      #
+      # check-dr-pairs: A DR standby shares its primary's account and has no
+      # budget: the primary's cost-optimization
+      # budget_additional_environment_tags lists each standby's settings.prefix. A primary's settings.dr.region is its
       # standby's region, kms/main's only replica region (aliased to the
       # standby's prefix + "-main") and the region its enabled backup/main
       # copies recovery points to. The failover flavor
@@ -312,27 +279,53 @@ workflows:
       # database_secret_arn; its database_name is every pair's
       # rds/main db_name, and each standby's external-secrets/main creates the
       # default store it names (dr-pair.py --lint).
-      - name: check-dr-pairs
+      #
+      # check-sqs-visibility: A queue a lambda's event source mapping reads:
+      # visibility_timeout_seconds below the function timeout fails (AWS
+      # rejects the mapping); below 6 x timeout + 5 warns.
+      #
+      # check-lambda-packages: iam/ci's lambda uploader role names its stage's
+      # s3/lambda-artifacts bucket and kms/main alias instead of reading their
+      # state (it applies first); this fails when either stops matching, and
+      # when an enabled lambda's s3_key is not a released
+      # <function_name>/<version>.zip.
+      #
+      # first-deploy-inputs: First-deploy preflight, WARN-ONLY here: the repo
+      # holds placeholders (account and organization IDs, example domains and
+      # alert addresses, empty EKS admin roles...) until the first deploy, so
+      # lint prints each one and never fails on them (--warn exits 0).
+      # bootstrap.yaml runs the same check fatally before anything touches AWS.
+      # docs/OPERATIONS.md#first-deploy-inputs.
+      - name: stack-checks
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_dr_pair.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/dr-pair.py --lint < "$stacks_json"
-      # A queue a lambda's event source mapping reads: visibility_timeout_seconds
-      # below the function timeout fails (AWS rejects the mapping); below
-      # 6 x timeout + 5 warns (check-sqs-visibility.py).
-      - name: check-sqs-visibility
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_sqs_visibility.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-sqs-visibility.py < "$stacks_json"
+          failed=""
+          # check <name> <unit test file> <check command...>: the check reads the JSON on stdin.
+          check() {
+            name=$1
+            unit=$2
+            shift 2
+            echo "== $name"
+            if python3 -m unittest "workflows/scripts/common/$unit" && "$@" < "$stacks_json"; then
+              return 0
+            fi
+            echo "$name FAILED"
+            failed="$failed $name"
+          }
+          check check-data-residency test_check_data_residency.py python3 workflows/scripts/common/check-data-residency.py
+          check check-scp-policies test_check_scp_policies.py python3 scripts/check-scp-policies.py
+          check check-dr-pairs test_dr_pair.py python3 workflows/scripts/common/dr-pair.py --lint
+          check check-sqs-visibility test_check_sqs_visibility.py python3 workflows/scripts/common/check-sqs-visibility.py
+          check check-lambda-packages test_check_lambda_packages.py python3 workflows/scripts/common/check-lambda-packages.py
+          check first-deploy-inputs test_check_first_deploy_inputs.py python3 workflows/scripts/common/check-first-deploy-inputs.py --warn
+          if [ -n "$failed" ]; then
+            echo "stack checks failed:$failed"
+            exit 1
+          fi
       # Atmos resolves a read in an abstract for every inheriting instance, even
       # one the instance overrides: every local read an instance resolves, its
       # own or inherited, names a real instance of its stack (the DR standbys
@@ -365,97 +358,6 @@ workflows:
       - name: scaffold-stack-reader
         type: shell
         command: bash scripts/test-scaffold-stack.sh
-      # iam/ci's lambda uploader role names its stage's s3/lambda-artifacts
-      # bucket and kms/main alias instead of reading their state (it applies
-      # first); this fails when either stops matching, and when an enabled
-      # lambda's s3_key is not a released <function_name>/<version>.zip.
-      - name: check-lambda-packages
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_lambda_packages.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-lambda-packages.py < "$stacks_json"
-      # secretsmanager types `secrets` as map(object), whose conversion drops
-      # an undeclared attribute silently (pasword_length plans clean and the
-      # default applies); this fails any entry key variables.tf does not declare.
-      # Also run by validate-all.
-      - name: check-secret-attributes
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_secret_attributes.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-secret-attributes.py components/terraform < "$stacks_json"
-      # A component that configures a kubernetes/helm/kubectl provider needs
-      # the EKS API, which GitHub-hosted runners cannot reach where the
-      # endpoint is private: each such instance must run on the in-VPC
-      # runners (settings.github.runner: in-vpc, with a pool its clusters
-      # admit) or set settings.github.actions_enabled: false
-      # (docs/OPERATIONS.md, "In-cluster components"); every runner pool
-      # must set allowed_refs and a max_size of at least 3 (the in-VPC jobs per
-      # pool); each pool must be in its stack's
-      # iam/ci ci_runner_pool_names; each provider exec command needs its
-      # tool in dependencies.tools; and each eks cluster admin role there
-      # (map_additional_iam_roles) must be trusted by its stage's state write
-      # role of the backend owning its state; a cluster with none only warns.
-      # Also run by validate-all.
-      - name: check-cluster-api-ci
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_backends.py workflows/scripts/common/test_ci_components.py workflows/scripts/common/test_ci_in_vpc.py workflows/scripts/common/test_runner_scripts.py workflows/scripts/common/test_in_vpc_workflows.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
-      # The backend owning a stack's state bucket (backend/main, or its EU twin)
-      # trusts the stack's CI roles as literal ARNs; this fails an iam/ci plan
-      # or apply role (<ci_role_name_prefix>-plan/-apply) that backend's stage
-      # read or write role does not trust, or that may assume another role
-      # (ci_backend_*_role_arn). Also run by validate-all.
-      - name: check-ci-state-roles
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_ci_state_roles.py workflows/scripts/common/test_backends.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-ci-state-roles.py < "$stacks_json"
-      # The stack templates leave the prod values of their rds and elasticache
-      # instances to the importing stack; this fails a stage prod instance
-      # without them (deletion protection, Multi-AZ/failover, final snapshot,
-      # 7+ days of backups or snapshots), and a prod cognito pool without
-      # deletion protection. Also run by validate-all.
-      - name: check-prod-protection
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_prod_protection.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-prod-protection.py components/terraform < "$stacks_json"
-      # First-deploy preflight, WARN-ONLY here: the repo holds placeholders
-      # (account and organization IDs, example domains and alert addresses,
-      # empty EKS admin roles...) until the first deploy, so lint prints each
-      # one and never fails on them (--warn exits 0). bootstrap.yaml runs the
-      # same check fatally before anything touches AWS.
-      # docs/OPERATIONS.md#first-deploy-inputs.
-      - name: first-deploy-inputs
-        type: shell
-        command: |
-          set -eu
-          python3 -m unittest workflows/scripts/common/test_check_first_deploy_inputs.py
-          stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-first-deploy-inputs.py --warn < "$stacks_json"
       - type: toast
         level: success
         content: Lint checks passed
