@@ -117,16 +117,11 @@ workflows:
       # -lockfile=readonly: the committed .terraform.lock.hcl must already
       # lock every provider the module uses (atmos workflow providers-lock -f
       # providers), so an unlocked provider fails here, not at deploy time.
+      # In parallel, $TF_VALIDATE_JOBS at a time (default: CPU count, at most
+      # 4); the script warms $TF_PLUGIN_CACHE_DIR serially first.
       - name: validate-root-modules
         type: shell
-        command: |
-          set -eu
-          for dir in components/terraform/*/; do
-            [ -n "$(find "$dir" -maxdepth 1 -name '*.tf' -print -quit)" ] || continue
-            echo "validating ${dir}"
-            terraform -chdir="$dir" init -backend=false -input=false -lockfile=readonly >/dev/null
-            terraform -chdir="$dir" validate -no-color
-          done
+        command: sh workflows/scripts/common/validate-root-modules.sh
 
   validate-stack:
     description: Validate stack manifests and resolve every component of one stack

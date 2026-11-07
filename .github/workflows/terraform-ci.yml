@@ -216,6 +216,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The provider cache of the next step, kept across runs. Keyed on the
+      # committed lock files like the Terraform tests job's cache, but its own
+      # prefix: that job inits only the tested components, and an exact-key hit
+      # on its subset would never be saved back with the rest.
+      - name: Restore/save the Terraform provider plugin cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/tf-plugin-cache
+          key: tfplugins-validate-${{ runner.os }}-${{ hashFiles('components/terraform/*/.terraform.lock.hcl') }}
+          restore-keys: |
+            tfplugins-validate-${{ runner.os }}-
       # validate-all runs `terraform init` in every root module. Without a
       # shared provider cache each one unpacks its own AWS provider and the
       # runner runs out of disk partway through the list.
