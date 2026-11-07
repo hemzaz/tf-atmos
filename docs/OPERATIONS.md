@@ -72,7 +72,8 @@ and `fixtures` stacks are exempt.
 `bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
 `backend-only`, `full`) before any AWS call, and so do `deploy-accounts.yaml` and
 `deploy-full-stack.yaml` (`deploy`, `deploy-kms`, `deploy-storage`, `deploy-security`; the other
-single-layer runs skip it); the cold start
+single-layer runs skip it), `apply-environment.yaml` (`apply`) and `security-hardening.yaml`
+(`harden`). Resuming a workflow with `--from-step` past it skips it; the cold start
 passes `--cold-start`, which makes a placeholder account in the backend's access-role principals a
 notice (it applies none of them). `atmos workflow lint` runs it with `--warn`: it
 never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
@@ -622,7 +623,7 @@ are set in the stack file.
 | Import a resource | `atmos workflow import -f import -s <stack>` |
 | List / release locks | `STACK=<stack> atmos workflow list-locks -f state-operations`; `atmos workflow force-unlock -f state-operations -s <stack>` (only when nothing is running) |
 | Rotate a Secrets Manager/Kubernetes certificate | `atmos workflow rotate -f rotate-certificate` (ACM certificates are Terraform-managed) |
-| Destroy a stack / the backend | `atmos workflow destroy -f destroy-environment` / `-f destroy-backend`; both prompt for the stack name, do not pass `-s` |
+| Destroy a stack / the backend | `atmos workflow destroy -f destroy-environment` / `-f destroy-backend`; both prompt for the stack name, do not pass `-s`. `destroy-environment` refuses fixture stacks and the audit stacks (the log archive and its Config key) |
 
 Destroying the backend is irreversible: it deletes the bucket and every stack's state in it.
 
