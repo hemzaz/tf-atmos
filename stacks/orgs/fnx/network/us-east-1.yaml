@@ -6,8 +6,19 @@
 # and one DNS delegation role per stage (aws-iam-role/dns-delegation-<stage>),
 # from orgs/fnx/network/_defaults (catalog/aws-dns-primary/main), all disabled
 # while the apex and account IDs are placeholders; the Transit Gateway hub
-# later (QE6). One enabled instance: its stage defaults' aws-account-settings
-# (stacks/orgs/fnx/network/_defaults.yaml). Its state goes to fnx-ue1-root's
+# later (QE6). Enabled: its stage defaults' aws-account-settings
+# (stacks/orgs/fnx/network/_defaults.yaml), and the account's trail and Config
+# recorder below.
+#
+# The account's one multi-region trail (cloudtrail, from
+# catalog/aws-cloudtrail/defaults; owner OQ-A, check-lane-names.py SINGLETONS),
+# delivering to fnx-ue1-audit's cloudtrail-bucket, and its Config recorder
+# (aws-config, inheriting aws-config/main), the account's global-resource
+# collector, delivering to fnx-ue1-audit's config-bucket. Both are in
+# deploy-full-stack's security layer, after the audit stack's storage layer
+# (docs/OPERATIONS.md "Bootstrap order").
+#
+# Its state goes to fnx-ue1-root's
 # bucket through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
 # whose core_write holds this stack's pattern pair (check-state-keys.py) and
 # trusts the network account's OrganizationAccountAccessRole: the provider
@@ -19,3 +30,14 @@ import:
   - catalog/_base/defaults
   - mixins/region/us-east-1
   - orgs/fnx/network/_defaults
+  - catalog/aws-cloudtrail/defaults
+  - catalog/aws-config/main
+
+components:
+  terraform:
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main

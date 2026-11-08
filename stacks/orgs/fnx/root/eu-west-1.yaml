@@ -21,6 +21,15 @@
 # settings (aws-account-settings, below):
 #   atmos workflow backend-cold-start -f bootstrap -s fnx-ew1-root
 #   atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root
+#
+# The management account's Config recorder for eu-west-1 (aws-config,
+# inheriting aws-config/main-eu-core, as the core template's eu-west-1 stacks):
+# regional resource types only, delivering to the EU archive (fnx-ew1-audit's
+# config-bucket), with the recorder role of fnx-ue1-root, the account's
+# global-resource collector, by its convention ARN (catalog/aws-config/main.yaml;
+# the scoped OQ-A exemption of check-data-residency.py), so deploy fnx-ue1-root's
+# first (docs/OPERATIONS.md "Bootstrap order"). No trail: fnx-ue1-root's
+# multi-region trail records this region (owner OQ-A).
 # =============================================================================
 
 import:
@@ -30,6 +39,7 @@ import:
   - orgs/fnx/root/_defaults
   - catalog/backend/roles/prod
   - catalog/aws-account-settings/main-standby
+  - catalog/aws-config/main
 
 vars:
   region: "{{ .settings.tfstate.region }}"
@@ -63,6 +73,13 @@ components:
     aws-account-settings:
       metadata:
         enabled: true
+
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main-eu-core
 
     backend/main:
       metadata:

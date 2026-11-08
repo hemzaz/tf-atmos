@@ -12,6 +12,16 @@
 #
 # Bootstrap (cold start, once): workflows/bootstrap.yaml `backend-cold-start`,
 # or by hand - see components/terraform/backend/README.md#bootstrap.
+#
+# The management account's one multi-region trail (cloudtrail, from
+# catalog/aws-cloudtrail/defaults; owner OQ-A, check-lane-names.py SINGLETONS),
+# delivering to fnx-ue1-audit's cloudtrail-bucket, and its Config recorder
+# (aws-config, inheriting aws-config/main), the account's global-resource
+# collector, delivering to fnx-ue1-audit's config-bucket. Both are in
+# deploy-full-stack's security layer, after the audit stack's storage layer
+# (docs/OPERATIONS.md "Bootstrap order"). This stack is not scaffolded: the
+# same instances as the core template's home-region stacks
+# (scaffolds/stack/stack/core.yaml.tmpl), by hand.
 # =============================================================================
 
 import:
@@ -22,6 +32,8 @@ import:
   - catalog/backend/roles/nonprod
   - catalog/backend/roles/prod
   - catalog/access-analyzer/root
+  - catalog/aws-cloudtrail/defaults
+  - catalog/aws-config/main
 
 vars:
   region: "{{ .settings.tfstate.region }}"
@@ -33,6 +45,13 @@ settings:
 
 components:
   terraform:
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main
+
     backend/main:
       metadata:
         component: backend

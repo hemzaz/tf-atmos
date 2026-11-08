@@ -111,6 +111,9 @@ MAP_CONSUMERS = frozenset({
     # The audit buckets' delivery policies and the Config bucket key's policy
     # list every account of their residency (E5a4).
     "aws-cloudtrail-bucket", "aws-config-bucket",
+    # The vendored trail and recorder (E5b): the trail key policy names the audit
+    # account, and the aggregator's delegated_accounts list every US account.
+    "aws-cloudtrail", "aws-config",
 })
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
 # UUID's last group: the lookbehind is the whole 8-4-4-4 UUID prefix, so

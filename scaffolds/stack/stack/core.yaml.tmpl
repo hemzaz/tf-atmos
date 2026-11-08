@@ -1,8 +1,10 @@
 [[- $stack := printf "%s-%s-%s" .Config.tenant .Config.region_code .Config.stage -]]
 [[- $home := eq .Config.region "us-east-1" -]]
-[[- $eu := hasPrefix "eu-" .Config.region -]]
+[[- /* The EU core region: scripts/stack-wiring.py EU_CORE_REGIONS (the scaffold's guard hook allows no other eu- region for a core stack). */ -]]
+[[- $eu := eq .Config.region "eu-west-1" -]]
 [[- $root := printf "%s-%s-root" .Config.tenant (ternary "ew1" "ue1" $eu) -]]
 [[- $archive := and (eq .Config.stage "audit") (or $home $eu) -]]
+[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) "main-eu-core" $home -]]
 ---
 # =============================================================================
 # [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
@@ -14,12 +16,33 @@
 # kms/config-bucket key from the imported catalogs (aws-config-bucket/[[ ternary "main-eu" "main" $eu ]]
 # for the [[ ternary "EU" "US" $eu ]] delivery accounts). The key is in the kms layer, the buckets in
 # the storage layer (workflows/deploy-full-stack.yaml).
-# Its state
 [[- else ]]
-# A core-account stack (owner decision QE5): no instance of its own; its stage
-# defaults' aws-account-settings is its one enabled instance until the core
-# components land. Its state
-[[- end ]] goes to [[ $root ]]'s bucket
+# A core-account stack (owner decision QE5): its stage defaults'
+# aws-account-settings, and the account's trail and Config recorder below.
+[[- end ]]
+[[- if $home ]]
+#
+# The account's one multi-region trail (cloudtrail, from
+# catalog/aws-cloudtrail/defaults; owner OQ-A, check-lane-names.py SINGLETONS),
+# delivering to [[ .Config.tenant ]]-ue1-audit's cloudtrail-bucket, and its Config recorder
+# (aws-config, inheriting aws-config/[[ $recorder ]]), the account's global-resource
+# collector, delivering to [[ .Config.tenant ]]-ue1-audit's config-bucket
+[[- if eq $recorder "security" ]]; it also holds the US
+# account aggregator (owner OQ-B: every account but prod-eu)
+[[- end ]]. Both are in
+# deploy-full-stack's security layer, after the audit stack's storage layer
+# (docs/OPERATIONS.md "Bootstrap order").
+[[- else ]]
+#
+# The account's Config recorder for [[ .Config.region ]] (aws-config, inheriting
+# aws-config/main-eu-core): regional resource types only, with the recorder
+# role of [[ .Config.tenant ]]-ue1-[[ .Config.stage ]], the account's global-resource collector, by
+# its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
+# first (docs/OPERATIONS.md "Bootstrap order"). No trail: the account's one
+# multi-region trail, in its home stack, records this region (owner OQ-A).
+[[- end ]]
+#
+# Its state goes to [[ $root ]]'s bucket
 # through the backend's core role (stacks/orgs/[[ .Config.tenant ]]/_defaults.yaml),
 # whose core_write trusts the management-account administrator and the
 # [[ .Config.stage ]] account's OrganizationAccountAccessRole, and its stage
@@ -31,9 +54,11 @@
 # An EU core stack (owner decision 2026-11-03: stages audit and security in
 # eu-west-1, scripts/stack-wiring.py EU_CORE_STAGES/EU_CORE_REGIONS), in the
 # same shared [[ .Config.stage ]] account: GDPR-scoped (check-data-residency.py),
-# so tagged Compliance "pci-sox-gdpr" and its state in the EU backend
-# ([[ $root ]], stacks/orgs/[[ .Config.tenant ]]/root/eu-west-1.yaml), whose
-# core_write trusts the [[ .Config.stage ]] account's OrganizationAccountAccessRole.
+# so tagged Compliance "pci-sox-gdpr", its recorder delivering to the EU
+# archive ([[ .Config.tenant ]]-ew1-audit) under the scoped OQ-A exemption for its US collector
+# region, and its state in the EU backend ([[ $root ]],
+# stacks/orgs/[[ .Config.tenant ]]/root/eu-west-1.yaml), whose core_write trusts the
+# [[ .Config.stage ]] account's OrganizationAccountAccessRole.
 [[- end ]]
 [[- if not $home ]]
 #
@@ -55,6 +80,10 @@ import:
   - catalog/aws-cloudtrail-bucket/defaults
   - catalog/aws-config-bucket/[[ ternary "main-eu" "main" $eu ]]
 [[- end ]]
+[[- if $home ]]
+  - catalog/aws-cloudtrail/defaults
+[[- end ]]
+  - catalog/aws-config/main
 [[- if $eu ]]
 
 vars:
@@ -73,3 +102,12 @@ settings:
     role_prefix: '{{ .settings.context.tenant }}-ew1-terraform-backend'
     stack: '{{ .settings.context.tenant }}-ew1-root'
 [[- end ]]
+
+components:
+  terraform:
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/[[ $recorder ]]

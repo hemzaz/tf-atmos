@@ -1,18 +1,29 @@
 ---
 # =============================================================================
-# fnx-ue1-audit - the audit account's home-region stack
+# fnx-ue1-audit - the audit account's us-east-1 stack
 # =============================================================================
-# Its stage defaults' aws-account-settings
-# (stacks/orgs/fnx/audit/_defaults.yaml), and the US log archive (E5a, one per residency, owner decision QE7): the
-# cloudtrail-bucket, config-bucket and its kms/config-bucket key from the
-# imported catalogs (aws-config-bucket/main for the US delivery accounts). The
-# key is in the kms layer, the buckets in the storage layer
-# (workflows/deploy-full-stack.yaml). Its state goes to fnx-ue1-root's
-# bucket through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
-# whose core_write holds this stack's pattern pair (check-state-keys.py) and
-# trusts the audit account's OrganizationAccountAccessRole: the provider guard
-# needs credentials in the audit account, and that role is the way in until
-# E4's Identity Center roles.
+# A core-account stack (owner decision QE5): its stage defaults'
+# aws-account-settings, and the US log archive (E5a, one per residency,
+# owner decision QE7): the cloudtrail-bucket, config-bucket and its
+# kms/config-bucket key from the imported catalogs (aws-config-bucket/main
+# for the US delivery accounts). The key is in the kms layer, the buckets in
+# the storage layer (workflows/deploy-full-stack.yaml).
+#
+# The account's one multi-region trail (cloudtrail, from
+# catalog/aws-cloudtrail/defaults; owner OQ-A, check-lane-names.py SINGLETONS),
+# delivering to fnx-ue1-audit's cloudtrail-bucket, and its Config recorder
+# (aws-config, inheriting aws-config/main), the account's global-resource
+# collector, delivering to fnx-ue1-audit's config-bucket. Both are in
+# deploy-full-stack's security layer, after the audit stack's storage layer
+# (docs/OPERATIONS.md "Bootstrap order").
+#
+# Its state goes to fnx-ue1-root's bucket
+# through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
+# whose core_write trusts the management-account administrator and the
+# audit account's OrganizationAccountAccessRole, and its stage
+# defaults keep it out of every CI matrix (github.actions_enabled: false). The
+# scaffold's wire hook added this stack's pattern pair to core_write
+# (check-state-keys.py).
 # =============================================================================
 
 import:
@@ -21,3 +32,14 @@ import:
   - orgs/fnx/audit/_defaults
   - catalog/aws-cloudtrail-bucket/defaults
   - catalog/aws-config-bucket/main
+  - catalog/aws-cloudtrail/defaults
+  - catalog/aws-config/main
+
+components:
+  terraform:
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main

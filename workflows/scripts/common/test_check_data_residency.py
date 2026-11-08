@@ -514,8 +514,15 @@ def archived(component, env, region="eu-west-1", compliance=EU, deps=None, accou
 
 def eu_core_recorder(account, **extra_vars):
     """A shared account's eu-west-1 recorder: its collector is the US home stack's (OQ-A)."""
-    return archived("aws-config", "ew1", account=account, global_resource_collector_region="us-east-1",
-                    iam_role_arn=f"arn:aws:iam::123456789012:role/fnx-ue1-{account}-aws-config-config", **extra_vars)
+    extra_vars = {"iam_role_arn": f"arn:aws:iam::123456789012:role/fnx-ue1-{account}-aws-config-config", **extra_vars}
+    return archived("aws-config", "ew1", account=account, global_resource_collector_region="us-east-1", **extra_vars)
+
+
+def home_collector(account):
+    """A shared account's US home-stack collector, with the null-label context the vendored component names from."""
+    spec = archived("aws-config", "ue1", "us-east-1", US, account=account, name="aws-config")
+    spec["vars"]["context"] = {"tenant": "fnx", "environment": "ue1", "stage": account}
+    return spec
 
 
 def audit_stacks():
@@ -557,9 +564,31 @@ class LogArchiveTest(unittest.TestCase):
             "fnx-ew1-root": eu_stack(**{"aws-config": eu_core_recorder("root")}),
             "fnx-ue1-root": stack(**{
                 "cloudtrail": archived("aws-cloudtrail", "ue1", "us-east-1", US, account="root"),
-                "aws-config": archived("aws-config", "ue1", "us-east-1", US, account="root"),
+                "aws-config": home_collector("root"),
             }),
         }), [])
+
+    def test_a_literal_collector_role_arn_names_the_collectors_role(self):
+        wrong = "arn:aws:iam::123456789012:role/fnx-ue1-audit-aws-config-config"
+        errors = self.check(**{
+            "fnx-ew1-root": eu_stack(**{"aws-config": eu_core_recorder("root", iam_role_arn=wrong)}),
+            "fnx-ue1-root": stack(**{"aws-config": home_collector("root")}),
+        })
+        self.assertEqual(errors, [
+            f"fnx-ew1-root: aws-config vars.iam_role_arn is {wrong!r}, not its collector's role "
+            "arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config",
+        ])
+        other_account = home_collector("root")
+        other_account["settings"]["environment"]["account_id"] = "210987654321"
+        errors = self.check(**{
+            "fnx-ew1-root": eu_stack(**{"aws-config": eu_core_recorder("root")}),
+            "fnx-ue1-root": stack(**{"aws-config": other_account}),
+        })
+        self.assertEqual(errors, [
+            "fnx-ew1-root: aws-config vars.iam_role_arn is "
+            "'arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config', not its collector's role "
+            "arn:aws:iam::210987654321:role/fnx-ue1-root-aws-config-config",
+        ])
 
     def test_us_collector_region_without_a_us_collector_in_the_account_fails(self):
         # prod-eu's stacks are all GDPR-scoped; and root's US home stack here holds no collector.
@@ -574,6 +603,20 @@ class LogArchiveTest(unittest.TestCase):
             f"fnx-ew1-prod: aws-config vars.global_resource_collector_region is 'us-east-1', {OUTSIDE}",
             f"fnx-ew1-root: aws-config vars.global_resource_collector_region is 'us-east-1', {OUTSIDE}",
         ])
+
+    def test_a_disabled_or_accountless_us_collector_is_no_collector(self):
+        accountless = archived("aws-config", "ue1", "us-east-1", US, account="root")
+        accountless["settings"]["environment"]["account"] = ""
+        for home in (archived("aws-config", "ue1", "us-east-1", US, account="root", enabled=False), accountless):
+            with self.subTest(home=home):
+                recorder = eu_core_recorder("root")
+                recorder["settings"]["environment"]["account"] = home["settings"]["environment"]["account"]
+                errors = self.check(**{
+                    "fnx-ew1-root": eu_stack(**{"aws-config": recorder}),
+                    "fnx-ue1-root": stack(**{"aws-config": home}),
+                })
+                self.assertIn(f"fnx-ew1-root: aws-config vars.global_resource_collector_region is 'us-east-1', "
+                              f"{OUTSIDE}", errors)
 
     def test_recorder_outside_its_collector_region_needs_the_collectors_role(self):
         errors = self.check(**{

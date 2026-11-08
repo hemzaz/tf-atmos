@@ -1,19 +1,41 @@
 ---
 # =============================================================================
-# fnx-ue1-identity - the identity account's home-region stack
+# fnx-ue1-identity - the identity account's us-east-1 stack
 # =============================================================================
-# No instance of its own, and one enabled instance: its stage defaults'
-# aws-account-settings (stacks/orgs/fnx/identity/_defaults.yaml); it keeps only
-# its baseline (owner OQ2, Cloud Posse Evolution 4: Identity Center lives in
-# fnx-gbl-root, E4). Its state goes to fnx-ue1-root's bucket through
-# the backend's core role (stacks/orgs/fnx/_defaults.yaml), whose core_write
-# holds this stack's pattern pair (check-state-keys.py) and trusts the identity
-# account's OrganizationAccountAccessRole: the provider guard needs credentials
-# in the identity account, and that role is the way in until E4's Identity
-# Center roles.
+# A core-account stack (owner decision QE5): its stage defaults'
+# aws-account-settings, and the account's trail and Config recorder below.
+# Identity Center is not here (owner OQ2, Cloud Posse Evolution 4: it lives in
+# fnx-gbl-root, E4).
+#
+# The account's one multi-region trail (cloudtrail, from
+# catalog/aws-cloudtrail/defaults; owner OQ-A, check-lane-names.py SINGLETONS),
+# delivering to fnx-ue1-audit's cloudtrail-bucket, and its Config recorder
+# (aws-config, inheriting aws-config/main), the account's global-resource
+# collector, delivering to fnx-ue1-audit's config-bucket. Both are in
+# deploy-full-stack's security layer, after the audit stack's storage layer
+# (docs/OPERATIONS.md "Bootstrap order").
+#
+# Its state goes to fnx-ue1-root's bucket
+# through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
+# whose core_write trusts the management-account administrator and the
+# identity account's OrganizationAccountAccessRole, and its stage
+# defaults keep it out of every CI matrix (github.actions_enabled: false). The
+# scaffold's wire hook added this stack's pattern pair to core_write
+# (check-state-keys.py).
 # =============================================================================
 
 import:
   - catalog/_base/defaults
   - mixins/region/us-east-1
   - orgs/fnx/identity/_defaults
+  - catalog/aws-cloudtrail/defaults
+  - catalog/aws-config/main
+
+components:
+  terraform:
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main
