@@ -126,10 +126,17 @@ the last step.
    Identity Center Terraform sets ([State backend](#state-backend)), and the PR enabling the
    `aws-identity-center` instance removes the `OrganizationAccountAccessRole` entries. The core stacks
    (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`, whose preflight fails while a
-   core account ID is a placeholder: today only their
-   `aws-account-settings`, plus the log archive in `fnx-ue1-audit` and, with `-s fnx-ew1-audit`, the
-   EU one), then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
-   and [Deploying a stack](#deploying-a-stack).
+   core account ID is a placeholder: their `aws-account-settings`, each account's trail and Config
+   recorder, plus the log archive in `fnx-ue1-audit` and, with `-s fnx-ew1-audit`, the EU one),
+   then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
+   and [Deploying a stack](#deploying-a-stack). Order the core stacks: `fnx-ue1-audit` first
+   (its storage layer holds the buckets every trail and recorder delivers to), then the other
+   `fnx-ue1-<core>` stacks and the management account's trail and recorder
+   (`atmos workflow deploy-security -f deploy-full-stack -s fnx-ue1-root`), and only then the
+   eu-west-1 ones (`-s fnx-ew1-audit`, and `deploy-security -s fnx-ew1-root`): a shared account's
+   eu-west-1 recorder uses its US home stack's recorder role by name
+   (`stacks/catalog/aws-config/main.yaml`, `main-eu-core`), which no dependency can enforce
+   (check-data-residency.py forbids an EU stack's dependency on a US one).
 
 **An imported account without `OrganizationAccountAccessRole`.** Organizations creates that role
 only in the accounts it creates; an account that joined by invitation has none, so step 6 and the
