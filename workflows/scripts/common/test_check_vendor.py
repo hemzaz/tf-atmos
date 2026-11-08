@@ -63,6 +63,10 @@ class Fixture(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = self.tmp.name
         self.write(f"{TARGET}/main.tf", MAIN_TF)
+        # The repository's entries name real targets this fixture lacks; a test lists its own.
+        patcher = mock.patch.object(check, "TFLINT_ALLOWLIST", ())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -123,22 +127,50 @@ class LockTest(Fixture):
             self.write(f"{TARGET}/{rel}", "{}")
         self.assertEqual(self.errs(), [])
 
+    HOUSE = 'plugin "terraform" {\n  enabled = true\n}\n'
+    TAIL = ('\n# Cloud Posse remote-state.tf uses lookup() with 2 arguments.\n'
+            'rule "terraform_deprecated_lookup" {\n  enabled = false\n}\n')
+    LISTED = ((TARGET, "terraform_deprecated_lookup", "lookup() with 2 arguments"),)
+
+    def tflint(self, text, allowlist=LISTED):
+        self.write(check.TFLINT, self.HOUSE)
+        self.write(f"{TARGET}/{check.TFLINT}", text)
+        return check.check_lock(manifest(source()), lock(), self.root, allowlist)
+
     def test_house_tflint_config_only_disables_rules(self):
-        house = 'plugin "terraform" {\n  enabled = true\n}\n'
-        self.write(check.TFLINT, house)
-        tail = '\n# Cloud Posse remote-state.tf uses lookup() with 2 arguments.\nrule "terraform_deprecated_lookup" {\n  enabled = false\n}\n'
-        self.write(f"{TARGET}/{check.TFLINT}", house + tail)
-        self.assertEqual(self.errs(), [])
+        house, tail = self.HOUSE, self.TAIL
+        self.assertEqual(self.tflint(house + tail), [])
         for bad in (house.replace("true", "false") + tail,  # the house config changed
                     house + tail.replace("false", "true"),  # a rule switched on
                     house + tail.replace("# Cloud Posse remote-state.tf uses lookup() with 2 arguments.\n", "")):
             with self.subTest(bad=bad):
-                self.write(f"{TARGET}/{check.TFLINT}", bad)
-                self.assertEqual(len(self.errs()), 1)
-                self.assertIn("verbatim", self.errs()[0])
+                errs = self.tflint(bad)
+                # The bad file disables nothing, so the entry is also stale.
+                self.assertEqual(len(errs), 2, errs)
+                self.assertIn("verbatim", errs[0])
         os.remove(os.path.join(self.root, TARGET, check.TFLINT))
         self.write(f"{TARGET}/modules/{check.TFLINT}", house + tail)
         self.assertIn("not from the vendor pull", self.errs()[0])
+
+    def test_tflint_rule_must_be_listed_for_its_target(self):
+        other = ((TARGET, "terraform_unused_declarations", "x"),
+                 ("components/terraform/other", "terraform_deprecated_lookup", "x"))
+        for allowlist in ((), other):
+            with self.subTest(allowlist=allowlist):
+                errs = [e for e in self.tflint(self.HOUSE + self.TAIL, allowlist) if "stale" not in e]
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("disables terraform_deprecated_lookup, which TFLINT_ALLOWLIST does not list", errs[0])
+
+    def test_stale_tflint_entry_fails(self):
+        # The listed rule is no longer disabled, or the target has no .tflint.hcl at all.
+        errs = self.tflint(self.HOUSE)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("allowlist entry terraform_deprecated_lookup", errs[0])
+        self.assertIn("stale", errs[0])
+        os.remove(os.path.join(self.root, TARGET, check.TFLINT))
+        errs = check.check_lock(manifest(source()), lock(), self.root, self.LISTED)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("stale", errs[0])
 
     def test_edited_missing_extra(self):
         self.write(f"{TARGET}/main.tf", MAIN_TF + "# local edit\n")
