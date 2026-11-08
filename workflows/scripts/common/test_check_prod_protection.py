@@ -160,5 +160,37 @@ class CiPlanTrustTest(unittest.TestCase):
         self.assertEqual(check_prod_protection.check_ci_plan_trust(
             stacks(**{"iam/main": instance("iam")}), COMPONENTS), [])
 
+
+class TrailProtectionTest(unittest.TestCase):
+    """OQ-F: every trail keeps its key and its label, in any stage (core stacks are not in CD)."""
+
+    @staticmethod
+    def found(stage="audit", metadata=None, **variables):
+        trail = instance("aws-cloudtrail", stage=stage, **{"enabled": True, "name": "cloudtrail", **variables})
+        trail["metadata"] = metadata or {}
+        return check_prod_protection.check_trails({"fnx-ue1-audit": {"components": {"terraform": {
+            "cloudtrail": trail}}}})
+
+    def test_catalog_trail_passes(self):
+        self.assertEqual(self.found(), [])
+        self.assertEqual(self.found(enabled=None), [])  # null-label: null is enabled
+
+    def test_disabled_trail_fails_in_any_stage(self):
+        for stage in ("audit", "root", "dev"):
+            with self.subTest(stage=stage):
+                found = self.found(stage=stage, enabled="false")
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("schedules the trail KMS key's deletion", found[0])
+
+    def test_relabelled_trail_fails(self):
+        self.assertIn("name 'trail'", self.found(name="trail")[0])
+        self.assertIn("attributes ['v2']", self.found(attributes=["v2"])[0])
+
+    def test_undeployed_trail_is_skipped(self):
+        # metadata.enabled false stops deploying it; Atmos destroys nothing.
+        self.assertEqual(self.found(metadata={"enabled": False}, enabled=False), [])
+        self.assertEqual(self.found(metadata={"type": "abstract"}, name=None), [])
+
+
 if __name__ == "__main__":
     unittest.main()

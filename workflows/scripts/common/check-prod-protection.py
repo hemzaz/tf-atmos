@@ -31,6 +31,16 @@ subject, and no other default branch even with a matching subject. The plan role
 every prod state object through backend/main's prod_read role, and the
 component's default trusts repo:<repo>:pull_request, i.e. code from any PR.
 
+And every deployable aws-cloudtrail instance, in any stage (OQ-F, E5b4b), keeps
+its trail and the trail's KMS key: Cloud Posse's component always creates the
+key, with a hardcoded 10-day deletion window, so the only routine change that
+schedules its deletion (and the trail's and log group's) is vars.enabled false;
+a renamed label (vars.name other than "cloudtrail", or vars.attributes) replaces
+the trail and its log group and renames the key alias. Removing the instance or
+metadata.enabled false destroys nothing (Atmos stops planning it). The core
+stacks that hold the trails are outside CD, so check-plan-destroys' deploy gate
+never sees them: this lint is the guard.
+
 Exits 1 on any unsafe value.
 """
 import json
@@ -43,6 +53,8 @@ PROD_STAGE = "prod"
 # Owner decision D3: a prod plan role trusts the master branch's ref, nothing else.
 PROD_PLAN_BRANCH = "master"
 MIN_RETENTION_DAYS = 7
+# OQ-F: the vendored trail component and its sticky label name (fnx-ue1-<stage>-cloudtrail).
+TRAIL_COMPONENT, TRAIL_NAME = "aws-cloudtrail", "cloudtrail"
 
 # component -> [(variable, is_safe, what safe means)]
 RULES: dict[str, list[tuple[str, Callable[[Any, dict], bool], str]]] = {
@@ -171,12 +183,37 @@ def check_ci_plan_trust(stacks: dict, components_dir: pathlib.Path) -> list[str]
     return errors
 
 
+def check_trails(stacks: dict) -> list[str]:
+    """aws-cloudtrail instances whose trail or trail key a routine change would destroy or replace."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            if instance.get("component") != TRAIL_COMPONENT or not is_deployable(instance):
+                continue
+            variables = instance.get("vars") or {}
+            # null-label: enabled null means enabled; only false destroys.
+            if normalize(variables.get("enabled")) is False:
+                errors.append(
+                    f"{stack_name}: {name} ({TRAIL_COMPONENT}) enabled is false: that schedules the trail KMS "
+                    "key's deletion and destroys the trail and its log group; set metadata.enabled false "
+                    "to stop deploying it instead (OQ-F)"
+                )
+            if variables.get("name") != TRAIL_NAME or variables.get("attributes"):
+                errors.append(
+                    f"{stack_name}: {name} ({TRAIL_COMPONENT}) is labelled name {variables.get('name')!r}, "
+                    f"attributes {variables.get('attributes') or []!r}: the trail, its log group and its key "
+                    f"alias are sticky as name {TRAIL_NAME!r} with no attributes (a new label replaces the trail)"
+                )
+    return errors
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__.splitlines()[2], file=sys.stderr)
         return 2
     described = json.load(sys.stdin)
-    errors = check(described, pathlib.Path(sys.argv[1])) + check_ci_plan_trust(described, pathlib.Path(sys.argv[1]))
+    errors = (check(described, pathlib.Path(sys.argv[1])) + check_ci_plan_trust(described, pathlib.Path(sys.argv[1]))
+              + check_trails(described))
     for error in errors:
         print(f"ERROR {error}")
     if errors:
@@ -187,7 +224,7 @@ def main() -> int:
         f"snapshot and {MIN_RETENTION_DAYS}+ days of backups; every prod elasticache instance fails over "
         f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots; every prod cognito pool is "
         "deletion-protected; every prod CI plan role trusts its "
-        "repository's master ref only"
+        "repository's master ref only; every trail keeps its key and its label"
     )
     return 0
 
