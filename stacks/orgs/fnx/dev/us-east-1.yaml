@@ -43,7 +43,7 @@ import:
   - catalog/secretsmanager/infra-dev
   - catalog/acm/main
   - catalog/acm/services
-  - catalog/cloudtrail/main
+  - catalog/aws-cloudtrail/defaults
   - catalog/awsconfig/main
   - catalog/guardduty/main
   - catalog/securityhub/main

@@ -13,12 +13,13 @@ component per service, the Cloud Posse model).
 - Instance: `security-monitoring/main` in the three AWS stacks, `fnx-ue2-prod` and `fnx-ec1-prod`
   (no CIS filters: no trail there) and `fnx-ew1-prod` (on its own trail's log group).
 - Reads: `guardduty/main .detector_id`, `securityhub/main .account_arn`,
-  `inspector2/main .account_id`, `cloudtrail/main .cloudtrail_logs_log_group_name`,
+  `inspector2/main .account_id`, `cloudtrail .cloudtrail_logs_log_group_name` (the vendored
+  `aws-cloudtrail` trail),
   `kms/main .key_arn`, `iam/ci .ci_apply_role_arn`.
 
 ## Notes
 
-- Apply `kms/main`, `cloudtrail/main`, `guardduty/main` and `securityhub/main` first. A null input
+- Apply `kms/main`, `cloudtrail`, `guardduty/main` and `securityhub/main` first. A null input
   fails the plan on the `require_*_route` preconditions (on by default) instead of silently
   turning alerting off.
 - `kms/main` needs `allow_eventbridge` and `allow_cloudwatch_alarms` (on in `kms/defaults`) so

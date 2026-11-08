@@ -58,7 +58,7 @@ import:
   - catalog/secretsmanager/infra[[ $f ]]
   - catalog/acm/main
   - catalog/acm/services
-  - catalog/cloudtrail/main
+  - catalog/aws-cloudtrail/defaults
   - catalog/awsconfig/main
   - catalog/guardduty/main
   - catalog/securityhub/main
@@ -313,7 +313,7 @@ components:
     # region's management events (the other stack's multi-region trail
     # already delivers them), kept so security-monitoring/main's CIS metric
     # filters run on a trail in this region.
-    cloudtrail/main:
+    cloudtrail:
       vars:
         is_multi_region_trail: false
         include_global_service_events: false
