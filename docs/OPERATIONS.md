@@ -135,7 +135,7 @@ the last step.
    (`atmos workflow deploy-security -f deploy-full-stack -s fnx-ue1-root`), and only then the
    eu-west-1 ones (`-s fnx-ew1-audit`, and `deploy-security -s fnx-ew1-root`): a shared account's
    eu-west-1 recorder uses its US home stack's recorder role by name
-   (`stacks/catalog/aws-config/main.yaml`, `main-eu-core`), which no dependency can enforce
+   (`stacks/catalog/aws-config/main.yaml`, `main-core-region`), which no dependency can enforce
    (check-data-residency.py forbids an EU stack's dependency on a US one).
 
 **An imported account without `OrganizationAccountAccessRole`.** Organizations creates that role
@@ -626,7 +626,7 @@ are set in the stack file.
 | Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-scan-report -f lint` lists every finding without failing. No baselines: fix a finding or suppress it inline with a reason (`#checkov:skip=<ID>:<reason>` in the block, `#trivy:ignore:<ID> <reason>` above it); a checkov finding in a vendored file, which cannot be edited, gets a (file, check, reason) entry in `scripts/check-checkov-allowlist.py`, and an entry that matches nothing fails the gate |
 | Security Hub findings | `atmos workflow security-audit -f security-hardening -s <stack>` |
 | Compliance | `atmos workflow check -f compliance-check -s <stack>`; `report` writes `compliance-report.md` |
-| Hardening | `STACK=<stack> atmos workflow harden -f security-hardening` (plans and applies `cloudtrail`, `awsconfig`, `guardduty`, `securityhub`), `harden-iam` (password policy) |
+| Hardening | `STACK=<stack> atmos workflow harden -f security-hardening` (plans and applies those of `cloudtrail`, `aws-config`, `guardduty/main`, `securityhub/main` the stack has), `harden-iam` (password policy) |
 | Import a resource | `atmos workflow import -f import -s <stack>` |
 | List / release locks | `STACK=<stack> atmos workflow list-locks -f state-operations`; `atmos workflow force-unlock -f state-operations -s <stack>` (only when nothing is running) |
 | Rotate a Secrets Manager/Kubernetes certificate | `atmos workflow rotate -f rotate-certificate` (ACM certificates are Terraform-managed) |

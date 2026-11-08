@@ -23,7 +23,7 @@
 #   atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root
 #
 # The management account's Config recorder for eu-west-1 (aws-config,
-# inheriting aws-config/main-eu-core, as the core template's eu-west-1 stacks):
+# inheriting aws-config/main-core-region, as the core template's eu-west-1 stacks):
 # regional resource types only, delivering to the EU archive (fnx-ew1-audit's
 # config-bucket), with the recorder role of fnx-ue1-root, the account's
 # global-resource collector, by its convention ARN (catalog/aws-config/main.yaml;
@@ -79,7 +79,7 @@ components:
       metadata:
         component: aws-config
         inherits:
-          - aws-config/main-eu-core
+          - aws-config/main-core-region
 
     backend/main:
       metadata:

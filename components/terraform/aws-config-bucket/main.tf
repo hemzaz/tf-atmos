@@ -30,7 +30,7 @@ locals {
   s3_bucket_arn    = format("arn:%s:s3:::%s", data.aws_partition.current.partition, module.aws_config_label.id)
   s3_object_prefix = format("%s/AWSLogs/*", local.s3_bucket_arn)
   # This account's own recorder role: its home stack's (<tenant>-ue1-<stage>) aws-config role,
-  # which its eu-west-1 recorder reuses (catalog/aws-config main-eu-core's convention ARN).
+  # which its eu-west-1 recorder reuses (catalog/aws-config main-core-region's convention ARN).
   recorder_role_arn = format("arn:%s:iam::%s:role/%s-ue1-%s-aws-config-config",
   data.aws_partition.current.partition, data.aws_caller_identity.current.account_id, module.this.tenant, module.this.stage)
 }

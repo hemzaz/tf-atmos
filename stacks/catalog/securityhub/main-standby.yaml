@@ -21,7 +21,7 @@ components:
         # Security Hub User Guide, "Controls that you might want to disable"
         # (https://docs.aws.amazon.com/securityhub/latest/userguide/controls-to-disable.html):
         # - global resources: AWS Config records IAM in the primary's region
-        #   only (awsconfig/main), so the IAM controls and KMS.1/KMS.2 (they
+        #   only (aws-config), so the IAM controls and KMS.1/KMS.2 (they
         #   check IAM policies, kms-controls.html) are disabled in every
         #   other region;
         # - CloudWatch.1-14 (CIS 1.2.0 section 3, PCI CW.1): log metric filters

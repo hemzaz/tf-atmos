@@ -10,7 +10,7 @@
 # the storage layer (workflows/deploy-full-stack.yaml).
 #
 # The account's Config recorder for eu-west-1 (aws-config, inheriting
-# aws-config/main-eu-core): regional resource types only, with the recorder
+# aws-config/main-core-region): regional resource types only, with the recorder
 # role of fnx-ue1-audit, the account's global-resource collector, by
 # its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
 # first (docs/OPERATIONS.md "Bootstrap order"). No trail: the account's one
@@ -71,4 +71,4 @@ components:
       metadata:
         component: aws-config
         inherits:
-          - aws-config/main-eu-core
+          - aws-config/main-core-region

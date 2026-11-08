@@ -161,6 +161,10 @@ SYNTH = [
     (r'^(dead_letter_)?queue_name$',  'example-queue'),
     # ...and the cloudtrail component's log group for its CIS metric filters.
     (r'^cloudtrail_logs_log_group_name$', '/aws/cloudtrail/example-cloudtrail'),
+    # ...and a DR standby's aws-config, which reads its primary's recorder
+    # role (catalog/aws-config/main-region: iam_role_arn and the SNS publish
+    # grant).
+    (r'^aws_config_iam_role$',        'arn:aws:iam::123456789012:role/example-aws-config-config'),
     # ...and alb-ingress-group's ALB listener, apigateway's http_routes[*]'s
     # integration_uri (an HTTP_PROXY/VPC_LINK route's target listener).
     (r'^(http|https)_listener_arn$',

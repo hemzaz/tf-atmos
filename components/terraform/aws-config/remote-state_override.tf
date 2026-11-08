@@ -33,7 +33,7 @@ module "config_bucket" {
 # naming), which the house stacks do not have: each stack's instance is
 # aws-config. The catalog variants that record outside the collector region
 # set iam_role_arn instead (main-region: !terraform.state of the home stack;
-# main-eu-core: the role's convention ARN), which main.tf prefers over this
+# main-core-region: the role's convention ARN), which main.tf prefers over this
 # read, so the read is never needed. The default is that same ARN, null when
 # unset: a recorder outside the collector region with no iam_role_arn then fails
 # at plan (main.tf joins a null), as upstream's missing-state read would, instead

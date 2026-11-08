@@ -57,7 +57,7 @@ import:
   - catalog/aws-account-settings/main
   - catalog/kms/main-prod
   - catalog/aws-cloudtrail/defaults
-  - catalog/awsconfig/main
+  - catalog/aws-config/main
   - catalog/guardduty/main-prod
   - catalog/securityhub/main-prod
   - catalog/inspector2/main
@@ -247,7 +247,7 @@ components:
     # The account and identity layer (iam/main, iam/ci), the stack's key
     # (kms/main) and the prod-eu account's singletons: the multi-region
     # CloudTrail trail (cloudtrail) and AWS Config's global-resource
-    # recording (awsconfig/main); the account budget is cost-optimization/main
+    # recording (aws-config); the account budget is cost-optimization/main
     # (services section). Then the regional security services: GuardDuty,
     # Security Hub, Inspector and finding routing with the CIS metric filters
     # on this stack's trail (security-monitoring/main); the API Gateway
@@ -306,6 +306,22 @@ components:
           account_name:
             format: "%v-{{ .settings.environment.account }}"
             labels: [tenant]
+
+    # AWS Config: the account's recorder (Cloud Posse's instance name; the
+    # variant is catalog/aws-config/main.yaml's), its global-resource
+    # collector, delivering to fnx-ew1-audit's config-bucket.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main
+      # Cloud Posse's account verification expects the "<tenant>-<stage>"
+      # account, but the prod-eu account runs stage prod: aws-config's own
+      # toggle turns it off (owner decision 2026-11-07). The trail keeps
+      # verifying, fail-closed, through the house
+      # components/terraform/aws-cloudtrail/account-verification_override.tf.
+      vars:
+        account_verification_enabled: false
 
     # ========================================================================
     # Compute

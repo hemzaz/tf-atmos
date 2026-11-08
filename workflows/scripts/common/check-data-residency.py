@@ -420,7 +420,7 @@ def null_label_id(instance: dict) -> str:
 
 
 def collector_role_errors(stacks: dict) -> list[str]:
-    """A recorder naming its collector's role by a literal ARN (aws-config/main-eu-core) names that role.
+    """A recorder naming its collector's role by a literal ARN (aws-config/main-core-region) names that role.
 
     The role is Cloud Posse's: the collector instance's null-label id plus the "config" attribute
     (cloudposse/config aws_config_label), in the collector's account. Only an account with one

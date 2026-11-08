@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# aws-config/main-region: the variant a DR standby's aws-config inherits
+# =============================================================================
+# A DR standby (settings.dr.standby_of: its primary, in the same account and
+# residency) records this region's resource types only, with the recorder
+# role its primary's aws-config (aws-config/main, the account's global
+# resource collector) creates, read from that stack's state. Its own file, so
+# only the standby stacks, which set settings.dr.standby_of, resolve the read
+# (a !terraform.state read in an abstract resolves for every importer).
+#
+#   components:
+#     terraform:
+#       aws-config:
+#         metadata:
+#           component: aws-config
+#           inherits:
+#             - aws-config/main-region
+#
+# The other variants are in main.yaml.
+# =============================================================================
+
+import:
+  - catalog/aws-config/defaults
+
+components:
+  terraform:
+    aws-config/main-region:
+      metadata:
+        component: aws-config
+        type: abstract
+        inherits:
+          - aws-config/defaults
+      vars:
+        iam_role_arn: !terraform.state aws-config {{ .settings.dr.standby_of }} .aws_config_iam_role
+        # The role's own sns:Publish names only its collector region's topic:
+        # this region's topic grants it in its topic policy, as
+        # aws-config/main-core-region does (E5b4b).
+        allowed_iam_arns_for_sns_publish:
+          - !terraform.state aws-config {{ .settings.dr.standby_of }} .aws_config_iam_role
+      # A list replaces the inherited one: defaults' bucket entry is repeated.
+      dependencies:
+        components:
+          - component: config-bucket
+            stack: '{{ .settings.context.tenant }}-{{ if hasPrefix "e" .settings.context.environment }}ew1{{ else }}ue1{{ end }}-audit'
+          - component: aws-config
+            stack: "{{ .settings.dr.standby_of }}"

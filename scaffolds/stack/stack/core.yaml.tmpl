@@ -4,7 +4,7 @@
 [[- $eu := eq .Config.region "eu-west-1" -]]
 [[- $root := printf "%s-%s-root" .Config.tenant (ternary "ew1" "ue1" $eu) -]]
 [[- $archive := and (eq .Config.stage "audit") (or $home $eu) -]]
-[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) "main-eu-core" $home -]]
+[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) "main-core-region" $home -]]
 ---
 # =============================================================================
 # [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
@@ -35,7 +35,7 @@
 [[- else ]]
 #
 # The account's Config recorder for [[ .Config.region ]] (aws-config, inheriting
-# aws-config/main-eu-core): regional resource types only, with the recorder
+# aws-config/main-core-region): regional resource types only, with the recorder
 # role of [[ .Config.tenant ]]-ue1-[[ .Config.stage ]], the account's global-resource collector, by
 # its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
 # first (docs/OPERATIONS.md "Bootstrap order"). No trail: the account's one

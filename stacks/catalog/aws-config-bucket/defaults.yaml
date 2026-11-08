@@ -68,7 +68,7 @@ components:
         enable_default_policy: true
         allow_config: true
         # The audit account's own recorder (its fnx-ue1-audit home role, also
-        # fnx-ew1-audit's: aws-config/main-eu-core) delivers here with its IAM
+        # fnx-ew1-audit's: aws-config/main-core-region) delivers here with its IAM
         # role, not config.amazonaws.com (same-account bucket), so it needs
         # the data key too (E5b4b). The bucket policy grants it S3 by the same
         # convention ARN.

@@ -78,7 +78,7 @@ import:
   - catalog/iam/ci-standby
   - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
-  - catalog/awsconfig/main-standby
+  - catalog/aws-config/main-region
   - catalog/guardduty/main-standby
   - catalog/securityhub/main-standby
   - catalog/security-monitoring/main-standby
@@ -220,12 +220,33 @@ components:
     # AWS Config, Inspector, finding routing, backups); account-wide ones do
     # not: no kms/main (this region's key is [[ $primary ]] kms/main's
     # multi-region replica, alias [[ .Config.region_code ]]-main), no iam/main, no cloudtrail/main
-    # (the primary's trail is multi-region), and awsconfig/main records this
+    # (the primary's trail is multi-region), and aws-config records this
     # region's resources only. iam/ci trusts the account's GitHub OIDC
     # provider, created by [[ $primary ]]'s iam/ci.
     #
-    # This file keeps security-monitoring/main's alert settings.
+    # This file keeps aws-config's instance and security-monitoring/main's
+    # alert settings.
     # ========================================================================
+    # AWS Config: this region's recorder (Cloud Posse's instance name; the
+    # variant is catalog/aws-config/main-region.yaml's): regional resource
+    # types only, with the recorder role of [[ $primary ]]'s aws-config (the
+    # account's global-resource collector), delivering to [[ .Config.tenant ]]-[[ ternary "ew1" "ue1" $gdpr ]]-audit's
+    # config-bucket.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main-region
+[[- if ne $account .Config.stage ]]
+      # Cloud Posse's account verification expects the "<tenant>-<stage>"
+      # account, but the [[ $account ]] account runs stage [[ .Config.stage ]]: aws-config's own
+      # toggle turns it off (owner decision 2026-11-07). The trail keeps
+      # verifying, fail-closed, through the house
+      # components/terraform/aws-cloudtrail/account-verification_override.tf.
+      vars:
+        account_verification_enabled: false
+[[- end ]]
+
     security-monitoring/main:
       vars:
 [[- if $gdpr ]]

@@ -9,7 +9,7 @@ the standards in `standards`, given as short `<name>/v/<version>` paths.
   `fnx-ec1-prod`; prod
   adds `pci-dss/v/3.2.1` (`securityhub/prod`, `stacks/catalog/securityhub/prod.yaml`).
 - No finding aggregator: each region's findings stay in that region (the EU stacks' in the EU).
-- Depends on `awsconfig/main` (ordering only): most controls evaluate AWS Config recordings.
+- Depends on `aws-config` (ordering only): most controls evaluate AWS Config recordings.
 - Used by: `security-monitoring` (`.account_arn`). `harden.sh` deploys this component.
 
 ## Notes

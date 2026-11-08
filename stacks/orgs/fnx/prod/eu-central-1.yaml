@@ -68,7 +68,7 @@ import:
   - catalog/iam/ci-standby
   - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
-  - catalog/awsconfig/main-standby
+  - catalog/aws-config/main-region
   - catalog/guardduty/main-standby
   - catalog/securityhub/main-standby
   - catalog/security-monitoring/main-standby
@@ -223,8 +223,9 @@ components:
     #     fnx-ew1-prod's iam/ci.
     #   - no cloudtrail/main: fnx-ew1-prod's trail is multi-region and records
     #     this region too, into eu-west-1; its CIS metric filters run there.
-    #   - awsconfig/main records this region's resources only
-    #     (include_global_resource_types: false; fnx-ew1-prod records IAM).
+    #   - aws-config records this region's resources only (Cloud Posse's
+    #     global_resource_collector_region is eu-west-1: fnx-ew1-prod records
+    #     IAM).
     # Every finding stays in eu-central-1: no Security Hub cross-region
     # aggregation, no GuardDuty export, the alert topic on this region's key,
     # and no enrichment Lambda (check-data-residency.py).
@@ -233,8 +234,26 @@ components:
     #
     # The backup copy target here is the vault ew1-backup-replica that
     # fnx-ew1-prod's backup/main creates in eu-central-1. This file keeps
-    # security-monitoring/main's alert settings.
+    # aws-config's instance and security-monitoring/main's alert settings.
     # ========================================================================
+    # AWS Config: this region's recorder (Cloud Posse's instance name; the
+    # variant is catalog/aws-config/main-region.yaml's): regional resource
+    # types only, with the recorder role of fnx-ew1-prod's aws-config (the
+    # account's global-resource collector), delivering to fnx-ew1-audit's
+    # config-bucket.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main-region
+      # Cloud Posse's account verification expects the "<tenant>-<stage>"
+      # account, but the prod-eu account runs stage prod: aws-config's own
+      # toggle turns it off (owner decision 2026-11-07). The trail keeps
+      # verifying, fail-closed, through the house
+      # components/terraform/aws-cloudtrail/account-verification_override.tf.
+      vars:
+        account_verification_enabled: false
+
     security-monitoring/main:
       vars:
         # Off in a GDPR-scoped stack (check-data-residency.py).

@@ -43,11 +43,13 @@ esac
 # Owned by these components, deployed in every stack. Creating the services
 # with the aws CLI instead would leave Terraform failing with "already exists"
 # on its next apply, so hardening deploys the components and never touches the
-# services directly. awsconfig/main comes before securityhub/main, whose
+# services directly. aws-config comes before securityhub/main, whose
 # controls are AWS Config rules. cloudtrail is the account's vendored
 # aws-cloudtrail trail (catalog/aws-cloudtrail/defaults), in the account's
-# home stack only (E5b); awsconfig/main becomes aws-config in E5b6.
-COMPONENTS=(cloudtrail awsconfig/main guardduty/main securityhub/main)
+# home stack only, and aws-config its vendored Config recorder
+# (catalog/aws-config, every stack) (E5b). A component the stack lacks (a DR
+# standby has no trail, a core stack no guardduty/main) is skipped.
+COMPONENTS=(cloudtrail aws-config guardduty/main securityhub/main)
 
 echo "Configuration:"
 echo "  Stack: ${STACK}"
@@ -61,6 +63,15 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 0
 fi
 
+PRESENT=()
+for component in "${COMPONENTS[@]}"; do
+  if atmos describe component "$component" -s "$STACK" --process-functions=false >/dev/null 2>&1; then
+    PRESENT+=("$component")
+  else
+    log_skip "${component} is not in ${STACK}"
+  fi
+done
+
 # =================================================================
 # CloudTrail, AWS Config, GuardDuty and Security Hub
 # =================================================================
@@ -68,7 +79,7 @@ fi
 # confirmed is what is applied: the apply step uses --from-plan, and Terraform
 # rejects a planfile that went stale in between.
 if [[ "$HARDEN_PHASE" != "apply" ]]; then
-  for component in "${COMPONENTS[@]}"; do
+  for component in "${PRESENT[@]}"; do
     log_info "Planning ${component} in ${STACK}..."
     atmos terraform plan "$component" -s "$STACK"
   done
@@ -79,7 +90,7 @@ if [[ "$HARDEN_PHASE" == "plan" ]]; then
   exit 0
 fi
 
-for component in "${COMPONENTS[@]}"; do
+for component in "${PRESENT[@]}"; do
   if [[ "$AUTO_APPROVE" == "true" ]]; then
     log_info "Applying the saved ${component} plan to ${STACK}..."
     atmos terraform deploy "$component" -s "$STACK" --from-plan
