@@ -59,7 +59,7 @@ import:
   - catalog/acm/main
   - catalog/acm/services
   - catalog/aws-cloudtrail/defaults
-  - catalog/awsconfig/main
+  - catalog/aws-config/main
   - catalog/guardduty/main
   - catalog/securityhub/main
   - catalog/inspector2/main
@@ -299,8 +299,8 @@ components:
     # provider instead of creating one, and its iam instance leaves the Auto
     # Scaling service-linked role alone, as the prod standbys' -standby files
     # do. Its trail records this region only (that stack's trail is
-    # multi-region and records the global services) and awsconfig/main
-    # records no global resources (IAM), as awsconfig/main-standby does.
+    # multi-region and records the global services), and aws-config below
+    # records no global resources (IAM).
     # check-lane-names.py allows each singleton once per account.
     iam/ci:
       vars:
@@ -317,10 +317,29 @@ components:
       vars:
         is_multi_region_trail: false
         include_global_service_events: false
-    awsconfig/main:
-      vars:
-        include_global_resource_types: false
-[[ end ]]
+[[- end ]]
+[[- if eq .Config.account_singletons "no" ]]
+    # AWS Config: this region's recorder (Cloud Posse's instance name; the
+    # variant is catalog/aws-config/main.yaml's): regional resource types
+    # only, with the recorder role of [[ .Config.tenant ]]-ue1-[[ .Config.stage ]]'s aws-config (the
+    # account's global-resource collector) by its convention ARN, so deploy
+    # that stack first; delivering to [[ .Config.tenant ]]-ue1-audit's config-bucket.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main-core-region
+[[- else ]]
+    # AWS Config: the account's recorder (Cloud Posse's instance name; the
+    # variant is catalog/aws-config/main.yaml's), its global-resource
+    # collector, delivering to [[ .Config.tenant ]]-ue1-audit's config-bucket.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main
+[[- end ]]
+
     # KMS - customer-managed key for Secrets Manager and other encrypted
     # services
     kms/main:

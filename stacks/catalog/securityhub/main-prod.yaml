@@ -4,7 +4,7 @@
 # =============================================================================
 # The production standards (catalog/securityhub/prod): PCI DSS on top of the
 # default ones. A primary's region records the account's global resources
-# (awsconfig/main) and holds the trail's log group (cloudtrail/main), so,
+# (aws-config) and holds the trail's log group (cloudtrail), so,
 # unlike main-standby.yaml, no IAM, KMS or CloudWatch control is disabled.
 # =============================================================================
 

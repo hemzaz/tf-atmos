@@ -8,7 +8,8 @@ names to its component's target and no other, and no two sources of a target wri
 vendor.lock.yaml holds a receipt per source and no other;
 each receipt file (a regular file at a relative path inside the target) is on disk with its
 sha256; nothing else is in the target (no extra file, symlink or empty directory) but
-.terraform.lock.hcl, *_override.tf and a top-level .tflint.hcl that is the repository's
+.terraform.lock.hcl, *_override.tf, house terraform tests (tests/*.tftest.hcl, top-level tests/
+only: TESTS) and a top-level .tflint.hcl that is the repository's
 .tflint.hcl verbatim plus only rule blocks disabling a rule, each after a # reason (TFLINT), and
 each listed for its target in TFLINT_ALLOWLIST, which fails an entry nothing disables (stale).
 Atmos 1.229's receipt omits the version (`atmos vendor
@@ -44,6 +45,10 @@ MIXIN_SUFFIX = "-mixins"
 # included_paths is orgs/** only, so its files are never read as stack manifests.
 TARGET = re.compile(r"^(components/terraform/[a-z0-9][a-z0-9-]*|stacks/catalog/[a-z0-9][a-z0-9-]*/catalog)$")
 HOUSE_FILES = (".terraform.lock.hcl", "*_override.tf")
+# House terraform tests of a vendored component's *_override.tf files (CI's terraform-test job
+# runs components/terraform/<c>/tests): *.tftest.hcl directly in the target's top-level tests/
+# directory, nothing else there and nowhere deeper.
+TESTS = ("tests", "*.tftest.hcl")
 # A vendored component's own tflint config: `atmos terraform lint` (the lint workflow's instance
 # pass) prefers a component-local .tflint.hcl to the repository's, and Cloud Posse code cannot be
 # edited to fix or annotate a finding. It may only switch house rules off (the directory pass
@@ -171,6 +176,12 @@ def on_disk(root, target):
     return sorted(regular), sorted(links), sorted(dirs)
 
 
+def is_house_test(rel):
+    """A house terraform test: <target>/tests/<name>.tftest.hcl (TESTS), not deeper."""
+    head, name = os.path.split(rel)
+    return head == TESTS[0] and fnmatch.fnmatch(name, TESTS[1])
+
+
 def check_lock(manifest, lock, root, tflint_allowlist=None):
     errs, have, disabled = [], receipts(lock), set()
     tflint_allowlist = TFLINT_ALLOWLIST if tflint_allowlist is None else tflint_allowlist
@@ -192,10 +203,10 @@ def check_lock(manifest, lock, root, tflint_allowlist=None):
                     if hashlib.sha256(fh.read()).hexdigest() != digest:
                         errs.append(f"{target}/{rel}: edited in place (sha256 differs from {LOCK}); use a *_override.tf")
         regular, links, dirs = on_disk(root, target)
-        kept = [r for r in regular if r in locked or r == TFLINT
+        kept = [r for r in regular if r in locked or r == TFLINT or is_house_test(r)
                 or any(fnmatch.fnmatch(os.path.basename(r), p) for p in HOUSE_FILES)]
-        errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)} and a top-level "
-                 f"{TFLINT} may be added" for r in regular if r not in kept]
+        errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)}, "
+                 f"{'/'.join(TESTS)} and a top-level {TFLINT} may be added" for r in regular if r not in kept]
         if TFLINT in regular and TFLINT not in locked:
             found, rules = tflint_errors(root, target, tflint_allowlist)
             errs += found

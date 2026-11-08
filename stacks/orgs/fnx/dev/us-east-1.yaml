@@ -44,7 +44,7 @@ import:
   - catalog/acm/main
   - catalog/acm/services
   - catalog/aws-cloudtrail/defaults
-  - catalog/awsconfig/main
+  - catalog/aws-config/main
   - catalog/guardduty/main
   - catalog/securityhub/main
   - catalog/inspector2/main
@@ -227,6 +227,15 @@ components:
     # ========================================================================
     # Security
     # ========================================================================
+    # AWS Config: the account's recorder (Cloud Posse's instance name; the
+    # variant is catalog/aws-config/main.yaml's), its global-resource
+    # collector, delivering to fnx-ue1-audit's config-bucket.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main
+
     # KMS - customer-managed key for Secrets Manager and other encrypted
     # services
     kms/main:

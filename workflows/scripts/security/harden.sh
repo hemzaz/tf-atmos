@@ -10,6 +10,9 @@
 #           AUTO_APPROVE=true
 set -euo pipefail
 
+# The stack's context from its aws-config (every stack has one; a core stack
+# has no vpc/main, stack-context.sh's default).
+CONTEXT_COMPONENT="${CONTEXT_COMPONENT:-aws-config}"
 # shellcheck source=../common/stack-context.sh
 source "$(dirname "$0")/../common/stack-context.sh"
 
@@ -40,14 +43,18 @@ case "$HARDEN_PHASE" in
     ;;
 esac
 
-# Owned by these components, deployed in every stack. Creating the services
-# with the aws CLI instead would leave Terraform failing with "already exists"
-# on its next apply, so hardening deploys the components and never touches the
-# services directly. awsconfig/main comes before securityhub/main, whose
-# controls are AWS Config rules. cloudtrail is the account's vendored
-# aws-cloudtrail trail (catalog/aws-cloudtrail/defaults), in the account's
-# home stack only (E5b); awsconfig/main becomes aws-config in E5b6.
-COMPONENTS=(cloudtrail awsconfig/main guardduty/main securityhub/main)
+# Owned by these components. Creating the services with the aws CLI instead
+# would leave Terraform failing with "already exists" on its next apply, so
+# hardening deploys the components and never touches the services directly.
+# aws-config comes before securityhub/main, whose controls are AWS Config
+# rules. aws-config, the vendored Config recorder (catalog/aws-config), is in
+# every stack: its absence fails the run. The others are skipped where the
+# stack genuinely lacks them: cloudtrail, the account's vendored aws-cloudtrail
+# trail (catalog/aws-cloudtrail/defaults), is in the account's home stack only
+# (a DR standby has none), and a core stack has no guardduty/main or
+# securityhub/main (E5b).
+REQUIRED=(aws-config)
+COMPONENTS=(cloudtrail aws-config guardduty/main securityhub/main)
 
 echo "Configuration:"
 echo "  Stack: ${STACK}"
@@ -61,6 +68,35 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 0
 fi
 
+# The stack's deployable (non-abstract) instances, listed once: a failed
+# describe or an unknown stack stops the run instead of skipping everything.
+if ! STACK_JSON="$(atmos describe stacks -s "$STACK" --process-functions=false --format json)"; then
+  log_error "atmos describe stacks -s ${STACK} failed (see the error above); nothing hardened"
+  exit 1
+fi
+if ! INSTANCES="$(jq -r --arg s "$STACK" 'if has($s) then .[$s].components.terraform // {}
+    | to_entries[] | select(.value.metadata.type != "abstract") | .key else error("unknown") end' \
+    <<<"$STACK_JSON")"; then
+  log_error "stack ${STACK} is unknown to atmos (atmos list stacks); nothing hardened"
+  exit 1
+fi
+has_instance() { grep -Fxq -- "$1" <<<"$INSTANCES"; }
+
+for component in "${REQUIRED[@]}"; do
+  if ! has_instance "$component"; then
+    log_error "${STACK} has no ${component} instance (every stack has one; Security Hub's controls need it)"
+    exit 1
+  fi
+done
+PRESENT=()
+for component in "${COMPONENTS[@]}"; do
+  if has_instance "$component"; then
+    PRESENT+=("$component")
+  else
+    log_skip "${component}: ${STACK} has no such instance (a DR standby has no trail, a core stack no guardduty/securityhub)"
+  fi
+done
+
 # =================================================================
 # CloudTrail, AWS Config, GuardDuty and Security Hub
 # =================================================================
@@ -68,7 +104,7 @@ fi
 # confirmed is what is applied: the apply step uses --from-plan, and Terraform
 # rejects a planfile that went stale in between.
 if [[ "$HARDEN_PHASE" != "apply" ]]; then
-  for component in "${COMPONENTS[@]}"; do
+  for component in ${PRESENT[@]+"${PRESENT[@]}"}; do
     log_info "Planning ${component} in ${STACK}..."
     atmos terraform plan "$component" -s "$STACK"
   done
@@ -79,7 +115,7 @@ if [[ "$HARDEN_PHASE" == "plan" ]]; then
   exit 0
 fi
 
-for component in "${COMPONENTS[@]}"; do
+for component in ${PRESENT[@]+"${PRESENT[@]}"}; do
   if [[ "$AUTO_APPROVE" == "true" ]]; then
     log_info "Applying the saved ${component} plan to ${STACK}..."
     atmos terraform deploy "$component" -s "$STACK" --from-plan

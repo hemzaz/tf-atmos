@@ -100,7 +100,7 @@ import:
   - catalog/acm/main-prod
   - catalog/acm/services
   - catalog/aws-cloudtrail/defaults
-  - catalog/awsconfig/main
+  - catalog/aws-config/main
   - catalog/guardduty/main-prod
   - catalog/securityhub/main-prod
   - catalog/inspector2/main
@@ -113,7 +113,7 @@ import:
   - catalog/aws-account-settings/main
   - catalog/kms/main-prod
   - catalog/aws-cloudtrail/defaults
-  - catalog/awsconfig/main
+  - catalog/aws-config/main
   - catalog/guardduty/main-prod
   - catalog/securityhub/main-prod
   - catalog/inspector2/main
@@ -378,7 +378,7 @@ components:
     #
     # The account and identity layer (iam/main, iam/ci), the stack's key
     # (kms/main), the account's singletons (cloudtrail's multi-region
-    # trail, awsconfig/main's global-resource recording) and the regional
+    # trail, aws-config's global-resource recording) and the regional
     # security services, each from its catalog/<c>/<i>[-prod] file. DR copies
     # (kms/main's replica, backup/main's copies, the secrets' replicas) go to
     # settings.dr.region, [[ .Config.dr_region ]].
@@ -387,9 +387,9 @@ components:
     # aggregation, no GuardDuty export, no enrichment Lambda
     # (check-data-residency.py).
 [[- end ]]
-    # This file keeps kms/main's description and replica alias[[ if $data_plane ]], iam/ci's
+    # This file keeps aws-config's instance, kms/main's description and replica alias[[ if $data_plane ]], iam/ci's
     # Lambda package uploader and acm/services' SAN[[ end ]][[ if ne $account .Config.stage ]] and
-    # cloudtrail's account name[[ end ]].
+    # cloudtrail's account name and aws-config's account verification[[ end ]].
     # ========================================================================
 [[- if $data_plane ]]
     iam/ci:
@@ -433,6 +433,24 @@ components:
           account_name:
             format: "%v-{{ .settings.environment.account }}"
             labels: [tenant]
+[[- end ]]
+
+    # AWS Config: the account's recorder (Cloud Posse's instance name; the
+    # variant is catalog/aws-config/main.yaml's), its global-resource
+    # collector, delivering to [[ .Config.tenant ]]-[[ ternary "ew1" "ue1" $gdpr ]]-audit's config-bucket.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main
+[[- if ne $account .Config.stage ]]
+      # Cloud Posse's account verification expects the "<tenant>-<stage>"
+      # account, but the [[ $account ]] account runs stage [[ .Config.stage ]]: aws-config's own
+      # toggle turns it off (owner decision 2026-11-07). The trail keeps
+      # verifying, fail-closed, through the house
+      # components/terraform/aws-cloudtrail/account-verification_override.tf.
+      vars:
+        account_verification_enabled: false
 [[- end ]]
 [[- if $data_plane ]]
 

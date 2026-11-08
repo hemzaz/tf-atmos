@@ -15,17 +15,20 @@
 #
 #   aws-config/main          the account's home stack (its global resource
 #                            collector region): creates the recorder role.
-#   aws-config/main-region   a DR standby: the role of the primary it stands by
-#                            for (settings.dr.standby_of, same account and
-#                            residency), from that stack's state.
-#   aws-config/main-eu-core  a shared account's eu-west-1 stack (fnx-ew1-root,
-#                            fnx-ew1-audit): the role of its fnx-ue1-<stage>
-#                            home stack by its convention ARN, since
-#                            check-data-residency.py forbids an EU stack's
-#                            dependency on a US one (IAM is global). Deploy the
-#                            home stack first.
+#   aws-config/main-core-region
+#                            a core account's stack outside its home region
+#                            (fnx-ew1-root, fnx-ew1-audit), or a nonprod
+#                            account's second stack: the role of its
+#                            fnx-ue1-<stage> home stack by its convention ARN,
+#                            since check-data-residency.py forbids an EU
+#                            stack's dependency on a US one (IAM is global).
+#                            Deploy the home stack first.
 #   aws-config/security      fnx-ue1-security: main plus the US account
 #                            aggregator.
+#
+# A DR standby's variant, aws-config/main-region (the primary's role from its
+# state), is in main-region.yaml, imported by the standby stacks only: its
+# !terraform.state read resolves for every stack that imports it.
 #
 # Upstream's own read of the collector region's role (remote state of
 # "aws-config-<region code>") is bypassed (remote-state_override.tf); these
@@ -46,23 +49,7 @@ components:
       vars:
         create_iam_role: true
 
-    aws-config/main-region:
-      metadata:
-        component: aws-config
-        type: abstract
-        inherits:
-          - aws-config/defaults
-      vars:
-        iam_role_arn: !terraform.state aws-config {{ .settings.dr.standby_of }} .aws_config_iam_role
-      # A list replaces the inherited one: defaults' bucket entry is repeated.
-      dependencies:
-        components:
-          - component: config-bucket
-            stack: '{{ .settings.context.tenant }}-{{ if hasPrefix "e" .settings.context.environment }}ew1{{ else }}ue1{{ end }}-audit'
-          - component: aws-config
-            stack: "{{ .settings.dr.standby_of }}"
-
-    aws-config/main-eu-core:
+    aws-config/main-core-region:
       metadata:
         component: aws-config
         type: abstract

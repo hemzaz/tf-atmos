@@ -21,7 +21,7 @@ components:
       # recorder they report no data. Ordering only (no state is read).
       dependencies:
         components:
-          - component: awsconfig/main
+          - component: aws-config
       vars:
         enable: true
         enable_default_standards: true

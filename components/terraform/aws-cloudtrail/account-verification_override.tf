@@ -23,8 +23,9 @@
 # An override file can only replace locals the mixin defines, so the
 # descriptor lookup is repeated in each of the three.
 #
-# Drop this file when upstream takes an account-name input (the E5b5 PR body
-# carries the upstream PR text).
+# Upstream: cloudposse-terraform-components/mixins#32 adds
+# account_verification_expected_account_name; when it ships, set it in
+# fnx-ew1-prod, re-vendor the mixin and delete this file.
 locals {
   expected_account_name = lookup(module.this.descriptors, "account_name", null) != null ? module.this.descriptors["account_name"] : (
     try(var.tenant, null) != null &&
