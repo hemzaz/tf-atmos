@@ -141,7 +141,7 @@ class LockTest(Fixture):
             if os.path.dirname(rel) not in ("", "tests"):
                 os.rmdir(os.path.join(self.root, TARGET, os.path.dirname(rel)))
 
-    HOUSE ='plugin "terraform" {\n  enabled = true\n}\n'
+    HOUSE = 'plugin "terraform" {\n  enabled = true\n}\n'
     TAIL = ('\n# Cloud Posse remote-state.tf uses lookup() with 2 arguments.\n'
             'rule "terraform_deprecated_lookup" {\n  enabled = false\n}\n')
     LISTED = ((TARGET, "terraform_deprecated_lookup", "lookup() with 2 arguments"),)

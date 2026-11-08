@@ -248,8 +248,9 @@ components:
           - aws-config/main-region
       # Cloud Posse's account verification expects the "<tenant>-<stage>"
       # account, but the prod-eu account runs stage prod: aws-config's own
-      # toggle turns it off (owner decision 2026-11-07). The trail keeps
-      # verifying, fail-closed, through the house
+      # toggle turns it off (owner decision 2026-11-07). This stack has no
+      # trail; the account's, fnx-ew1-prod's, keeps verifying, fail-closed,
+      # through the house
       # components/terraform/aws-cloudtrail/account-verification_override.tf.
       vars:
         account_verification_enabled: false

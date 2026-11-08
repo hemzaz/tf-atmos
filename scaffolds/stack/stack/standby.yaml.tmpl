@@ -240,8 +240,9 @@ components:
 [[- if ne $account .Config.stage ]]
       # Cloud Posse's account verification expects the "<tenant>-<stage>"
       # account, but the [[ $account ]] account runs stage [[ .Config.stage ]]: aws-config's own
-      # toggle turns it off (owner decision 2026-11-07). The trail keeps
-      # verifying, fail-closed, through the house
+      # toggle turns it off (owner decision 2026-11-07). This stack has no
+      # trail; the account's, [[ $primary ]]'s, keeps verifying, fail-closed,
+      # through the house
       # components/terraform/aws-cloudtrail/account-verification_override.tf.
       vars:
         account_verification_enabled: false

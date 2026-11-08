@@ -128,6 +128,12 @@ workflows:
             command: |
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_plan_destroys.py workflows/scripts/common/test_deploy_component.py
+          # harden.sh (security-hardening.yaml): which security components it
+          # plans in a stack, and that an unknown stack or a missing aws-config
+          # fails it.
+          - name: harden-selection
+            type: shell
+            command: python3 -m unittest workflows/scripts/common/test_harden.py
           # atmos.yaml validates stacks against the pinned
           # schemas/atmos/atmos-manifest.json, not a URL (cached in $TMPDIR and
           # corrupted there by concurrent runs). The pin must be the embedded
