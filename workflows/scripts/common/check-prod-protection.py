@@ -34,9 +34,14 @@ component's default trusts repo:<repo>:pull_request, i.e. code from any PR.
 And every deployable aws-cloudtrail instance, in any stage (OQ-F, E5b4b), keeps
 its trail and the trail's KMS key: Cloud Posse's component always creates the
 key, with a hardcoded 10-day deletion window, so the only routine change that
-schedules its deletion (and the trail's and log group's) is vars.enabled false;
-a renamed label (vars.name other than "cloudtrail", or vars.attributes) replaces
-the trail and its log group and renames the key alias. Removing the instance or
+schedules its deletion (and the trail's and log group's) is enabled false (the
+var, or vars.context.enabled when the var is null); a new label replaces the
+trail and its log group and renames the key alias, so the label must be the
+stack's resolved `vendored` abstract context (namespace, tenant, environment,
+stage, delimiter, label_order, id_length_limit, label_value_case,
+regex_replace_chars; each var overriding its context field), with name
+"cloudtrail" and no attributes (var or context), giving
+<tenant>-<settings.prefix>-<stage>-cloudtrail. Removing the instance or
 metadata.enabled false destroys nothing (Atmos stops planning it). The core
 stacks that hold the trails are outside CD, so check-plan-destroys' deploy gate
 never sees them: this lint is the guard.
@@ -55,6 +60,11 @@ PROD_PLAN_BRANCH = "master"
 MIN_RETENTION_DAYS = 7
 # OQ-F: the vendored trail component and its sticky label name (fnx-ue1-<stage>-cloudtrail).
 TRAIL_COMPONENT, TRAIL_NAME = "aws-cloudtrail", "cloudtrail"
+# The trail's label must equal the stack's resolved `vendored` abstract context
+# (stacks/catalog/_base/vendored.yaml) in every null-label field that shapes the id.
+VENDORED_ABSTRACT = "vendored"
+TRAIL_LABEL_FIELDS = ("namespace", "tenant", "environment", "stage", "delimiter", "label_order",
+                      "id_length_limit", "label_value_case", "regex_replace_chars")
 
 # component -> [(variable, is_safe, what safe means)]
 RULES: dict[str, list[tuple[str, Callable[[Any, dict], bool], str]]] = {
@@ -190,20 +200,46 @@ def check_trails(stacks: dict) -> list[str]:
         for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
             if instance.get("component") != TRAIL_COMPONENT or not is_deployable(instance):
                 continue
-            variables = instance.get("vars") or {}
-            # null-label: enabled null means enabled; only false destroys.
-            if normalize(variables.get("enabled")) is False:
-                errors.append(
-                    f"{stack_name}: {name} ({TRAIL_COMPONENT}) enabled is false: that schedules the trail KMS "
-                    "key's deletion and destroys the trail and its log group; set metadata.enabled false "
-                    "to stop deploying it instead (OQ-F)"
-                )
-            if variables.get("name") != TRAIL_NAME or variables.get("attributes"):
-                errors.append(
-                    f"{stack_name}: {name} ({TRAIL_COMPONENT}) is labelled name {variables.get('name')!r}, "
-                    f"attributes {variables.get('attributes') or []!r}: the trail, its log group and its key "
-                    f"alias are sticky as name {TRAIL_NAME!r} with no attributes (a new label replaces the trail)"
-                )
+            errors += trail_errors(f"{stack_name}: {name} ({TRAIL_COMPONENT})", instance.get("vars") or {},
+                                   (((stack.get("components") or {}).get("terraform") or {}).get(VENDORED_ABSTRACT)
+                                    or {}).get("vars"))
+    return errors
+
+
+def trail_errors(where: str, variables: dict, vendored: Optional[dict]) -> list[str]:
+    """One trail's findings against its stack's resolved `vendored` abstract (the null-label shape)."""
+    context = variables.get("context") or {}
+    expected = (vendored or {}).get("context")
+    if not isinstance(expected, dict):
+        return [f"{where}: its stack has no resolved {VENDORED_ABSTRACT!r} abstract context to check the label against"]
+
+    def effective(field: str) -> Any:
+        # null-label: a non-null var wins, else the context's value.
+        value = variables.get(field)
+        return normalize(value if value is not None else context.get(field))
+
+    errors = []
+    if effective("enabled") is False:
+        errors.append(
+            f"{where} enabled is false (var or context): that schedules the trail KMS key's deletion and "
+            "destroys the trail and its log group; set metadata.enabled false to stop deploying it instead (OQ-F)"
+        )
+    # null-label appends context.attributes to var.attributes.
+    attributes = list(variables.get("attributes") or []) + list(context.get("attributes") or [])
+    changed = [f"{field} {effective(field)!r} (vendored: {normalize(expected.get(field))!r})"
+               for field in TRAIL_LABEL_FIELDS if effective(field) != normalize(expected.get(field))]
+    if attributes:
+        changed.append(f"attributes {attributes!r} (vendored: [])")
+    if effective("name") != TRAIL_NAME:
+        changed.append(f"name {effective('name')!r} (want {TRAIL_NAME!r})")
+    want = "-".join(str(expected.get(f)) for f in ("tenant", "environment", "stage")) + f"-{TRAIL_NAME}"
+    got = "-".join(str(effective(f)) for f in ("tenant", "environment", "stage", "name"))
+    if changed or got != want:
+        errors.append(
+            f"{where} label differs from the vendored null-label shape ({'; '.join(changed) or 'id'}): "
+            f"the trail, its log group and its key alias are sticky as {want!r} (this label gives {got!r}"
+            f"{' before the changed fields' if changed else ''}); a new label replaces the trail"
+        )
     return errors
 
 

@@ -161,6 +161,13 @@ class LockTest(Fixture):
                 self.assertEqual(len(errs), 1, errs)
                 self.assertIn("disables terraform_deprecated_lookup, which TFLINT_ALLOWLIST does not list", errs[0])
 
+    def test_tflint_entry_needs_a_reason(self):
+        for why in ("", "  ", None):
+            with self.subTest(why=why):
+                errs = self.tflint(self.HOUSE + self.TAIL, ((TARGET, "terraform_deprecated_lookup", why),))
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("allowlist entry terraform_deprecated_lookup has no reason", errs[0])
+
     def test_stale_tflint_entry_fails(self):
         # The listed rule is no longer disabled, or the target has no .tflint.hcl at all.
         errs = self.tflint(self.HOUSE)

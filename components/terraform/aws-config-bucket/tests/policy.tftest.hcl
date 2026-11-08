@@ -5,7 +5,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "us-east-1"
+  region                      = "eu-west-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -43,27 +43,36 @@ override_data {
   }
 }
 
+# fnx-ew1-audit's config-bucket as its stack resolves it: the vendored null-label shape
+# (stacks/catalog/_base/vendored.yaml: no namespace, tenant first) and the EU residency.
 variables {
-  region              = "us-east-1"
-  account_map_enabled = false
-  namespace           = "fnx"
-  environment         = "ew1"
-  stage               = "audit"
-  name                = "config"
-  tenant              = "acme"
-  kms_master_key_arn  = "arn:aws:kms:eu-west-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+  region                = "eu-west-1"
+  account_map_enabled   = false
+  namespace             = null
+  tenant                = "fnx"
+  environment           = "ew1"
+  stage                 = "audit"
+  name                  = "config"
+  label_order           = ["tenant", "environment", "stage", "name", "attributes"]
+  kms_master_key_arn    = "arn:aws:kms:eu-west-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+  residency_account_ids = ["666666666666", "111111111111", "123456789012", "333333333333"]
   account_map = {
     full_account_map = {
-      acme-root     = "111111111111"
-      acme-audit    = "123456789012"
-      acme-security = "333333333333"
-      acme-prod-eu  = "666666666666"
+      fnx-root     = "111111111111"
+      fnx-audit    = "123456789012"
+      fnx-security = "333333333333"
+      fnx-prod-eu  = "666666666666"
     }
   }
 }
 
 run "grants_this_accounts_recorder_role" {
   command = plan
+
+  assert {
+    condition     = module.aws_config_label.id == "fnx-ew1-audit-config-aws-config"
+    error_message = "The bucket is fnx-ew1-audit's real name under the vendored label shape."
+  }
 
   assert {
     condition = (
@@ -74,7 +83,7 @@ run "grants_this_accounts_recorder_role" {
         Resource  = "arn:aws:s3:::fnx-ew1-audit-config-aws-config/AWSLogs/*"
         Principal = { AWS = "*" }
         Condition = {
-          ArnEquals  = { "aws:PrincipalArn" = "arn:aws:iam::123456789012:role/acme-ue1-audit-aws-config-config" }
+          ArnEquals  = { "aws:PrincipalArn" = "arn:aws:iam::123456789012:role/fnx-ue1-audit-aws-config-config" }
           StringLike = { "s3:x-amz-acl" = "bucket-owner-full-control" }
         }
       }
@@ -85,7 +94,7 @@ run "grants_this_accounts_recorder_role" {
   assert {
     condition = (
       one([for s in jsondecode(data.aws_iam_policy_document.aws_config_bucket_policy[0].json).Statement : s if s.Sid == "AWSConfigRoleBucketChecks"]).Condition == {
-        ArnEquals = { "aws:PrincipalArn" = "arn:aws:iam::123456789012:role/acme-ue1-audit-aws-config-config" }
+        ArnEquals = { "aws:PrincipalArn" = "arn:aws:iam::123456789012:role/fnx-ue1-audit-aws-config-config" }
       }
       && toset(one([for s in jsondecode(data.aws_iam_policy_document.aws_config_bucket_policy[0].json).Statement : s if s.Sid == "AWSConfigRoleBucketChecks"]).Action) == toset(["s3:GetBucketAcl", "s3:ListBucket"])
     )

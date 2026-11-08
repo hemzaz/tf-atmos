@@ -174,6 +174,8 @@ def on_disk(root, target):
 def check_lock(manifest, lock, root, tflint_allowlist=None):
     errs, have, disabled = [], receipts(lock), set()
     tflint_allowlist = TFLINT_ALLOWLIST if tflint_allowlist is None else tflint_allowlist
+    errs += [f"{target}/{TFLINT}: allowlist entry {rule} has no reason" for target, rule, why in tflint_allowlist
+             if not str(why or "").strip()]
     declared = {(s.get("component"), (s.get("targets") or [None])[0]) for s in sources(manifest)}
     for name, target in sorted(set(have) - declared, key=str):
         errs.append(f"{LOCK}: receipt for {name} -> {target}, which {MANIFEST} does not declare (atmos vendor clean)")
