@@ -49,6 +49,9 @@ workflows:
         # scripts/check-stack-samples.sh (stack-samples) edits a scratch
         # manifest with it; the atmos image ships no yq.
         mikefarah/yq: "v4.53.6"
+        # harden-selection's test_harden.py runs harden.sh, which reads atmos's
+        # JSON with it; the atmos image ships no jq.
+        jqlang/jq: "1.8.2"
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos

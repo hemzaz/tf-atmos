@@ -16,6 +16,9 @@ workflows:
         # test_check_catalog_read_overrides.py (unittest discover below) parses
         # the stack YAML with it; the atmos image ships no yq.
         mikefarah/yq: "v4.53.6"
+        # test_harden.py (unittest discover below) runs harden.sh, which reads
+        # atmos's JSON with it; the atmos image ships no jq.
+        jqlang/jq: "1.8.2"
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
