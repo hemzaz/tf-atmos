@@ -558,7 +558,7 @@ class LogArchiveBucketsTest(unittest.TestCase):
     """The audit buckets' delivery policies (E5a4) name every account in their residency."""
 
     def test_an_enabled_bucket_needs_the_core_accounts(self):
-        for component in ("aws-cloudtrail-bucket", "aws-config-bucket"):
+        for component in ("aws-cloudtrail-bucket", "aws-config-bucket", "aws-cloudtrail", "aws-config"):
             with self.subTest(component=component):
                 self.assertIn(component, preflight.MAP_CONSUMERS)
                 bucket = {"component": component}

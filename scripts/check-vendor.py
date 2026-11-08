@@ -8,7 +8,9 @@ names to its component's target and no other, and no two sources of a target wri
 vendor.lock.yaml holds a receipt per source and no other;
 each receipt file (a regular file at a relative path inside the target) is on disk with its
 sha256; nothing else is in the target (no extra file, symlink or empty directory) but
-.terraform.lock.hcl and *_override.tf. Atmos 1.229's receipt omits the version (`atmos vendor
+.terraform.lock.hcl, *_override.tf and a top-level .tflint.hcl that is the repository's
+.tflint.hcl verbatim plus only rule blocks disabling a rule, each after a # reason (TFLINT).
+Atmos 1.229's receipt omits the version (`atmos vendor
 verify` passes a changed pin), so --repull pulls the manifest into a scratch dir and fails a file
 that differs from the receipt or a target the pull or the receipt lacks.
 Usage: check-vendor.py [--list | --repull]   (--list prints the vendored dirs). No vendor.yaml:
@@ -41,6 +43,12 @@ MIXIN_SUFFIX = "-mixins"
 # included_paths is orgs/** only, so its files are never read as stack manifests.
 TARGET = re.compile(r"^(components/terraform/[a-z0-9][a-z0-9-]*|stacks/catalog/[a-z0-9][a-z0-9-]*/catalog)$")
 HOUSE_FILES = (".terraform.lock.hcl", "*_override.tf")
+# A vendored component's own tflint config: `atmos terraform lint` (the lint workflow's instance
+# pass) prefers a component-local .tflint.hcl to the repository's, and Cloud Posse code cannot be
+# edited to fix or annotate a finding. It may only switch house rules off (the directory pass
+# already skips vendored code): the repository's config verbatim, then disabled rule blocks.
+TFLINT = ".tflint.hcl"
+TFLINT_TAIL = re.compile(r'(?:\n*(?:#[^\n]*\n)+rule "[a-z0-9_]+" \{\n  enabled = false\n\}\n)*\n*\Z')
 # Never committed: Terraform's working dir and the files Atmos writes before a run.
 IGNORED = {".terraform", "backend.tf.json", "providers_override.tf.json"}
 # The scratch pull's atmos.yaml (JSON is YAML); vendor.yaml and vendor.lock.yaml are the defaults.
@@ -171,13 +179,31 @@ def check_lock(manifest, lock, root):
                     if hashlib.sha256(fh.read()).hexdigest() != digest:
                         errs.append(f"{target}/{rel}: edited in place (sha256 differs from {LOCK}); use a *_override.tf")
         regular, links, dirs = on_disk(root, target)
-        kept = [r for r in regular if r in locked or any(fnmatch.fnmatch(os.path.basename(r), p) for p in HOUSE_FILES)]
-        errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)} may be added"
-                 for r in regular if r not in kept]
+        kept = [r for r in regular if r in locked or r == TFLINT
+                or any(fnmatch.fnmatch(os.path.basename(r), p) for p in HOUSE_FILES)]
+        errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)} and a top-level "
+                 f"{TFLINT} may be added" for r in regular if r not in kept]
+        if TFLINT in regular and TFLINT not in locked:
+            errs += tflint_errors(root, target)
         errs += [f"{target}/{r}: a symlink; {LOCK} records regular files only" for r in links]
         errs += [f"{target}/{d}: a directory with no vendored or house file" for d in dirs
                  if not any(k.startswith(d + "/") for k in kept)]
     return errs
+
+
+def tflint_errors(root, target):
+    """A vendored target's house .tflint.hcl that is not the repository's plus disabled rules."""
+    try:
+        with open(os.path.join(root, TFLINT)) as fh:
+            house = fh.read()
+        with open(os.path.join(root, target, TFLINT)) as fh:
+            local = fh.read()
+    except OSError as exc:
+        return [f"{target}/{TFLINT}: cannot compare with the repository's {TFLINT}: {exc}"]
+    if local.startswith(house) and TFLINT_TAIL.fullmatch(local[len(house):]):
+        return []
+    return [f"{target}/{TFLINT}: must be the repository's {TFLINT} verbatim, then only "
+            '`rule "<name>" {\n  enabled = false\n}` blocks, each after a # reason line']
 
 
 def repull(lock):

@@ -46,7 +46,8 @@ holding that bucket instance (cloudtrail-bucket, config-bucket) that is GDPR-sco
 own stack is (fnx-ew1-audit, else fnx-ue1-audit), which it lists in dependencies.components.
 No other vars key containing "bucket" may be set: a literal bucket name would bypass this.
 A recorder outside its global_resource_collector_region takes the collector's role: it sets
-iam_role_arn and not create_iam_role. A non-GDPR stack's Config aggregator (the aws-config
+iam_role_arn and not create_iam_role; a literal iam_role_arn is the ARN of the one enabled
+collector of its account and collector region (its account_id, its null-label id + "-config"). A non-GDPR stack's Config aggregator (the aws-config
 instance of the central_resource_collector_account in its collector region) lists in
 delegated_accounts no account whose stacks are all GDPR-scoped (by settings.environment
 .account_id; an id another account also carries, like the placeholder, cannot be told apart and
@@ -406,7 +407,49 @@ def log_archive_errors(stacks: dict, scoped: set) -> list[str]:
             if archive is None:
                 continue
             errors += archive_errors(stacks, scoped, stack_name, name, instance, archive)
-    return errors + aggregator_errors(stacks, scoped)
+    return errors + aggregator_errors(stacks, scoped) + collector_role_errors(stacks)
+
+
+def null_label_id(instance: dict) -> str:
+    """The instance's null-label id (default label order and delimiter): its vars override vars.context."""
+    variables = instance.get("vars") or {}
+    context = variables.get("context") or {}
+    parts = [variables.get(key) or context.get(key) for key in ("namespace", "tenant", "environment", "stage", "name")]
+    parts += list(variables.get("attributes") or context.get("attributes") or [])
+    return "-".join(str(part) for part in parts if part)
+
+
+def collector_role_errors(stacks: dict) -> list[str]:
+    """A recorder naming its collector's role by a literal ARN (aws-config/main-eu-core) names that role.
+
+    The role is Cloud Posse's: the collector instance's null-label id plus the "config" attribute
+    (cloudposse/config aws_config_label), in the collector's account. Only an account with one
+    enabled collector in that region is compared: none or two are other findings (us_collectors
+    above, check-lane-names.py's singleton).
+    """
+    collectors: dict = {}
+    for stack_name, stack in stacks.items():
+        for name, instance in instances(stack).items():
+            variables = instance.get("vars") or {}
+            if component_of(name, instance) == "aws-config" and account_of(instance) \
+                    and flag_on(variables.get("enabled", True)) and variables.get("region") \
+                    and variables.get("global_resource_collector_region") == variables.get("region"):
+                collectors.setdefault((account_of(instance), variables["region"]), []).append(instance)
+    errors = []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            arn = (instance.get("vars") or {}).get("iam_role_arn")
+            if component_of(name, instance) != "aws-config" or not isinstance(arn, str) or not arn.startswith("arn:"):
+                continue
+            home = collectors.get((account_of(instance), (instance.get("vars") or {}).get("global_resource_collector_region")))
+            if not home or len(home) != 1:
+                continue
+            account_id = ((home[0].get("settings") or {}).get("environment") or {}).get("account_id")
+            role = f"iam::{account_id}:role/{null_label_id(home[0])}-config"
+            if not re.fullmatch(rf"arn:aws[a-z-]*:{re.escape(role)}", arn):
+                errors.append(f"{stack_name}: {name} vars.iam_role_arn is {arn!r}, not its collector's role "
+                              f"arn:aws:{role}")
+    return errors
 
 
 def component_of(name: str, instance: dict) -> str:
@@ -418,13 +461,19 @@ def account_of(instance: dict) -> Optional[str]:
 
 
 def us_collectors(stacks: dict, scoped: set) -> frozenset:
-    """(account, region) of every aws-config global-resource collector in a stack that is not GDPR-scoped."""
+    """(account, region) of every aws-config global-resource collector in a stack that is not GDPR-scoped.
+
+    A recorder with vars.enabled false creates nothing, and one with no settings.environment.account
+    names no account, so neither is a collector a GDPR-scoped stack may lean on.
+    """
     return frozenset(
         (account_of(instance), variables.get("region"))
         for stack_name in set(stacks) - scoped
         for name, instance in instances(stacks[stack_name]).items()
         for variables in [instance.get("vars") or {}]
         if component_of(name, instance) == "aws-config"
+        and account_of(instance)
+        and flag_on(variables.get("enabled", True))
         and variables.get("global_resource_collector_region") == variables.get("region")
     )
 

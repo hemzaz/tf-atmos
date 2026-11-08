@@ -123,6 +123,23 @@ class LockTest(Fixture):
             self.write(f"{TARGET}/{rel}", "{}")
         self.assertEqual(self.errs(), [])
 
+    def test_house_tflint_config_only_disables_rules(self):
+        house = 'plugin "terraform" {\n  enabled = true\n}\n'
+        self.write(check.TFLINT, house)
+        tail = '\n# Cloud Posse remote-state.tf uses lookup() with 2 arguments.\nrule "terraform_deprecated_lookup" {\n  enabled = false\n}\n'
+        self.write(f"{TARGET}/{check.TFLINT}", house + tail)
+        self.assertEqual(self.errs(), [])
+        for bad in (house.replace("true", "false") + tail,  # the house config changed
+                    house + tail.replace("false", "true"),  # a rule switched on
+                    house + tail.replace("# Cloud Posse remote-state.tf uses lookup() with 2 arguments.\n", "")):
+            with self.subTest(bad=bad):
+                self.write(f"{TARGET}/{check.TFLINT}", bad)
+                self.assertEqual(len(self.errs()), 1)
+                self.assertIn("verbatim", self.errs()[0])
+        os.remove(os.path.join(self.root, TARGET, check.TFLINT))
+        self.write(f"{TARGET}/modules/{check.TFLINT}", house + tail)
+        self.assertIn("not from the vendor pull", self.errs()[0])
+
     def test_edited_missing_extra(self):
         self.write(f"{TARGET}/main.tf", MAIN_TF + "# local edit\n")
         self.assertIn("edited in place", self.errs()[0])
