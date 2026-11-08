@@ -37,7 +37,10 @@ use through their own IAM policies.
   Prefer them over `key_service_users`, which has no conditions. `allow_config` (AWS Config
   delivering to a bucket on the key, scoped by `aws:SourceAccount` to `config_source_accounts`,
   this account when empty) is off in `kms/defaults`: only the audit stacks' `kms/config-bucket`
-  (`stacks/catalog/aws-config-bucket/`) sets it, with its residency's accounts.
+  (`stacks/catalog/aws-config-bucket/`) sets it, with its residency's accounts, and
+  `config_delivery_role_arns`: the audit account's own recorder delivers with its IAM role, not
+  the service principal, so that role gets the data key (via S3, by `aws:PrincipalArn` under a
+  `*` principal, since the role is created after the key).
 - The CI apply role gets key use via `iam`'s `ci_apply_kms_key_aliases` (by alias, because
   `iam/ci` applies in the layer before `kms/main`).
 - Replicas get their own region-scoped policy; the `key_policy` output is the primary's.

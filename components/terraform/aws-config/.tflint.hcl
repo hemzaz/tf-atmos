@@ -59,7 +59,7 @@ rule "aws_resource_missing_tags" {
   enabled = false
 }
 
-# House file (scripts/check-vendor.py TFLINT): the repository's .tflint.hcl above,
+# House file (scripts/check-vendor.py TFLINT, TFLINT_ALLOWLIST): the repository's .tflint.hcl above,
 # verbatim, for `atmos terraform lint`, which prefers this file to the root one.
 # Vendored Cloud Posse aws-config v3.1.1 remote-state.tf (module
 # global_collector_region, which remote-state_override.tf bypasses) calls

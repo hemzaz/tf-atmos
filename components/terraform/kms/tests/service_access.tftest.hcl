@@ -474,6 +474,42 @@ run "config_delivers_only_for_the_listed_accounts" {
   }
 }
 
+run "config_role_delivery_is_opt_in_and_scoped" {
+  command = plan
+
+  variables {
+    allow_config              = true
+    config_delivery_role_arns = ["arn:aws:iam::123456789012:role/acme-ue1-audit-aws-config-config"]
+  }
+
+  assert {
+    condition = (
+      # "*" narrowed by aws:PrincipalArn: KMS rejects a policy naming a role that
+      # does not exist yet, and the recorder role is created after the key.
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowConfigRoleDelivery"]).Principal.AWS == "*"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowConfigRoleDelivery"]).Action) == toset(["kms:Decrypt", "kms:GenerateDataKey*"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowConfigRoleDelivery"]).Condition == {
+        ArnEquals = { "aws:PrincipalArn" = "arn:aws:iam::123456789012:role/acme-ue1-audit-aws-config-config" }
+        StringEquals = {
+          "kms:CallerAccount" = "123456789012"
+          "kms:ViaService"    = "s3.us-east-1.amazonaws.com"
+        }
+      }
+    )
+    error_message = "The recorder role may use the key only by its ARN, from this account, via S3 in this region."
+  }
+}
+
+run "config_role_delivery_needs_allow_config" {
+  command = plan
+
+  variables {
+    config_delivery_role_arns = ["arn:aws:iam::123456789012:role/acme-ue1-audit-aws-config-config"]
+  }
+
+  expect_failures = [var.config_delivery_role_arns]
+}
+
 run "config_defaults_to_this_account" {
   command = plan
 

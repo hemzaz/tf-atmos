@@ -9,7 +9,8 @@ vendor.lock.yaml holds a receipt per source and no other;
 each receipt file (a regular file at a relative path inside the target) is on disk with its
 sha256; nothing else is in the target (no extra file, symlink or empty directory) but
 .terraform.lock.hcl, *_override.tf and a top-level .tflint.hcl that is the repository's
-.tflint.hcl verbatim plus only rule blocks disabling a rule, each after a # reason (TFLINT).
+.tflint.hcl verbatim plus only rule blocks disabling a rule, each after a # reason (TFLINT), and
+each listed for its target in TFLINT_ALLOWLIST, which fails an entry nothing disables (stale).
 Atmos 1.229's receipt omits the version (`atmos vendor
 verify` passes a changed pin), so --repull pulls the manifest into a scratch dir and fails a file
 that differs from the receipt or a target the pull or the receipt lacks.
@@ -49,6 +50,15 @@ HOUSE_FILES = (".terraform.lock.hcl", "*_override.tf")
 # already skips vendored code): the repository's config verbatim, then disabled rule blocks.
 TFLINT = ".tflint.hcl"
 TFLINT_TAIL = re.compile(r'(?:\n*(?:#[^\n]*\n)+rule "[a-z0-9_]+" \{\n  enabled = false\n\}\n)*\n*\Z')
+TFLINT_RULE = re.compile(r'^rule "([a-z0-9_]+)" \{$', re.MULTILINE)
+# The rules a vendored target's .tflint.hcl may disable, one (target, rule, reason) each, reviewed
+# like code (as scripts/check-checkov-allowlist.py): an unlisted disabled rule fails, and so does
+# an entry its target's .tflint.hcl does not disable (stale: drop it).
+TFLINT_ALLOWLIST = (
+    ("components/terraform/aws-config", "terraform_deprecated_lookup",
+     "Cloud Posse aws-config v3.1.1 remote-state.tf (module global_collector_region, bypassed by "
+     "remote-state_override.tf) calls lookup() with 2 arguments"),
+)
 # Never committed: Terraform's working dir and the files Atmos writes before a run.
 IGNORED = {".terraform", "backend.tf.json", "providers_override.tf.json"}
 # The scratch pull's atmos.yaml (JSON is YAML); vendor.yaml and vendor.lock.yaml are the defaults.
@@ -161,8 +171,11 @@ def on_disk(root, target):
     return sorted(regular), sorted(links), sorted(dirs)
 
 
-def check_lock(manifest, lock, root):
-    errs, have = [], receipts(lock)
+def check_lock(manifest, lock, root, tflint_allowlist=None):
+    errs, have, disabled = [], receipts(lock), set()
+    tflint_allowlist = TFLINT_ALLOWLIST if tflint_allowlist is None else tflint_allowlist
+    errs += [f"{target}/{TFLINT}: allowlist entry {rule} has no reason" for target, rule, why in tflint_allowlist
+             if not str(why or "").strip()]
     declared = {(s.get("component"), (s.get("targets") or [None])[0]) for s in sources(manifest)}
     for name, target in sorted(set(have) - declared, key=str):
         errs.append(f"{LOCK}: receipt for {name} -> {target}, which {MANIFEST} does not declare (atmos vendor clean)")
@@ -184,26 +197,34 @@ def check_lock(manifest, lock, root):
         errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)} and a top-level "
                  f"{TFLINT} may be added" for r in regular if r not in kept]
         if TFLINT in regular and TFLINT not in locked:
-            errs += tflint_errors(root, target)
+            found, rules = tflint_errors(root, target, tflint_allowlist)
+            errs += found
+            disabled |= {(target, rule) for rule in rules}
         errs += [f"{target}/{r}: a symlink; {LOCK} records regular files only" for r in links]
         errs += [f"{target}/{d}: a directory with no vendored or house file" for d in dirs
                  if not any(k.startswith(d + "/") for k in kept)]
+    errs += [f"{target}/{TFLINT}: allowlist entry {rule} ({why}) disables nothing there (stale; drop it)"
+             for target, rule, why in tflint_allowlist if (target, rule) not in disabled]
     return errs
 
 
-def tflint_errors(root, target):
-    """A vendored target's house .tflint.hcl that is not the repository's plus disabled rules."""
+def tflint_errors(root, target, allowlist):
+    """(findings, rules disabled) for a vendored target's house .tflint.hcl: the repository's
+    verbatim, then disabled rule blocks, each listed for this target in the allowlist."""
     try:
         with open(os.path.join(root, TFLINT)) as fh:
             house = fh.read()
         with open(os.path.join(root, target, TFLINT)) as fh:
             local = fh.read()
     except OSError as exc:
-        return [f"{target}/{TFLINT}: cannot compare with the repository's {TFLINT}: {exc}"]
-    if local.startswith(house) and TFLINT_TAIL.fullmatch(local[len(house):]):
-        return []
-    return [f"{target}/{TFLINT}: must be the repository's {TFLINT} verbatim, then only "
-            '`rule "<name>" {\n  enabled = false\n}` blocks, each after a # reason line']
+        return [f"{target}/{TFLINT}: cannot compare with the repository's {TFLINT}: {exc}"], set()
+    if not (local.startswith(house) and TFLINT_TAIL.fullmatch(local[len(house):])):
+        return [f"{target}/{TFLINT}: must be the repository's {TFLINT} verbatim, then only "
+                '`rule "<name>" {\n  enabled = false\n}` blocks, each after a # reason line'], set()
+    rules = set(TFLINT_RULE.findall(local[len(house):]))
+    listed = {rule for tgt, rule, _ in allowlist if tgt == target}
+    return [f"{target}/{TFLINT}: disables {rule}, which TFLINT_ALLOWLIST does not list for {target}"
+            for rule in sorted(rules - listed)], rules
 
 
 def repull(lock):

@@ -38,6 +38,13 @@ refresh.
   on default encryption passes). The residency is `residency_account_ids`, or, unset, every
   account of `account_map.full_account_map` but `<tenant>-prod-eu` (the US bucket: a new account
   joins it). An `eu-` region bucket must set it (prod-eu, root, audit, security: owner OQ4).
+- **Same-account recorder (E5b4b)**: AWS Config delivers to a bucket of its own account with the
+  recorder's IAM role, not the service principal, so the policy also grants
+  `<tenant>-ue1-<stage>-aws-config-config` of this account (the audit account's home recorder
+  role, which its eu-west-1 recorder reuses) `s3:GetBucketAcl`, `s3:ListBucket` and
+  `s3:PutObject` under `AWSLogs/` with `bucket-owner-full-control`. Its principal is `*` with a
+  fixed `aws:PrincipalArn`, because the role is created after the bucket; the residency Denys
+  name the service principal only. The key grants the same role (`config_delivery_role_arns`).
 - **Key (E5a4)**: `kms_master_key_arn` has no default. Each audit stack needs its own key: a
   dedicated `kms` instance whose key policy lets `config.amazonaws.com` use it
   (`kms:GenerateDataKey*`, `kms:Decrypt`), limited by `aws:SourceAccount` to the same residency

@@ -16,7 +16,9 @@
 # another account cannot deliver here even with its own s3KmsKeyArn. The
 # bucket is SSE-KMS under its kms/config-bucket key, whose policy lets
 # config.amazonaws.com use it only for the same accounts (kms allow_config,
-# config_source_accounts).
+# config_source_accounts). The audit account's own recorder delivers with its
+# role instead (a same-account bucket): bucket and key grant that role by ARN
+# (aws:PrincipalArn), which the service-principal Denys do not match.
 # =============================================================================
 
 import:
@@ -65,3 +67,10 @@ components:
         deletion_window_in_days: 30
         enable_default_policy: true
         allow_config: true
+        # The audit account's own recorder (its fnx-ue1-audit home role, also
+        # fnx-ew1-audit's: aws-config/main-eu-core) delivers here with its IAM
+        # role, not config.amazonaws.com (same-account bucket), so it needs
+        # the data key too (E5b4b). The bucket policy grants it S3 by the same
+        # convention ARN.
+        config_delivery_role_arns:
+          - 'arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.tenant }}-ue1-{{ .settings.context.stage }}-aws-config-config'

@@ -160,5 +160,85 @@ class CiPlanTrustTest(unittest.TestCase):
         self.assertEqual(check_prod_protection.check_ci_plan_trust(
             stacks(**{"iam/main": instance("iam")}), COMPONENTS), [])
 
+
+class TrailProtectionTest(unittest.TestCase):
+    """OQ-F: every trail keeps its key and its label, in any stage (core stacks are not in CD)."""
+
+    # The `vendored` abstract as describe stacks resolves it in fnx-ue1-audit.
+    VENDORED = {"enabled": True, "namespace": None, "tenant": "fnx", "environment": "ue1", "stage": "audit",
+                "name": None, "delimiter": None, "attributes": [], "regex_replace_chars": None,
+                "label_order": ["tenant", "environment", "stage", "name", "attributes"], "id_length_limit": None,
+                "label_key_case": None, "label_value_case": None}
+
+    def found(self, settings_stage="audit", metadata=None, context=None, vendored=True, **variables):
+        stage = settings_stage
+        trail = instance("aws-cloudtrail", stage=stage)  # settings.context.stage: any stage is checked
+        trail["vars"] = {"enabled": True, "name": "cloudtrail", "tenant": "fnx", "environment": "ue1",
+                         "stage": "audit", "context": {**self.VENDORED, **(context or {})}, **variables}
+        trail["metadata"] = metadata or {}
+        components = {"cloudtrail": trail}
+        if vendored:
+            components["vendored"] = {"metadata": {"type": "abstract"}, "vars": {"context": dict(self.VENDORED)}}
+        return check_prod_protection.check_trails({"fnx-ue1-audit": {"components": {"terraform": components}}})
+
+    def assert_label_fails(self, fragment, **kwargs):
+        found = self.found(**kwargs)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("label differs from the vendored null-label shape", found[0])
+        self.assertIn(fragment, found[0])
+
+    def test_catalog_trail_passes(self):
+        self.assertEqual(self.found(), [])
+        self.assertEqual(self.found(enabled=None), [])  # null-label: null takes context.enabled (true)
+
+    def test_disabled_trail_fails_in_any_stage(self):
+        for stage in ("audit", "root", "dev"):
+            with self.subTest(stage=stage):
+                found = self.found(settings_stage=stage, enabled="false")
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("schedules the trail KMS key's deletion", found[0])
+
+    def test_context_disabled_trail_fails(self):
+        # var.enabled null: null-label takes context.enabled.
+        found = self.found(enabled=None, context={"enabled": False})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("schedules the trail KMS key's deletion", found[0])
+
+    def test_relabelled_trail_fails(self):
+        self.assert_label_fails("name 'trail'", name="trail")
+        self.assert_label_fails("attributes ['v2']", attributes=["v2"])
+
+    def test_context_attributes_fail(self):
+        self.assert_label_fails("attributes ['x']", context={"attributes": ["x"]})
+
+    def test_each_context_label_field_fails(self):
+        for field, value in {
+            "label_order": ["environment", "tenant", "stage", "name", "attributes"],
+            "delimiter": "_",
+            "id_length_limit": 32,
+            "label_value_case": "upper",
+            "regex_replace_chars": "/[^a-z0-9]/",
+            "namespace": "acme",
+        }.items():
+            with self.subTest(field=field):
+                self.assert_label_fails(f"{field} {value!r}", context={field: value})
+
+    def test_tenant_or_environment_change_fails(self):
+        # Through the context (top-level var null) or the top-level var.
+        self.assert_label_fails("tenant 'acme'", tenant=None, context={"tenant": "acme"})
+        self.assert_label_fails("environment 'ew1'", environment="ew1")
+        self.assert_label_fails("stage 'prod'", stage=None, context={"stage": "prod"})
+
+    def test_missing_vendored_abstract_fails(self):
+        found = self.found(vendored=False)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("no resolved 'vendored' abstract", found[0])
+
+    def test_undeployed_trail_is_skipped(self):
+        # metadata.enabled false stops deploying it; Atmos destroys nothing.
+        self.assertEqual(self.found(metadata={"enabled": False}, enabled=False), [])
+        self.assertEqual(self.found(metadata={"type": "abstract"}, name=None), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -666,6 +666,46 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # AWS Config of this key's own account delivers with its recorder's IAM role,
+  # not the service principal (the service principal is only for a bucket of
+  # another account), so the role needs the data key too. The principal is "*"
+  # narrowed by aws:PrincipalArn, not the role itself: KMS rejects a key policy
+  # naming a role that does not exist yet, and the audit account's recorder
+  # role is created after its bucket's key. kms:CallerAccount pins it to this
+  # account and kms:ViaService to S3 in this document's region.
+  dynamic "statement" {
+    for_each = var.allow_config && length(var.config_delivery_role_arns) > 0 ? [1] : []
+
+    content {
+      sid       = "AllowConfigRoleDelivery"
+      actions   = ["kms:Decrypt", "kms:GenerateDataKey*"]
+      resources = ["*"]
+
+      principals {
+        type        = "AWS"
+        identifiers = ["*"]
+      }
+
+      condition {
+        test     = "ArnEquals"
+        variable = "aws:PrincipalArn"
+        values   = distinct(var.config_delivery_role_arns)
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "kms:CallerAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "kms:ViaService"
+        values   = ["s3.${each.key}.amazonaws.com"]
+      }
+    }
+  }
+
   # CloudFront reading SSE-KMS objects through origin access control (an
   # origin bucket encrypted with this key): read-only, so kms:Decrypt only,
   # limited to this account's distributions (any of them: account-scoped, so

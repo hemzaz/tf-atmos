@@ -240,6 +240,22 @@ variable "config_source_accounts" {
   }
 }
 
+variable "config_delivery_role_arns" {
+  type        = list(string)
+  description = "With allow_config, the IAM role ARNs of this account's own AWS Config recorders: AWS Config delivers to a bucket of its own account with the recorder's role, not config.amazonaws.com, so each role may use the key (kms:GenerateDataKey*, kms:Decrypt) via S3 in the key's region, matched by aws:PrincipalArn (the role may not exist yet when the key is created)"
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.config_delivery_role_arns : can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$", arn))])
+    error_message = "config_delivery_role_arns are IAM role ARNs (arn:aws:iam::<12-digit account>:role/<name>)."
+  }
+
+  validation {
+    condition     = length(var.config_delivery_role_arns) == 0 || var.allow_config
+    error_message = "config_delivery_role_arns needs allow_config = true."
+  }
+}
+
 variable "allow_autoscaling_ebs" {
   type        = bool
   description = "Let the EC2 Auto Scaling service-linked role (arn:<partition>:iam::<account>:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling) use the key to encrypt/decrypt EBS volumes it launches for a managed node group or ASG (kms:Encrypt/Decrypt/ReEncrypt*/GenerateDataKey*/DescribeKey, scoped by kms:ViaService=ec2.<region>.amazonaws.com and kms:CallerAccount) and create the grant EC2 needs to do so (kms:CreateGrant, scoped by kms:GrantIsForAWSResource). The role exists in every account that has used Auto Scaling; without this, new instances on a CMK-encrypted launch template fail to launch"

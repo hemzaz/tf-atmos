@@ -10,7 +10,8 @@
 #     config-storage builds the bucket policy from its own statements only and ignores its
 #     `policy` input, so no Deny could be added. Two Denys are added to its statements:
 #     config.amazonaws.com may put an object only for an aws:SourceAccount of this bucket's
-#     residency (residency_account_ids), and only under this bucket's key.
+#     residency (residency_account_ids), and only under this bucket's key. Two Allows add this
+#     account's own recorder role (E5b4b): a same-account recorder delivers with its role.
 #   - The bucket is encrypted with a customer managed KMS key (E5a3): sse_algorithm is
 #     "aws:kms" and kms_master_key_arn is a required input. Upstream hardcodes "AES256".
 #   - enable_glacier_transition is passed through (upstream declares it but never wires it).
@@ -28,9 +29,15 @@ locals {
   ])
   s3_bucket_arn    = format("arn:%s:s3:::%s", data.aws_partition.current.partition, module.aws_config_label.id)
   s3_object_prefix = format("%s/AWSLogs/*", local.s3_bucket_arn)
+  # This account's own recorder role: its home stack's (<tenant>-ue1-<stage>) aws-config role,
+  # which its eu-west-1 recorder reuses (catalog/aws-config main-eu-core's convention ARN).
+  recorder_role_arn = format("arn:%s:iam::%s:role/%s-ue1-%s-aws-config-config",
+  data.aws_partition.current.partition, data.aws_caller_identity.current.account_id, module.this.tenant, module.this.stage)
 }
 
 data "aws_partition" "current" {}
+
+data "aws_caller_identity" "current" {}
 
 # The bucket name config-storage gives s3-log-storage (attributes "aws-config").
 module "aws_config_label" {
@@ -110,6 +117,49 @@ data "aws_iam_policy_document" "aws_config_bucket_policy" {
     principals {
       type        = "Service"
       identifiers = ["config.amazonaws.com"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+  }
+
+  # House: AWS Config delivers to a bucket of its own account with the recorder's IAM role, not
+  # config.amazonaws.com, so this account's recorder gets the three statements above by role
+  # (E5b4b). The principal is "*" narrowed by aws:PrincipalArn: S3 rejects a policy naming a role
+  # that does not exist yet, and the recorder is created after its bucket. A fixed
+  # aws:PrincipalArn keeps the policy non-public (block_public_policy). The Denys below name the
+  # service principal only, so they do not match this role.
+  statement {
+    sid       = "AWSConfigRoleBucketChecks"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketAcl", "s3:ListBucket"]
+    resources = [local.s3_bucket_arn]
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:PrincipalArn"
+      values   = [local.recorder_role_arn]
+    }
+  }
+
+  statement {
+    sid       = "AWSConfigRoleDelivery"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = [local.s3_object_prefix]
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:PrincipalArn"
+      values   = [local.recorder_role_arn]
     }
     condition {
       test     = "StringLike"
