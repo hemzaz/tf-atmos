@@ -1,6 +1,8 @@
 """Tests for workflows/scripts/security/harden.sh's component selection, against a fake atmos on
-PATH (stdlib only; needs bash and jq, which harden.sh's workflow declares: without jq every case fails,
-never skips): python3 -m unittest workflows/scripts/common/test_harden.py
+PATH (stdlib only; needs bash and jq): python3 -m unittest workflows/scripts/common/test_harden.py
+
+Skipped without jq: the CI image ships none, and the toolchain's jqlang/jq fails its
+attestation check there, so this runs locally (validate-all's unittest discover) only.
 
 HARDEN_PHASE=plan stops after the plans, so no aws CLI call is reached.
 """
@@ -36,7 +38,7 @@ def stacks(stack, *instances, abstract=()):
     return {stack: {"components": {"terraform": terraform}}}
 
 
-@unittest.skipUnless(shutil.which("bash"), "bash is required")
+@unittest.skipUnless(shutil.which("bash") and shutil.which("jq"), "bash and jq are required")
 class HardenSelectionTest(unittest.TestCase):
     def setUp(self):
         self.dir = pathlib.Path(tempfile.mkdtemp())

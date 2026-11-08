@@ -49,9 +49,6 @@ workflows:
         # scripts/check-stack-samples.sh (stack-samples) edits a scratch
         # manifest with it; the atmos image ships no yq.
         mikefarah/yq: "v4.53.6"
-        # harden-selection's test_harden.py runs harden.sh, which reads atmos's
-        # JSON with it; the atmos image ships no jq.
-        jqlang/jq: "1.8.2"
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
@@ -131,12 +128,6 @@ workflows:
             command: |
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_plan_destroys.py workflows/scripts/common/test_deploy_component.py
-          # harden.sh (security-hardening.yaml): which security components it
-          # plans in a stack, and that an unknown stack or a missing aws-config
-          # fails it.
-          - name: harden-selection
-            type: shell
-            command: python3 -m unittest workflows/scripts/common/test_harden.py
           # atmos.yaml validates stacks against the pinned
           # schemas/atmos/atmos-manifest.json, not a URL (cached in $TMPDIR and
           # corrupted there by concurrent runs). The pin must be the embedded
