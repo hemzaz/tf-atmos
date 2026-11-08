@@ -44,8 +44,10 @@ esac
 # with the aws CLI instead would leave Terraform failing with "already exists"
 # on its next apply, so hardening deploys the components and never touches the
 # services directly. awsconfig/main comes before securityhub/main, whose
-# controls are AWS Config rules.
-COMPONENTS=(cloudtrail/main awsconfig/main guardduty/main securityhub/main)
+# controls are AWS Config rules. cloudtrail is the account's vendored
+# aws-cloudtrail trail (catalog/aws-cloudtrail/defaults), in the account's
+# home stack only (E5b); awsconfig/main becomes aws-config in E5b6.
+COMPONENTS=(cloudtrail awsconfig/main guardduty/main securityhub/main)
 
 echo "Configuration:"
 echo "  Stack: ${STACK}"

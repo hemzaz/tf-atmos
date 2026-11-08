@@ -56,7 +56,7 @@ import:
   - catalog/iam/ci-prod
   - catalog/aws-account-settings/main
   - catalog/kms/main-prod
-  - catalog/cloudtrail/main
+  - catalog/aws-cloudtrail/defaults
   - catalog/awsconfig/main
   - catalog/guardduty/main-prod
   - catalog/securityhub/main-prod
@@ -246,7 +246,7 @@ components:
     #
     # The account and identity layer (iam/main, iam/ci), the stack's key
     # (kms/main) and the prod-eu account's singletons: the multi-region
-    # CloudTrail trail (cloudtrail/main) and AWS Config's global-resource
+    # CloudTrail trail (cloudtrail) and AWS Config's global-resource
     # recording (awsconfig/main); the account budget is cost-optimization/main
     # (services section). Then the regional security services: GuardDuty,
     # Security Hub, Inspector and finding routing with the CIS metric filters
@@ -292,6 +292,20 @@ components:
         # own prefix's alias, as fnx-ue2-prod does ue1's (ue2-main).
         replica_alias_names:
           eu-central-1: ec1-main
+
+    # The account's trail (catalog/aws-cloudtrail/defaults) verifies its plan
+    # runs in this stack's account (settings.environment.account), not the
+    # "<tenant>-<stage>" one Cloud Posse assumes: the prod-eu account runs
+    # stage prod. The null-label descriptor account_name carries it to
+    # components/terraform/aws-cloudtrail/account-verification_override.tf
+    # (fail-closed: a run in another account, or a name account_map lacks,
+    # fails the plan).
+    cloudtrail:
+      vars:
+        descriptor_formats:
+          account_name:
+            format: "%v-{{ .settings.environment.account }}"
+            labels: [tenant]
 
     # ========================================================================
     # Compute

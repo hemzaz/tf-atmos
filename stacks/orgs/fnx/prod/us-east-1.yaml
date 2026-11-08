@@ -47,7 +47,7 @@ import:
   - catalog/secretsmanager/infra-prod
   - catalog/acm/main-prod
   - catalog/acm/services
-  - catalog/cloudtrail/main
+  - catalog/aws-cloudtrail/defaults
   - catalog/awsconfig/main
   - catalog/guardduty/main-prod
   - catalog/securityhub/main-prod

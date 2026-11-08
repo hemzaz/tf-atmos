@@ -99,7 +99,7 @@ import:
   - catalog/secretsmanager/infra-prod
   - catalog/acm/main-prod
   - catalog/acm/services
-  - catalog/cloudtrail/main
+  - catalog/aws-cloudtrail/defaults
   - catalog/awsconfig/main
   - catalog/guardduty/main-prod
   - catalog/securityhub/main-prod
@@ -112,7 +112,7 @@ import:
   - catalog/iam/ci-prod
   - catalog/aws-account-settings/main
   - catalog/kms/main-prod
-  - catalog/cloudtrail/main
+  - catalog/aws-cloudtrail/defaults
   - catalog/awsconfig/main
   - catalog/guardduty/main-prod
   - catalog/securityhub/main-prod
@@ -377,7 +377,7 @@ components:
     # Security
     #
     # The account and identity layer (iam/main, iam/ci), the stack's key
-    # (kms/main), the account's singletons (cloudtrail/main's multi-region
+    # (kms/main), the account's singletons (cloudtrail's multi-region
     # trail, awsconfig/main's global-resource recording) and the regional
     # security services, each from its catalog/<c>/<i>[-prod] file. DR copies
     # (kms/main's replica, backup/main's copies, the secrets' replicas) go to
@@ -388,7 +388,8 @@ components:
     # (check-data-residency.py).
 [[- end ]]
     # This file keeps kms/main's description and replica alias[[ if $data_plane ]], iam/ci's
-    # Lambda package uploader and acm/services' SAN[[ end ]].
+    # Lambda package uploader and acm/services' SAN[[ end ]][[ if ne $account .Config.stage ]] and
+    # cloudtrail's account name[[ end ]].
     # ========================================================================
 [[- if $data_plane ]]
     iam/ci:
@@ -417,6 +418,22 @@ components:
         # cross-stack and reaches it by its own prefix's alias.
         replica_alias_names:
           [[ .Config.dr_region ]]: [[ .Config.dr_region_code ]]-main
+[[- if ne $account .Config.stage ]]
+
+    # The account's trail (catalog/aws-cloudtrail/defaults) verifies its plan
+    # runs in this stack's account (settings.environment.account), not the
+    # "<tenant>-<stage>" one Cloud Posse assumes: the [[ $account ]] account
+    # runs stage [[ .Config.stage ]]. The null-label descriptor account_name
+    # carries it to components/terraform/aws-cloudtrail/
+    # account-verification_override.tf (fail-closed: a run in another account,
+    # or a name account_map lacks, fails the plan).
+    cloudtrail:
+      vars:
+        descriptor_formats:
+          account_name:
+            format: "%v-{{ .settings.environment.account }}"
+            labels: [tenant]
+[[- end ]]
 [[- if $data_plane ]]
 
     acm/services:

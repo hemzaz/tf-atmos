@@ -1,6 +1,6 @@
 # Security audit and account-level hardening.
 #   security-audit - Security Hub findings mapped to components (read-only)
-#   harden         - plan the cloudtrail/main, awsconfig/main, guardduty/main
+#   harden         - plan the cloudtrail, awsconfig/main, guardduty/main
 #                    and securityhub/main components and print the plans
 #                    BEFORE the confirm prompt, then apply
 #                    exactly those planfiles (atmos terraform deploy
@@ -25,7 +25,7 @@ workflows:
         command: aws compliance report --framework cis-aws
 
   harden:
-    description: Plan cloudtrail/main, awsconfig/main, guardduty/main and securityhub/main, confirm, apply those plans, then apply account/region hardening (EBS, S3)
+    description: Plan cloudtrail, awsconfig/main, guardduty/main and securityhub/main, confirm, apply those plans, then apply account/region hardening (EBS, S3)
     dependencies:
       tools:
         aws/aws-cli: "2.36.49"

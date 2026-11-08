@@ -6,7 +6,7 @@
 # trail delivers to the log group of the primary stack it stands by for
 # (settings.dr.standby_of), where they run. It does not inherit
 # security-monitoring/defaults, whose cloudtrail_log_group_name reads a
-# cloudtrail/main a standby does not have (a null cannot unset an inherited
+# cloudtrail a standby does not have (a null cannot unset an inherited
 # value); the rest mirrors it. The alert topic is on this region's key, the
 # primary's kms/main multi-region replica. Each stack keeps its
 # security_email_subscriptions and enable_alert_enrichment: the recipients

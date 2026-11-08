@@ -5,16 +5,17 @@
 # Routes security findings to an SNS topic. It does NOT own the GuardDuty
 # detector, the Security Hub hub or the Inspector enabler: the guardduty,
 # securityhub and inspector2 components do, and this component consumes their
-# outputs. They, kms/main (the topic's key), cloudtrail/main (the CIS filters'
-# log group) and iam/ci (the CI apply role excluded from security group change
-# alerts) are declared in dependencies.components so they deploy first;
-# workflows/scripts/common/check-dependencies.py enforces that.
+# outputs. They, kms/main (the topic's key), cloudtrail (the account's
+# vendored aws-cloudtrail trail, catalog/aws-cloudtrail/defaults: the CIS
+# filters' log group) and iam/ci (the CI apply role excluded from security
+# group change alerts) are declared in dependencies.components so they deploy
+# first; workflows/scripts/common/check-dependencies.py enforces that.
 #
 # Only main.yaml imports this file, and every stack that imports main.yaml
-# runs kms/main, cloudtrail/main, guardduty/main, securityhub/main,
-# inspector2/main and iam/ci, so the references resolve in all of them. The
-# DR standbys (main-standby.yaml) have no kms/main or cloudtrail/main and
-# neither import nor inherit it.
+# (the 4 workload primaries) runs kms/main, cloudtrail, guardduty/main,
+# securityhub/main, inspector2/main and iam/ci, so the references resolve in
+# all of them. The DR standbys (main-standby.yaml) have no kms/main or
+# cloudtrail and neither import nor inherit it.
 
 components:
   terraform:
@@ -25,7 +26,7 @@ components:
       dependencies:
         components:
           - component: kms/main
-          - component: cloudtrail/main
+          - component: cloudtrail
           - component: guardduty/main
           - component: securityhub/main
           - component: inspector2/main
@@ -39,7 +40,7 @@ components:
         require_securityhub_route: true
         # The CIS metric filters (root usage, unauthorized API calls, IAM
         # policy and security group changes) run on the trail's log group.
-        cloudtrail_log_group_name: !terraform.state cloudtrail/main .cloudtrail_logs_log_group_name
+        cloudtrail_log_group_name: !terraform.state cloudtrail .cloudtrail_logs_log_group_name
         require_cloudtrail_route: true
         # Every security group create, delete and rule change in the account
         # and region, one notification each (EventBridge, from the trail's
