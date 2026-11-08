@@ -127,7 +127,21 @@ class LockTest(Fixture):
             self.write(f"{TARGET}/{rel}", "{}")
         self.assertEqual(self.errs(), [])
 
-    HOUSE = 'plugin "terraform" {\n  enabled = true\n}\n'
+    def test_house_terraform_tests_only_in_top_level_tests(self):
+        self.write(f"{TARGET}/tests/override.tftest.hcl", "")
+        self.assertEqual(self.errs(), [])
+        for rel in ("tests/override.tftest.hcl.bak", "tests/helper.tf", "tests/sub/deep.tftest.hcl",
+                    "other/x.tftest.hcl", "top.tftest.hcl"):
+            self.write(f"{TARGET}/{rel}", "")
+            errs = self.errs()
+            self.assertIn(f"{rel}: not from the vendor pull", errs[0], rel)
+            # A directory holding no kept file (tests/sub, other) is its own finding.
+            self.assertEqual(len(errs), 1 if os.path.dirname(rel) in ("", "tests") else 2, (rel, errs))
+            os.remove(os.path.join(self.root, TARGET, rel))
+            if os.path.dirname(rel) not in ("", "tests"):
+                os.rmdir(os.path.join(self.root, TARGET, os.path.dirname(rel)))
+
+    HOUSE ='plugin "terraform" {\n  enabled = true\n}\n'
     TAIL = ('\n# Cloud Posse remote-state.tf uses lookup() with 2 arguments.\n'
             'rule "terraform_deprecated_lookup" {\n  enabled = false\n}\n')
     LISTED = ((TARGET, "terraform_deprecated_lookup", "lookup() with 2 arguments"),)
