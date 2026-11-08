@@ -72,7 +72,11 @@ components:
         # The home stack's recorder role: the null-label id of its
         # aws-config (<tenant>-ue1-<stage>-aws-config) plus Cloud Posse's
         # "config" attribute (cloudposse/config aws_config_label).
-        iam_role_arn: 'arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.tenant }}-ue1-{{ .settings.context.stage }}-aws-config-config'
+        iam_role_arn: &home_role 'arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.tenant }}-ue1-{{ .settings.context.stage }}-aws-config-config'
+        # That role's own sns:Publish names only its home (us-east-1) topic:
+        # this region's topic grants it in its topic policy (E5b4b).
+        allowed_iam_arns_for_sns_publish:
+          - *home_role
 
     # OQ-B: the aggregator covers every account but prod-eu (whose data stays
     # in the EU: its aggregator is fnx-ew1-security's, E5c). Cloud Posse
