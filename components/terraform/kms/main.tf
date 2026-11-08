@@ -27,6 +27,7 @@ module "kms" {
   allow_cloudtrail                = var.allow_cloudtrail
   allow_config                    = var.allow_config
   config_source_accounts          = var.config_source_accounts
+  config_delivery_role_arns       = var.config_delivery_role_arns
   allow_autoscaling_ebs           = var.allow_autoscaling_ebs
   allow_sns                       = var.allow_sns
   allow_s3                        = var.allow_s3

@@ -127,9 +127,10 @@ run "us_residency_derived_from_account_map" {
   assert {
     condition = [for s in data.aws_iam_policy_document.aws_config_bucket_policy[0].statement : s.sid] == [
       "AWSConfigBucketPermissionsCheck", "AWSConfigBucketExistenceCheck", "AWSConfigBucketDelivery",
+      "AWSConfigRoleBucketChecks", "AWSConfigRoleDelivery",
       "DenyDeliveryOutsideResidency", "DenyDeliveryUnderOtherKey",
     ]
-    error_message = "The policy is config-storage 1.0.2's three statements plus the two residency Denys."
+    error_message = "The policy is config-storage 1.0.2's three statements, the recorder role's two and the two residency Denys."
   }
 }
 
