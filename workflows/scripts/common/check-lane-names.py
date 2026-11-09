@@ -26,12 +26,11 @@ it cannot be checked. Within a group this fails:
     GitHub OIDC provider, the Auto Scaling service-linked role, the
     multi-region CloudTrail trail, CloudTrail's global-service-event
     recording, AWS Config's global-resource recording, the IAM account alias
-    and the S3 account public access block), whichever component creates it:
-    the hand-written cloudtrail and awsconfig and the vendored aws-cloudtrail
-    (multi-region with global events unless set false, CP defaults) and
-    aws-config (its global-resource collector, the instance whose
-    global_resource_collector_region is its stack's region, or unset:
-    REGION_SINGLETONS) count as one;
+    and the S3 account public access block), whichever instance creates it:
+    the vendored aws-cloudtrail (multi-region with global events unless set
+    false, CP defaults) and aws-config (its global-resource collector, the
+    instance whose global_resource_collector_region is its stack's region,
+    or unset: REGION_SINGLETONS);
     stage fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
@@ -99,7 +98,7 @@ NOT_PRIMARY = {("alb-controller-ingress-group", "cluster_name"), ("lambda", "ali
 # roles from the null-label id (vars.context), whose environment is the region
 # code, not from tags.Environment.
 ACCOUNT_WIDE_COMPONENTS = frozenset({
-    "alb", "apigateway", "awsconfig", "backup", "batch", "cloudtrail", "cost-optimization", "ec2", "ecs-service", "eks",
+    "alb", "apigateway", "backup", "batch", "cost-optimization", "ec2", "ecs-service", "eks",
     "eks-addons", "external-secrets", "firehose", "github-runners", "glue", "lambda", "monitoring", "rds",
     "s3", "security-monitoring", "stepfunctions", "vpc",
 })
@@ -123,12 +122,9 @@ RAW_NAMES = {
 SINGLETONS = {
     ("iam", "github_oidc_create_provider", False): "GitHub OIDC provider",
     ("iam", "enable_autoscaling_service_linked_role", False): "Auto Scaling service-linked role",
-    ("cloudtrail", "is_multi_region_trail", True): "multi-region CloudTrail trail",
-    # A second trail recording IAM/STS events would duplicate (and bill) the
+    # The vendored Cloud Posse trail defaults both to true (variables.tf). A
+    # second trail recording IAM/STS events would duplicate (and bill) the
     # account's global-service events: a regional trail sets it false.
-    ("cloudtrail", "include_global_service_events", True): "CloudTrail global-service-event recording",
-    ("awsconfig", "include_global_resource_types", True): "AWS Config global-resource recording",
-    # The vendored Cloud Posse trail defaults both to true (variables.tf).
     ("aws-cloudtrail", "is_multi_region_trail", True): "multi-region CloudTrail trail",
     ("aws-cloudtrail", "include_global_service_events", True): "CloudTrail global-service-event recording",
     # aws-account-settings' account-wide settings: its account's first stack

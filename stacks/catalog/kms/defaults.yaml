@@ -47,8 +47,6 @@ components:
         # (EventBridge rules are covered by allow_eventbridge), limited to this
         # account's SNS topics.
         allow_cloudwatch_alarms: true
-        # cloudtrail/main encrypts its trail log files with this key.
-        allow_cloudtrail: true
         # SNS subscriptions delivering to SQS queues encrypted with this key
         # (sqs, sns components), limited to this account's topics in this
         # region. EventBridge rules delivering to such queues are covered by

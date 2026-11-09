@@ -193,7 +193,7 @@ components:
     #     service-linked role are fnx-ue1-prod's iam/main.
     #   - iam/ci trusts the account's GitHub OIDC provider, created by
     #     fnx-ue1-prod's iam/ci.
-    #   - no cloudtrail/main: fnx-ue1-prod's trail is multi-region and records
+    #   - no cloudtrail: fnx-ue1-prod's trail is multi-region and records
     #     this region too; its CIS metric filters run there.
     #   - aws-config records this region's resources only (Cloud Posse's
     #     global_resource_collector_region is us-east-1, fnx-ue1-prod's).

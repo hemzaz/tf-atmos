@@ -735,12 +735,12 @@ class LogArchiveTest(unittest.TestCase):
             "vars.cloudtrail_bucket_stage_name: its log archive stack cannot be checked",
         ])
 
-    def test_hand_written_and_disabled_trails_are_not_checked(self):
-        hand_written = instance("us-east-1", US, s3_bucket_name="fnx-trail")
-        hand_written["metadata"] = {"component": "cloudtrail"}
+    def test_other_components_and_disabled_trails_are_not_checked(self):
+        other = instance("us-east-1", US, s3_bucket_name="fnx-trail")
+        other["metadata"] = {"component": "s3"}
         disabled = archived("aws-cloudtrail", "ew1", "us-east-1", US, deps=[])
         disabled["metadata"]["enabled"] = False
-        self.assertEqual(self.check(**{"fnx-ue1-prod": stack(**{"cloudtrail/main": hand_written,
+        self.assertEqual(self.check(**{"fnx-ue1-prod": stack(**{"s3/trail": other,
                                                                  "cloudtrail": disabled})}), [])
 
 

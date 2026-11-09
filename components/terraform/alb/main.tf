@@ -129,7 +129,7 @@ data "aws_caller_identity" "current" {
 locals {
   # S3 bucket names are global across all AWS accounts; the account id keeps
   # this bucket's name unique the way the repo's other component-created
-  # buckets do (awsconfig/main.tf, cloudtrail/main.tf).
+  # buckets do (s3/main.tf).
   access_logs_bucket_name = local.access_logs_enabled ? "${local.name}-access-logs-${data.aws_caller_identity.current[0].account_id}" : ""
   access_logs_bucket_arn  = "arn:${data.aws_partition.current.partition}:s3:::${local.access_logs_bucket_name}"
   access_logs_key_prefix  = var.access_logs_prefix != "" ? "${trim(var.access_logs_prefix, "/")}/" : ""
@@ -142,7 +142,7 @@ resource "aws_s3_bucket" "access_logs" {
   #checkov:skip=CKV_AWS_18:This bucket IS the access-log destination; access logs of a log bucket are out of scope
   #checkov:skip=CKV2_AWS_61:aws_s3_bucket_lifecycle_configuration.access_logs covers this bucket via count when lifecycle_rule_enabled is set
   #checkov:skip=CKV2_AWS_62:Event notifications are out of scope for this component
-  #checkov:skip=CKV_AWS_144:Access-log bucket; cross-region replication is out of scope for this component (mirrors s3/main.tf and cloudtrail/main.tf)
+  #checkov:skip=CKV_AWS_144:Access-log bucket; cross-region replication is out of scope for this component (mirrors s3/main.tf)
   count = local.access_logs_enabled ? 1 : 0
 
   bucket        = local.access_logs_bucket_name

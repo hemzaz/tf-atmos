@@ -117,7 +117,7 @@ run "cis_security_group_filter_is_json_on_the_trail_log_group" {
 
   assert {
     condition     = aws_cloudwatch_log_metric_filter.cloudtrail["security_group_changes"].log_group_name == var.cloudtrail_log_group_name
-    error_message = "The filter must read the account trail's log group (encrypted with kms/main by the cloudtrail component)."
+    error_message = "The filter must read the account trail's log group (the cloudtrail instance's, encrypted with its own trail key)."
   }
 
   assert {

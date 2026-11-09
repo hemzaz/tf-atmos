@@ -51,8 +51,8 @@ esac
 # every stack: its absence fails the run. The others are skipped where the
 # stack genuinely lacks them: cloudtrail, the account's vendored aws-cloudtrail
 # trail (catalog/aws-cloudtrail/defaults), is in the account's home stack only
-# (a DR standby has none), and a core stack has no guardduty/main or
-# securityhub/main (E5b).
+# (a DR standby or a nonprod account's second region has none), and a core
+# stack has no guardduty/main or securityhub/main (E5b).
 REQUIRED=(aws-config)
 COMPONENTS=(cloudtrail aws-config guardduty/main securityhub/main)
 
@@ -93,7 +93,7 @@ for component in "${COMPONENTS[@]}"; do
   if has_instance "$component"; then
     PRESENT+=("$component")
   else
-    log_skip "${component}: ${STACK} has no such instance (a DR standby has no trail, a core stack no guardduty/securityhub)"
+    log_skip "${component}: ${STACK} has no such instance (only an account's home stack has the trail, a core stack no guardduty/securityhub)"
   fi
 done
 

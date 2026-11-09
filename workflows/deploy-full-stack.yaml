@@ -23,7 +23,7 @@
 # (the network account's dns-delegation role that aws-dns-delegated's aws.primary provider
 # assumes) shares the iam layer too.
 # Connectivity follows networking, security-monitoring
-# follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; awsconfig
+# follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; aws-config
 # shares the security layer with securityhub, which only lists it in
 # dependencies.components), lambda (compute) precedes apigateway (services), as
 # does apigateway-account (security: the account's CloudWatch role REST stage
@@ -240,8 +240,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "aws-cloudtrail"
+          or .metadata.component == "securityhub" or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
@@ -257,7 +256,6 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
-          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
@@ -629,8 +627,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "aws-cloudtrail"
+          or .metadata.component == "securityhub" or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
@@ -646,7 +643,6 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
-          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"

@@ -68,7 +68,7 @@ variable "cloudtrail_log_group_name" {
 
 variable "require_cloudtrail_route" {
   type        = bool
-  description = "Fail the plan when cloudtrail_log_group_name is null, instead of silently planning without the CIS CloudTrail metric filters and alarms (e.g. cloudtrail/main not applied yet)"
+  description = "Fail the plan when cloudtrail_log_group_name is null, instead of silently planning without the CIS CloudTrail metric filters and alarms (e.g. the account's cloudtrail not applied yet)"
   default     = true
 }
 

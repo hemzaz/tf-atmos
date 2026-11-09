@@ -421,7 +421,7 @@ class CoreAccountTest(unittest.TestCase):
         self.assertEqual([f.key.rsplit(".", 1)[-1] for f in errors(stacks, ["fnx-ue1-security"])], ["security"])
 
     def test_missing_core_account_fails(self):
-        self.assertEqual(self.core_errors(component="cloudtrail", artifacts=None),
+        self.assertEqual(self.core_errors(component="aws-cloudtrail", artifacts=None),
                          [("repository", "artifacts", "core account missing")])
 
     def test_two_core_accounts_sharing_an_id_fail(self):

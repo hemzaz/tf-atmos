@@ -17,7 +17,7 @@ locals {
 
   # CIS AWS Foundations Benchmark v1.2.0 metric filters (the version Security
   # Hub's default CIS standard checks, controls CloudWatch.1/.2/.4/.10), on the
-  # log group the cloudtrail component's trail delivers to. Metric names are
+  # log group the account's trail (the cloudtrail instance) delivers to. Metric names are
   # the CloudTrailMetrics names the alarms below watch.
   cloudtrail_metric_filters = {
     root_account_usage = {
@@ -102,7 +102,7 @@ resource "aws_sns_topic" "security_alerts" {
 
     precondition {
       condition     = !var.require_cloudtrail_route || local.cloudtrail_enabled
-      error_message = "require_cloudtrail_route is set but cloudtrail_log_group_name is null. Apply cloudtrail/main first (its cloudtrail_logs_log_group_name output), or set require_cloudtrail_route = false to run without the CIS CloudTrail alarms."
+      error_message = "require_cloudtrail_route is set but cloudtrail_log_group_name is null. Apply the account's trail first (the cloudtrail instance's cloudtrail_logs_log_group_name output), or set require_cloudtrail_route = false to run without the CIS CloudTrail alarms."
     }
   }
 }
@@ -253,7 +253,8 @@ resource "aws_cloudwatch_event_target" "inspector_sns" {
 # this rule delivers each change (who, which group, which API call) as it
 # happens, including ModifySecurityGroupRules, which the CIS pattern omits.
 # EventBridge receives these "AWS API Call via CloudTrail" events from the
-# account trail (cloudtrail/main). Calls made by the roles in
+# account's multi-region trail (the cloudtrail instance, in the account's home
+# stack; it records every region). Calls made by the roles in
 # security_group_change_excluded_role_arns (controllers, EKS, CI applies) are
 # left to the alarm; see security_group_change_principal_filter above.
 # UpdateSecurityGroupRuleDescriptions* is not matched: it changes a rule's

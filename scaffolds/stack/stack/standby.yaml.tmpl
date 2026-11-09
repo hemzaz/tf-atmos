@@ -219,7 +219,7 @@ components:
     # Regional services run here as in [[ $primary ]] (GuardDuty, Security Hub,
     # AWS Config, Inspector, finding routing, backups); account-wide ones do
     # not: no kms/main (this region's key is [[ $primary ]] kms/main's
-    # multi-region replica, alias [[ .Config.region_code ]]-main), no iam/main, no cloudtrail/main
+    # multi-region replica, alias [[ .Config.region_code ]]-main), no iam/main, no cloudtrail
     # (the primary's trail is multi-region), and aws-config records this
     # region's resources only. iam/ci trusts the account's GitHub OIDC
     # provider, created by [[ $primary ]]'s iam/ci.

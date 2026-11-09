@@ -22,8 +22,8 @@
 /stacks/catalog/kms/              @hemzaz
 /stacks/catalog/acm/              @hemzaz
 /stacks/catalog/secretsmanager/   @hemzaz
-/stacks/catalog/cloudtrail/       @hemzaz
-/stacks/catalog/awsconfig/        @hemzaz
+/stacks/catalog/aws-cloudtrail/   @hemzaz
+/stacks/catalog/aws-config/       @hemzaz
 /stacks/catalog/guardduty/        @hemzaz
 /stacks/catalog/securityhub/      @hemzaz
 /stacks/catalog/inspector2/       @hemzaz
