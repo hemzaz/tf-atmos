@@ -63,7 +63,7 @@ import:
 [[- end ]]
   - catalog/aws-config/main
   - catalog/guardduty/main
-  - catalog/securityhub/main
+  - catalog/securityhub/main[[ if eq .Config.account_singletons "no" ]]-region[[ end ]]
   - catalog/inspector2/main
   - catalog/apigateway-account/main
   - catalog/security-monitoring/main[[ if eq .Config.account_singletons "no" ]]-region[[ end ]]

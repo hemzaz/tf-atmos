@@ -13,7 +13,8 @@
 # receives this region's "AWS API Call via CloudTrail" events from the
 # account's multi-region trail. It does not inherit security-monitoring/
 # defaults, whose cloudtrail_log_group_name reads a cloudtrail this stack does
-# not have (a null cannot unset an inherited value); the rest mirrors it.
+# not have (a null cannot unset an inherited value); the rest mirrors it:
+# keep it in sync with defaults.yaml.
 # =============================================================================
 
 components:
