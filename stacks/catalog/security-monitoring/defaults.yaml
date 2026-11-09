@@ -15,7 +15,8 @@
 # (the 4 workload primaries) runs kms/main, cloudtrail, guardduty/main,
 # securityhub/main, inspector2/main and iam/ci, so the references resolve in
 # all of them. The DR standbys (main-standby.yaml) have no kms/main or
-# cloudtrail and neither import nor inherit it.
+# cloudtrail and neither import nor inherit it; nor does main-region.yaml (a
+# nonprod account's second region). Keep both in sync with this file.
 
 components:
   terraform:

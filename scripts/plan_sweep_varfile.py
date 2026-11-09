@@ -159,7 +159,8 @@ SYNTH = [
     (r'^function_arn$',               'arn:aws:lambda:us-east-1:123456789012:function:example-function'),
     # ...and the DLQ alarms' queue names.
     (r'^(dead_letter_)?queue_name$',  'example-queue'),
-    # ...and the cloudtrail component's log group for its CIS metric filters.
+    # ...and the trail's log group (the cloudtrail instance, vendored
+    # aws-cloudtrail) for security-monitoring's CIS metric filters.
     (r'^cloudtrail_logs_log_group_name$', '/aws/cloudtrail/example-cloudtrail'),
     # ...and a DR standby's aws-config, which reads its primary's recorder
     # role (catalog/aws-config/main-region: iam_role_arn and the SNS publish

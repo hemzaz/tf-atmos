@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# security-monitoring/main in a nonprod account's second region
+# =============================================================================
+# The scaffold's nonprod stack with account_singletons=no: the account's
+# trail is its home stack's (one multi-region trail per account, E5b OQ-A),
+# so this region has none. Finding routing for this region, on this stack's
+# own kms/main. No CIS metric filters here: a metric filter lives in its log
+# group's region, and the home trail delivers every region's events,
+# this one's included, to its log group in the home region, where the home
+# stack's security-monitoring/main runs them (as for the DR standbys,
+# main-standby.yaml). The security group change rule stays: EventBridge
+# receives this region's "AWS API Call via CloudTrail" events from the
+# account's multi-region trail. It does not inherit security-monitoring/
+# defaults, whose cloudtrail_log_group_name reads a cloudtrail this stack does
+# not have (a null cannot unset an inherited value); the rest mirrors it:
+# keep it in sync with defaults.yaml.
+# =============================================================================
+
+components:
+  terraform:
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+      vars:
+        guardduty_detector_id: !terraform.state guardduty/main .detector_id
+        securityhub_account_arn: !terraform.state securityhub/main .account_arn
+        require_guardduty_route: true
+        require_securityhub_route: true
+        require_cloudtrail_route: false
+        enable_security_group_change_events: true
+        security_group_change_excluded_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-data-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-data-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
+          - !terraform.state iam/ci .ci_apply_role_arn
+        kms_key_id: !terraform.state kms/main .key_arn
+        inspector2_account_id: !terraform.state inspector2/main .account_id
+        enable_alert_enrichment: false
+        security_email_subscriptions: []
+        tags:
+          Component: "SecurityMonitoring"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: guardduty/main
+          - component: securityhub/main
+          - component: inspector2/main
+          - component: iam/ci

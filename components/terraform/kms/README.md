@@ -13,7 +13,7 @@ use through their own IAM policies.
 - Depends on `iam/dev` (dev) or `iam/main` (staging, prod), which creates the Auto Scaling
   service-linked role this key policy names.
 - Used by (`.key_arn`): `vpc`, `eks`, `eks-addons`, `external-secrets`, `rds`, `elasticache`, `ec2`,
-  `secretsmanager`, `backup`, `cloudtrail`, `awsconfig`, `cost-optimization`, `monitoring`,
+  `secretsmanager`, `backup`, `cost-optimization`, `monitoring`,
   `security-monitoring`, and the template-only catalog bases (`athena`, `dynamodb`, `eventbridge`,
   `glue`, `kinesis`, `s3`, `sns`, `sqs`, `stepfunctions`, `waf`).
 
@@ -26,7 +26,8 @@ use through their own IAM policies.
 - The `allow_*` flags add condition-scoped statements for service principals the root statement
   does not reach (CloudWatch Logs, log delivery, EventBridge, SNS, S3, CloudWatch alarms,
   CloudTrail, Auto Scaling EBS, Backup, CloudFront). `kms/defaults` turns them on, except
-  `allow_cloudfront` (kms:Decrypt for any distribution of the account), which a stack with a
+  `allow_cloudtrail` (no stack's trail uses this key: the vendored `aws-cloudtrail` creates its
+  own), `allow_cloudfront` (kms:Decrypt for any distribution of the account), which a stack with a
   `cloudfront` instance over an SSE-KMS origin bucket sets on its `kms/main`, and
   `allow_log_delivery_s3` (data keys for vended log delivery into a bucket on this key), which a
   stack whose `cloudfront` instance logs to an s3 bucket sets (the `web-application` template's

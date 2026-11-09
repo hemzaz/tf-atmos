@@ -152,8 +152,10 @@ spec:
     # nonprod: whether this stack creates its account's singletons (iam/ci's
     # GitHub OIDC provider, the Auto Scaling service-linked role, the
     # multi-region CloudTrail trail, AWS Config's global-resource recording):
-    # yes for the account's first stack, no for another region of it (the
-    # guard checks; no gives a regional trail and Config without IAM).
+    # yes for the account's first stack, its home stack in us-east-1; no for
+    # another region of it (the guard checks both; no gives no trail, the
+    # home stack's multi-region trail records the region, and Config without
+    # IAM).
     - name: account_singletons
       type: select
       label: Create the account's singletons (yes = the account's first stack)
@@ -383,12 +385,20 @@ spec:
               case "${other##*/}" in _defaults.yaml) continue ;; esac
               [ ! -e "$other" ] || others="$others ${other##*/}"
             done
+            # The singletons' stack is the account's home stack, us-east-1:
+            # aws-config's global-resource collector region and the second
+            # region's recorder role (catalog/aws-config/main.yaml,
+            # main-core-region: <tenant>-ue1-<stage>-aws-config-config) assume it.
             if [ "{{ .Answers.account_singletons }}" = "yes" ]; then
               [ -z "$others" ] \
                 || fail "account_singletons=yes, but the {{ .Answers.stage }} account already has a stack ($others) that creates its singletons (GitHub OIDC provider, Auto Scaling service-linked role, multi-region trail, Config global recording): answer no"
+              [ "{{ .Answers.region }}" = "us-east-1" ] \
+                || fail "account_singletons=yes needs region us-east-1: the account's home stack (its trail, Config's global-resource collector and recorder role) is its us-east-1 stack"
             else
               [ -n "$others" ] \
                 || fail "account_singletons=no, but the {{ .Answers.stage }} account has no other stack to create its singletons (GitHub OIDC provider, Auto Scaling service-linked role, multi-region trail, Config global recording): answer yes"
+              [ -e "$root/stacks/orgs/{{ .Answers.tenant }}/{{ .Answers.stage }}/us-east-1.yaml" ] \
+                || fail "account_singletons=no, but the {{ .Answers.stage }} account has no us-east-1 stack: its home stack (trail, Config collector and recorder role) must be us-east-1.yaml"
             fi
           {{- end }}
           {{- if eq .Answers.profile "standby" }}

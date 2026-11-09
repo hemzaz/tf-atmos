@@ -146,31 +146,30 @@ class GroupTest(unittest.TestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("both create the GitHub OIDC provider '(one per account)' in account prod", errors[0])
 
-    def test_second_region_with_regional_trail_and_config_passes(self):
-        # A second nonprod stack of an account (scaffold account_singletons=no).
+    def test_second_region_without_trail_and_with_regional_config_passes(self):
+        # A second nonprod stack of an account (scaffold account_singletons=no): the home stack's
+        # multi-region trail records its region, and its recorder skips global types.
         self.assertEqual(self.errors({
             "fnx-ue1-dev": stack(**{
-                "cloudtrail/main": instance("ue1", component="cloudtrail"),
-                "awsconfig/main": instance("ue1", component="awsconfig"),
+                "cloudtrail": instance("ue1", component="aws-cloudtrail"),
+                "aws-config": instance("ue1", component="aws-config", global_resource_collector_region="us-east-1"),
             }),
             "fnx-uw2-dev": stack(**{
-                "cloudtrail/main": instance("uw2", component="cloudtrail", region="us-west-2",
-                                            is_multi_region_trail=False, include_global_service_events=False),
-                "awsconfig/main": instance("uw2", component="awsconfig", region="us-west-2",
-                                           include_global_resource_types=False),
+                "aws-config": instance("uw2", component="aws-config", region="us-west-2",
+                                       global_resource_collector_region="us-east-1"),
             }),
         }), [])
 
     def test_second_region_multi_region_trail_and_global_config_fail(self):
         errors = self.errors({
             "fnx-ue1-dev": stack(**{
-                "cloudtrail/main": instance("ue1", component="cloudtrail", is_multi_region_trail=True),
-                "awsconfig/main": instance("ue1", component="awsconfig"),
+                "cloudtrail": instance("ue1", component="aws-cloudtrail"),
+                "aws-config": instance("ue1", component="aws-config", global_resource_collector_region="us-east-1"),
             }),
             "fnx-uw2-dev": stack(**{
-                "cloudtrail/main": instance("uw2", component="cloudtrail", region="us-west-2"),
-                "awsconfig/main": instance("uw2", component="awsconfig", region="us-west-2",
-                                           include_global_resource_types=True),
+                "cloudtrail": instance("uw2", component="aws-cloudtrail", region="us-west-2"),
+                "aws-config": instance("uw2", component="aws-config", region="us-west-2",
+                                       global_resource_collector_region="us-west-2"),
             }),
         })
         self.assertEqual(len(errors), 3, errors)
@@ -183,9 +182,9 @@ class GroupTest(unittest.TestCase):
     def test_second_region_trail_recording_global_service_events_fails(self):
         # A regional trail that still records IAM/STS events duplicates the account trail's.
         errors = self.errors({
-            "fnx-ue1-dev": stack(**{"cloudtrail/main": instance("ue1", component="cloudtrail")}),
-            "fnx-uw2-dev": stack(**{"cloudtrail/main": instance(
-                "uw2", component="cloudtrail", region="us-west-2", is_multi_region_trail=False)}),
+            "fnx-ue1-dev": stack(**{"cloudtrail": instance("ue1", component="aws-cloudtrail")}),
+            "fnx-uw2-dev": stack(**{"cloudtrail": instance(
+                "uw2", component="aws-cloudtrail", region="us-west-2", is_multi_region_trail=False)}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("both create the CloudTrail global-service-event recording '(one per account)' in account dev",
@@ -217,17 +216,6 @@ class GroupTest(unittest.TestCase):
         self.assertIn("both create the CloudTrail global-service-event recording '(one per account)' in account prod",
                       errors[1])
 
-    def test_vendored_trail_beside_the_hand_written_trail_fails(self):
-        # The E5b5 swap: both trails in one stack are two multi-region trails of the account.
-        errors = self.errors({"fnx-ue1-dev": stack(**{
-            "cloudtrail/main": instance("ue1", component="cloudtrail"),
-            "cloudtrail": instance("ue1", component="aws-cloudtrail", is_multi_region_trail=True,
-                                   include_global_service_events=False),
-        })})
-        self.assertEqual(len(errors), 1, errors)
-        self.assertIn("fnx-ue1-dev: cloudtrail/main vars.is_multi_region_trail and fnx-ue1-dev: cloudtrail "
-                      "vars.is_multi_region_trail both create the multi-region CloudTrail trail", errors[0])
-
     def test_regional_vendored_trail_in_a_second_region_passes(self):
         self.assertEqual(self.errors({
             "fnx-ue1-dev": stack(**{"cloudtrail": instance("ue1", component="aws-cloudtrail")}),
@@ -252,15 +240,6 @@ class GroupTest(unittest.TestCase):
                       "aws-config vars.global_resource_collector_region (us-east-1) both create the AWS Config "
                       "global-resource recording '(one per account)' in account prod", errors[0])
         self.assertIn("fnx-uw2-prod: aws-config", errors[1])
-
-    def test_config_collector_beside_the_hand_written_recorder_fails(self):
-        # The E5b6 swap: awsconfig's global types and aws-config's collector are one recording.
-        errors = self.errors({"fnx-ue1-dev": stack(**{
-            "awsconfig/main": instance("ue1", component="awsconfig"),
-            "aws-config": instance("ue1", component="aws-config", global_resource_collector_region="us-east-1"),
-        })})
-        self.assertEqual(len(errors), 1, errors)
-        self.assertIn("both create the AWS Config global-resource recording", errors[0])
 
     def test_account_settings_in_a_second_region_without_its_account_wide_settings_passes(self):
         # fnx-ue2-prod imports catalog/aws-account-settings/main-standby.

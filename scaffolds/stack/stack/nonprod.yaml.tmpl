@@ -58,13 +58,15 @@ import:
   - catalog/secretsmanager/infra[[ $f ]]
   - catalog/acm/main
   - catalog/acm/services
+[[- if eq .Config.account_singletons "yes" ]]
   - catalog/aws-cloudtrail/defaults
+[[- end ]]
   - catalog/aws-config/main
   - catalog/guardduty/main
-  - catalog/securityhub/main
+  - catalog/securityhub/main[[ if eq .Config.account_singletons "no" ]]-region[[ end ]]
   - catalog/inspector2/main
   - catalog/apigateway-account/main
-  - catalog/security-monitoring/main
+  - catalog/security-monitoring/main[[ if eq .Config.account_singletons "no" ]]-region[[ end ]]
   - catalog/backup/main
 
   # --- compute
@@ -298,9 +300,11 @@ components:
     # there is one): this stack's iam/ci trusts that stack's GitHub OIDC
     # provider instead of creating one, and its iam instance leaves the Auto
     # Scaling service-linked role alone, as the prod standbys' -standby files
-    # do. Its trail records this region only (that stack's trail is
-    # multi-region and records the global services), and aws-config below
-    # records no global resources (IAM).
+    # do. It has no trail: the account's one trail, that stack's cloudtrail,
+    # is multi-region and records this region too (E5b OQ-A), so its CIS
+    # metric filters run there, beside the trail's log group
+    # (catalog/security-monitoring/main-region), and aws-config below records
+    # no global resources (IAM).
     # check-lane-names.py allows each singleton once per account.
     iam/ci:
       vars:
@@ -309,14 +313,6 @@ components:
     iam/[[ if eq $flavor "dev" ]]dev[[ else ]]main[[ end ]]:
       vars:
         enable_autoscaling_service_linked_role: false
-    # Deliberate: this regional trail is a second, billed copy of this
-    # region's management events (the other stack's multi-region trail
-    # already delivers them), kept so security-monitoring/main's CIS metric
-    # filters run on a trail in this region.
-    cloudtrail:
-      vars:
-        is_multi_region_trail: false
-        include_global_service_events: false
 [[- end ]]
 [[- if eq .Config.account_singletons "no" ]]
     # AWS Config: this region's recorder (Cloud Posse's instance name; the

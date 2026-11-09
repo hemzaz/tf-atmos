@@ -107,7 +107,7 @@ CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts"
 # and reads none of their IDs, nor aws-account-settings, which configures only its own account.
 MAP_CONSUMERS = frozenset({
     "aws-identity-center", "aws-teams", "aws-team-roles", "access-analyzer",
-    "guardduty", "securityhub", "inspector2", "cloudtrail", "awsconfig",
+    "guardduty", "securityhub", "inspector2",
     # The audit buckets' delivery policies and the Config bucket key's policy
     # list every account of their residency (E5a4).
     "aws-cloudtrail-bucket", "aws-config-bucket",
