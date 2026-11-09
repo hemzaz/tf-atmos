@@ -26,7 +26,7 @@
 # settings; this stack's key pair ("*/fnx-gbl-root/*", "*/fnx-gbl-root-*") is
 # on root_write in fnx-ue1-root's backend/main. Still disabled, each with its
 # reason below: the member accounts (placeholder root-user emails) and the
-# SCPs (no exception yet for E4's Identity Center roles). An enabled
+# SCPs (until aws-identity-center is applied, below). An enabled
 # instance's vars go through the first-deploy preflight (account emails and
 # import ids; not the core account IDs, which this stack creates).
 #
@@ -44,7 +44,8 @@
 # imported account already running workloads lands in an OU, check that it
 # uses no region the region-* policies deny, and that its deploy roles match
 # security-services' exception (<stack>-ci-apply, OrganizationAccountAccessRole,
-# the Identity Center TerraformApplyAccess/AdministratorAccess roles).
+# the Identity Center TerraformApplyAccess/AdministratorAccess roles; in plat,
+# not OrganizationAccountAccessRole for its trail and Config recorder).
 #
 # OUs, Cloud Posse's reference architecture (aws-organizational-unit README):
 #   core  the core accounts (root stays at the organization root; audit,
@@ -267,10 +268,14 @@ components:
     # root (organization_root_id) as a target.
     #
     # Disabled until Identity Center is applied: security-services excepts the
-    # CI apply roles, OrganizationAccountAccessRole and the Identity Center
+    # CI apply roles, OrganizationAccountAccessRole (core; in plat only from
+    # the detector deny, E5b8) and the Identity Center
     # TerraformApplyAccess/AdministratorAccess roles (E4b1), and protects them
     # (OrganizationAccountAccessRole stays excepted until Identity Center is
-    # applied, owner decision Evolution 4), and the region policies would bind accounts nobody
+    # applied, owner decision Evolution 4). check-scp-policies.py fails an
+    # enabled security-services instance while aws-identity-center is
+    # disabled: before it, the plat accounts' workload bootstrap runs as
+    # OrganizationAccountAccessRole. The region policies would bind accounts nobody
     # has reviewed against them. Enabled before an account lands in its OU,
     # they need no other change: deploy-accounts' ou-eu and scp-eu phases
     # select them.
@@ -308,7 +313,7 @@ components:
         component: aws-scp
         enabled: false
         inherits:
-          - aws-scp/security-services-defaults
+          - aws-scp/security-services-core-defaults
       dependencies:
         components:
           - component: aws-organizational-unit/core
@@ -322,7 +327,7 @@ components:
         component: aws-scp
         enabled: false
         inherits:
-          - aws-scp/security-services-defaults
+          - aws-scp/security-services-plat-defaults
       dependencies:
         components:
           - component: aws-organizational-unit/plat

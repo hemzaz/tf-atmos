@@ -26,7 +26,9 @@
 #
 #   policy             core  plat  eu   source
 #   baseline            x     x    (1)  Cloud Posse catalog (catalog/*.yaml)
-#   security-services   x     x    (1)  house: the catalog's have no exception
+#   security-services   x     x    (1)  house: the catalog's have no exception;
+#                                       plat's trail/Config one omits
+#                                       OrganizationAccountAccessRole (OQ-F)
 #   region-plat               x    (1)  house: the catalog has no region policy
 #   region-eu                       x   house
 #   (1) eu is under plat: plat's policies apply to its accounts too.
@@ -73,10 +75,12 @@ components:
     # DenyDisablingGuardDuty have no principal exception, so they would deny the
     # roles that configure these services (each account's own trail and Config
     # under QE7 (c), E5's delegated administrators), and the catalog has nothing
-    # for Security Hub or Access Analyzer. One statement for the five services,
-    # from the catalog's CloudTrail and Config actions plus the disable and
-    # disassociate actions of the other three (not the catalog's whole GuardDuty
-    # list, which also denies routine finding triage).
+    # for Security Hub or Access Analyzer. Two statements (E5b8, owner decision
+    # OQ-F), since their exceptions differ: DenyTrailConfigTampering, the
+    # catalog's CloudTrail and Config actions, and DenyDetectorTampering, the
+    # disable and disassociate actions of the other three (not the catalog's
+    # whole GuardDuty list, which also denies routine finding triage), which E5c
+    # narrows to the delegated-admin path.
     #
     # Excepted (the shared &deploy_roles list): each stack's CI apply role
     # (iam/ci: <stack>-ci-apply, which deploys these components),
@@ -100,18 +104,36 @@ components:
     # under aws-reserved/ (defence in depth for the SSO exception). The CI
     # apply role keeps managing iam/ci (itself and ci-plan) through Terraform;
     # OrganizationAccountAccessRole creates them at bootstrap.
-    aws-scp/security-services-defaults:
+    #
+    # Per OU (OQ-F): core keeps OrganizationAccountAccessRole in every
+    # exception, since it applies the core stacks' trails and recorders
+    # (OPERATIONS, Bootstrap order step 6). plat's DenyTrailConfigTampering
+    # drops it (security-services-plat-defaults): a workload trail or recorder is applied
+    # only by its stack's CI apply role, the TerraformApplyAccess sets and the
+    # AdministratorAccess break-glass. plat's DenyProtectedRoleTampering drops
+    # it from its exception too, or it could create or re-trust a CI apply role
+    # and act as that; it stays a protected role (a resource of that Deny, not
+    # an exempt principal). The workload stacks' bootstrap as
+    # OrganizationAccountAccessRole (iam, including the CI roles, and VPCs,
+    # `full -f bootstrap`) runs while these SCPs are disabled, and the state
+    # backends stop trusting that role when Identity Center is applied, before
+    # these are enabled (root/global-region.yaml; check-scp-policies.py fails an
+    # enabled one while aws-identity-center is disabled). plat's
+    # DenyDetectorTampering keeps it until E5c narrows that statement.
+    # check-scp-policies.py fails the role in plat's trail/Config exception, or
+    # its absence from core's.
+    aws-scp/security-services-core-defaults:
       metadata:
         component: aws-scp
         type: abstract
         inherits:
           - aws-scp/defaults
       vars:
-        policy_description: "Deny disabling CloudTrail, Config, GuardDuty, Security Hub and Access Analyzer, and changing the deploy roles, except to the deploy roles"
+        policy_description: &security_services_description "Deny disabling CloudTrail, Config, GuardDuty, Security Hub and Access Analyzer, and changing the deploy roles, except to the deploy roles"
         policy_statements:
-          - sid: "DenySecurityServicesTampering"
+          - sid: "DenyTrailConfigTampering"
             effect: "Deny"
-            actions:
+            actions: &trail_config_actions
               - "cloudtrail:DeleteTrail"
               - "cloudtrail:PutEventSelectors"
               - "cloudtrail:StopLogging"
@@ -123,6 +145,21 @@ components:
               - "config:DeleteRetentionConfiguration"
               - "config:DeleteEvaluationResults"
               - "config:DeleteConfigurationAggregator"
+            resources:
+              - "*"
+            conditions:
+              - test: "ArnNotLike"
+                variable: "aws:PrincipalArn"
+                values: &deploy_roles
+                  - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
+                  - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-*"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+          - &detector_tampering
+            sid: "DenyDetectorTampering"
+            effect: "Deny"
+            actions:
               - "guardduty:DeleteDetector"
               - "guardduty:UpdateDetector"
               - "guardduty:DisassociateFromMasterAccount"
@@ -147,15 +184,10 @@ components:
             conditions:
               - test: "ArnNotLike"
                 variable: "aws:PrincipalArn"
-                values: &deploy_roles
-                  - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
-                  - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
-                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*"
-                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-*"
-                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+                values: *deploy_roles
           - sid: "DenyProtectedRoleTampering"
             effect: "Deny"
-            actions:
+            actions: &protected_role_actions
               - "iam:CreateRole"
               - "iam:DeleteRole"
               - "iam:UpdateRole"
@@ -169,7 +201,7 @@ components:
               - "iam:DeleteRolePermissionsBoundary"
               - "iam:TagRole"
               - "iam:UntagRole"
-            resources:
+            resources: &protected_roles
               - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
               - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-plan"
               - "arn:aws:iam::*:role/OrganizationAccountAccessRole"
@@ -178,6 +210,46 @@ components:
               - test: "ArnNotLike"
                 variable: "aws:PrincipalArn"
                 values: *deploy_roles
+
+    # The workload OU's copy: core's, but without OrganizationAccountAccessRole
+    # in DenyTrailConfigTampering's and DenyProtectedRoleTampering's exceptions
+    # (&workload_roles, above). Same protected roles: that role stays one, so
+    # no one else may squat on or re-trust it. Dropping it from the protected
+    # roles' exception too closes the escalation the trail/Config narrowing
+    # would otherwise leave: create or re-trust a <stack>-ci-apply role, assume
+    # it, then stop the trail (check-scp-policies.py: whoever may create or
+    # re-trust an exempt role must be exempt from every other statement).
+    aws-scp/security-services-plat-defaults:
+      metadata:
+        component: aws-scp
+        type: abstract
+        inherits:
+          - aws-scp/defaults
+      vars:
+        policy_description: *security_services_description
+        policy_statements:
+          - sid: "DenyTrailConfigTampering"
+            effect: "Deny"
+            actions: *trail_config_actions
+            resources:
+              - "*"
+            conditions:
+              - test: "ArnNotLike"
+                variable: "aws:PrincipalArn"
+                values: &workload_roles
+                  - "arn:aws:iam::*:role/{{ .settings.context.tenant }}-*-ci-apply"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess_*"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_TerraformApplyAccess-*"
+                  - "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+          - *detector_tampering
+          - sid: "DenyProtectedRoleTampering"
+            effect: "Deny"
+            actions: *protected_role_actions
+            resources: *protected_roles
+            conditions:
+              - test: "ArnNotLike"
+                variable: "aws:PrincipalArn"
+                values: *workload_roles
 
     # House region allow-lists. The NotAction list is AWS Control Tower's
     # Region deny control (GRREGIONDENY, controlreference/primary-region-deny-policy):
