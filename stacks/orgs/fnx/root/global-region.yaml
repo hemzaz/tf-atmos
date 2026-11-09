@@ -44,7 +44,8 @@
 # imported account already running workloads lands in an OU, check that it
 # uses no region the region-* policies deny, and that its deploy roles match
 # security-services' exception (<stack>-ci-apply, OrganizationAccountAccessRole,
-# the Identity Center TerraformApplyAccess/AdministratorAccess roles).
+# the Identity Center TerraformApplyAccess/AdministratorAccess roles; in plat,
+# not OrganizationAccountAccessRole for its trail and Config recorder).
 #
 # OUs, Cloud Posse's reference architecture (aws-organizational-unit README):
 #   core  the core accounts (root stays at the organization root; audit,
@@ -308,7 +309,7 @@ components:
         component: aws-scp
         enabled: false
         inherits:
-          - aws-scp/security-services-defaults
+          - aws-scp/security-services-core-defaults
       dependencies:
         components:
           - component: aws-organizational-unit/core
@@ -322,7 +323,7 @@ components:
         component: aws-scp
         enabled: false
         inherits:
-          - aws-scp/security-services-defaults
+          - aws-scp/security-services-plat-defaults
       dependencies:
         components:
           - component: aws-organizational-unit/plat

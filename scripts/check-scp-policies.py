@@ -15,8 +15,11 @@ instance (disabled ones too, which E3e enables):
     a misspelled aws:RequestedRegion denies in every region);
   - a region deny (a NotAction statement on aws:RequestedRegion) exempts every global
     service in GLOBAL_SERVICES, which are served from us-east-1;
-  - a Deny of a security service's disable actions excepts the deploy roles (PRINCIPALS,
-    a <tenant>-*-ci-apply pattern and the SSO_REQUIRED Identity Center sets);
+  - a Deny of a security service's disable actions excepts the deploy roles (a
+    <tenant>-*-ci-apply pattern and the SSO_REQUIRED Identity Center sets), never mixes
+    CloudTrail/Config with detector actions (their exceptions differ), and excepts
+    OrganizationAccountAccessRole: always for detectors (until E5c), for CloudTrail/Config only
+    on OAAR_TRAIL_OUS (core) and never on another OU (owner decision OQ-F);
   - an Identity Center (AWSReservedSSO_) principal pattern names one permission set under
     the reserved path role/aws-reserved/sso.amazonaws.com/ (SSO_ROLE), and every other
     role-name exception of a policy (ArnNotLike aws:PrincipalArn) is a resource of a Deny
@@ -54,8 +57,15 @@ KNOWN_KEYS = (REGION_KEY, PRINCIPAL_KEY, "aws:principalaccount", "aws:principalo
 GLOBAL_SERVICES = ("iam:*", "sts:*", "organizations:*", "route53:*", "route53domains:*",
                    "cloudfront:*", "acm:*", "wafv2:*", "kms:*", "budgets:*", "ce:*", "cur:*",
                    "support:*", "health:*", "sso:*", "account:*")
-SECURITY_SERVICES = ("cloudtrail:", "config:", "guardduty:", "securityhub:", "access-analyzer:")
-PRINCIPALS = ("arn:aws:iam::*:role/OrganizationAccountAccessRole",)
+TRAIL_CONFIG = ("cloudtrail:", "config:")
+DETECTORS = ("guardduty:", "securityhub:", "access-analyzer:")
+SECURITY_SERVICES = TRAIL_CONFIG + DETECTORS
+OAAR = "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+PRINCIPALS = (OAAR,)
+# OUs whose accounts' trails and recorders OrganizationAccountAccessRole applies (the core
+# stacks, OPERATIONS Bootstrap order step 6). Every other OU's trail/Config deny must not except
+# it (owner decision OQ-F): workload trails are applied by CI, the Terraform sets and the break-glass.
+OAAR_TRAIL_OUS = ("aws-organizational-unit/core",)
 CI_APPLY = re.compile(r"^arn:aws:iam::\*:role/[a-z0-9]+-\*-ci-apply$")
 # An Identity Center role: one named permission set under the path only Identity Center
 # creates in (the * before the name admits the home region's path segment), any hash.
@@ -168,7 +178,38 @@ def principal_exceptions(st):
     return [v for key, values in keys.items() if key.lower() == PRINCIPAL_KEY for v in as_list(values)]
 
 
-def statement_findings(where, st):
+def security_findings(where, st, ous):
+    """A Deny of security-service actions: its deploy-role exception, per kind and OU."""
+    actions, allowed = as_list(st.get("Action")), principal_exceptions(st)
+    trail = any(a.startswith(TRAIL_CONFIG) for a in actions)
+    detector = any(a.startswith(DETECTORS) for a in actions)
+    if trail and detector:
+        return [f"{where}: denies CloudTrail/Config and detector (GuardDuty, Security Hub, Access Analyzer) "
+                "actions in one statement; split it (DenyTrailConfigTampering, DenyDetectorTampering): "
+                "their exceptions differ"]
+    sets = {m.group(1) for m in map(SSO_ROLE.match, allowed) if m}
+    errs = []
+    if not (any(CI_APPLY.match(p) for p in allowed) and set(SSO_REQUIRED) <= sets
+            and (trail or all(p in allowed for p in PRINCIPALS))):
+        names = ", ".join(("<tenant>-*-ci-apply",) + (() if trail else PRINCIPALS))
+        errs.append(f"{where}: denies security-service actions without the ArnNotLike aws:PrincipalArn "
+                    f"exception for {names} and the Identity Center sets {', '.join(SSO_REQUIRED)}")
+    core = [o for o in ous if o in OAAR_TRAIL_OUS]
+    if trail and core and len(core) < len(ous):
+        errs.append(f"{where}: one CloudTrail/Config deny targets {', '.join(sorted(ous))}; "
+                    f"{', '.join(OAAR_TRAIL_OUS)} needs its own policy (its exception keeps {OAAR})")
+    elif trail and core and OAAR not in allowed:
+        errs.append(f"{where}: CloudTrail/Config deny on {', '.join(core)} does not except {OAAR}, which applies "
+                    "the core stacks' trails and recorders (OPERATIONS, Bootstrap order step 6)")
+    elif trail and ous and not core and OAAR in allowed:
+        errs.append(f"{where}: CloudTrail/Config deny on {', '.join(sorted(ous))} excepts {OAAR}; only "
+                    f"{', '.join(OAAR_TRAIL_OUS)} may (owner decision OQ-F: workload trails and recorders are "
+                    "applied by <stack>-ci-apply, TerraformApplyAccess and AdministratorAccess)")
+    return errs
+
+
+def statement_findings(where, st, ous=()):
+    """ous: the OU instances (aws-organizational-unit/<ou>) the statement's policy targets."""
     errs, actions = [], as_list(st.get("Action"))
     for keys in (st.get("Condition") or {}).values():
         for key, values in keys.items():
@@ -199,13 +240,7 @@ def statement_findings(where, st):
         if missing:
             errs.append(f"{where}: region deny does not exempt global service(s) {', '.join(missing)}")
     if cond is None and any(a.startswith(SECURITY_SERVICES) for a in actions):
-        allowed = principal_exceptions(st)
-        sets = {m.group(1) for m in map(SSO_ROLE.match, allowed) if m}
-        if not (all(p in allowed for p in PRINCIPALS) and any(CI_APPLY.match(p) for p in allowed)
-                and set(SSO_REQUIRED) <= sets):
-            errs.append(f"{where}: denies security-service actions without the ArnNotLike aws:PrincipalArn "
-                        f"exception for <tenant>-*-ci-apply, {', '.join(PRINCIPALS)} and the Identity Center "
-                        f"sets {', '.join(SSO_REQUIRED)}")
+        errs += security_findings(where, st, ous)
     return errs
 
 
@@ -265,8 +300,9 @@ def check(stacks):
             size = len(json.dumps(doc, separators=(",", ":")))
             if size > MAX_CHARS:
                 errs.append(f"{where}: policy is {size} characters, over AWS's {MAX_CHARS}")
+            ous = sorted({m.group(1) for m in map(READ.match, map(str, targets)) if m})
             for i, st in enumerate(doc["Statement"]):
-                errs += statement_findings(f"{where} statement {st.get('Sid', i)}", st)
+                errs += statement_findings(f"{where} statement {st.get('Sid', i)}", st, ous)
             errs += squat_findings(where, doc["Statement"])
             for t in targets:
                 per_target.setdefault((stack, str(t)), []).append(name)
