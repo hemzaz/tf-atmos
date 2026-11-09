@@ -24,6 +24,11 @@ instance (disabled ones too, which E3e enables):
     the reserved path role/aws-reserved/sso.amazonaws.com/ (SSO_ROLE), and every other
     role-name exception of a policy (ArnNotLike aws:PrincipalArn) is a resource of a Deny
     in that policy of SQUAT_ACTIONS (no one else can create or re-trust a role of that name);
+  - the exception of a policy's role-protection Deny (SQUAT_ACTIONS) is a subset of every other
+    exception in it (whoever may create or re-trust an exempt role is exempt everywhere, or they
+    escape a Deny by acting as that role); action names compare case-insensitively;
+  - no aws-scp/security-services-* instance is enabled while the stack's aws-identity-center is
+    disabled (until Identity Center is applied, OrganizationAccountAccessRole runs the accounts);
   - no target has more than four (AWS allows five per target, FullAWSAccess included);
   - every stack's tags.Account is an aws-account instance (or in UNMATCHED_ACCOUNTS), and
     for its account's OU chain (the parent_id read of aws-account/<account>, an OU's
@@ -66,6 +71,7 @@ PRINCIPALS = (OAAR,)
 # stacks, OPERATIONS Bootstrap order step 6). Every other OU's trail/Config deny must not except
 # it (owner decision OQ-F): workload trails are applied by CI, the Terraform sets and the break-glass.
 OAAR_TRAIL_OUS = ("aws-organizational-unit/core",)
+IDENTITY_CENTER, SECURITY_SERVICES_SCP = "aws-identity-center", "aws-scp/security-services-"
 CI_APPLY = re.compile(r"^arn:aws:iam::\*:role/[a-z0-9]+-\*-ci-apply$")
 # An Identity Center role: one named permission set under the path only Identity Center
 # creates in (the * before the name admits the home region's path segment), any hash.
@@ -181,8 +187,8 @@ def principal_exceptions(st):
 def security_findings(where, st, ous):
     """A Deny of security-service actions: its deploy-role exception, per kind and OU."""
     actions, allowed = as_list(st.get("Action")), principal_exceptions(st)
-    trail = any(a.startswith(TRAIL_CONFIG) for a in actions)
-    detector = any(a.startswith(DETECTORS) for a in actions)
+    trail = any(a.lower().startswith(TRAIL_CONFIG) for a in actions)
+    detector = any(a.lower().startswith(DETECTORS) for a in actions)
     if trail and detector:
         return [f"{where}: denies CloudTrail/Config and detector (GuardDuty, Security Hub, Access Analyzer) "
                 "actions in one statement; split it (DenyTrailConfigTampering, DenyDetectorTampering): "
@@ -239,21 +245,60 @@ def statement_findings(where, st, ous=()):
         missing = [g for g in GLOBAL_SERVICES if g not in as_list(st["NotAction"])]
         if missing:
             errs.append(f"{where}: region deny does not exempt global service(s) {', '.join(missing)}")
-    if cond is None and any(a.startswith(SECURITY_SERVICES) for a in actions):
+    if cond is None and any(a.lower().startswith(SECURITY_SERVICES) for a in actions):
         errs += security_findings(where, st, ous)
     return errs
 
 
 def squat_findings(where, statements):
     """Role-name exceptions (not Identity Center's) that no Deny of the same policy protects."""
-    protected = {r for st in statements if st.get("Effect") == "Deny"
-                 and all(a in as_list(st.get("Action")) for a in SQUAT_ACTIONS)
-                 for r in as_list(st.get("Resource"))}
+    protected = {r for st in statements if is_protection(st) for r in as_list(st.get("Resource"))}
     names = {v for st in statements if st.get("Effect") == "Deny" for v in principal_exceptions(st)
              if ":role/" in v and not SSO_ROLE.match(v)}
     return [f"{where}: exception {v!r} is no resource of a Deny of {', '.join(SQUAT_ACTIONS)} in this "
             "policy, so anyone who can create a role of that name escapes the deny"
             for v in sorted(names - protected)]
+
+
+def escalation_findings(where, statements):
+    """Principals the role-protection Deny exempts but another Deny binds: they could create or
+    re-trust a role that Deny exempts, assume it and escape it (the protection's exception must be
+    a subset of every other exception in the policy)."""
+    errs = []
+    for prot in (st for st in statements if is_protection(st)):
+        exempt = set(principal_exceptions(prot))
+        for st in statements:
+            others = set(principal_exceptions(st))
+            if st is not prot and st.get("Effect") == "Deny" and others and exempt - others:
+                errs.append(f"{where}: {', '.join(sorted(exempt - others))} may create or re-trust a role "
+                            f"{st.get('Sid')} excepts ({prot.get('Sid')} exempts it), so {st.get('Sid')} "
+                            "does not bind it")
+    return errs
+
+
+def is_protection(st):
+    """A Deny of every SQUAT_ACTIONS action (the role-protection statement)."""
+    actions = {a.lower() for a in as_list(st.get("Action"))}
+    return st.get("Effect") == "Deny" and all(a.lower() in actions for a in SQUAT_ACTIONS)
+
+
+def enabled(comp):
+    return (comp.get("metadata") or {}).get("enabled") is not False and (comp.get("vars") or {}).get("enabled") is not False
+
+
+def lockout_findings(stack, components):
+    """An enabled security-services SCP while the stack's aws-identity-center is disabled or absent:
+    until Identity Center is applied the accounts are run as OrganizationAccountAccessRole, which
+    the plat trail/Config and protected-role denies do not except (root/global-region.yaml)."""
+    if any(c.get("component") == IDENTITY_CENTER and enabled(c) and (c.get("metadata") or {}).get("type") != "abstract"
+           for c in components.values()):
+        return []
+    return [f"{stack} {name}: enabled while {IDENTITY_CENTER} is disabled; enable the SCP only after Identity "
+            "Center is applied (until then OrganizationAccountAccessRole runs the accounts, and plat's denies "
+            "do not except it)"
+            for name, c in sorted(components.items())
+            if c.get("component") == COMPONENT and name.startswith(SECURITY_SERVICES_SCP) and enabled(c)
+            and (c.get("metadata") or {}).get("type") != "abstract"]
 
 
 def target_findings(where, targets):
@@ -285,6 +330,7 @@ def terraform(body):
 def check(stacks):
     errs, per_target, ou_statements = [], {}, {}
     for stack, body in sorted(stacks.items()):
+        errs += lockout_findings(stack, terraform(body))
         for name, comp in sorted(terraform(body).items()):
             meta = comp.get("metadata") or {}
             if comp.get("component") != COMPONENT or meta.get("type") == "abstract":
@@ -304,6 +350,7 @@ def check(stacks):
             for i, st in enumerate(doc["Statement"]):
                 errs += statement_findings(f"{where} statement {st.get('Sid', i)}", st, ous)
             errs += squat_findings(where, doc["Statement"])
+            errs += escalation_findings(where, doc["Statement"])
             for t in targets:
                 per_target.setdefault((stack, str(t)), []).append(name)
                 m = READ.match(str(t))

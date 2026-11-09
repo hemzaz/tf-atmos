@@ -181,29 +181,71 @@ def scp(statements, ou=CORE):
                      "policy_statements": [to_vars(s) for s in statements]}}
 
 
+PLAT_PROTECT = dict(PROTECT, Condition={"ArnNotLike": {"aws:PrincipalArn": WORKLOAD_ROLES}})
+IDENTITY_CENTER = {"component": "aws-identity-center", "metadata": {}}
+
+
 class CheckWiring(unittest.TestCase):
-    def stacks(self, statements, ou=CORE):
+    def stacks(self, statements, ou=CORE, identity_center=True):
         name = "aws-scp/security-services-" + ou.rsplit("/", 1)[1]
-        return {"fnx-gbl-root": {"components": {"terraform": {name: scp(statements, ou)}}}}
+        comps = {name: scp(statements, ou)}
+        if identity_center:
+            comps["aws-identity-center"] = IDENTITY_CENTER
+        return {"fnx-gbl-root": {"components": {"terraform": comps}}}
 
     def test_catalog_shape_is_clean(self):
         # The catalog's two copies (stacks/catalog/aws-scp/defaults.yaml): core keeps
-        # OrganizationAccountAccessRole in the trail/Config exception, plat drops it.
-        for ou, trail_roles in ((CORE, DEPLOY_ROLES), (PLAT, WORKLOAD_ROLES)):
+        # OrganizationAccountAccessRole in every exception; plat drops it from the trail/Config
+        # and protected-role ones (it stays a protected role) and keeps it for detectors.
+        for ou, roles, protect in ((CORE, DEPLOY_ROLES, PROTECT), (PLAT, WORKLOAD_ROLES, PLAT_PROTECT)):
             with self.subTest(ou=ou):
-                statements = [security_deny(trail_roles), detector_deny(DEPLOY_ROLES), PROTECT]
+                statements = [security_deny(roles), detector_deny(DEPLOY_ROLES), protect]
                 self.assertEqual(check.check(self.stacks(statements, ou)), [])
 
     def test_plat_copy_with_oaar_fails_the_check(self):
-        errs = check.check(self.stacks([security_deny(DEPLOY_ROLES), detector_deny(DEPLOY_ROLES), PROTECT], PLAT))
+        errs = check.check(self.stacks([security_deny(DEPLOY_ROLES), detector_deny(DEPLOY_ROLES), PLAT_PROTECT], PLAT))
         self.assertEqual(len(errs), 1)
         self.assertIn("DenyTrailConfigTampering", errs[0])
         self.assertIn("OQ-F", errs[0])
 
-    def test_core_copy_without_oaar_fails_the_check(self):
-        errs = check.check(self.stacks([security_deny(WORKLOAD_ROLES), detector_deny(DEPLOY_ROLES), PROTECT]))
+    def test_plat_protection_exempting_oaar_is_an_escalation(self):
+        # #516's first head: OAAR may create or re-trust a <stack>-ci-apply role, assume it and
+        # stop the trail DenyTrailConfigTampering denies it.
+        errs = check.check(self.stacks([security_deny(WORKLOAD_ROLES), detector_deny(DEPLOY_ROLES), PROTECT], PLAT))
         self.assertEqual(len(errs), 1)
-        self.assertIn("core stacks' trails", errs[0])
+        self.assertIn(OAAR, errs[0])
+        self.assertIn("may create or re-trust a role DenyTrailConfigTampering excepts", errs[0])
+
+    def test_escalation_compares_actions_case_insensitively(self):
+        lower = dict(PROTECT, Action=[a.lower() for a in PROTECT["Action"]])
+        errs = check.escalation_findings("p", [security_deny(WORKLOAD_ROLES), lower])
+        self.assertEqual(len(errs), 1)
+        upper = security_deny(WORKLOAD_ROLES, ("CloudTrail:StopLogging",))
+        self.assertEqual(len(check.statement_findings("s", upper, [PLAT])), 0)
+        self.assertEqual(len(check.statement_findings("s", security_deny(DEPLOY_ROLES, ("CloudTrail:StopLogging",)),
+                                                      [PLAT])), 1)
+
+    def test_enabled_without_identity_center_fails(self):
+        statements = [security_deny(DEPLOY_ROLES), detector_deny(DEPLOY_ROLES), PROTECT]
+        errs = check.check(self.stacks(statements, identity_center=False))
+        self.assertEqual(len(errs), 1)
+        self.assertIn("enabled while aws-identity-center is disabled", errs[0])
+        stacks = self.stacks(statements)
+        terraform = stacks["fnx-gbl-root"]["components"]["terraform"]
+        terraform["aws-identity-center"] = dict(IDENTITY_CENTER, metadata={"enabled": False})
+        self.assertEqual(len(check.check(stacks)), 1)
+
+    def test_disabled_without_identity_center_passes(self):
+        stacks = self.stacks([security_deny(DEPLOY_ROLES), detector_deny(DEPLOY_ROLES), PROTECT], identity_center=False)
+        stacks["fnx-gbl-root"]["components"]["terraform"]["aws-scp/security-services-core"]["metadata"] = {"enabled": False}
+        self.assertEqual(check.check(stacks), [])
+
+    def test_core_copy_without_oaar_fails_the_check(self):
+        # Also an escalation: core's protection still exempts OAAR, which the trail deny now binds.
+        errs = check.check(self.stacks([security_deny(WORKLOAD_ROLES), detector_deny(DEPLOY_ROLES), PROTECT]))
+        self.assertEqual(len(errs), 2)
+        self.assertTrue(any("core stacks' trails" in e for e in errs))
+        self.assertTrue(any("may create or re-trust" in e for e in errs))
 
     def test_missing_protection_fails_the_check(self):
         errs = check.check(self.stacks([security_deny(DEPLOY_ROLES)]))
