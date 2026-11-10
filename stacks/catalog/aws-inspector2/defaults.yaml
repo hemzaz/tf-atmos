@@ -1,0 +1,87 @@
+---
+# =============================================================================
+# aws-inspector2 - organization Amazon Inspector, delegated to the security account (E5c)
+# =============================================================================
+# Vendored Cloud Posse aws-inspector2 v2.0.1 (vendor.yaml), in its README's two
+# steps, per region (no step 1: the delegation itself makes the administrator).
+# A stack's instance takes Cloud Posse's name and inherits one variant:
+#
+#   aws-inspector2/root-defaults
+#       instance aws-inspector2/root in the management account's stack:
+#       delegates Inspector to <tenant>-security.
+#   aws-inspector2/org-settings-us, -eu
+#       instance aws-inspector2/org-settings in the security stack
+#       (admin_delegated: true): enables the administrator, the organization's
+#       auto-enable (CP scan types EC2, ECR and Lambda) and every map account
+#       but itself as a member. Unlike GuardDuty and Security Hub, CP's
+#       member list keeps the management account, and member_association_excludes
+#       (documented upstream as account names) is compared against account
+#       IDs (main.tf locals), so the excludes are IDs: -us drops prod-eu's
+#       (owner decision OQ-RES), -eu keeps everyone.
+#
+# Owner decision OQ-IN (2026-11-10): delegate now, scan nothing yet (W3 D5,
+# Inspector off by default): each stack's aws-inspector2/org-settings instance
+# commits metadata.enabled: false, so turning scanning on is that one flag.
+# The delegation (root) is enabled; it bills nothing. Dependency: org-settings
+# after root, within one residency.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-inspector2/defaults:
+      metadata:
+        component: aws-inspector2
+        type: abstract
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: aws-inspector2
+        delegated_administrator_account_name: '{{ .settings.context.tenant }}-security'
+        admin_delegated: false
+        auto_enable_ec2: true
+        auto_enable_ecr: true
+        auto_enable_lambda: true
+        member_association_excludes: []
+        tags:
+          Component: "Inspector"
+
+    aws-inspector2/root-defaults:
+      metadata:
+        component: aws-inspector2
+        type: abstract
+        inherits:
+          - aws-inspector2/defaults
+
+    aws-inspector2/org-settings-us:
+      metadata:
+        component: aws-inspector2
+        type: abstract
+        inherits:
+          - aws-inspector2/defaults
+      vars:
+        admin_delegated: true
+        member_association_excludes:
+          - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
+      dependencies:
+        components:
+          - component: aws-inspector2/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
+
+    aws-inspector2/org-settings-eu:
+      metadata:
+        component: aws-inspector2
+        type: abstract
+        inherits:
+          - aws-inspector2/defaults
+      vars:
+        admin_delegated: true
+      dependencies:
+        components:
+          - component: aws-inspector2/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'

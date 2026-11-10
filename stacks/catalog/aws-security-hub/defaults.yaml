@@ -1,0 +1,217 @@
+---
+# =============================================================================
+# aws-security-hub - organization Security Hub, delegated to the security account (E5c)
+# =============================================================================
+# Vendored Cloud Posse aws-security-hub v2.2.1 (vendor.yaml), in its README's
+# three steps, per region. A stack's instance takes Cloud Posse's name and
+# inherits its variants (see catalog/aws-guardduty/defaults.yaml for the shape):
+#
+#   aws-security-hub/delegated-administrator-us, -eu
+#       step 1, instance aws-security-hub/delegated-administrator in the
+#       security stack: the delegated administrator's hub. -us also aggregates:
+#       CP creates the finding aggregator only where finding_aggregation_region
+#       is the stack's region, so us-east-1 links us-east-2 alone
+#       (SPECIFIED_REGIONS) and no EU region (QE7). -eu never aggregates.
+#   aws-security-hub/root-defaults
+#       step 2, instance aws-security-hub/root in the management account's
+#       stack: delegates Security Hub and enables the management account's hub.
+#   aws-security-hub/root-organization-policy
+#       step 2 in fnx-ue1-root only: also the Organizations resource policy
+#       (an organization singleton, global; one owner).
+#   aws-security-hub/org-settings-us, -eu
+#       step 3, instance aws-security-hub/org-settings in the security stack:
+#       members (the map minus self and the management account: -us without
+#       prod-eu, OQ-RES) and auto-enable of new accounts with the default
+#       standards. CP's organization configuration is LOCAL (hardcoded).
+#   aws-security-hub/standby-suppressions
+#       added to org-settings in a region that is no account's home
+#       (us-east-2, eu-central-1): suppresses the controls that cannot pass
+#       there, as automation rules in that region's administrator. LOCAL
+#       configuration cannot disable a control in a member, so CP suppresses
+#       its findings instead. They stay out of us-east-1: rules in the
+#       aggregation region also act on the linked regions' findings.
+#
+# Owner decision OQ-SH (2026-11-10): Cloud Posse's default standards (AWS
+# Foundational Security Best Practices v1.0.0 and CIS AWS Foundations 1.2.0)
+# org-wide, LOCAL; prod's PCI DSS standard (hand-written securityhub/prod) is
+# dropped. Dependencies within one residency: root after step 1, org-settings
+# after root. Controls are AWS Config rules: each member region needs its
+# aws-config recorder (E5b).
+#
+# PCI DSS, if anyone wants it later (not deployed; why it is off: CP has no
+# per-account or per-OU standard in LOCAL mode, so PCI would apply to every
+# member, dev and core accounts included, with their findings and per-check
+# cost, and the owner chose the CP default):
+#   (a) CENTRAL configuration, a house component next to aws-security-hub
+#       (step 4, in the delegated administrator of the aggregation region):
+#       aws_securityhub_organization_configuration with configuration_type
+#       CENTRAL (it replaces CP's LOCAL one: set org-settings' auto-enable off
+#       or drop CP's resource there, one owner per region), one
+#       aws_securityhub_configuration_policy per profile (baseline: FSBP + CIS;
+#       pci: baseline + "standards/pci-dss/v/3.2.1", any disabled controls)
+#       and aws_securityhub_configuration_policy_association per target (the
+#       plat OU, or only fnx-prod and fnx-prod-eu). CENTRAL needs the
+#       aggregator and governs only the linked regions, so the EU regions
+#       either join a separate EU aggregator in fnx-ew1-security with its own
+#       policies (residency: never linked to us-east-1) or stay LOCAL. Matches
+#       AWS's recommended model; a deviation from CP (a house component, an
+#       upstream ask), and CENTRAL is sticky once applied (back to LOCAL means
+#       disassociating every policy first).
+#   (b) LOCAL, per-account: enable the standard in fnx-prod's (and
+#       fnx-prod-eu's) own hub with aws_securityhub_standards_subscription from
+#       a small house component deployed in the member stacks. No org change,
+#       but a member-side Security Hub resource again (what E5c removes),
+#       outside the administrator's control, and only where it is deployed.
+#   What changes either way: check-lane-names.py (one CENTRAL configuration
+#   per aggregation region, the policy-association owner), check-data-residency.py
+#   (EU policies only in EU stacks; no EU region linked to a US aggregator),
+#   the SCP DenyDetectorTampering list (securityhub:UpdateConfigurationPolicy,
+#   DeleteConfigurationPolicy, StartConfigurationPolicyDisassociation), and
+#   the first-apply checklist (get-configuration-policy-association per target).
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-security-hub/defaults:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - vendored
+      vars:
+        enabled: true
+        name: aws-security-hub
+        account_map_enabled: false
+        delegated_administrator_account_name: '{{ .settings.context.tenant }}-security'
+        admin_delegated: false
+        default_standards_enabled: true
+        enabled_standards: []
+        auto_enable_organization_members: true
+        finding_aggregator_enabled: false
+        organizations_resource_policy_enabled: false
+        create_sns_topic: false
+        tags:
+          Component: "SecurityHub"
+
+    aws-security-hub/delegated-administrator-us:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/defaults
+          - account-map-bypass
+      vars:
+        finding_aggregator_enabled: true
+        finding_aggregation_region: us-east-1
+        finding_aggregator_linking_mode: SPECIFIED_REGIONS
+        finding_aggregator_regions:
+          - us-east-2
+
+    aws-security-hub/delegated-administrator-eu:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/defaults
+          - account-map-bypass
+
+    aws-security-hub/root-defaults:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/defaults
+          - account-map-bypass
+      dependencies:
+        components:
+          - component: aws-security-hub/delegated-administrator
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-security'
+
+    aws-security-hub/root-organization-policy:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/root-defaults
+      vars:
+        organizations_resource_policy_enabled: true
+
+    aws-security-hub/org-settings-us:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/defaults
+          - account-map-bypass-us
+      vars:
+        admin_delegated: true
+      dependencies:
+        components:
+          - component: aws-security-hub/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
+
+    aws-security-hub/org-settings-eu:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/defaults
+          - account-map-bypass
+      vars:
+        admin_delegated: true
+      dependencies:
+        components:
+          - component: aws-security-hub/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
+
+    # The hand-written securityhub/main-standby's disabled controls (AWS
+    # Security Hub User Guide, "Controls that you might want to disable",
+    # controls-to-disable.html), by consolidated control ID, PCI-only IDs out:
+    # AWS Config records IAM in each account's home region only, so the IAM
+    # controls and KMS.1/KMS.2 (they check IAM policies) cannot pass elsewhere;
+    # CloudWatch.1-14 check metric filters on the multi-region trail's log
+    # group, which exists only in the home region.
+    aws-security-hub/standby-suppressions:
+      metadata:
+        type: abstract
+      vars:
+        disabled_control_finding_reasons:
+          IAM.1: {control_id: IAM.1, reason_code: GLOBAL_IAM, disabled_reason: &iam "Not a home region: AWS Config records IAM in the account's home region only"}
+          IAM.2: {control_id: IAM.2, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.3: {control_id: IAM.3, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.4: {control_id: IAM.4, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.5: {control_id: IAM.5, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.6: {control_id: IAM.6, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.7: {control_id: IAM.7, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.8: {control_id: IAM.8, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.9: {control_id: IAM.9, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.11: {control_id: IAM.11, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.12: {control_id: IAM.12, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.13: {control_id: IAM.13, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.14: {control_id: IAM.14, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.15: {control_id: IAM.15, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.16: {control_id: IAM.16, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.17: {control_id: IAM.17, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.18: {control_id: IAM.18, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.20: {control_id: IAM.20, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          IAM.21: {control_id: IAM.21, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          KMS.1: {control_id: KMS.1, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          KMS.2: {control_id: KMS.2, reason_code: GLOBAL_IAM, disabled_reason: *iam}
+          CloudWatch.1: {control_id: CloudWatch.1, reason_code: HOME_TRAIL, disabled_reason: &trail "Not a home region: the metric filters are on the multi-region trail's log group, in the home region"}
+          CloudWatch.2: {control_id: CloudWatch.2, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.3: {control_id: CloudWatch.3, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.4: {control_id: CloudWatch.4, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.5: {control_id: CloudWatch.5, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.6: {control_id: CloudWatch.6, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.7: {control_id: CloudWatch.7, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.8: {control_id: CloudWatch.8, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.9: {control_id: CloudWatch.9, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.10: {control_id: CloudWatch.10, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.11: {control_id: CloudWatch.11, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.12: {control_id: CloudWatch.12, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.13: {control_id: CloudWatch.13, reason_code: HOME_TRAIL, disabled_reason: *trail}
+          CloudWatch.14: {control_id: CloudWatch.14, reason_code: HOME_TRAIL, disabled_reason: *trail}
