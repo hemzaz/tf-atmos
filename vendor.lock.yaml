@@ -1,5 +1,67 @@
 version: 1
 artifacts:
+  0a2c2fb51875f9760082b008b2a05da80c8e5c87aa0aa8130a6823da5df0434c:
+    name: aws-security-hub
+    kind: remote
+    target: components/terraform/aws-security-hub
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-security-hub.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-security-hub.git//src
+      digest: sha256:527e4182a7c201d4a8d50a3a9351553fd0c03b97bc2e1f222e8c8d7f5f2abca3
+      query_digest: sha256:e5e9430327a786dc73555f634b5e82e28efe8dbc3c8d621318bb96ecd35926c9
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: e7ccfdf05c59f82d439c446a4a586a6ff3f4529163fdd8a73c5be0f79546ea8f
+      - path: account-verification.tf
+        type: file
+        mode: 420
+        sha256: 8926ae1c96c16020c97ff984d73b61c41546e7162d85a124d07f3ea79819f554
+      - path: automation-rules.tf
+        type: file
+        mode: 420
+        sha256: 1484a591460b4dfba8c501749e9a6ce93d601574a671609ba9c41ec4c96a01b5
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 0f3744c9240e4cecfb7e902048b9c0d3a82d9c296ac52f7329ddd4841b7b7af4
+      - path: organizations-resource-policy.tf
+        type: file
+        mode: 420
+        sha256: 6f771bb9ff4a7896da7132c8c81b754c9b0267ec002b26c232b79d42bd353b73
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 1792ab88a3a62a46fa69bfc83808482dc1886bd49bb02382039756faba5ad8a4
+      - path: product-subscriptions.tf
+        type: file
+        mode: 420
+        sha256: 8216dcfcebe916d03bc089d52467ca17c864dc184b0583d21d549a0abc4d7d2e
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 5e05e357987c1b29a1e1a909ab24f2bb616bed21f5bd4b9d9123869e33d89025
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: 85883a6039760f350c7e5a5898f4093dc2bd9bb6f21d97f144056c7637458356
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: c018883e219814b603802c374bd04dfe38041d5aaf430e5eb805a962dd0a95c5
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: b1fb38ae45bb7c4f288795e09f16cb67e968ad990cd6147b9a035e52c3e0e36d
+    order: 21
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
   2d57fff1970fe254cf0baa29faf194b34795d9a25b969cd92253a9e4fe35f3c4:
     name: aws-dns-primary-mixins
     kind: remote
@@ -42,6 +104,56 @@ artifacts:
     included_paths:
       - providers-account-map-bypass.depth-1.tf
       - account-verification.mixin.tf
+  3ef8bf938974dd26c994fddccad600d6fd2fceaa1a1b8f54901618d3124b63f4:
+    name: aws-inspector2
+    kind: remote
+    target: components/terraform/aws-inspector2
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-inspector2.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-inspector2.git//src
+      digest: sha256:b118188d48d9c3ddcc06eb01faeb111927aff0b4f2ada024e782496c17baf316
+      query_digest: sha256:8ab24fa512c0b7eaac2e3cc2ed468cfc856d2fac31a531b5629faad52e86ca33
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: e283302b20b4004a0522fbc957f07cf2e3b00c6a476f3bb95510259c2ca4defb
+      - path: account-verification.tf
+        type: file
+        mode: 420
+        sha256: 8926ae1c96c16020c97ff984d73b61c41546e7162d85a124d07f3ea79819f554
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: d36972ff0b683a3ec0edbbfa165a02af7b2fe6058024ae0d89222a7605df66ac
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 20e367983b5dfeb915a3f5f9b6154a5f9c46dcd24c459deb54641c30fe9cdd8f
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 556ca8428884d5398dee8948c00e94165ed7ad1aceec03fcef87a82cff766f48
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: 19215f17ef39f456be5f09b7f7cc085dc8547fa9b91aa33fd6f4b5a18c217bd7
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: d53f25ac63d6925e66b731997d04c12341d03d4c2f85090f8d28ccc34d6c15da
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: c5907ed520114a66ea2694da518a75a3cbe7d7b097a970f0c9bb0b8ec5135fca
+    order: 22
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
   5bcbaae4952daaa7f24750f3f656bb344372688279abca3e06bf618ebaa67326:
     name: aws-cloudtrail-bucket-mixins
     kind: remote
@@ -207,6 +319,68 @@ artifacts:
         mode: 420
         sha256: be0e2262c1d5de2b8df463971c96d0a683763679448e68e1d3e47226fefdf1c7
     order: 4
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+  24f71aa70affe75b8f695c06ecf5f797fd2fd6f5b1c40a4f3df30b53ded7d6e8:
+    name: aws-guardduty
+    kind: remote
+    target: components/terraform/aws-guardduty
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-guardduty.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-guardduty.git//src
+      digest: sha256:d1ae6e0fd46300377bab4eb0475155e7826c48653d49ef30a432a19f53a68882
+      query_digest: sha256:fa8c610f8c176e80218b76926d957e7b73e9e6f9ba74fc66fa5f40f0939f234e
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 84ffa3ecf4ce588315174a8935224cb79d6e751c0e586a456c16f38babd51410
+      - path: account-verification.tf
+        type: file
+        mode: 420
+        sha256: 8926ae1c96c16020c97ff984d73b61c41546e7162d85a124d07f3ea79819f554
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: kms.tf
+        type: file
+        mode: 420
+        sha256: 7ea8944ab3c30f8d99d0c613c2e70ff9db6a9cae3e459fdff9e36fb6d69b8c0c
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: e1479892aca27f717b49a7d17e43006d85c1651fc0e8d78a13c2e2da5ca10c18
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 608c42a2dc3ab214c8394ee71b64a22c3e1d840b4499c7968e43bb22c8a2269f
+      - path: providers.tf
+        type: file
+        mode: 420
+        sha256: 5e05e357987c1b29a1e1a909ab24f2bb616bed21f5bd4b9d9123869e33d89025
+      - path: remote-state.tf
+        type: file
+        mode: 420
+        sha256: 57f2b0d12ff71e9d624a77dd71b796dfd7c9026742f3028d1794fe5f4934a873
+      - path: sns.tf
+        type: file
+        mode: 420
+        sha256: 1af7d0b82a286369dbff7c77d69bab9a82be9390368a889121f46541b3deeada
+      - path: sqs.tf
+        type: file
+        mode: 420
+        sha256: ab6999b2205b76ade084caba18486d3e3f4a2501838d4e19a782c27e66d0eabf
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 62148e5c14fdd2504b6b04ddc1b1b72edd9569fc37bb33fae5adc0895f06a6c8
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: c5907ed520114a66ea2694da518a75a3cbe7d7b097a970f0c9bb0b8ec5135fca
+    order: 20
     included_paths:
       - '**/*.tf'
       - '**/*.md'

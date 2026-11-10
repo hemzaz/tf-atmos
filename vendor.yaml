@@ -186,3 +186,26 @@ spec:
       targets:
         - "components/terraform/aws-config"
       included_paths: ["**/*.tf", "**/*.md"]
+    # Organization-wide threat detection and posture (E5c): GuardDuty, Security
+    # Hub and Inspector, delegated from the management account (root) to the
+    # security account, which configures the organization. Vendored unedited
+    # with their providers.tf: each takes its own account_map
+    # (account_map_enabled false), so none gets a providers mixin.
+    - component: aws-guardduty
+      source: "github.com/cloudposse-terraform-components/aws-guardduty.git//src?ref={{ .Version }}"
+      version: "v3.0.2"
+      targets:
+        - "components/terraform/aws-guardduty"
+      included_paths: ["**/*.tf", "**/*.md"]
+    - component: aws-security-hub
+      source: "github.com/cloudposse-terraform-components/aws-security-hub.git//src?ref={{ .Version }}"
+      version: "v2.2.1"
+      targets:
+        - "components/terraform/aws-security-hub"
+      included_paths: ["**/*.tf", "**/*.md"]
+    - component: aws-inspector2
+      source: "github.com/cloudposse-terraform-components/aws-inspector2.git//src?ref={{ .Version }}"
+      version: "v2.0.1"
+      targets:
+        - "components/terraform/aws-inspector2"
+      included_paths: ["**/*.tf", "**/*.md"]
