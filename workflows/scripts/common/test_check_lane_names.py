@@ -523,5 +523,136 @@ class GlobalTest(unittest.TestCase):
         }), [])
 
 
+# The E5c4-E5c6 simulation (security + root stacks of 4 regions) from the residency test, the one copy.
+_spec = importlib.util.spec_from_file_location(
+    "test_check_data_residency", pathlib.Path(__file__).with_name("test_check_data_residency.py")
+)
+residency_test = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(residency_test)
+
+
+class OrgServicesTest(unittest.TestCase):
+    """ORG_SERVICES account singletons: root, delegated-administrator, org-settings, the resource policy."""
+
+    def org(self, stacks):
+        return [e for e in check_lane_names.check(stacks) if "aws-" in e]
+
+    @staticmethod
+    def instances(stacks, stack_name):
+        return stacks[stack_name]["components"]["terraform"]
+
+    def test_simulated_e5c_slices_pass(self):
+        self.assertEqual(check_lane_names.check(residency_test.org_services_stacks()), [])
+
+    def test_two_delegated_administrators_in_one_service_and_region_fail(self):
+        stacks = residency_test.org_services_stacks()
+        security = self.instances(stacks, "fnx-ue1-security")
+        security["aws-guardduty/delegated-administrator-2"] = security["aws-guardduty/delegated-administrator"]
+        # A lane of the security stack holding a second one is the same finding.
+        stacks["fnx-ue1-security-lane"] = {"components": {"terraform": {
+            "aws-guardduty/delegated-administrator": security["aws-guardduty/delegated-administrator"]}}}
+        found = self.org(stacks)
+        self.assertEqual(len(found), 2, found)  # the singleton, and the in-stack same-name pair
+        self.assertIn("fnx-ue1-security: aws-guardduty/delegated-administrator and fnx-ue1-security: "
+                      "aws-guardduty/delegated-administrator-2 and fnx-ue1-security-lane: "
+                      "aws-guardduty/delegated-administrator are all the aws-guardduty delegated-administrator step in "
+                      "us-east-1", found[-1])
+
+    def test_two_org_settings_or_roots_in_one_region_fail(self):
+        for stack_name, name in (("fnx-ec1-security", "aws-security-hub/org-settings"),
+                                 ("fnx-ue2-root", "aws-inspector2/root")):
+            with self.subTest(name=name):
+                stacks = residency_test.org_services_stacks()
+                stacks[f"{stack_name}-x"] = {"components": {"terraform": {
+                    name: self.instances(stacks, stack_name)[name]}}}
+                found = self.org(stacks)
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(f"are all the {name.split('/')[0]} {name.split('/')[1]} step", found[0])
+
+    def test_one_region_per_step_is_not_a_collision(self):
+        # The 4 regions' instances of one step are separate singletons (the simulation passes).
+        stacks = residency_test.org_services_stacks()
+        self.assertEqual(len([n for s in stacks.values() for n in s["components"]["terraform"]
+                              if n == "aws-guardduty/root"]), 4)
+        self.assertEqual(self.org(stacks), [])
+
+    def test_a_delegated_administrator_outside_the_security_account_fails(self):
+        stacks = residency_test.org_services_stacks()
+        rogue = residency_test.org_instance("aws-guardduty", "prod", "us-east-1")
+        self.instances(stacks, "fnx-ue1-prod")["aws-guardduty/delegated-administrator"] = rogue
+        self.assertEqual(self.org(stacks), [
+            "fnx-ue1-prod: aws-guardduty/delegated-administrator is in account fnx-prod, neither the management "
+            "account (fnx-root) nor the delegated administrator (fnx-security): it creates nothing there"])
+        rogue["vars"]["delegated_administrator_account_name"] = "fnx-prod"
+        self.assertEqual(self.org(stacks), [
+            "fnx-ue1-prod: aws-guardduty/delegated-administrator names delegated administrator 'fnx-prod': the org "
+            "services' delegated administrator is fnx-security"])
+        rogue["vars"].pop("delegated_administrator_account_name")  # CP default core-security
+        self.assertIn("names delegated administrator 'core-security'", self.org(stacks)[0])
+
+    def test_two_resource_policies_fail(self):
+        stacks = residency_test.org_services_stacks()
+        hub = self.instances(stacks, "fnx-ew1-root")["aws-security-hub/root"]
+        hub["vars"].pop("organizations_resource_policy_enabled")  # CP default true
+        self.assertEqual(self.org(stacks), [
+            "fnx-ew1-root: aws-security-hub/root and fnx-ue1-root: aws-security-hub/root all create the Security Hub "
+            "Organizations resource policy, an organization singleton: set organizations_resource_policy_enabled "
+            "false in all but one"])
+
+    def test_inspector_has_no_step_one(self):
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue1-security")["aws-inspector2/org-settings"]["vars"]["admin_delegated"] = False
+        self.assertEqual(self.org(stacks), [
+            "fnx-ue1-security: aws-inspector2/org-settings is an aws-inspector2 instance with admin_delegated off: "
+            "Inspector has no step 1, only org-settings"])
+
+    def test_a_second_aggregator_of_the_administrator_fails(self):
+        # Review L2: ue2 aggregating us-east-1 back, beside ue1's aggregator.
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue2-security")["aws-security-hub/delegated-administrator"]["vars"].update(
+            finding_aggregation_region="us-east-2", finding_aggregator_regions=["us-east-1"])
+        self.assertEqual(self.org(stacks), [
+            "fnx-ue1-security: aws-security-hub/delegated-administrator and fnx-ue2-security: "
+            "aws-security-hub/delegated-administrator all create a Security Hub finding aggregator for fnx-security: "
+            "one aggregation region per administrator (OQ-SH: us-east-1 aggregates us-east-2)"])
+
+    def test_a_management_account_other_than_the_map_root_fails(self):
+        # Review L1: an instance naming its own (security) account management is no root step.
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue1-security")["aws-guardduty/org-settings"]["vars"][
+            "organization_management_account_name"] = "fnx-security"
+        self.assertIn("fnx-ue1-security: aws-guardduty/org-settings names management account 'fnx-security', not "
+                      "its account_map's root account 'fnx-root': the management account is the root account",
+                      self.org(stacks))
+
+    def test_a_string_admin_delegated_fails(self):
+        # Terraform reads "true" as step 3, but the security-org layer's query matches only the bool.
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue1-security")["aws-security-hub/org-settings"]["vars"]["admin_delegated"] = "true"
+        # (Its step unknown, it is also compared by name with the stack's delegated-administrator.)
+        self.assertIn("fnx-ue1-security: aws-security-hub/org-settings sets admin_delegated 'true', not a bool: "
+                      "deploy-full-stack's security-org layer selects step 3 by .vars.admin_delegated == true",
+                      self.org(stacks))
+
+    def test_steps_sharing_a_stack_collide_with_an_sns_topic(self):
+        stacks = residency_test.org_services_stacks()
+        for name in ("aws-guardduty/delegated-administrator", "aws-guardduty/org-settings"):
+            self.instances(stacks, "fnx-ue1-security")[name]["vars"]["name"] = "guardduty"
+        self.assertEqual(self.org(stacks), [])
+        self.instances(stacks, "fnx-ue1-security")["aws-guardduty/org-settings"]["vars"]["create_sns_topic"] = True
+        self.assertEqual(len(self.org(stacks)), 1)
+        self.assertIn('set the same name "guardduty"', self.org(stacks)[0])
+
+    def test_disabled_and_fixture_instances_are_exempt(self):
+        stacks = residency_test.org_services_stacks()
+        twin = dict(self.instances(stacks, "fnx-ue1-root")["aws-security-hub/root"])
+        twin["metadata"] = {"component": "aws-security-hub", "enabled": False}
+        stacks["fnx-ue1-root-x"] = {"components": {"terraform": {"aws-security-hub/root": twin}}}
+        fixture = residency_test.org_instance("aws-security-hub", "root", "us-east-1")
+        fixture["settings"]["context"]["stage"] = "fixtures"
+        stacks["fnx-ue1-fixtures-org"] = {"components": {"terraform": {"aws-security-hub/root": fixture}}}
+        self.assertEqual(self.org(stacks), [])
+
+
 if __name__ == "__main__":
     unittest.main()

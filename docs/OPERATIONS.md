@@ -71,7 +71,8 @@ cost-allocation tags) as notices, and per stack its budget amount to confirm, an
 and `fixtures` stacks are exempt.
 `bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
 `backend-only`, `full`) before any AWS call, and so do `deploy-accounts.yaml` and
-`deploy-full-stack.yaml` (`deploy`, `deploy-kms`, `deploy-storage`, `deploy-security`; the other
+`deploy-full-stack.yaml` (`deploy`, `deploy-kms`, `deploy-storage`, `deploy-security`,
+`deploy-security-org`; the other
 single-layer runs skip it), `apply-environment.yaml` (`apply`) and `security-hardening.yaml`
 (`harden`). Resuming a workflow with `--from-step` past it skips it; the cold start
 passes `--cold-start`, which makes a placeholder account in the backend's access-role principals a
@@ -362,7 +363,9 @@ planned, confirmed, then applied from the saved plan. Each layer is also its own
 
 `backend`, `iam`, `kms`, `storage`, `networking`, `connectivity`, `security`,
 `security-monitoring`, `compute`, `platform`, `data`, `dns-apex`, `dns-zones`, `dns`,
-`certificates`, `addons`, `services`, `regional-waf`, `monitoring`.
+`certificates`, `addons`, `services`, `regional-waf`, `monitoring`, `security-org` (the
+GuardDuty, Security Hub and Inspector org settings, `vars.admin_delegated: true`: Cloud Posse's
+step 3, after the root stack's delegation).
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that

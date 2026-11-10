@@ -521,6 +521,56 @@ class StaticAccountMapTest(unittest.TestCase):
         ic["vars"]["account_assignments"] = {self.MAPPED: {}}
         self.assertEqual(self.failures(stacks), [])
 
+    def test_the_us_map_variant_passes_only_for_guardduty_and_security_hub(self):
+        us = {**self.STATIC, "full_account_map": {
+            k: v for k, v in self.STATIC["full_account_map"].items() if k != "fnx-prod-eu"}}
+        no_dev = {**self.STATIC, "full_account_map": {
+            k: v for k, v in self.STATIC["full_account_map"].items() if k != "fnx-dev"}}
+        # The real static map carries iam_role_arn_templates; account-map-bypass-us (E5c1) leaves it out.
+        templates = {"dns-delegation": "arn:aws:iam::777777777773:role/fnx-ue1-network-dns-delegation-dev"}
+        with_templates = {**self.STATIC, "iam_role_arn_templates": templates}
+        us_other_templates = {**us, "iam_role_arn_templates": {"dns-delegation": "arn:aws:iam::1:role/x"}}
+        for component, account_map, static, fatal in (
+            ("aws-guardduty", us, self.STATIC, False), ("aws-security-hub", us, self.STATIC, False),
+            ("aws-inspector2", us, self.STATIC, True), ("access-analyzer", us, self.STATIC, True),
+            ("aws-guardduty", no_dev, self.STATIC, True), ("aws-guardduty", self.STATIC, self.STATIC, False),
+            ("aws-guardduty", us, with_templates, False),
+            ("aws-security-hub", {**us, "iam_role_arn_templates": templates}, with_templates, False),
+            ("aws-security-hub", us_other_templates, with_templates, True),
+            ("aws-security-hub", {**us, "audit_account_account_name": "fnx-root"}, self.STATIC, True),
+        ):
+            with self.subTest(component=component, keys=sorted(account_map), n=len(account_map["full_account_map"])):
+                stacks = CoreAccountTest.with_map()
+                spec = inst("security", env("security", ACCOUNTS["security"]), component=component, enabled=False,
+                            account_map=account_map, tenant="fnx")
+                spec["settings"]["static_account_map"] = static
+                stacks["fnx-ue1-root"]["components"]["terraform"][f"{component}/org-settings"] = spec
+                found = [(f.level, f.key) for f in self.failures(stacks)]
+                self.assertEqual(found, [("fatal", f"{component}/org-settings vars.account_map")] if fatal else [])
+        # Review S1: an EU-region instance keeps the full map (prod-eu's admin is the EU one).
+        for region, fatal in (("eu-west-1", True), ("us-east-2", False)):
+            with self.subTest(region=region):
+                stacks = CoreAccountTest.with_map()
+                spec = inst("security", env("security", ACCOUNTS["security"]), component="aws-guardduty",
+                            enabled=False, account_map=us, tenant="fnx", region=region)
+                spec["settings"]["static_account_map"] = self.STATIC
+                stacks["fnx-ue1-root"]["components"]["terraform"]["aws-guardduty/org-settings"] = spec
+                found = [(f.level, f.key) for f in self.failures(stacks)]
+                self.assertEqual(found, [("fatal", "aws-guardduty/org-settings vars.account_map")] if fatal else [])
+        # The component-less abstract that carries the US map (catalog/_base account-map-bypass-us), and no other
+        # (review L5: a concrete instance or one with a component under that name is not it).
+        for name, metadata, fatal in (
+            ("account-map-bypass-us", {"type": "abstract"}, False), ("account-map-bypass", {"type": "abstract"}, True),
+            ("account-map-bypass-us", {}, True), ("account-map-bypass-us", {"type": "abstract", "component": "vpc"}, True),
+        ):
+            with self.subTest(abstract=name, metadata=metadata):
+                stacks = CoreAccountTest.with_map()
+                spec = {"metadata": metadata, "vars": {"account_map": us},
+                        "settings": {"context": {"tenant": "fnx"}, "static_account_map": self.STATIC}}
+                stacks["fnx-ue1-root"]["components"]["terraform"][name] = spec
+                found = [(f.level, f.key) for f in self.failures(stacks)]
+                self.assertEqual(found, [("fatal", f"{name} vars.account_map")] if fatal else [])
+
     def run_main(self, stacks, *argv):
         out = io.StringIO()
         with mock.patch.object(sys, "argv", ["check-first-deploy-inputs.py", *argv]), \
