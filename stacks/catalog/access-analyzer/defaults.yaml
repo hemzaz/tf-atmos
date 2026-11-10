@@ -10,8 +10,12 @@
 #      (fnx-ue1-root): delegates Access Analyzer to the security account and
 #      creates the service-linked role. Once per organization.
 #   2. access-analyzer/delegated-administrator in the security account, per
-#      region: the ORGANIZATION and ORGANIZATION_UNUSED_ACCESS analyzers.
-#      Not yet: the security account has no stack (Wave E).
+#      region: the ORGANIZATION and ORGANIZATION_UNUSED_ACCESS analyzers. A
+#      security stack's instance inherits a variant of
+#      delegated-administrator.yaml: -defaults (organization analyzer only),
+#      or -unused-access in fnx-ue1-security alone: unused access is
+#      about IAM, which is global, so one region analyses it (E5c plan, OQ-G).
+#      No stack imports them yet (E5c7).
 # account_map is the static map (account_map_enabled false, the CP default),
 # from the abstract account-map-bypass (catalog/_base/account-map-bypass):
 # settings.static_account_map (stacks/orgs/fnx/_defaults.yaml), keys

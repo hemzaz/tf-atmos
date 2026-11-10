@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# aws-guardduty US-region variants (E5c): imported only by the us- security stacks
+# =============================================================================
+# The variants of aws-guardduty/defaults.yaml that keep the all-GDPR accounts
+# (prod-eu) out of a US region (owner decision OQ-RES). Their own file,
+# so an EU stack that imports defaults.yaml never resolves them: the
+# first-deploy-inputs and data-residency checks read every abstract a stack
+# resolves.
+# =============================================================================
+
+import:
+  - catalog/aws-guardduty/defaults
+  - catalog/_base/account-map-bypass-us
+
+components:
+  terraform:
+    aws-guardduty/org-settings-us:
+      metadata:
+        component: aws-guardduty
+        type: abstract
+        inherits:
+          - aws-guardduty/defaults
+          - account-map-bypass-us
+      vars:
+        admin_delegated: true
+      dependencies:
+        components:
+          - component: aws-guardduty/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'

@@ -1,0 +1,116 @@
+---
+# =============================================================================
+# aws-guardduty - organization GuardDuty, delegated to the security account (E5c)
+# =============================================================================
+# Vendored Cloud Posse aws-guardduty v3.0.2 (vendor.yaml), in its README's three
+# steps, per region (CP: every region the organization operates in). A stack's
+# instance takes Cloud Posse's name and inherits one variant:
+#
+#   components:
+#     terraform:
+#       aws-guardduty/org-settings:
+#         metadata:
+#           component: aws-guardduty
+#           inherits:
+#             - aws-guardduty/org-settings-us
+#
+#   aws-guardduty/delegated-administrator-defaults
+#       step 1, instance aws-guardduty/delegated-administrator in the security
+#       stack: the detector of the delegated administrator (<tenant>-security).
+#   aws-guardduty/root-defaults
+#       step 2, instance aws-guardduty/root in the management account's stack
+#       of the same region: delegates GuardDuty to <tenant>-security (CP checks
+#       Organizations trusted access, aws-organization/defaults.yaml).
+#   aws-guardduty/org-settings-us (us.yaml), aws-guardduty/org-settings-eu
+#       step 3, instance aws-guardduty/org-settings in the security stack
+#       ("deployed again", admin_delegated: true): members and auto-enable.
+#       Members are the account map minus the security and management
+#       accounts, so the residency is the map (owner decision OQ-RES): -us
+#       (us- regions) takes account-map-bypass-us, without prod-eu; -eu (eu-
+#       regions) the full map. CP's auto_enable_organization_members NEW (the
+#       default) applies the organization's feature configuration to the
+#       existing members CP adds with CreateMembers too (GuardDuty API
+#       reference, CreateMembers: "irrespective of the accounts being new or
+#       existing members"); ALL would enrol every account, prod-eu included.
+#
+# Owner decisions (E5c plan, 2026-11-10):
+#   - OQ-GD: one org-wide protection plan: S3, EKS audit logs and EBS malware
+#     scanning on; runtime monitoring, Lambda network logs and RDS login
+#     events off (RDS: no CP input, off); findings every FIFTEEN_MINUTES. The
+#     hand-written component's Portscan auto-archive filter is dropped (CP has
+#     no filter; security-monitoring routes alert at severity >= 4).
+#   - OQ-W: step 3 reads step 1's detector id with a data source in its own
+#     account and region (the allowlisted house detector_house.tf, handed to
+#     main.tf by remote-state_override.tf's bypass), never remote state; steps
+#     1 and 2 read nothing.
+#   - No SNS topic and no publishing destination: findings stay in their
+#     region, routed per account by security-monitoring (OQ-AL).
+# Dependencies follow CP's order, each within one residency (same region code):
+# root after step 1, org-settings after root.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-guardduty/defaults:
+      metadata:
+        component: aws-guardduty
+        type: abstract
+        inherits:
+          - vendored
+      vars:
+        enabled: true
+        name: aws-guardduty
+        account_map_enabled: false
+        delegated_administrator_account_name: '{{ .settings.context.tenant }}-security'
+        delegated_administrator_component_name: aws-guardduty/delegated-administrator
+        admin_delegated: false
+        auto_enable_organization_members: NEW
+        finding_publishing_frequency: FIFTEEN_MINUTES
+        s3_protection_enabled: true
+        kubernetes_audit_logs_enabled: true
+        malware_protection_scan_ec2_ebs_volumes_enabled: true
+        lambda_network_logs_enabled: false
+        runtime_monitoring_enabled: false
+        eks_runtime_monitoring_enabled: false
+        create_sns_topic: false
+        cloudwatch_enabled: false
+        tags:
+          Component: "GuardDuty"
+
+    aws-guardduty/delegated-administrator-defaults:
+      metadata:
+        component: aws-guardduty
+        type: abstract
+        inherits:
+          - aws-guardduty/defaults
+          - account-map-bypass
+
+    aws-guardduty/root-defaults:
+      metadata:
+        component: aws-guardduty
+        type: abstract
+        inherits:
+          - aws-guardduty/defaults
+          - account-map-bypass
+      dependencies:
+        components:
+          - component: aws-guardduty/delegated-administrator
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-security'
+
+    aws-guardduty/org-settings-eu:
+      metadata:
+        component: aws-guardduty
+        type: abstract
+        inherits:
+          - aws-guardduty/defaults
+          - account-map-bypass
+      vars:
+        admin_delegated: true
+      dependencies:
+        components:
+          - component: aws-guardduty/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'

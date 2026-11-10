@@ -11,7 +11,10 @@ sha256; nothing else is in the target (no extra file, symlink or empty directory
 .terraform.lock.hcl, *_override.tf, house terraform tests (tests/*.tftest.hcl, top-level tests/
 only: TESTS) and a top-level .tflint.hcl that is the repository's
 .tflint.hcl verbatim plus only rule blocks disabling a rule, each after a # reason (TFLINT), and
-each listed for its target in TFLINT_ALLOWLIST, which fails an entry nothing disables (stale).
+each listed for its target in TFLINT_ALLOWLIST, which fails an entry nothing disables (stale),
+and the house files HOUSE_FILE_ALLOWLIST lists by (target, file, reason), which fails an entry
+whose file is missing (stale) or that the pull now ships (rename it); each BYPASSED_READS override
+must keep `bypass = true` in its remote-state module (no live remote-state read).
 Atmos 1.229's receipt omits the version (`atmos vendor
 verify` passes a changed pin), so --repull pulls the manifest into a scratch dir and fails a file
 that differs from the receipt or a target the pull or the receipt lacks.
@@ -63,6 +66,28 @@ TFLINT_ALLOWLIST = (
     ("components/terraform/aws-config", "terraform_deprecated_lookup",
      "Cloud Posse aws-config v3.1.1 remote-state.tf (module global_collector_region, bypassed by "
      "remote-state_override.tf) calls lookup() with 2 arguments"),
+)
+# House files that are not overrides, one (target, file, reason) each, reviewed like code: what a
+# *_override.tf cannot do because Terraform rejects a new block there (a data source a bypassed
+# remote-state read needs). Named *_house.tf, a suffix Cloud Posse does not use, so a pull never
+# ships it; the vendor pull only writes the files its included_paths match and deletes nothing. An
+# unlisted house file fails (above), and so does an entry whose file is gone (stale) or that the
+# pull now records (upstream took the name: rename the house file).
+HOUSE_FILE_ALLOWLIST = (
+    ("components/terraform/aws-guardduty", "detector_house.tf",
+     "E5c OQ-W: the delegated administrator's detector, looked up in its own account and region "
+     "for org-settings; remote-state_override.tf bypasses CP's live remote-state read with it"),
+    ("components/terraform/aws-security-hub", "account-suppressions_house.tf",
+     "E5c: automation rules filtered by account (CP's disabled_control_finding_reasons matches every "
+     "account), so fnx-ew1-security suppresses the shared accounts' home-region-only controls and "
+     "keeps prod-eu's findings"),
+)
+# Cloud Posse remote-state reads the house bypasses (owner OQ-E/OQ-W: no live remote state), one
+# (target, override file, module, reason) each: the override must keep `bypass = true` in that
+# module's block, or Terraform reads the other stack's state at plan time again (E5c Risk 7).
+BYPASSED_READS = (
+    ("components/terraform/aws-guardduty", "remote-state_override.tf", "guardduty_delegated_detector",
+     "step 1's detector comes from detector_house.tf, not the delegated administrator's state"),
 )
 # Never committed: Terraform's working dir and the files Atmos writes before a run.
 IGNORED = {".terraform", "backend.tf.json", "providers_override.tf.json"}
@@ -182,10 +207,14 @@ def is_house_test(rel):
     return head == TESTS[0] and fnmatch.fnmatch(name, TESTS[1])
 
 
-def check_lock(manifest, lock, root, tflint_allowlist=None):
-    errs, have, disabled = [], receipts(lock), set()
+def check_lock(manifest, lock, root, tflint_allowlist=None, house_allowlist=None, bypassed=None):
+    errs, have, disabled, housed = [], receipts(lock), set(), set()
+    bypassed = BYPASSED_READS if bypassed is None else bypassed
     tflint_allowlist = TFLINT_ALLOWLIST if tflint_allowlist is None else tflint_allowlist
+    house_allowlist = HOUSE_FILE_ALLOWLIST if house_allowlist is None else house_allowlist
     errs += [f"{target}/{TFLINT}: allowlist entry {rule} has no reason" for target, rule, why in tflint_allowlist
+             if not str(why or "").strip()]
+    errs += [f"{target}/{name}: HOUSE_FILE_ALLOWLIST entry has no reason" for target, name, why in house_allowlist
              if not str(why or "").strip()]
     declared = {(s.get("component"), (s.get("targets") or [None])[0]) for s in sources(manifest)}
     for name, target in sorted(set(have) - declared, key=str):
@@ -203,10 +232,16 @@ def check_lock(manifest, lock, root, tflint_allowlist=None):
                     if hashlib.sha256(fh.read()).hexdigest() != digest:
                         errs.append(f"{target}/{rel}: edited in place (sha256 differs from {LOCK}); use a *_override.tf")
         regular, links, dirs = on_disk(root, target)
-        kept = [r for r in regular if r in locked or r == TFLINT or is_house_test(r)
+        listed = {name for tgt, name, _ in house_allowlist if tgt == target}
+        for name in sorted(listed & set(locked)):
+            errs.append(f"{target}/{name}: HOUSE_FILE_ALLOWLIST lists it, but {LOCK} records it "
+                        "(the pull ships that name now): rename the house file")
+        housed |= {(target, name) for name in listed if name in regular or name in locked}
+        kept = [r for r in regular if r in locked or r == TFLINT or is_house_test(r) or r in listed
                 or any(fnmatch.fnmatch(os.path.basename(r), p) for p in HOUSE_FILES)]
         errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)}, "
-                 f"{'/'.join(TESTS)} and a top-level {TFLINT} may be added" for r in regular if r not in kept]
+                 f"{'/'.join(TESTS)}, a top-level {TFLINT} and the HOUSE_FILE_ALLOWLIST files may be added"
+                 for r in regular if r not in kept]
         if TFLINT in regular and TFLINT not in locked:
             found, rules = tflint_errors(root, target, tflint_allowlist)
             errs += found
@@ -216,6 +251,27 @@ def check_lock(manifest, lock, root, tflint_allowlist=None):
                  if not any(k.startswith(d + "/") for k in kept)]
     errs += [f"{target}/{TFLINT}: allowlist entry {rule} ({why}) disables nothing there (stale; drop it)"
              for target, rule, why in tflint_allowlist if (target, rule) not in disabled]
+    errs += [f"{target}/{name}: HOUSE_FILE_ALLOWLIST entry ({why}) names no file there (stale; drop it)"
+             for target, name, why in house_allowlist if (target, name) not in housed]
+    errs += bypass_errors(root, bypassed)
+    return errs
+
+
+def bypass_errors(root, bypassed):
+    """BYPASSED_READS whose override no longer sets `bypass = true` in the module's block."""
+    errs = []
+    for target, name, module, why in bypassed:
+        try:
+            with open(os.path.join(root, target, name)) as fh:
+                text = fh.read()
+        except OSError:
+            errs.append(f"{target}/{name}: missing; it must bypass module {module} ({why})")
+            continue
+        # The block runs from its header to the first closing brace at column 0 (terraform fmt).
+        block = re.search(r'^module "' + re.escape(module) + r'" \{\n(.*?)^\}', text, re.MULTILINE | re.DOTALL)
+        if not block or not re.search(r"^\s*bypass\s*=\s*true\s*$", block.group(1), re.MULTILINE):
+            errs.append(f"{target}/{name}: module {module} must set `bypass = true` "
+                        f"(a live remote-state read otherwise; {why})")
     return errs
 
 

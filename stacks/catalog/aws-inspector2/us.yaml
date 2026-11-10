@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# aws-inspector2 US-region variants (E5c): imported only by the us- security stacks
+# =============================================================================
+# The variants of aws-inspector2/defaults.yaml that keep the all-GDPR accounts
+# (prod-eu) out of a US region (owner decision OQ-RES). Their own file,
+# so an EU stack that imports defaults.yaml never resolves them: the
+# first-deploy-inputs and data-residency checks read every abstract a stack
+# resolves.
+# =============================================================================
+
+import:
+  - catalog/aws-inspector2/defaults
+
+components:
+  terraform:
+    aws-inspector2/org-settings-us:
+      metadata:
+        component: aws-inspector2
+        type: abstract
+        inherits:
+          - aws-inspector2/defaults
+      vars:
+        admin_delegated: true
+        member_association_excludes:
+          - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
+      dependencies:
+        components:
+          - component: aws-inspector2/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
