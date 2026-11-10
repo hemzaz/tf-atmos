@@ -38,7 +38,9 @@ Fatal (a config bug, not a placeholder: always printed, exit 1 even with --warn)
   - an instance's vars.account_map (a vendored Cloud Posse component's static
     map) that differs from its settings.static_account_map, disabled and
     abstract instances included: the vars copy is repeated by hand, so lint
-    fails on drift before the instance is enabled
+    fails on drift before the instance is enabled. An aws-guardduty or
+    aws-security-hub map may also be the US variant, the static map without
+    <tenant>-prod-eu (owner OQ-RES; check-data-residency.py requires it there)
   - an instance's vars.account_assignments (aws-identity-center) keyed by an
     account its vars.account_map lacks, disabled instances included
   - an aws-cloudtrail-bucket instance with a vars.policy (policy_override.tf
@@ -114,7 +116,15 @@ MAP_CONSUMERS = frozenset({
     # The vendored trail and recorder (E5b): the trail key policy names the audit
     # account, and the aggregator's delegated_accounts list every US account.
     "aws-cloudtrail", "aws-config",
+    # The vendored org security services (E5c): delegation, detectors/hubs and org members by account ID.
+    "aws-guardduty", "aws-security-hub", "aws-inspector2",
 })
+# Components whose US-region instances take the static map less the all-GDPR account (owner OQ-RES,
+# check-data-residency.py's member rule): that one subset of settings.static_account_map is not drift.
+US_MAP_COMPONENTS = frozenset({"aws-guardduty", "aws-security-hub"})
+GDPR_ONLY_ACCOUNT = "prod-eu"
+# The abstract carrying that map (stacks/catalog/_base/account-map-bypass.yaml, E5c1), checked like them.
+US_MAP_ABSTRACT = "account-map-bypass-us"
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
 # UUID's last group: the lookbehind is the whole 8-4-4-4 UUID prefix, so
 # names like "backups-2026-123456789012" or "logs-cafe-123456789012" still match.
@@ -210,11 +220,26 @@ def static_map_drift(stack: str, instance_name: str, spec: dict):
     if "account_map" not in variables:
         return None
     static = (spec.get("settings") or {}).get("static_account_map")
-    if variables["account_map"] == static:
+    if variables["account_map"] == static or is_us_map(instance_name, spec, variables["account_map"], static):
         return None
     return Finding("fatal", stack, f"{instance_name} vars.account_map",
                    "differs from settings.static_account_map (stacks/orgs/fnx/_defaults.yaml): keep the copy equal",
                    "Account IDs")
+
+
+def is_us_map(instance_name: str, spec: dict, account_map, static) -> bool:
+    """Whether a US_MAP_COMPONENTS instance's (or the US_MAP_ABSTRACT's) map is the US variant: static's
+    full_account_map without <tenant>-prod-eu, its other keys equal, iam_role_arn_templates optional
+    (the org services assume no role from it)."""
+    if (component_of(spec) not in US_MAP_COMPONENTS and instance_name != US_MAP_ABSTRACT) \
+            or not isinstance(static, dict) or not isinstance(account_map, dict):
+        return False
+    tenant = residency.tenant_of(spec)
+    full = {k: v for k, v in (static.get("full_account_map") or {}).items() if k != f"{tenant}-{GDPR_ONLY_ACCOUNT}"}
+    expected = {**static, "full_account_map": full}
+    if "iam_role_arn_templates" not in account_map:
+        expected.pop("iam_role_arn_templates", None)
+    return account_map == expected
 
 
 def unmapped_assignments(stack: str, instance_name: str, spec: dict):

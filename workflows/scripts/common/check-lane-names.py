@@ -34,6 +34,18 @@ it cannot be checked. Within a group this fails:
     stage fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
+The org security services (check-data-residency.py's ORG_SERVICES: the vendored
+aws-guardduty, aws-security-hub, aws-inspector2) run one of Cloud Posse's three
+steps by the account they deploy to: root (the management account, its
+delegation), delegated-administrator (the security account, admin_delegated off:
+the detector/hub; Inspector has none) and org-settings (the security account,
+admin_delegated on). Across all stacks (fixtures exempt) this fails an instance
+whose delegated_administrator_account_name is not <tenant>-security, or that
+deploys to any other account (it would create nothing); two instances of one
+service, step and region; and two aws-security-hub root steps that leave
+organizations_resource_policy_enabled on (CP default): the policy is an
+organization singleton. Two steps of one service in one stack are not a
+same-name pair (only step 1 names a resource) unless one sets create_sns_topic.
 Account-wide names (IAM, the account singletons) are also compared between
 the regions of one account: fnx-ue1-prod and its DR stack fnx-ue2-prod share
 the prod account, so they cannot create the same IAM role or both the GitHub
@@ -56,6 +68,7 @@ creating stack would leave.
 Exits 1 on any collision.
 """
 import collections
+import importlib.util
 import json
 import os
 import re
@@ -63,6 +76,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fixtures  # noqa: E402
+
+# check-data-residency.py's ORG_SERVICES and its account helpers, the one definition.
+_spec = importlib.util.spec_from_file_location(
+    "check_data_residency", os.path.join(os.path.dirname(os.path.abspath(__file__)), "check-data-residency.py")
+)
+residency = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(residency)
+# The org services' delegated administrator: the security account (CP, owner E5c Design).
+DELEGATED_ADMIN_ACCOUNT = "security"
 
 SKIP_VARS = {"tags", "description"}
 # vars keys that name an instance's resources (with tags.Environment).
@@ -328,11 +350,13 @@ def check_instances(stacks: dict) -> list[str]:
     for stack_name, stack in sorted(stacks.items()):
         by_component = collections.defaultdict(list)
         for name, instance in instances_of(stack):
-            by_component[str(instance.get("component"))].append((name, instance.get("vars") or {}))
+            by_component[str(instance.get("component"))].append((name, instance))
         for component, members in sorted(by_component.items()):
-            for index, (name_a, vars_a) in enumerate(members):
-                for name_b, vars_b in members[index + 1:]:
-                    why = same_names(vars_a, vars_b, component)
+            for index, (name_a, instance_a) in enumerate(members):
+                for name_b, instance_b in members[index + 1:]:
+                    if org_steps_differ(instance_a, instance_b):
+                        continue
+                    why = same_names(instance_a.get("vars") or {}, instance_b.get("vars") or {}, component)
                     if why:
                         errors.append(
                             f"{stack_name}: {name_a}, {name_b} ({component}) set {why}, so they build the "
@@ -380,10 +404,76 @@ def check_trusted_providers(stacks: dict) -> list[str]:
     ]
 
 
+def org_service_step(instance: dict):
+    """(step, error): which of Cloud Posse's three steps an ORG_SERVICES instance runs (main.tf locals)."""
+    variables = instance.get("vars") or {}
+    tenant, own = residency.tenant_of(instance), residency.own_account(instance)
+    admin = variables.get("delegated_administrator_account_name", "core-security")
+    management = residency.management_account(instance)
+    if not own or not management:
+        return None, "sets no settings.environment.account, tenant or management account name: its step cannot be told"
+    if not isinstance(variables.get("admin_delegated", False), bool):
+        return None, (f"sets admin_delegated {variables['admin_delegated']!r}, not a bool: deploy-full-stack's "
+                      "security-org layer selects step 3 by .vars.admin_delegated == true")
+    if admin != f"{tenant}-{DELEGATED_ADMIN_ACCOUNT}":
+        return None, (f"names delegated administrator {admin!r}: the org services' delegated administrator is "
+                      f"{tenant}-{DELEGATED_ADMIN_ACCOUNT}")
+    if own == management:
+        return "root", None
+    if own != admin:
+        return None, (f"is in account {own}, neither the management account ({management}) nor the delegated "
+                      f"administrator ({admin}): it creates nothing there")
+    if residency.flag_on(variables.get("admin_delegated")):
+        return "org-settings", None
+    if instance.get("component") == "aws-inspector2":
+        return None, "is an aws-inspector2 instance with admin_delegated off: Inspector has no step 1, only org-settings"
+    return "delegated-administrator", None
+
+
+def org_steps_differ(a: dict, b: dict) -> bool:
+    """Two ORG_SERVICES instances of one stack running different steps: only step 1 names a resource
+    (the detector/hub module), unless create_sns_topic adds the module-level topic to both."""
+    if a.get("component") not in residency.ORG_SERVICES or any(
+            residency.flag_on((i.get("vars") or {}).get("create_sns_topic")) for i in (a, b)):
+        return False
+    step_a, step_b = org_service_step(a)[0], org_service_step(b)[0]
+    return bool(step_a and step_b and step_a != step_b)
+
+
+def check_org_services(stacks: dict) -> list[str]:
+    """ORG_SERVICES account singletons: one root (management account), delegated-administrator and
+    org-settings (security account) per service and region, and one Security Hub Organizations
+    resource policy (an organization singleton) in all."""
+    errors, owners, policies = [], collections.defaultdict(list), []
+    for stack_name in sorted(stacks):
+        for name, instance in instances_of(stacks[stack_name]):
+            component = instance.get("component")
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            if component not in residency.ORG_SERVICES or stage == fixtures.FIXTURE_STAGE:
+                continue
+            where = f"{stack_name}: {name}"
+            step, error = org_service_step(instance)
+            if error:
+                errors.append(f"{where} {error}")
+                continue
+            owners[(component, step, (instance.get("vars") or {}).get("region"))].append(where)
+            if component == "aws-security-hub" and step == "root" and residency.flag_on(
+                    (instance.get("vars") or {}).get("organizations_resource_policy_enabled", True)):
+                policies.append(where)
+    for (component, step, region), wheres in sorted(owners.items()):
+        if len(wheres) > 1:
+            errors.append(f"{' and '.join(wheres)} are all the {component} {step} step in {region}: one per service "
+                          "and region (the delegation, detector/hub and org settings are account singletons)")
+    if len(policies) > 1:
+        errors.append(f"{' and '.join(policies)} all create the Security Hub Organizations resource policy, an "
+                      "organization singleton: set organizations_resource_policy_enabled false in all but one")
+    return errors
+
+
 def check(stacks: dict) -> list[str]:
     return (
         check_groups(stacks) + check_account(stacks) + check_instances(stacks) + check_global(stacks)
-        + check_trusted_providers(stacks)
+        + check_trusted_providers(stacks) + check_org_services(stacks)
     )
 
 

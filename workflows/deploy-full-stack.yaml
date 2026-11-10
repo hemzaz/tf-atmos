@@ -8,7 +8,7 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: backend, iam, kms, storage, networking, connectivity, security, security-monitoring, compute, platform, data, dns-apex, dns-zones, dns, certificates, addons, services, regional-waf, monitoring
+#   layers: backend, iam, kms, storage, networking, connectivity, security, security-monitoring, compute, platform, data, dns-apex, dns-zones, dns, certificates, addons, services, regional-waf, monitoring, security-org
 #
 # A layer plans all its instances before it applies any of them, so an instance
 # that reads another's state (!terraform.state / !terraform.output) must be in a
@@ -76,7 +76,15 @@
 # the apigateway routes (services) that read its listener. A Secrets Manager rotation
 # lambda (vars.rotation_secret_arn set) reads its rotation target (e.g. elasticache,
 # data), so it leaves compute for addons, after data.
-# Every layer except backend, dns-apex (aws-dns-primary is only in fnx-ue1-network)
+# The vendored org security services (aws-guardduty, aws-security-hub, aws-inspector2) run
+# Cloud Posse's three steps: the security account's detector/hub (step 1) and the management
+# account's delegation (step 2, in the root stacks) are in the security layer; the security
+# account's org settings (step 3, vars.admin_delegated true, "deployed again" after the
+# delegation) are the last layer, security-org. Steps 1 -> 2 -> 3 cross stacks, so a first
+# deploy runs the security stack, then the root stack, then the security stack's security-org
+# (docs/OPERATIONS.md).
+# Every layer except backend, dns-apex (aws-dns-primary is only in fnx-ue1-network), security-org
+# (no stack has an org-settings instance yet)
 # and regional-waf (no workload stack has a waf instance yet; an empty layer plans
 # "No components matched") has at least one
 # enabled instance in every workload stack (eks-backend-services/main, the last
@@ -96,7 +104,7 @@
 # is changed.
 workflows:
   deploy:
-    description: Deploy the complete stack layer by layer (backend -> monitoring), each layer planned, confirmed, then applied from its saved plan
+    description: Deploy the complete stack layer by layer (backend -> security-org), each layer planned, confirmed, then applied from its saved plan
     steps:
       # Template fixture stacks (stage "fixtures", stacks/orgs/fnx/fixtures)
       # exist for CI's checks and are never deployed. Every workflow below
@@ -243,6 +251,9 @@ workflows:
           or .metadata.component == "securityhub" or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
+          or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm_security
         type: confirm
@@ -259,6 +270,9 @@ workflows:
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
+          or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
           or .metadata.component == "waf"
           and .vars.scope == "CLOUDFRONT"'
       - name: plan-security-monitoring
@@ -472,6 +486,19 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "monitoring"
           or .metadata.component == "cost-optimization"'
+      - name: plan-security-org
+        type: atmos
+        command: terraform plan --query '.vars.admin_delegated == true'
+      - name: confirm_security_org
+        type: confirm
+        prompt: Apply the security-org layer plan above?
+        default: false
+      - name: guard-security-org
+        type: shell
+        command: test "{{ .steps.confirm_security_org.value }}" = "true" || { echo "Deployment cancelled before the security-org layer."; exit 1; }
+      - name: deploy-security-org
+        type: atmos
+        command: terraform deploy --from-plan --query '.vars.admin_delegated == true'
       - type: toast
         level: success
         content: All layers deployed
@@ -630,6 +657,9 @@ workflows:
           or .metadata.component == "securityhub" or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
+          or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
           or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm
         type: confirm
@@ -646,6 +676,9 @@ workflows:
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or .metadata.component == "inspector2" or .metadata.component == "access-analyzer"
+          or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
+          or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
           or .metadata.component == "waf"
           and .vars.scope == "CLOUDFRONT"'
 
@@ -908,3 +941,22 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "monitoring"
           or .metadata.component == "cost-optimization"'
+
+  deploy-security-org:
+    description: "Deploy the security-org layer: the GuardDuty, Security Hub and Inspector org settings (admin_delegated, Cloud Posse step 3, after the management account's delegation)"
+    steps:
+      - *fixtures-stages
+      - *refuse-fixtures
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.vars.admin_delegated == true'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the security-org layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.vars.admin_delegated == true'

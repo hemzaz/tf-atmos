@@ -11,8 +11,8 @@ _spec.loader.exec_module(check_deploy_layers)
 
 
 def query(*types):
-    """`a` -> .metadata.component == "a"; a term that already starts with `.` is kept as is."""
-    return " or ".join(t if t.startswith(".") else f'.metadata.component == "{t}"' for t in types)
+    """`a` -> .metadata.component == "a"; a term that already starts with `.` or `(` is kept as is."""
+    return " or ".join(t if t.startswith((".", "(")) else f'.metadata.component == "{t}"' for t in types)
 
 
 def workflow_files(*layers, per_layer=True):
@@ -209,6 +209,32 @@ class CheckDeployLayersTest(unittest.TestCase):
         # Both in the rules' layer: the read is in the same phase.
         flat = (("services", ["eventbridge"]),)
         self.assert_errors(stacks, workflow_files(*flat), "reads eventbridge/bus, which is planned in the same phase")
+
+    def test_security_org_layer_splits_the_org_services(self):
+        # deploy-full-stack's queries: steps 1 and 2 in security, the org settings (step 3) last.
+        services = ("aws-guardduty", "aws-security-hub", "aws-inspector2")
+        layers = (
+            ("security", ["aws-config"] + [
+                f'(.metadata.component == "{c}" and .vars.admin_delegated != true)' for c in services]),
+            ("monitoring", ["monitoring"]),
+            ("security-org", [".vars.admin_delegated == true"]),
+        )
+        stacks = {
+            "fnx-ue1-security": stack(**{
+                f"{c}__{step}": instance(c, {"admin_delegated": True} if step == "org-settings" else {})
+                for c in services for step in ("delegated-administrator", "org-settings") if c != "aws-inspector2"
+                or step == "org-settings"
+            }, **{"aws-config__security": instance("aws-config")}),
+            "fnx-ue1-root": stack(**{f"{c}__root": instance(c) for c in services}),
+        }
+        self.assert_errors(stacks, workflow_files(*layers))
+        # Without the split, each org-settings instance is planned by two phases.
+        unsplit = (("security", ["aws-config", *services]), layers[2])
+        self.assert_errors(stacks, workflow_files(*unsplit), *["is planned by more than one step: plan-security, plan-security-org"] * 3)
+        # A string "true" (not a bool) is not step 3 to the query: it stays in the security layer.
+        stacks["fnx-ue1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["vars"][
+            "admin_delegated"] = "true"
+        self.assert_errors(stacks, workflow_files(*layers))
 
     def test_bool_literal_does_not_match_a_string_or_number(self):
         query = check_deploy_layers.parse_query('.vars.flag == true')

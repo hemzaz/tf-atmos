@@ -744,5 +744,215 @@ class LogArchiveTest(unittest.TestCase):
                                                                  "cloudtrail": disabled})}), [])
 
 
+# E5c4-E5c6 on E5c1's catalog variants (feat/e5c1-detector-catalogs: catalog/{aws-guardduty,
+# aws-security-hub,aws-inspector2}/defaults.yaml, _base/account-map-bypass{,-us}), resolved as describe
+# stacks would, so the guards are proven on the shapes the later slices commit: delegated-administrator
+# + org-settings in the 4 security stacks, the delegation in the 4 root stacks (the resource policy only
+# in fnx-ue1-root, root-organization-policy), US org-settings on account-map-bypass-us.
+ORG_IDS = {a: f"10000000000{i}" if i < 10 else f"1000000000{i}" for i, a in enumerate(
+    ("root", "audit", "security", "network", "identity", "artifacts", "dev", "staging", "prod", "prod-eu"))}
+# account-map-bypass (settings.static_account_map's copy) and account-map-bypass-us (no prod-eu, no templates).
+STATIC_MAP = {"full_account_map": {f"fnx-{a}": i for a, i in ORG_IDS.items()},
+              "root_account_account_name": "fnx-root", "identity_account_account_name": "fnx-identity",
+              "audit_account_account_name": "fnx-audit", "iam_role_arn_templates": {
+                  "dns-delegation": f"arn:aws:iam::{ORG_IDS['network']}:role/fnx-ue1-network-dns-delegation-security"}}
+US_MAP = {k: v for k, v in STATIC_MAP.items() if k != "iam_role_arn_templates"}
+US_MAP["full_account_map"] = {k: v for k, v in STATIC_MAP["full_account_map"].items() if k != "fnx-prod-eu"}
+ORG_REGIONS = {"ue1": "us-east-1", "ue2": "us-east-2", "ew1": "eu-west-1", "ec1": "eu-central-1"}
+# Each component's `defaults` abstract.
+ORG_DEFAULTS = {
+    "aws-guardduty": dict(
+        enabled=True, name="aws-guardduty", delegated_administrator_component_name="aws-guardduty/delegated-administrator",
+        admin_delegated=False, auto_enable_organization_members="NEW", finding_publishing_frequency="FIFTEEN_MINUTES",
+        s3_protection_enabled=True, kubernetes_audit_logs_enabled=True, malware_protection_scan_ec2_ebs_volumes_enabled=True,
+        lambda_network_logs_enabled=False, runtime_monitoring_enabled=False, eks_runtime_monitoring_enabled=False,
+        create_sns_topic=False, cloudwatch_enabled=False),
+    "aws-security-hub": dict(
+        enabled=True, name="aws-security-hub", admin_delegated=False, default_standards_enabled=True,
+        enabled_standards=[], auto_enable_organization_members=True, finding_aggregator_enabled=False,
+        organizations_resource_policy_enabled=False, create_sns_topic=False),
+    "aws-inspector2": dict(
+        enabled=True, name="aws-inspector2", admin_delegated=False, auto_enable_ec2=True, auto_enable_ecr=True,
+        auto_enable_lambda=True, member_association_excludes=[]),
+}
+# aws-security-hub/delegated-administrator-us; standby-suppressions (a sample of its automation rules).
+HUB_US = dict(finding_aggregator_enabled=True, finding_aggregation_region="us-east-1",
+              finding_aggregator_linking_mode="SPECIFIED_REGIONS", finding_aggregator_regions=["us-east-2"])
+STANDBY = {"disabled_control_finding_reasons": {"IAM.1": {
+    "control_id": "IAM.1", "reason_code": "GLOBAL_IAM", "disabled_reason": "Not a home region"}}}
+
+
+def org_instance(component, account, region, deps=(), account_map=None, **variables):
+    eu = region.startswith("eu-")
+    spec = instance(region=region, compliance=EU if eu else US, deps=deps, tenant="fnx", account_map_enabled=False,
+                    account_map=account_map or STATIC_MAP, delegated_administrator_account_name="fnx-security",
+                    **{**ORG_DEFAULTS.get(component, {}), **variables})
+    spec["component"] = component
+    spec["metadata"] = {"component": component}
+    spec["settings"].update(environment={"account": account, "account_id": ORG_IDS[account]},
+                            context={"tenant": "fnx", "stage": account}, static_account_map=STATIC_MAP)
+    return spec
+
+
+def org_services_stacks():
+    """The simulated fnx-<r>-security and fnx-<r>-root stacks of E5c4-E5c6, plus prod and prod-eu workloads."""
+    stacks = {}
+    for code, region in ORG_REGIONS.items():
+        eu, security, root = region.startswith("eu-"), f"fnx-{code}-security", f"fnx-{code}-root"
+        standby = STANDBY if code in ("ue2", "ec1") else {}
+        us_org = {} if eu else {"account_map": US_MAP}
+
+        def on_root(component):
+            return [{"component": f"{component}/root", "stack": root}]
+
+        stacks[security] = stack(**{
+            "aws-guardduty/delegated-administrator": org_instance("aws-guardduty", "security", region),
+            "aws-guardduty/org-settings": org_instance("aws-guardduty", "security", region, on_root("aws-guardduty"),
+                                                       admin_delegated=True, **us_org),
+            "aws-security-hub/delegated-administrator": org_instance(
+                "aws-security-hub", "security", region, **({} if eu else HUB_US), **standby),
+            "aws-security-hub/org-settings": org_instance("aws-security-hub", "security", region,
+                                                          on_root("aws-security-hub"), admin_delegated=True, **us_org),
+            "aws-inspector2/org-settings": org_instance(
+                "aws-inspector2", "security", region, on_root("aws-inspector2"), admin_delegated=True,
+                member_association_excludes=[] if eu else [ORG_IDS["prod-eu"]]),
+        })
+        stacks[root] = stack(**{
+            f"{c}/root": org_instance(c, "root", region, [{"component": f"{c}/delegated-administrator", "stack": security}]
+                                      if c != "aws-inspector2" else [],
+                                      **({"organizations_resource_policy_enabled": True}
+                                         if c == "aws-security-hub" and code == "ue1" else {}))
+            for c in ("aws-guardduty", "aws-security-hub", "aws-inspector2")
+        })
+    stacks["fnx-ue1-prod"] = stack(vpc=org_instance("vpc", "prod", "us-east-1"))
+    stacks["fnx-ew1-prod"] = stack(vpc=org_instance("vpc", "prod-eu", "eu-west-1"))
+    return stacks
+
+
+class OrgServicesTest(unittest.TestCase):
+    """GuardDuty, Security Hub, Inspector (ORG_SERVICES): members and aggregation kept in their residency."""
+
+    def org(self, stacks):
+        return [e for e in residency.check(stacks) if "aws-" in e]
+
+    @staticmethod
+    def instances_map(stack_name, name):
+        return org_services_stacks()[stack_name]["components"]["terraform"][name]["vars"]["account_map"]
+
+    def test_simulated_e5c_slices_pass(self):
+        self.assertEqual(residency.check(org_services_stacks()), [])
+
+    def test_us_hub_aggregating_all_or_eu_regions_fails(self):
+        for hub, fragment in (
+            ({"finding_aggregator_linking_mode": "ALL_REGIONS"}, "finding_aggregator_linking_mode 'ALL_REGIONS'"),
+            ({"finding_aggregator_linking_mode": None}, "finding_aggregator_linking_mode None"),
+            ({"finding_aggregator_linking_mode": "ALL_REGIONS_EXCEPT_SPECIFIED"}, "ALL_REGIONS_EXCEPT_SPECIFIED"),
+            ({"finding_aggregator_regions": ["us-east-2", "eu-west-1"]}, "links 'eu-west-1'"),
+            ({"finding_aggregator_regions": []}, "needs a non-empty list"),
+        ):
+            with self.subTest(hub=hub):
+                stacks = org_services_stacks()
+                stacks["fnx-ue1-security"]["components"]["terraform"]["aws-security-hub/delegated-administrator"][
+                    "vars"].update(hub)
+                self.assertEqual(len(self.org(stacks)), 1, self.org(stacks))
+                self.assertIn("fnx-ue1-security: aws-security-hub/delegated-administrator", self.org(stacks)[0])
+                self.assertIn(fragment, self.org(stacks)[0])
+
+    def test_unset_linking_mode_is_cp_all_regions(self):
+        stacks = org_services_stacks()
+        stacks["fnx-ue1-security"]["components"]["terraform"]["aws-security-hub/delegated-administrator"][
+            "vars"].pop("finding_aggregator_linking_mode")
+        self.assertEqual(len(self.org(stacks)), 1)
+        self.assertIn("'ALL_REGIONS'", self.org(stacks)[0])
+
+    def test_only_the_aggregating_instance_is_judged(self):
+        # ue2's hub (aggregation region us-east-1), org-settings and a disabled aggregator create none.
+        stacks = org_services_stacks()
+        for name, stack_name in (("aws-security-hub/delegated-administrator", "fnx-ue2-security"),
+                                 ("aws-security-hub/org-settings", "fnx-ue1-security")):
+            stacks[stack_name]["components"]["terraform"][name]["vars"]["finding_aggregator_linking_mode"] = "ALL_REGIONS"
+        self.assertEqual(self.org(stacks), [])
+        hub = stacks["fnx-ue1-security"]["components"]["terraform"]["aws-security-hub/delegated-administrator"]
+        hub["vars"].update(finding_aggregator_linking_mode="ALL_REGIONS", finding_aggregator_enabled=False)
+        self.assertEqual(self.org(stacks), [])
+
+    def test_eu_hub_never_aggregates(self):
+        stacks = org_services_stacks()
+        stacks["fnx-ew1-security"]["components"]["terraform"]["aws-security-hub/delegated-administrator"]["vars"].update(
+            finding_aggregator_enabled=True, finding_aggregation_region="eu-west-1",
+            finding_aggregator_linking_mode="SPECIFIED_REGIONS", finding_aggregator_regions=["eu-central-1"])
+        self.assertEqual(self.org(stacks), [
+            "fnx-ew1-security: aws-security-hub/delegated-administrator creates a Security Hub finding aggregator in a "
+            "GDPR-scoped stack: EU hubs are not aggregated (set finding_aggregator_enabled false)"])
+        # Aggregating into us-east-1 is also a non-eu region in a GDPR-scoped stack.
+        stacks["fnx-ew1-security"]["components"]["terraform"]["aws-security-hub/delegated-administrator"]["vars"].update(
+            finding_aggregation_region="us-east-1")
+        self.assertEqual(self.org(stacks), [
+            "fnx-ew1-security: aws-security-hub/delegated-administrator vars.finding_aggregation_region is 'us-east-1', "
+            f"{OUTSIDE}"])
+
+    def test_prod_eu_in_a_us_map_fails(self):
+        # Step 1 (delegated-administrator) and root hold the full map: only org-settings makes members.
+        self.assertEqual(self.instances_map("fnx-ue2-security", "aws-guardduty/delegated-administrator"), STATIC_MAP)
+        for stack_name, name in (("fnx-ue1-security", "aws-guardduty/org-settings"),
+                                 ("fnx-ue2-security", "aws-guardduty/org-settings"),
+                                 ("fnx-ue1-security", "aws-security-hub/org-settings")):
+            with self.subTest(stack=stack_name, name=name):
+                stacks = org_services_stacks()
+                stacks[stack_name]["components"]["terraform"][name]["vars"]["account_map"] = STATIC_MAP
+                self.assertEqual(self.org(stacks), [
+                    f"{stack_name}: {name} account_map.full_account_map holds fnx-prod-eu ({ORG_IDS['prod-eu']}), an "
+                    "account whose stacks are all GDPR-scoped: it would be a member outside the EU; drop it from the map"])
+
+    def test_prod_eu_id_under_another_key_fails_but_a_shared_placeholder_is_keyed(self):
+        stacks = org_services_stacks()
+        org = stacks["fnx-ue1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["vars"]
+        org["account_map"] = {**US_MAP, "full_account_map": {**US_MAP["full_account_map"], "fnx-eu": ORG_IDS["prod-eu"]}}
+        self.assertEqual(len(self.org(stacks)), 1)
+        self.assertIn("holds fnx-eu (", self.org(stacks)[0])
+        # Every account on one placeholder ID: IDs cannot be told apart, the fnx-prod-eu key still can.
+        stacks = org_services_stacks()
+        for stack_ in stacks.values():
+            for spec in stack_["components"]["terraform"].values():
+                spec["settings"]["environment"]["account_id"] = "123456789012"
+        stacks["fnx-ue1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["vars"][
+            "account_map"] = STATIC_MAP
+        self.assertEqual(len(self.org(stacks)), 1)
+        self.assertIn("holds fnx-prod-eu", self.org(stacks)[0])
+
+    def test_inspector_excludes_prod_eu_by_id(self):
+        stacks = org_services_stacks()
+        inspector = stacks["fnx-ue1-security"]["components"]["terraform"]["aws-inspector2/org-settings"]["vars"]
+        inspector["member_association_excludes"] = ["fnx-prod-eu"]  # names: CP compares IDs (main.tf:6)
+        self.assertEqual(self.org(stacks), [
+            f"fnx-ue1-security: aws-inspector2/org-settings account_map.full_account_map holds fnx-prod-eu "
+            f"({ORG_IDS['prod-eu']}), an account whose stacks are all GDPR-scoped: it would be a member outside the "
+            "EU; list its ID in member_association_excludes"])
+        # OQ-IN: org-settings is committed disabled, so it is not judged until it is turned on.
+        stacks["fnx-ue1-security"]["components"]["terraform"]["aws-inspector2/org-settings"]["metadata"] = {
+            "component": "aws-inspector2", "enabled": False}
+        self.assertEqual(self.org(stacks), [])
+
+    def test_a_us_member_map_from_account_map_state_fails(self):
+        # (Every root and EU instance of the simulation holds the full map and passes.)
+        stacks = org_services_stacks()
+        stacks["fnx-ue1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["vars"][
+            "account_map_enabled"] = True
+        self.assertEqual(len(self.org(stacks)), 1)
+        self.assertIn("sets account_map_enabled", self.org(stacks)[0])
+
+    def test_root_security_dependencies_stay_in_one_residency(self):
+        stacks = org_services_stacks()
+        stacks["fnx-ew1-root"]["components"]["terraform"]["aws-guardduty/root"]["dependencies"]["components"] = [
+            {"component": "aws-guardduty/delegated-administrator", "stack": "fnx-ue1-security"}]
+        stacks["fnx-ue1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["dependencies"][
+            "components"] = [{"component": "aws-guardduty/root", "stack": "fnx-ew1-root"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ew1-root: aws-guardduty/root depends on aws-guardduty/delegated-administrator in fnx-ue1-security, "
+            "which is not GDPR-scoped",
+            "fnx-ue1-security: aws-guardduty/org-settings depends on aws-guardduty/root in fnx-ew1-root, which is "
+            "GDPR-scoped: EU data may not be read outside the EU"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -362,7 +362,9 @@ planned, confirmed, then applied from the saved plan. Each layer is also its own
 
 `backend`, `iam`, `kms`, `storage`, `networking`, `connectivity`, `security`,
 `security-monitoring`, `compute`, `platform`, `data`, `dns-apex`, `dns-zones`, `dns`,
-`certificates`, `addons`, `services`, `regional-waf`, `monitoring`.
+`certificates`, `addons`, `services`, `regional-waf`, `monitoring`, `security-org` (the
+GuardDuty, Security Hub and Inspector org settings, `vars.admin_delegated: true`: Cloud Posse's
+step 3, after the root stack's delegation).
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that
