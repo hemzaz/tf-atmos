@@ -606,6 +606,25 @@ class OrgServicesTest(unittest.TestCase):
             "fnx-ue1-security: aws-inspector2/org-settings is an aws-inspector2 instance with admin_delegated off: "
             "Inspector has no step 1, only org-settings"])
 
+    def test_a_second_aggregator_of_the_administrator_fails(self):
+        # Review L2: ue2 aggregating us-east-1 back, beside ue1's aggregator.
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue2-security")["aws-security-hub/delegated-administrator"]["vars"].update(
+            finding_aggregation_region="us-east-2", finding_aggregator_regions=["us-east-1"])
+        self.assertEqual(self.org(stacks), [
+            "fnx-ue1-security: aws-security-hub/delegated-administrator and fnx-ue2-security: "
+            "aws-security-hub/delegated-administrator all create a Security Hub finding aggregator for fnx-security: "
+            "one aggregation region per administrator (OQ-SH: us-east-1 aggregates us-east-2)"])
+
+    def test_a_management_account_other_than_the_map_root_fails(self):
+        # Review L1: an instance naming its own (security) account management is no root step.
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue1-security")["aws-guardduty/org-settings"]["vars"][
+            "organization_management_account_name"] = "fnx-security"
+        self.assertIn("fnx-ue1-security: aws-guardduty/org-settings names management account 'fnx-security', not "
+                      "its account_map's root account 'fnx-root': the management account is the root account",
+                      self.org(stacks))
+
     def test_a_string_admin_delegated_fails(self):
         # Terraform reads "true" as step 3, but the security-org layer's query matches only the bool.
         stacks = residency_test.org_services_stacks()

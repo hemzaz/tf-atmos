@@ -63,13 +63,18 @@ is core-account control-plane metadata, not EU personal data; a GDPR-scoped stac
 or recorder still delivers only to the EU archive.
 The org security services (ORG_SERVICES: the vendored aws-guardduty, aws-security-hub and
 aws-inspector2; owner OQ-RES/OQ-SH, 2026-11-10) keep EU findings in the EU. A deployable
-org-settings instance (admin_delegated on, outside the management account:
-organization_management_account_name, else account_map.root_account_account_name; the only step
-whose members are its account_map, CP main.tf) of a stack that is not GDPR-scoped reads a static
-account_map (account_map_enabled false; catalog/_base account-map-bypass-us) that holds no account
-whose stacks are all GDPR-scoped (by <tenant>-<account> key, and by ID unless shared): its org
-settings would make that account a member there, its findings stored outside the EU. Inspector
-may hold one if member_association_excludes lists its ID. A Security Hub that creates a finding
+org-settings instance (admin_delegated on; the only step whose members are its account_map, CP
+main.tf; not the root step, which deploys to the map's root_account_account_name and names it as
+organization_management_account_name too) reads a static account_map (account_map_enabled false).
+GDPR_ONLY_ACCOUNTS declares the accounts whose stacks are all GDPR-scoped (prod-eu); a stack set
+deriving others fails. Outside the GDPR scope the map holds none of them (by <tenant>-<account>
+key, and by ID unless shared: catalog/_base account-map-bypass-us), or, for Inspector,
+member_association_excludes lists exactly their IDs; a GuardDuty org-settings there auto-enables
+NEW or NONE (CP default NEW), as ALL enrolls every existing account whatever the map. Inside it the
+map holds all of them and Inspector excludes none: the EU admin is theirs. Known limitation: Security
+Hub's auto_enable and Inspector's auto_enable_* also enroll accounts that join the organization AFTER
+its org-settings apply, so an all-GDPR account created later would be enrolled by a US admin; today
+prod-eu exists first. A Security Hub that creates a finding
 aggregator (outside the management account, admin_delegated off, finding_aggregator_enabled and
 finding_aggregation_region its region, CP defaults true and us-east-1) is in a stack that is not
 GDPR-scoped and sets finding_aggregator_linking_mode SPECIFIED_REGIONS with a non-empty
@@ -164,6 +169,10 @@ GLOBAL_SERVICE_EMAIL_VARS: dict = {
 # creates the detector/hub (admin_delegated false; Inspector has none) and the org settings
 # (admin_delegated true) over its account_map's other accounts.
 ORG_SERVICES = ("aws-guardduty", "aws-security-hub", "aws-inspector2")
+# The accounts whose stacks are all GDPR-scoped (owner B5: EU prod), declared once: check-first-deploy-inputs
+# builds the US map variant from it, and org_service_errors fails when the stacks derive another set.
+GDPR_ONLY_ACCOUNTS = ("prod-eu",)
+GUARDDUTY_AUTO_ENABLE_DEFAULT = "NEW"  # aws-guardduty variables.tf auto_enable_organization_members
 
 
 def is_deployable(instance: dict) -> bool:
@@ -541,11 +550,22 @@ def tenant_of(instance: dict) -> Optional[str]:
         or ((instance.get("settings") or {}).get("context") or {}).get("tenant")
 
 
+def map_root_account(instance: dict) -> Optional[str]:
+    """The management account: the account map's root_account_account_name (else <tenant>-root)."""
+    root = ((instance.get("vars") or {}).get("account_map") or {}).get("root_account_account_name")
+    return root or (f"{tenant_of(instance)}-root" if tenant_of(instance) else None)
+
+
 def management_account(instance: dict) -> Optional[str]:
     """An org service instance's management account name (CP main.tf: the var, else the map's root account)."""
-    variables = instance.get("vars") or {}
-    return variables.get("organization_management_account_name") \
-        or (variables.get("account_map") or {}).get("root_account_account_name") or None
+    return (instance.get("vars") or {}).get("organization_management_account_name") or map_root_account(instance)
+
+
+def is_management(instance: dict) -> bool:
+    """Whether the instance runs the root step: it deploys to the map's root account, which it also names as
+    management (an instance naming its own account management is judged as the step it really is)."""
+    return own_account(instance) is not None and own_account(instance) == map_root_account(instance) \
+        == management_account(instance)
 
 
 def own_account(instance: dict) -> Optional[str]:
@@ -557,7 +577,7 @@ def own_account(instance: dict) -> Optional[str]:
 def creates_aggregator(instance: dict) -> bool:
     """Whether an aws-security-hub instance creates a finding aggregator (CP main.tf, step 1)."""
     variables = instance.get("vars") or {}
-    return own_account(instance) != management_account(instance) \
+    return not is_management(instance) \
         and flag_on(variables.get("enabled", True)) and not flag_on(variables.get("admin_delegated")) \
         and flag_on(variables.get("finding_aggregator_enabled", True)) \
         and variables.get("finding_aggregation_region", "us-east-1") == variables.get("region")
@@ -575,44 +595,65 @@ def aggregator_region_errors(where: str, variables: dict) -> list[str]:
             for region in linked if region.startswith(EU_PREFIX)]
 
 
-def member_map_errors(where: str, component: str, variables: dict, tenant: str, eu: list, eu_ids: set) -> list[str]:
-    """A non-GDPR org-settings instance whose account_map makes an all-GDPR account a member."""
+def member_map_errors(where: str, component: str, variables: dict, tenant: str, eu_ids: set, gdpr: bool) -> list[str]:
+    """An org-settings instance's members: outside the GDPR scope no all-GDPR account (Inspector: excluded by
+    exactly their IDs); inside it every all-GDPR account (the EU admin is theirs)."""
     if flag_on(variables.get("account_map_enabled", False)):
         return [f"{where} sets account_map_enabled: its members come from the account-map state and cannot be checked; "
-                "use the static account_map without the accounts whose stacks are all GDPR-scoped"]
+                "use the static account_map (catalog/_base account-map-bypass, or -us outside the EU)"]
     full = (variables.get("account_map") or {}).get("full_account_map") or {}
     excludes = {str(i) for i in variables.get("member_association_excludes") or []}
-    errors, eu_keys = [], {f"{tenant}-{a}" for a in eu}
-    for key, account_id in sorted(full.items()):
-        if key not in eu_keys and str(account_id) not in eu_ids:
-            continue
-        if component == "aws-inspector2" and str(account_id) in excludes:
-            continue
-        hint = "list its ID in member_association_excludes" if component == "aws-inspector2" else "drop it from the map"
-        errors.append(f"{where} account_map.full_account_map holds {key} ({account_id}), an account whose stacks are all "
-                      f"GDPR-scoped: it would be a member outside the EU; {hint}")
-    return errors
+    eu_keys = {f"{tenant}-{a}" for a in GDPR_ONLY_ACCOUNTS}
+    held = {key: str(account_id) for key, account_id in full.items() if key in eu_keys or str(account_id) in eu_ids}
+    if gdpr:
+        errors = [f"{where} account_map.full_account_map lacks {key}, an account whose stacks are all GDPR-scoped: "
+                  "its EU admin must make it a member (use the full map)" for key in sorted(eu_keys - set(full))]
+        if component == "aws-inspector2":
+            errors += [f"{where} member_association_excludes lists {key} ({account_id}): its EU admin must make it a member"
+                       for key, account_id in sorted(held.items()) if account_id in excludes]
+        return errors
+    if component == "aws-inspector2":
+        if excludes != set(held.values()):
+            return [f"{where} member_association_excludes is {sorted(excludes)}: exclude exactly the IDs of the accounts "
+                    f"whose stacks are all GDPR-scoped ({sorted(set(held.values()))}), no other member"]
+        return []
+    return [f"{where} account_map.full_account_map holds {key} ({account_id}), an account whose stacks are all "
+            "GDPR-scoped: it would be a member outside the EU; drop it from the map" for key, account_id in sorted(held.items())]
+
+
+def auto_enable_errors(where: str, component: str, variables: dict) -> list[str]:
+    """A non-GDPR GuardDuty org-settings that auto-enables existing accounts (ALL) enrolls the all-GDPR ones too."""
+    mode = variables.get("auto_enable_organization_members", GUARDDUTY_AUTO_ENABLE_DEFAULT)
+    if component != "aws-guardduty" or mode in ("NEW", "NONE"):
+        return []
+    return [f"{where} sets auto_enable_organization_members {mode!r}: outside the EU only NEW or NONE (ALL enrolls every "
+            "existing account, the all-GDPR ones included, whatever the account_map)"]
 
 
 def org_service_errors(stacks: dict, scoped: set) -> list[str]:
     """ORG_SERVICES members and Security Hub aggregation kept in their residency (owner OQ-RES/OQ-SH)."""
     eu, eu_ids = gdpr_only_accounts(stacks, scoped)
-    errors = []
+    errors, seen = [], False
     for stack_name in sorted(stacks):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             component, variables = component_of(name, instance), instance.get("vars") or {}
             if component not in ORG_SERVICES or not flag_on(variables.get("enabled", True)):
                 continue
-            where = f"{stack_name}: {name}"
+            where, seen = f"{stack_name}: {name}", True
             if component == "aws-security-hub" and creates_aggregator(instance):
                 if stack_name in scoped:
                     errors.append(f"{where} creates a Security Hub finding aggregator in a GDPR-scoped stack: EU hubs "
                                   "are not aggregated (set finding_aggregator_enabled false)")
                 else:
                     errors += aggregator_region_errors(where, variables)
-            if stack_name not in scoped and own_account(instance) != management_account(instance) \
-                    and flag_on(variables.get("admin_delegated")):
-                errors += member_map_errors(where, component, variables, str(tenant_of(instance)), eu, eu_ids)
+            if not is_management(instance) and flag_on(variables.get("admin_delegated")):
+                errors += member_map_errors(where, component, variables, str(tenant_of(instance)), eu_ids,
+                                            stack_name in scoped)
+                if stack_name not in scoped:
+                    errors += auto_enable_errors(where, component, variables)
+    if seen and eu and set(eu) != set(GDPR_ONLY_ACCOUNTS):
+        errors.append(f"the accounts whose stacks are all GDPR-scoped are {eu}, not GDPR_ONLY_ACCOUNTS "
+                      f"{list(GDPR_ONLY_ACCOUNTS)}: update the declaration (check-data-residency.py)")
     return errors
 
 

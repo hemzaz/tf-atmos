@@ -39,8 +39,9 @@ Fatal (a config bug, not a placeholder: always printed, exit 1 even with --warn)
     map) that differs from its settings.static_account_map, disabled and
     abstract instances included: the vars copy is repeated by hand, so lint
     fails on drift before the instance is enabled. An aws-guardduty or
-    aws-security-hub map may also be the US variant, the static map without
-    <tenant>-prod-eu (owner OQ-RES; check-data-residency.py requires it there)
+    aws-security-hub map outside the eu- regions, and the component-less abstract
+    account-map-bypass-us, may also be the US variant, the static map without
+    check-data-residency.py's GDPR_ONLY_ACCOUNTS (owner OQ-RES; residency requires it there)
   - an instance's vars.account_assignments (aws-identity-center) keyed by an
     account its vars.account_map lacks, disabled instances included
   - an aws-cloudtrail-bucket instance with a vars.policy (policy_override.tf
@@ -122,7 +123,6 @@ MAP_CONSUMERS = frozenset({
 # Components whose US-region instances take the static map less the all-GDPR account (owner OQ-RES,
 # check-data-residency.py's member rule): that one subset of settings.static_account_map is not drift.
 US_MAP_COMPONENTS = frozenset({"aws-guardduty", "aws-security-hub"})
-GDPR_ONLY_ACCOUNT = "prod-eu"
 # The abstract carrying that map (stacks/catalog/_base/account-map-bypass.yaml, E5c1), checked like them.
 US_MAP_ABSTRACT = "account-map-bypass-us"
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
@@ -228,14 +228,19 @@ def static_map_drift(stack: str, instance_name: str, spec: dict):
 
 
 def is_us_map(instance_name: str, spec: dict, account_map, static) -> bool:
-    """Whether a US_MAP_COMPONENTS instance's (or the US_MAP_ABSTRACT's) map is the US variant: static's
-    full_account_map without <tenant>-prod-eu, its other keys equal, iam_role_arn_templates optional
-    (the org services assume no role from it)."""
-    if (component_of(spec) not in US_MAP_COMPONENTS and instance_name != US_MAP_ABSTRACT) \
-            or not isinstance(static, dict) or not isinstance(account_map, dict):
+    """Whether the map of a US_MAP_COMPONENTS instance outside the eu- regions (or of the component-less
+    US_MAP_ABSTRACT abstract) is the US variant: static's full_account_map without check-data-residency.py's
+    GDPR_ONLY_ACCOUNTS, its other keys equal, iam_role_arn_templates optional (the org services assume
+    no role from it)."""
+    metadata = spec.get("metadata") or {}
+    abstract = instance_name == US_MAP_ABSTRACT and metadata.get("type") == "abstract" and not metadata.get("component")
+    us_instance = component_of(spec) in US_MAP_COMPONENTS \
+        and not str((spec.get("vars") or {}).get("region") or "").startswith(residency.EU_PREFIX)
+    if not (abstract or us_instance) or not isinstance(static, dict) or not isinstance(account_map, dict):
         return False
     tenant = residency.tenant_of(spec)
-    full = {k: v for k, v in (static.get("full_account_map") or {}).items() if k != f"{tenant}-{GDPR_ONLY_ACCOUNT}"}
+    dropped = {f"{tenant}-{account}" for account in residency.GDPR_ONLY_ACCOUNTS}
+    full = {k: v for k, v in (static.get("full_account_map") or {}).items() if k not in dropped}
     expected = {**static, "full_account_map": full}
     if "iam_role_arn_templates" not in account_map:
         expected.pop("iam_role_arn_templates", None)

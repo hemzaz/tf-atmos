@@ -44,7 +44,9 @@ whose delegated_administrator_account_name is not <tenant>-security, or that
 deploys to any other account (it would create nothing); two instances of one
 service, step and region; and two aws-security-hub root steps that leave
 organizations_resource_policy_enabled on (CP default): the policy is an
-organization singleton. Two steps of one service in one stack are not a
+organization singleton; two Security Hub finding aggregators of one account; and an
+organization_management_account_name other than its account_map's root account (an instance
+naming its own account management is not a root step). Two steps of one service in one stack are not a
 same-name pair (only step 1 names a resource) unless one sets create_sns_topic.
 Account-wide names (IAM, the account singletons) are also compared between
 the regions of one account: fnx-ue1-prod and its DR stack fnx-ue2-prod share
@@ -418,6 +420,9 @@ def org_service_step(instance: dict):
     if admin != f"{tenant}-{DELEGATED_ADMIN_ACCOUNT}":
         return None, (f"names delegated administrator {admin!r}: the org services' delegated administrator is "
                       f"{tenant}-{DELEGATED_ADMIN_ACCOUNT}")
+    if management != residency.map_root_account(instance):
+        return None, (f"names management account {management!r}, not its account_map's root account "
+                      f"{residency.map_root_account(instance)!r}: the management account is the root account")
     if own == management:
         return "root", None
     if own != admin:
@@ -444,7 +449,7 @@ def check_org_services(stacks: dict) -> list[str]:
     """ORG_SERVICES account singletons: one root (management account), delegated-administrator and
     org-settings (security account) per service and region, and one Security Hub Organizations
     resource policy (an organization singleton) in all."""
-    errors, owners, policies = [], collections.defaultdict(list), []
+    errors, owners, policies, aggregators = [], collections.defaultdict(list), [], collections.defaultdict(list)
     for stack_name in sorted(stacks):
         for name, instance in instances_of(stacks[stack_name]):
             component = instance.get("component")
@@ -460,6 +465,12 @@ def check_org_services(stacks: dict) -> list[str]:
             if component == "aws-security-hub" and step == "root" and residency.flag_on(
                     (instance.get("vars") or {}).get("organizations_resource_policy_enabled", True)):
                 policies.append(where)
+            if component == "aws-security-hub" and residency.creates_aggregator(instance):
+                aggregators[residency.own_account(instance)].append(where)
+    for account, wheres in sorted(aggregators.items()):
+        if len(wheres) > 1:
+            errors.append(f"{' and '.join(wheres)} all create a Security Hub finding aggregator for {account}: one "
+                          "aggregation region per administrator (OQ-SH: us-east-1 aggregates us-east-2)")
     for (component, step, region), wheres in sorted(owners.items()):
         if len(wheres) > 1:
             errors.append(f"{' and '.join(wheres)} are all the {component} {step} step in {region}: one per service "

@@ -810,9 +810,11 @@ def org_services_stacks():
             "aws-guardduty/org-settings": org_instance("aws-guardduty", "security", region, on_root("aws-guardduty"),
                                                        admin_delegated=True, **us_org),
             "aws-security-hub/delegated-administrator": org_instance(
-                "aws-security-hub", "security", region, **({} if eu else HUB_US), **standby),
+                "aws-security-hub", "security", region, **({} if eu else HUB_US)),
+            # CP creates the suppression automation rules only with create_org_configuration (step 3).
             "aws-security-hub/org-settings": org_instance("aws-security-hub", "security", region,
-                                                          on_root("aws-security-hub"), admin_delegated=True, **us_org),
+                                                          on_root("aws-security-hub"), admin_delegated=True, **us_org,
+                                                          **standby),
             "aws-inspector2/org-settings": org_instance(
                 "aws-inspector2", "security", region, on_root("aws-inspector2"), admin_delegated=True,
                 member_association_excludes=[] if eu else [ORG_IDS["prod-eu"]]),
@@ -924,14 +926,71 @@ class OrgServicesTest(unittest.TestCase):
         stacks = org_services_stacks()
         inspector = stacks["fnx-ue1-security"]["components"]["terraform"]["aws-inspector2/org-settings"]["vars"]
         inspector["member_association_excludes"] = ["fnx-prod-eu"]  # names: CP compares IDs (main.tf:6)
+        exact = (f"exclude exactly the IDs of the accounts whose stacks are all GDPR-scoped (['{ORG_IDS['prod-eu']}']), "
+                 "no other member")
         self.assertEqual(self.org(stacks), [
-            f"fnx-ue1-security: aws-inspector2/org-settings account_map.full_account_map holds fnx-prod-eu "
-            f"({ORG_IDS['prod-eu']}), an account whose stacks are all GDPR-scoped: it would be a member outside the "
-            "EU; list its ID in member_association_excludes"])
+            f"fnx-ue1-security: aws-inspector2/org-settings member_association_excludes is ['fnx-prod-eu']: {exact}"])
+        # A superset (prod excluded too) and an empty list fail the same way.
+        for excludes in ([ORG_IDS["prod-eu"], ORG_IDS["prod"]], []):
+            inspector["member_association_excludes"] = excludes
+            self.assertEqual(len(self.org(stacks)), 1, excludes)
+            self.assertIn(exact, self.org(stacks)[0])
         # OQ-IN: org-settings is committed disabled, so it is not judged until it is turned on.
         stacks["fnx-ue1-security"]["components"]["terraform"]["aws-inspector2/org-settings"]["metadata"] = {
             "component": "aws-inspector2", "enabled": False}
         self.assertEqual(self.org(stacks), [])
+
+    def test_us_guardduty_auto_enable_all_fails(self):
+        # ALL enrolls every existing account, prod-eu included, whatever the map (review B1).
+        stacks = org_services_stacks()
+        org = stacks["fnx-ue1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["vars"]
+        for mode, fails in (("ALL", True), ("NEW", False), ("NONE", False), (None, False)):
+            with self.subTest(mode=mode):
+                if mode is None:
+                    org.pop("auto_enable_organization_members", None)  # CP default NEW
+                else:
+                    org["auto_enable_organization_members"] = mode
+                self.assertEqual(self.org(stacks), [
+                    "fnx-ue1-security: aws-guardduty/org-settings sets auto_enable_organization_members 'ALL': outside "
+                    "the EU only NEW or NONE (ALL enrolls every existing account, the all-GDPR ones included, whatever "
+                    "the account_map)"] if fails else [])
+        # The EU admin may enroll everyone.
+        stacks = org_services_stacks()
+        stacks["fnx-ew1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["vars"][
+            "auto_enable_organization_members"] = "ALL"
+        self.assertEqual(self.org(stacks), [])
+
+    def test_eu_org_settings_keep_every_gdpr_account(self):
+        # Review S1: the US map, or an Inspector exclude, in an EU admin drops prod-eu from its only admin.
+        stacks = org_services_stacks()
+        eu = stacks["fnx-ew1-security"]["components"]["terraform"]
+        eu["aws-guardduty/org-settings"]["vars"]["account_map"] = US_MAP
+        eu["aws-inspector2/org-settings"]["vars"]["member_association_excludes"] = [ORG_IDS["prod-eu"]]
+        self.assertEqual(self.org(stacks), [
+            "fnx-ew1-security: aws-guardduty/org-settings account_map.full_account_map lacks fnx-prod-eu, an account "
+            "whose stacks are all GDPR-scoped: its EU admin must make it a member (use the full map)",
+            f"fnx-ew1-security: aws-inspector2/org-settings member_association_excludes lists fnx-prod-eu "
+            f"({ORG_IDS['prod-eu']}): its EU admin must make it a member"])
+
+    def test_naming_its_own_account_management_does_not_skip_the_member_rule(self):
+        # Review L1: the root step is the map's root account only.
+        stacks = org_services_stacks()
+        org = stacks["fnx-ue1-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["vars"]
+        org.update(organization_management_account_name="fnx-security", account_map=STATIC_MAP)
+        self.assertEqual(len(self.org(stacks)), 1)
+        self.assertIn("holds fnx-prod-eu", self.org(stacks)[0])
+
+    def test_a_drifted_gdpr_account_declaration_fails(self):
+        # Review L4: the stacks derive the all-GDPR accounts; GDPR_ONLY_ACCOUNTS must name the same set.
+        stacks = org_services_stacks()
+        stacks["fnx-ec1-prod"] = stack(vpc=org_instance("vpc", "prod-eu", "eu-central-1"))
+        self.assertEqual(self.org(stacks), [])
+        # The prod account's only stack moved to the EU: it is all-GDPR now, but not declared.
+        stacks["fnx-ue1-prod"]["components"]["terraform"]["vpc"]["settings"]["environment"]["account"] = "prod-us"
+        stacks["fnx-ew1-prod"]["components"]["terraform"]["vpc"]["settings"]["environment"]["account"] = "prod"
+        found = [e for e in residency.check(stacks) if "GDPR_ONLY_ACCOUNTS" in e]
+        self.assertEqual(found, ["the accounts whose stacks are all GDPR-scoped are ['prod', 'prod-eu'], not "
+                                 "GDPR_ONLY_ACCOUNTS ['prod-eu']: update the declaration (check-data-residency.py)"])
 
     def test_a_us_member_map_from_account_map_state_fails(self):
         # (Every root and EU instance of the simulation holds the full map and passes.)

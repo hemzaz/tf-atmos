@@ -547,11 +547,25 @@ class StaticAccountMapTest(unittest.TestCase):
                 stacks["fnx-ue1-root"]["components"]["terraform"][f"{component}/org-settings"] = spec
                 found = [(f.level, f.key) for f in self.failures(stacks)]
                 self.assertEqual(found, [("fatal", f"{component}/org-settings vars.account_map")] if fatal else [])
-        # The component-less abstract that carries the US map (catalog/_base account-map-bypass-us), and no other.
-        for name, fatal in (("account-map-bypass-us", False), ("account-map-bypass", True)):
-            with self.subTest(abstract=name):
+        # Review S1: an EU-region instance keeps the full map (prod-eu's admin is the EU one).
+        for region, fatal in (("eu-west-1", True), ("us-east-2", False)):
+            with self.subTest(region=region):
                 stacks = CoreAccountTest.with_map()
-                spec = {"metadata": {"type": "abstract"}, "vars": {"account_map": us},
+                spec = inst("security", env("security", ACCOUNTS["security"]), component="aws-guardduty",
+                            enabled=False, account_map=us, tenant="fnx", region=region)
+                spec["settings"]["static_account_map"] = self.STATIC
+                stacks["fnx-ue1-root"]["components"]["terraform"]["aws-guardduty/org-settings"] = spec
+                found = [(f.level, f.key) for f in self.failures(stacks)]
+                self.assertEqual(found, [("fatal", "aws-guardduty/org-settings vars.account_map")] if fatal else [])
+        # The component-less abstract that carries the US map (catalog/_base account-map-bypass-us), and no other
+        # (review L5: a concrete instance or one with a component under that name is not it).
+        for name, metadata, fatal in (
+            ("account-map-bypass-us", {"type": "abstract"}, False), ("account-map-bypass", {"type": "abstract"}, True),
+            ("account-map-bypass-us", {}, True), ("account-map-bypass-us", {"type": "abstract", "component": "vpc"}, True),
+        ):
+            with self.subTest(abstract=name, metadata=metadata):
+                stacks = CoreAccountTest.with_map()
+                spec = {"metadata": metadata, "vars": {"account_map": us},
                         "settings": {"context": {"tenant": "fnx"}, "static_account_map": self.STATIC}}
                 stacks["fnx-ue1-root"]["components"]["terraform"][name] = spec
                 found = [(f.level, f.key) for f in self.failures(stacks)]

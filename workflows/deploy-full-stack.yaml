@@ -80,11 +80,12 @@
 # Cloud Posse's three steps: the security account's detector/hub (step 1) and the management
 # account's delegation (step 2, in the root stacks) are in the security layer; the security
 # account's org settings (step 3, vars.admin_delegated true, "deployed again" after the
-# delegation) are the last layer, security-org. Steps 1 -> 2 -> 3 cross stacks, so a first
-# deploy runs the security stack, then the root stack, then the security stack's security-org
-# (docs/OPERATIONS.md).
+# delegation) are the last layer, security-org. Only the security stacks hold org-settings
+# (never a workload stack). Steps 1 -> 2 -> 3 cross stacks: a first `deploy -s fnx-<r>-security`
+# reaches security-org before the root stack's step 2 exists, so the operator declines that
+# layer at its confirm, deploys the root stack, then runs deploy-security-org (docs/OPERATIONS.md).
 # Every layer except backend, dns-apex (aws-dns-primary is only in fnx-ue1-network), security-org
-# (no stack has an org-settings instance yet)
+# (only the security stacks, none of which has an org-settings instance yet)
 # and regional-waf (no workload stack has a waf instance yet; an empty layer plans
 # "No components matched") has at least one
 # enabled instance in every workload stack (eks-backend-services/main, the last
@@ -488,7 +489,7 @@ workflows:
           or .metadata.component == "cost-optimization"'
       - name: plan-security-org
         type: atmos
-        command: terraform plan --query '.vars.admin_delegated == true'
+        command: terraform plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true)'
       - name: confirm_security_org
         type: confirm
         prompt: Apply the security-org layer plan above?
@@ -498,7 +499,7 @@ workflows:
         command: test "{{ .steps.confirm_security_org.value }}" = "true" || { echo "Deployment cancelled before the security-org layer."; exit 1; }
       - name: deploy-security-org
         type: atmos
-        command: terraform deploy --from-plan --query '.vars.admin_delegated == true'
+        command: terraform deploy --from-plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true)'
       - type: toast
         level: success
         content: All layers deployed
@@ -947,9 +948,11 @@ workflows:
     steps:
       - *fixtures-stages
       - *refuse-fixtures
+      - *preflight-targets
+      - *preflight
       - name: plan
         type: atmos
-        command: terraform plan --query '.vars.admin_delegated == true'
+        command: terraform plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true)'
       - name: confirm
         type: confirm
         prompt: Deploy the security-org layer?
@@ -959,4 +962,4 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.vars.admin_delegated == true'
+        command: terraform deploy --from-plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true)'

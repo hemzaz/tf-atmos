@@ -217,7 +217,7 @@ class CheckDeployLayersTest(unittest.TestCase):
             ("security", ["aws-config"] + [
                 f'(.metadata.component == "{c}" and .vars.admin_delegated != true)' for c in services]),
             ("monitoring", ["monitoring"]),
-            ("security-org", [".vars.admin_delegated == true"]),
+            ("security-org", [f'(.metadata.component == "{c}" and .vars.admin_delegated == true)' for c in services]),
         )
         stacks = {
             "fnx-ue1-security": stack(**{
