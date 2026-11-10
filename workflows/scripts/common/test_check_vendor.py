@@ -64,7 +64,7 @@ class Fixture(unittest.TestCase):
         self.root = self.tmp.name
         self.write(f"{TARGET}/main.tf", MAIN_TF)
         # The repository's entries name real targets this fixture lacks; a test lists its own.
-        for name in ("TFLINT_ALLOWLIST", "HOUSE_FILE_ALLOWLIST"):
+        for name in ("TFLINT_ALLOWLIST", "HOUSE_FILE_ALLOWLIST", "BYPASSED_READS"):
             patcher = mock.patch.object(check, name, ())
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -233,6 +233,31 @@ class LockTest(Fixture):
         errs = self.house(self.HOUSE_LISTED, lck)
         self.assertEqual(len(errs), 1, errs)
         self.assertIn("rename the house file", errs[0])
+
+    BYPASSED = ((TARGET, "remote-state_override.tf", "detector", "no live read"),)
+    OVERRIDE = 'module "detector" {\n  count  = 1\n  bypass = BYPASS\n  defaults = {\n    id = "x"\n  }\n}\n'
+
+    def bypass(self):
+        return check.check_lock(manifest(source()), lock(), self.root, (), (), self.BYPASSED)
+
+    def test_bypassed_read_passes(self):
+        self.write(f"{TARGET}/remote-state_override.tf", self.OVERRIDE.replace("BYPASS", "true"))
+        self.assertEqual(self.bypass(), [])
+
+    def test_live_read_fails(self):
+        # bypass false, bypass only in another module's block, or no bypass at all.
+        other = 'module "detector" {\n  count = 1\n}\n\nmodule "other" {\n  bypass = true\n}\n'
+        for text in (self.OVERRIDE.replace("BYPASS", "false"), other, 'module "detector" {\n}\n'):
+            with self.subTest(text=text):
+                self.write(f"{TARGET}/remote-state_override.tf", text)
+                errs = self.bypass()
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("must set `bypass = true`", errs[0])
+
+    def test_missing_bypass_override_fails(self):
+        errs = self.bypass()
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("missing; it must bypass module detector", errs[0])
 
     def test_edited_missing_extra(self):
         self.write(f"{TARGET}/main.tf", MAIN_TF + "# local edit\n")

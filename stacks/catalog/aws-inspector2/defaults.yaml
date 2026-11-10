@@ -9,7 +9,7 @@
 #   aws-inspector2/root-defaults
 #       instance aws-inspector2/root in the management account's stack:
 #       delegates Inspector to <tenant>-security.
-#   aws-inspector2/org-settings-us, -eu
+#   aws-inspector2/org-settings-us (us.yaml), -eu
 #       instance aws-inspector2/org-settings in the security stack
 #       (admin_delegated: true): enables the administrator, the organization's
 #       auto-enable (CP scan types EC2, ECR and Lambda) and every map account
@@ -57,21 +57,6 @@ components:
         type: abstract
         inherits:
           - aws-inspector2/defaults
-
-    aws-inspector2/org-settings-us:
-      metadata:
-        component: aws-inspector2
-        type: abstract
-        inherits:
-          - aws-inspector2/defaults
-      vars:
-        admin_delegated: true
-        member_association_excludes:
-          - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
-      dependencies:
-        components:
-          - component: aws-inspector2/root
-            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
 
     aws-inspector2/org-settings-eu:
       metadata:

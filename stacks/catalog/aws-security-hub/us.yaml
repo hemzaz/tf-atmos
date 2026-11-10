@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# aws-security-hub US-region variants (E5c): imported only by the us- security stacks
+# =============================================================================
+# The variants of aws-security-hub/defaults.yaml that keep the all-GDPR accounts
+# (prod-eu) out of a US region (owner decision OQ-RES, OQ-SH: the aggregator links us-east-2 only). Their own file,
+# so an EU stack that imports defaults.yaml never resolves them: the
+# first-deploy-inputs and data-residency checks read every abstract a stack
+# resolves.
+# =============================================================================
+
+import:
+  - catalog/aws-security-hub/defaults
+  - catalog/_base/account-map-bypass-us
+
+components:
+  terraform:
+    aws-security-hub/delegated-administrator-us:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/defaults
+          - account-map-bypass
+      vars:
+        finding_aggregator_enabled: true
+        finding_aggregation_region: us-east-1
+        finding_aggregator_linking_mode: SPECIFIED_REGIONS
+        finding_aggregator_regions:
+          - us-east-2
+
+    aws-security-hub/org-settings-us:
+      metadata:
+        component: aws-security-hub
+        type: abstract
+        inherits:
+          - aws-security-hub/defaults
+          - account-map-bypass-us
+      vars:
+        admin_delegated: true
+      dependencies:
+        components:
+          - component: aws-security-hub/root
+            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'

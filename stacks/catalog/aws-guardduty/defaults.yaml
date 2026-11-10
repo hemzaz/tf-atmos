@@ -21,7 +21,7 @@
 #       step 2, instance aws-guardduty/root in the management account's stack
 #       of the same region: delegates GuardDuty to <tenant>-security (CP checks
 #       Organizations trusted access, aws-organization/defaults.yaml).
-#   aws-guardduty/org-settings-us, aws-guardduty/org-settings-eu
+#   aws-guardduty/org-settings-us (us.yaml), aws-guardduty/org-settings-eu
 #       step 3, instance aws-guardduty/org-settings in the security stack
 #       ("deployed again", admin_delegated: true): members and auto-enable.
 #       Members are the account map minus the security and management
@@ -52,7 +52,6 @@
 import:
   - catalog/_base/vendored
   - catalog/_base/account-map-bypass
-  - catalog/_base/account-map-bypass-us
 
 components:
   terraform:
@@ -101,20 +100,6 @@ components:
         components:
           - component: aws-guardduty/delegated-administrator
             stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-security'
-
-    aws-guardduty/org-settings-us:
-      metadata:
-        component: aws-guardduty
-        type: abstract
-        inherits:
-          - aws-guardduty/defaults
-          - account-map-bypass-us
-      vars:
-        admin_delegated: true
-      dependencies:
-        components:
-          - component: aws-guardduty/root
-            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
 
     aws-guardduty/org-settings-eu:
       metadata:

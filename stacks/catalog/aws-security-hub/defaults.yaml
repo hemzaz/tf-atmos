@@ -6,7 +6,7 @@
 # three steps, per region. A stack's instance takes Cloud Posse's name and
 # inherits its variants (see catalog/aws-guardduty/defaults.yaml for the shape):
 #
-#   aws-security-hub/delegated-administrator-us, -eu
+#   aws-security-hub/delegated-administrator-us (us.yaml), -eu
 #       step 1, instance aws-security-hub/delegated-administrator in the
 #       security stack: the delegated administrator's hub. -us also aggregates:
 #       CP creates the finding aggregator only where finding_aggregation_region
@@ -18,7 +18,7 @@
 #   aws-security-hub/root-organization-policy
 #       step 2 in fnx-ue1-root only: also the Organizations resource policy
 #       (an organization singleton, global; one owner).
-#   aws-security-hub/org-settings-us, -eu
+#   aws-security-hub/org-settings-us (us.yaml), -eu
 #       step 3, instance aws-security-hub/org-settings in the security stack:
 #       members (the map minus self and the management account: -us without
 #       prod-eu, OQ-RES) and auto-enable of new accounts with the default
@@ -83,7 +83,6 @@
 import:
   - catalog/_base/vendored
   - catalog/_base/account-map-bypass
-  - catalog/_base/account-map-bypass-us
 
 components:
   terraform:
@@ -107,20 +106,6 @@ components:
         create_sns_topic: false
         tags:
           Component: "SecurityHub"
-
-    aws-security-hub/delegated-administrator-us:
-      metadata:
-        component: aws-security-hub
-        type: abstract
-        inherits:
-          - aws-security-hub/defaults
-          - account-map-bypass
-      vars:
-        finding_aggregator_enabled: true
-        finding_aggregation_region: us-east-1
-        finding_aggregator_linking_mode: SPECIFIED_REGIONS
-        finding_aggregator_regions:
-          - us-east-2
 
     aws-security-hub/delegated-administrator-eu:
       metadata:
@@ -150,20 +135,6 @@ components:
           - aws-security-hub/root-defaults
       vars:
         organizations_resource_policy_enabled: true
-
-    aws-security-hub/org-settings-us:
-      metadata:
-        component: aws-security-hub
-        type: abstract
-        inherits:
-          - aws-security-hub/defaults
-          - account-map-bypass-us
-      vars:
-        admin_delegated: true
-      dependencies:
-        components:
-          - component: aws-security-hub/root
-            stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
 
     aws-security-hub/org-settings-eu:
       metadata:
