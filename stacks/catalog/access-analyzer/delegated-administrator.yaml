@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# access-analyzer/delegated-administrator variants (E5c7)
+# =============================================================================
+# Cloud Posse aws-access-analyzer README, step 2: in each security stack, the
+# organization analyzer; the unused-access analyzer in fnx-ue1-security only
+# (IAM is global, so one region analyses it; E5c plan OQ-G). A security
+# stack's access-analyzer/delegated-administrator instance inherits one. Its
+# own file, so the root stack, which imports defaults.yaml, does not resolve them.
+# =============================================================================
+
+import:
+  - catalog/access-analyzer/defaults
+
+components:
+  terraform:
+    access-analyzer/delegated-administrator-defaults:
+      metadata:
+        component: access-analyzer
+        type: abstract
+        inherits:
+          - access-analyzer/defaults
+      vars:
+        accessanalyzer_organization_enabled: true
+
+    access-analyzer/delegated-administrator-unused-access:
+      metadata:
+        component: access-analyzer
+        type: abstract
+        inherits:
+          - access-analyzer/delegated-administrator-defaults
+      vars:
+        accessanalyzer_organization_unused_access_enabled: true
