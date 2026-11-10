@@ -45,30 +45,3 @@ components:
           audit_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.audit_account_account_name }}'
           iam_role_arn_templates:
             dns-delegation: 'arn:aws:iam::{{ .settings.account_map.full_account_map.network }}:role/{{ .settings.context.tenant }}-ue1-network-dns-delegation-{{ .settings.context.stage }}'
-
-    # The same map without the all-GDPR accounts (prod-eu), for the org-wide
-    # security services' US-region instances, whose member lists are the map
-    # minus self and the management account (E5c, owner decision OQ-RES: EU
-    # personal data never reaches a US region's admin). Its own abstract, not an
-    # override of account-map-bypass: Atmos deep-merges maps, so an inheritor
-    # cannot drop the prod-eu key. A subset of settings.static_account_map, never
-    # a different value for a key it keeps.
-    account-map-bypass-us:
-      metadata:
-        type: abstract
-      vars:
-        account_map_enabled: false
-        account_map:
-          full_account_map:
-            '{{ .settings.context.tenant }}-root': '{{ .settings.account_map.full_account_map.root }}'
-            '{{ .settings.context.tenant }}-audit': '{{ .settings.account_map.full_account_map.audit }}'
-            '{{ .settings.context.tenant }}-security': '{{ .settings.account_map.full_account_map.security }}'
-            '{{ .settings.context.tenant }}-network': '{{ .settings.account_map.full_account_map.network }}'
-            '{{ .settings.context.tenant }}-identity': '{{ .settings.account_map.full_account_map.identity }}'
-            '{{ .settings.context.tenant }}-artifacts': '{{ .settings.account_map.full_account_map.artifacts }}'
-            '{{ .settings.context.tenant }}-dev': '{{ .settings.account_map.full_account_map.dev }}'
-            '{{ .settings.context.tenant }}-staging': '{{ .settings.account_map.full_account_map.staging }}'
-            '{{ .settings.context.tenant }}-prod': '{{ .settings.account_map.full_account_map.prod }}'
-          root_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.root_account_account_name }}'
-          identity_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.identity_account_account_name }}'
-          audit_account_account_name: '{{ .settings.context.tenant }}-{{ .settings.account_map.audit_account_account_name }}'

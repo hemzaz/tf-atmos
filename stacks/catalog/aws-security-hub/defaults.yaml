@@ -83,6 +83,7 @@
 import:
   - catalog/_base/vendored
   - catalog/_base/account-map-bypass
+  - catalog/_base/account-map-bypass-us
 
 components:
   terraform:
