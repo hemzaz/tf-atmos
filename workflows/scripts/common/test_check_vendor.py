@@ -64,9 +64,10 @@ class Fixture(unittest.TestCase):
         self.root = self.tmp.name
         self.write(f"{TARGET}/main.tf", MAIN_TF)
         # The repository's entries name real targets this fixture lacks; a test lists its own.
-        patcher = mock.patch.object(check, "TFLINT_ALLOWLIST", ())
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name in ("TFLINT_ALLOWLIST", "HOUSE_FILE_ALLOWLIST"):
+            patcher = mock.patch.object(check, name, ())
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -192,6 +193,46 @@ class LockTest(Fixture):
         errs = check.check_lock(manifest(source()), lock(), self.root, self.LISTED)
         self.assertEqual(len(errs), 1, errs)
         self.assertIn("stale", errs[0])
+
+    HOUSE_LISTED = ((TARGET, "detector_house.tf", "a lookup an override cannot add"),)
+
+    def house(self, allowlist, lck=None):
+        return check.check_lock(manifest(source()), lock() if lck is None else lck, self.root, (), allowlist)
+
+    def test_listed_house_file_passes(self):
+        self.write(f"{TARGET}/detector_house.tf", "")
+        self.assertEqual(self.house(self.HOUSE_LISTED), [])
+
+    def test_unlisted_house_file_fails(self):
+        # Not listed at all, or listed for another target only.
+        self.write(f"{TARGET}/detector_house.tf", "")
+        other = (("components/terraform/other", "detector_house.tf", "x"),)
+        for allowlist in ((), other):
+            with self.subTest(allowlist=allowlist):
+                errs = [e for e in self.house(allowlist) if "stale" not in e]
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("detector_house.tf: not from the vendor pull", errs[0])
+
+    def test_house_entry_needs_a_reason(self):
+        self.write(f"{TARGET}/detector_house.tf", "")
+        for why in ("", "  ", None):
+            with self.subTest(why=why):
+                errs = self.house(((TARGET, "detector_house.tf", why),))
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("HOUSE_FILE_ALLOWLIST entry has no reason", errs[0])
+
+    def test_missing_house_file_is_stale(self):
+        errs = self.house(self.HOUSE_LISTED)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("names no file there (stale; drop it)", errs[0])
+
+    def test_house_file_the_pull_ships_fails(self):
+        self.write(f"{TARGET}/detector_house.tf", MAIN_TF)
+        lck = lock()
+        lck["artifacts"]["id"]["files"].append({"path": "detector_house.tf", "type": "file", "sha256": DIGEST})
+        errs = self.house(self.HOUSE_LISTED, lck)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("rename the house file", errs[0])
 
     def test_edited_missing_extra(self):
         self.write(f"{TARGET}/main.tf", MAIN_TF + "# local edit\n")

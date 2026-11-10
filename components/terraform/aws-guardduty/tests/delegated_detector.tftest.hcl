@@ -1,4 +1,4 @@
-# House test of remote-state_override.tf (E5c1, OQ-W; a vendored target admits
+# House test of remote-state_override.tf and detector_house.tf (E5c1, OQ-W; a vendored target admits
 # tests/*.tftest.hcl: scripts/check-vendor.py TESTS) and the E5c spike: each of
 # Cloud Posse's three steps plans only its own resources, and org-settings takes
 # the detector id from the house lookup, not remote state. Mocked providers, no
@@ -79,7 +79,7 @@ run "step1_delegated_administrator_detector_only" {
     error_message = "step 1 configures no organization settings"
   }
   assert {
-    condition     = length(module.guardduty_delegated_detector) == 0
+    condition     = length(module.guardduty_delegated_detector) == 0 && length(data.aws_guardduty_detector.delegated) == 0
     error_message = "step 1 looks up no detector"
   }
 }
@@ -104,7 +104,7 @@ run "step2_root_delegation_only" {
     error_message = "root creates no detector and no organization settings"
   }
   assert {
-    condition     = length(module.guardduty_delegated_detector) == 0
+    condition     = length(module.guardduty_delegated_detector) == 0 && length(data.aws_guardduty_detector.delegated) == 0
     error_message = "root must not look up a detector"
   }
 }
@@ -178,6 +178,23 @@ run "step3_org_settings_eu_includes_prod_eu" {
     condition     = toset(one(awsutils_guardduty_organization_settings.this[*].member_accounts)) == toset(["999999999999", "121212121212"])
     error_message = "EU members include prod-eu"
   }
+}
+
+# Fail-closed: org-settings before step 1 enabled the detector.
+run "step3_disabled_detector_fails" {
+  command = plan
+  variables {
+    admin_delegated = true
+  }
+  override_data {
+    target = data.aws_caller_identity.this[0]
+    values = { account_id = "222222222222" }
+  }
+  override_data {
+    target = data.aws_guardduty_detector.delegated[0]
+    values = { id = "d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5", status = "DISABLED" }
+  }
+  expect_failures = [data.aws_guardduty_detector.delegated[0]]
 }
 
 # Account verification: step 1/3 in fnx-ue1-security's account passes, run in

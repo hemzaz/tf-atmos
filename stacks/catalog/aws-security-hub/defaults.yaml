@@ -28,8 +28,18 @@
 #       (us-east-2, eu-central-1): suppresses the controls that cannot pass
 #       there, as automation rules in that region's administrator. LOCAL
 #       configuration cannot disable a control in a member, so CP suppresses
-#       its findings instead. They stay out of us-east-1: rules in the
-#       aggregation region also act on the linked regions' findings.
+#       its findings instead. "An automation rule applies only in the AWS
+#       Region in which it's created" (Security Hub User Guide,
+#       automation-rules.html), so each region's administrator suppresses its
+#       own findings; us-east-1 (home of every US account) has none, and the
+#       aggregated copies carry the linked region's workflow status.
+#   aws-security-hub/eu-shared-account-suppressions
+#       added to org-settings in eu-west-1 (fnx-ew1-security): the same
+#       controls, suppressed only for the shared accounts (all but prod-eu),
+#       whose home region is us-east-1; prod-eu's home is eu-west-1, so its
+#       findings stay. CP's rules match every account, so these use the
+#       house account-suppressions_house.tf (account_scoped_control_suppressions,
+#       allowlisted in scripts/check-vendor.py).
 #
 # Owner decision OQ-SH (2026-11-10): Cloud Posse's default standards (AWS
 # Foundational Security Best Practices v1.0.0 and CIS AWS Foundations 1.2.0)
@@ -215,3 +225,31 @@ components:
           CloudWatch.12: {control_id: CloudWatch.12, reason_code: HOME_TRAIL, disabled_reason: *trail}
           CloudWatch.13: {control_id: CloudWatch.13, reason_code: HOME_TRAIL, disabled_reason: *trail}
           CloudWatch.14: {control_id: CloudWatch.14, reason_code: HOME_TRAIL, disabled_reason: *trail}
+
+    # standby-suppressions' controls as account-filtered rules (AWS: at most 20
+    # control IDs per rule): IAM in one, KMS.1/KMS.2 and CloudWatch in the other.
+    aws-security-hub/eu-shared-account-suppressions:
+      metadata:
+        type: abstract
+      vars:
+        account_scoped_control_suppressions:
+          shared-accounts-global-iam:
+            control_ids: [IAM.1, IAM.2, IAM.3, IAM.4, IAM.5, IAM.6, IAM.7, IAM.8, IAM.9, IAM.11, IAM.12,
+                          IAM.13, IAM.14, IAM.15, IAM.16, IAM.17, IAM.18, IAM.20, IAM.21]
+            account_names: &shared
+              - '{{ .settings.context.tenant }}-root'
+              - '{{ .settings.context.tenant }}-audit'
+              - '{{ .settings.context.tenant }}-security'
+              - '{{ .settings.context.tenant }}-network'
+              - '{{ .settings.context.tenant }}-identity'
+              - '{{ .settings.context.tenant }}-artifacts'
+              - '{{ .settings.context.tenant }}-dev'
+              - '{{ .settings.context.tenant }}-staging'
+              - '{{ .settings.context.tenant }}-prod'
+            disabled_reason: "Not this account's home region: AWS Config records its IAM in us-east-1 only"
+          shared-accounts-home-trail:
+            control_ids: [KMS.1, KMS.2, CloudWatch.1, CloudWatch.2, CloudWatch.3, CloudWatch.4, CloudWatch.5,
+                          CloudWatch.6, CloudWatch.7, CloudWatch.8, CloudWatch.9, CloudWatch.10, CloudWatch.11,
+                          CloudWatch.12, CloudWatch.13, CloudWatch.14]
+            account_names: *shared
+            disabled_reason: "Not this account's home region: its IAM (KMS.1/2) and its multi-region trail's log group (CloudWatch) are in us-east-1"

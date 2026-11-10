@@ -40,8 +40,9 @@
 #     hand-written component's Portscan auto-archive filter is dropped (CP has
 #     no filter; security-monitoring routes alert at severity >= 4).
 #   - OQ-W: step 3 reads step 1's detector id with a data source in its own
-#     account and region (remote-state_override.tf), never remote state; step
-#     2 reads nothing.
+#     account and region (the allowlisted house detector_house.tf, handed to
+#     main.tf by remote-state_override.tf's bypass), never remote state; steps
+#     1 and 2 read nothing.
 #   - No SNS topic and no publishing destination: findings stay in their
 #     region, routed per account by security-monitoring (OQ-AL).
 # Dependencies follow CP's order, each within one residency (same region code):
