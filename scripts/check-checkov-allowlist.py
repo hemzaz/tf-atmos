@@ -71,6 +71,20 @@ ALLOWLIST = (
     (r"/aws-config/main\.tf", "CKV_TF_1", TF_1),
     (r"/aws-config/remote-state\.tf", "CKV_TF_1", TF_1),
     (r"/aws-config/modules/org-conformance-pack/context\.tf", "CKV_TF_1", TF_1),
+    # aws-guardduty (vendor.yaml): GuardDuty delegated to the security account (E5c).
+    (r"/aws-guardduty/context\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-guardduty/kms\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-guardduty/main\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-guardduty/remote-state\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-guardduty/sns\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-guardduty/sqs\.tf", "CKV_TF_1", TF_1),
+    # aws-security-hub (vendor.yaml): Security Hub delegated to the security account (E5c).
+    (r"/aws-security-hub/context\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-security-hub/main\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-security-hub/remote-state\.tf", "CKV_TF_1", TF_1),
+    # aws-inspector2 (vendor.yaml): Inspector delegated to the security account (E5c).
+    (r"/aws-inspector2/context\.tf", "CKV_TF_1", TF_1),
+    (r"/aws-inspector2/remote-state\.tf", "CKV_TF_1", TF_1),
     # account-map's iam-roles module (vendor.yaml), reached through the account-map-bypass
     # providers mixin of the dns components and aws-iam-role (bypassed, still expanded).
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),
