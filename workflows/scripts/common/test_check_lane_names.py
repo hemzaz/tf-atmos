@@ -241,6 +241,32 @@ class GroupTest(unittest.TestCase):
                       "global-resource recording '(one per account)' in account prod", errors[0])
         self.assertIn("fnx-uw2-prod: aws-config", errors[1])
 
+    def test_security_eu_collector_is_the_one_scoped_allowance(self):
+        # OQ-EA: the security account collects in eu-west-1 too (its EU aggregator); no other
+        # account, no other region, and never twice in eu-west-1.
+        def collector(code, region, stage):
+            return instance(code, component="aws-config", stage=stage, region=region,
+                            global_resource_collector_region=region)
+
+        self.assertEqual(self.errors({
+            "fnx-ue1-security": stack(**{"aws-config": collector("ue1", "us-east-1", "security")}),
+            "fnx-ew1-security": stack(**{"aws-config": collector("ew1", "eu-west-1", "security")}),
+        }), [])
+        for stage, region in (("audit", "eu-west-1"), ("security", "eu-central-1")):
+            with self.subTest(stage=stage, region=region):
+                errors = self.errors({
+                    f"fnx-ue1-{stage}": stack(**{"aws-config": collector("ue1", "us-east-1", stage)}),
+                    f"fnx-x-{stage}": stack(**{"aws-config": collector("x", region, stage)}),
+                })
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn(f"global-resource recording '(one per account)' in account {stage}", errors[0])
+        errors = self.errors({
+            "fnx-ew1-security": stack(**{"aws-config": collector("ew1", "eu-west-1", "security")}),
+            "fnx-ew1-security-x": stack(**{"aws-config": collector("ew1-x", "eu-west-1", "security")}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("in account security, eu-west-1", errors[0])
+
     def test_account_settings_in_a_second_region_without_its_account_wide_settings_passes(self):
         # fnx-ue2-prod imports catalog/aws-account-settings/main-standby.
         self.assertEqual(self.errors({

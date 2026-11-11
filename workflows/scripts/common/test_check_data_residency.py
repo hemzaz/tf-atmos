@@ -1,4 +1,5 @@
 """Tests for check-data-residency.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import copy
 import importlib.util
 import pathlib
 import unittest
@@ -758,6 +759,11 @@ STATIC_MAP = {"full_account_map": {f"fnx-{a}": i for a, i in ORG_IDS.items()},
                   "dns-delegation": f"arn:aws:iam::{ORG_IDS['network']}:role/fnx-ue1-network-dns-delegation-security"}}
 US_MAP = {k: v for k, v in STATIC_MAP.items() if k != "iam_role_arn_templates"}
 US_MAP["full_account_map"] = {k: v for k, v in STATIC_MAP["full_account_map"].items() if k != "fnx-prod-eu"}
+# catalog aws-security-hub/eu-shared-account-suppressions: the shared accounts are the map minus prod-eu.
+SHARED = sorted(k for k in STATIC_MAP["full_account_map"] if k != "fnx-prod-eu")
+EU_SHARED = {"account_scoped_control_suppressions": {
+    "shared-accounts-global-iam": {"control_ids": ["IAM.1"], "account_names": SHARED, "disabled_reason": "home us-east-1"},
+    "shared-accounts-home-trail": {"control_ids": ["KMS.1"], "account_names": SHARED, "disabled_reason": "home us-east-1"}}}
 ORG_REGIONS = {"ue1": "us-east-1", "ue2": "us-east-2", "ew1": "eu-west-1", "ec1": "eu-central-1"}
 # Each component's `defaults` abstract.
 ORG_DEFAULTS = {
@@ -814,7 +820,7 @@ def org_services_stacks():
             # CP creates the suppression automation rules only with create_org_configuration (step 3).
             "aws-security-hub/org-settings": org_instance("aws-security-hub", "security", region,
                                                           on_root("aws-security-hub"), admin_delegated=True, **us_org,
-                                                          **standby),
+                                                          **standby, **(copy.deepcopy(EU_SHARED) if code == "ew1" else {})),
             "aws-inspector2/org-settings": org_instance(
                 "aws-inspector2", "security", region, on_root("aws-inspector2"), admin_delegated=True,
                 member_association_excludes=[] if eu else [ORG_IDS["prod-eu"]]),
@@ -892,6 +898,39 @@ class OrgServicesTest(unittest.TestCase):
         self.assertEqual(self.org(stacks), [
             "fnx-ew1-security: aws-security-hub/delegated-administrator vars.finding_aggregation_region is 'us-east-1', "
             f"{OUTSIDE}"])
+
+    def suppressions(self, stacks, stack_name="fnx-ew1-security"):
+        return stacks[stack_name]["components"]["terraform"]["aws-security-hub/org-settings"]["vars"][
+            "account_scoped_control_suppressions"]
+
+    def test_account_scoped_suppressions_never_name_a_gdpr_account(self):
+        # Review SF-2: prod-eu's home is eu-west-1, so its findings there must stay.
+        stacks = org_services_stacks()
+        self.suppressions(stacks)["shared-accounts-global-iam"]["account_names"] = SHARED + ["fnx-prod-eu"]
+        self.assertEqual(self.org(stacks), [
+            "fnx-ew1-security: aws-security-hub/org-settings account_scoped_control_suppressions.shared-accounts-global-iam "
+            "names fnx-prod-eu, an account whose stacks are all GDPR-scoped: its findings in its own home region must stay"])
+
+    def test_account_scoped_suppressions_only_in_a_gdpr_stack(self):
+        stacks = org_services_stacks()
+        for stack_name in ("fnx-ue1-security", "fnx-ue2-security"):
+            stacks[stack_name]["components"]["terraform"]["aws-security-hub/org-settings"]["vars"].update(copy.deepcopy(EU_SHARED))
+        errs = self.org(stacks)
+        self.assertEqual(len(errs), 2, errs)
+        for stack_name, err in zip(("fnx-ue1-security", "fnx-ue2-security"), errs):
+            self.assertTrue(err.startswith(f"{stack_name}: aws-security-hub/org-settings sets "
+                                           "account_scoped_control_suppressions outside the GDPR scope"), err)
+
+    def test_account_scoped_suppressions_cover_exactly_the_shared_accounts(self):
+        # Review SF-3: one shared account missing, or a name not in the map, both fail.
+        for names in (SHARED[1:], SHARED + ["fnx-sandbox"]):
+            with self.subTest(names=names):
+                stacks = org_services_stacks()
+                self.suppressions(stacks)["shared-accounts-home-trail"]["account_names"] = names
+                errs = self.org(stacks)
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("account_scoped_control_suppressions.shared-accounts-home-trail account_names", errs[0])
+                self.assertIn("are not the shared accounts (the account map minus ['fnx-prod-eu']", errs[0])
 
     def test_prod_eu_in_a_us_map_fails(self):
         # Step 1 (delegated-administrator) and root hold the full map: only org-settings makes members.

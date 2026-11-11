@@ -13,9 +13,9 @@
 # An EU stack points its settings.tfstate here, all of it
 # (stacks/orgs/fnx/_defaults.yaml). The bucket holds prod state
 # (fnx-ew1-prod and its DR standby fnx-ec1-prod, both in the prod-eu
-# account) and the EU core stacks' (fnx-ew1-audit, through core_write), so
-# this stack has the prod roles (catalog/backend/roles/prod) and no
-# read/write: check-state-keys.py fails a role that matches no state.
+# account) and the EU core stacks' (fnx-ew1-audit, fnx-ew1-security, through
+# core_write), so this stack has the prod roles (catalog/backend/roles/prod)
+# and no read/write: check-state-keys.py fails a role that matches no state.
 #
 # Bootstrap (cold start, once), then the management account's eu-west-1
 # settings (aws-account-settings, below):
@@ -147,6 +147,10 @@ components:
             object_key_patterns:
               - "*/fnx-ew1-audit/*"
               - "*/fnx-ew1-audit-*"
+              - "*/fnx-ew1-security/*"
+              - "*/fnx-ew1-security-*"
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/OrganizationAccountAccessRole"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"

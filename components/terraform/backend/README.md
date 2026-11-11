@@ -45,7 +45,7 @@ stage's write role until Identity Center is applied; the PR enabling that instan
   `prod-eu`'s) `TerraformPlanAccess-Prod` (EU: `-Eu`) / `AdministratorAccess`.
 - `core_write` (`fnx-terraform-backend-core-role`, EU `fnx-ew1-terraform-backend-core-role`): the
   core stages' objects (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`,
-  `fnx-ue1-identity`, `fnx-ue1-artifacts`; EU `fnx-ew1-audit`), trusted by each core account's
+  `fnx-ue1-identity`, `fnx-ue1-artifacts`; EU `fnx-ew1-audit`, `fnx-ew1-security`), trusted by each core account's
   `AdministratorAccess`. No read twin: `TFSTATE_ACCESS=read` selects it too.
 - `root_write` (`fnx-terraform-backend-root-role`, EU `fnx-ew1-terraform-backend-root-role`): the
   root stacks' objects only (`fnx-ue1-root`, `fnx-gbl-root`; EU `fnx-ew1-root`), trusted only by

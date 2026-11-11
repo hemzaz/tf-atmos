@@ -79,7 +79,10 @@ aggregator (outside the management account, admin_delegated off, finding_aggrega
 finding_aggregation_region its region, CP defaults true and us-east-1) is in a stack that is not
 GDPR-scoped and sets finding_aggregator_linking_mode SPECIFIED_REGIONS with a non-empty
 finding_aggregator_regions of non-eu regions only (ALL_REGIONS would pull in every EU region,
-also one enabled later); a GDPR-scoped stack's never aggregates. Their dependencies.components
+also one enabled later); a GDPR-scoped stack's never aggregates. Security Hub's account_scoped_control_suppressions (house
+account-suppressions_house.tf) is set only in a GDPR-scoped stack, and each entry's account_names
+is exactly its account_map's keys minus the all-GDPR ones: it never suppresses an all-GDPR account's
+findings (their home region is the EU one). Their dependencies.components
 (root <-> security) stay in one residency by the dependency rules above.
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
@@ -630,6 +633,29 @@ def auto_enable_errors(where: str, component: str, variables: dict) -> list[str]
             "existing account, the all-GDPR ones included, whatever the account_map)"]
 
 
+def suppression_errors(where: str, variables: dict, tenant: str, gdpr: bool) -> list[str]:
+    """aws-security-hub account_scoped_control_suppressions (account-suppressions_house.tf): only an EU admin's, and
+    each entry suppresses exactly the shared accounts (the map minus the all-GDPR ones), never an all-GDPR one."""
+    suppressions = variables.get("account_scoped_control_suppressions") or {}
+    if not suppressions:
+        return []
+    if not gdpr:
+        return [f"{where} sets account_scoped_control_suppressions outside the GDPR scope: they exist to keep an EU "
+                "administrator from suppressing the all-GDPR accounts' home-region findings; a US region suppresses "
+                "with disabled_control_finding_reasons"]
+    eu_keys = {f"{tenant}-{a}" for a in GDPR_ONLY_ACCOUNTS}
+    shared = set((variables.get("account_map") or {}).get("full_account_map") or {}) - eu_keys
+    errors = []
+    for key, entry in sorted(suppressions.items()):
+        names = {str(n) for n in (entry or {}).get("account_names") or []}
+        errors += [f"{where} account_scoped_control_suppressions.{key} names {name}, an account whose stacks are all "
+                   "GDPR-scoped: its findings in its own home region must stay" for name in sorted(names & eu_keys)]
+        if names - eu_keys != shared:
+            errors.append(f"{where} account_scoped_control_suppressions.{key} account_names {sorted(names - eu_keys)} "
+                          f"are not the shared accounts (the account map minus {sorted(eu_keys)}: {sorted(shared)})")
+    return errors
+
+
 def org_service_errors(stacks: dict, scoped: set) -> list[str]:
     """ORG_SERVICES members and Security Hub aggregation kept in their residency (owner OQ-RES/OQ-SH)."""
     eu, eu_ids = gdpr_only_accounts(stacks, scoped)
@@ -646,6 +672,8 @@ def org_service_errors(stacks: dict, scoped: set) -> list[str]:
                                   "are not aggregated (set finding_aggregator_enabled false)")
                 else:
                     errors += aggregator_region_errors(where, variables)
+            if component == "aws-security-hub":
+                errors += suppression_errors(where, variables, str(tenant_of(instance)), stack_name in scoped)
             if not is_management(instance) and flag_on(variables.get("admin_delegated")):
                 errors += member_map_errors(where, component, variables, str(tenant_of(instance)), eu_ids,
                                             stack_name in scoped)

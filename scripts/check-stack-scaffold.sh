@@ -34,8 +34,8 @@
 # Last, the fresh-stack end to end: brand-new stacks generated with the hooks
 # (a us-west-2 stack of each nonprod flavor with account_singletons=no beside
 # its account's committed stack, a us-west-2 core stack, the EU core stack
-# fnx-ew1-security (its account's operator role added to the EU backend's
-# core_write in the scratch copy first), and a prod primary +
+# fnx-ew1-security (its committed file and pattern pair removed from the
+# scratch copy first, its account staying onboarded), and a prod primary +
 # standby pair,
 # fnx-ue1-prod with its DR in us-west-2 and the new standby fnx-uw2-prod, in
 # place of the committed ue1/ue2 pair: no other prod primary is generatable,
@@ -83,7 +83,7 @@ ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.y
 # Core stacks whose account's OrganizationAccountAccessRole is in their
 # backend's core_write (stacks/orgs/fnx/root/us-east-1.yaml, eu-west-1.yaml
 # for the EU core stacks): their golden must report wired.
-ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security fnx-ue1-identity fnx-ue1-artifacts fnx-ew1-audit"
+ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security fnx-ue1-identity fnx-ue1-artifacts fnx-ew1-audit fnx-ew1-security"
 
 # A critical_alerts answer that runs a command if any hook interpolates it
 # into shell unchecked (literal: the $( ) is the point).
@@ -128,8 +128,8 @@ REFUSALS=(
     "fnx-ew1-prod|the prod-eu account already has its prod primary (eu-west-1.yaml)|region=eu-central-1 region_code=ec1 az_ids=euc1-az1,euc1-az2,euc1-az3 dr_region=eu-west-1 dr_region_code=ew1"
     # Core stacks: profile core takes exactly the core accounts' stages, each
     # in its own account, outside the EU but for audit and security in
-    # eu-west-1 (scripts/stack-wiring.py EU_CORE_STAGES/EU_CORE_REGIONS; the
-    # fresh stacks below generate fnx-ew1-security).
+    # eu-west-1 (scripts/stack-wiring.py EU_CORE_STAGES/EU_CORE_REGIONS; both
+    # exist, so the fresh stacks below regenerate fnx-ew1-security).
     "fnx-ue1-security|a core stack is a core account's stack|stage=dev account=dev"
     "fnx-ue1-dev|stage security is a core account's: its stack takes profile core|stage=security account=security"
     "fnx-ue1-security|account audit does not belong to stage security|account=audit"
@@ -633,9 +633,10 @@ FRESH=(
     # lines; the account's operator role is already there, from fnx-ue1-security).
     "fnx-ue1-security|fnx-uw2-security|region=us-west-2 region_code=uw2"
     # An EU core stack (audit/security in eu-west-1): its pair joins the EU
-    # backend's core_write, where the scratch setup below lists the security
-    # account's operator role (the hand edit of its first EU stack).
-    "fnx-ue1-security|fnx-ew1-security|region=eu-west-1 region_code=ew1"
+    # backend's core_write, which already trusts the security account's
+    # operator role (both EU core stacks exist, so the scratch setup below
+    # removes the committed fnx-ew1-security and its pair first).
+    "fnx-ew1-security|fnx-ew1-security|"
 )
 us_root="${ROOT_FILES[0]}"
 eu_root="${ROOT_FILES[1]}"
@@ -643,19 +644,12 @@ files_list > "$out/fresh.before"
 cp "$us_root" "$out/fresh.us.committed"
 cp "$eu_root" "$out/fresh.eu.committed"
 fresh_ok=1
-rm stacks/orgs/fnx/prod/us-east-1.yaml stacks/orgs/fnx/prod/us-east-2.yaml stacks/orgs/fnx/prod/eu-central-1.yaml
-# Only the pair's list items go; the comments naming them stay.
+rm stacks/orgs/fnx/prod/us-east-1.yaml stacks/orgs/fnx/prod/us-east-2.yaml stacks/orgs/fnx/prod/eu-central-1.yaml \
+    stacks/orgs/fnx/security/eu-west-1.yaml
+# Only the stacks' list items go; the comments naming them, and the security
+# account's principals on the EU core_write (it stays onboarded), stay.
 grep -v -E '^ *- .*(fnx-ue1-prod|fnx-ue2-prod)' "$out/fresh.us.committed" > "$us_root"
-grep -v -E '^ *- .*fnx-ec1-prod' "$out/fresh.eu.committed" > "$eu_root"
-# fnx-ew1-security's account onboarded on the EU backend: its operator role
-# beside the audit account's on core_write (the only OAAR in that file).
-cp "$eu_root" "$out/fresh.eu.unonboarded"
-sed '/full_account_map[.]audit }}:role[/]OrganizationAccountAccessRole"$/{p;s/[.]audit }}/.security }}/;}' \
-    "$out/fresh.eu.unonboarded" > "$eu_root"
-if ! grep -q 'full_account_map[.]security }}:role/OrganizationAccountAccessRole"$' "$eu_root"; then
-    echo "ERROR fresh: could not add the security account's operator role to $eu_root's core_write" >&2
-    failed="$failed fresh"
-fi
+grep -v -E '^ *- .*(fnx-ec1-prod|fnx-ew1-security)' "$out/fresh.eu.committed" > "$eu_root"
 cp "$us_root" "$out/fresh.us.base"
 cp "$eu_root" "$out/fresh.eu.base"
 fresh=()

@@ -4,7 +4,9 @@
 [[- $eu := eq .Config.region "eu-west-1" -]]
 [[- $root := printf "%s-%s-root" .Config.tenant (ternary "ew1" "ue1" $eu) -]]
 [[- $archive := and (eq .Config.stage "audit") (or $home $eu) -]]
-[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) "main-core-region" $home -]]
+[[- /* fnx-ew1-security holds the EU Config aggregator (E5c OQ-EA): its own collector, aws-config/security-eu. */ -]]
+[[- $eu_aggregator := and $eu (eq .Config.stage "security") -]]
+[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) (ternary "security-eu" "main-core-region" $eu_aggregator) $home -]]
 ---
 # =============================================================================
 # [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
@@ -32,6 +34,14 @@
 [[- end ]]. Both are in
 # deploy-full-stack's security layer, after the audit stack's storage layer
 # (docs/OPERATIONS.md "Bootstrap order").
+[[- else if $eu_aggregator ]]
+#
+# The account's Config recorder for [[ .Config.region ]] (aws-config, inheriting
+# aws-config/security-eu, owner OQ-EA): its own global-resource collector, with
+# its own role, delivering to [[ .Config.tenant ]]-ew1-audit's config-bucket, because it also
+# holds the EU account aggregator (prod-eu), which Cloud Posse creates only in
+# the collector region. No trail: the account's one multi-region trail, in its
+# home stack, records this region (owner OQ-A).
 [[- else ]]
 #
 # The account's Config recorder for [[ .Config.region ]] (aws-config, inheriting
@@ -55,8 +65,8 @@
 # eu-west-1, scripts/stack-wiring.py EU_CORE_STAGES/EU_CORE_REGIONS), in the
 # same shared [[ .Config.stage ]] account: GDPR-scoped (check-data-residency.py),
 # so tagged Compliance "pci-sox-gdpr", its recorder delivering to the EU
-# archive ([[ .Config.tenant ]]-ew1-audit) under the scoped OQ-A exemption for its US collector
-# region, and its state in the EU backend ([[ $root ]],
+# archive ([[ .Config.tenant ]]-ew1-audit)[[ if not $eu_aggregator ]] under the scoped OQ-A exemption for its US collector
+# region[[ end ]], and its state in the EU backend ([[ $root ]],
 # stacks/orgs/[[ .Config.tenant ]]/root/eu-west-1.yaml), whose core_write trusts the
 # [[ .Config.stage ]] account's OrganizationAccountAccessRole.
 [[- end ]]
@@ -83,7 +93,7 @@ import:
 [[- if $home ]]
   - catalog/aws-cloudtrail/defaults
 [[- end ]]
-  - catalog/aws-config/main
+  - catalog/aws-config/[[ ternary "security-eu" "main" $eu_aggregator ]]
 [[- if $eu ]]
 
 vars:
@@ -105,7 +115,7 @@ settings:
 
 components:
   terraform:
-    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    # Cloud Posse's instance name; the variant is catalog/aws-config/[[ ternary "security-eu" "main" $eu_aggregator ]].yaml's.
     aws-config:
       metadata:
         component: aws-config

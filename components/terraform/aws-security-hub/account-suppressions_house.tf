@@ -27,8 +27,19 @@ variable "account_scoped_control_suppressions" {
     error_message = "Each entry needs 1-20 control_ids and 1-100 account_names (AWS automation rule criteria limits)."
   }
   validation {
-    condition     = alltrue([for v in values(var.account_scoped_control_suppressions) : trimspace(v.disabled_reason) != ""])
-    error_message = "Each entry needs a non-empty disabled_reason."
+    condition = alltrue([for v in values(var.account_scoped_control_suppressions) :
+    trimspace(v.disabled_reason) != "" && length(v.disabled_reason) <= 512])
+    error_message = "Each entry needs a disabled_reason of 1-512 characters (it is also the finding note, AWS Note.Text <= 512)."
+  }
+  # The key names the rule ("Suppress <key>"); the API documents no rule-name limit, so this is a
+  # house bound that keeps names short and printable.
+  validation {
+    condition     = alltrue([for k in keys(var.account_scoped_control_suppressions) : can(regex("^[A-Za-z0-9._-]{1,64}$", k))])
+    error_message = "Each key must be 1-64 characters of letters, digits, '.', '_' or '-'."
+  }
+  validation {
+    condition     = alltrue([for v in values(var.account_scoped_control_suppressions) : v.rule_order >= 1 && v.rule_order <= 1000])
+    error_message = "rule_order must be 1-1000 (CreateAutomationRule RuleOrder)."
   }
 }
 

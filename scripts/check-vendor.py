@@ -13,8 +13,10 @@ only: TESTS) and a top-level .tflint.hcl that is the repository's
 .tflint.hcl verbatim plus only rule blocks disabling a rule, each after a # reason (TFLINT), and
 each listed for its target in TFLINT_ALLOWLIST, which fails an entry nothing disables (stale),
 and the house files HOUSE_FILE_ALLOWLIST lists by (target, file, reason), which fails an entry
-whose file is missing (stale) or that the pull now ships (rename it); each BYPASSED_READS override
-must keep `bypass = true` in its remote-state module (no live remote-state read).
+whose file is missing (stale), that the pull now ships (rename it) or not named *_house.tf; no house
+.tf holds a moved/removed/import block, nor an allowlisted house file a provider block; each
+BYPASSED_READS override must keep `bypass = true` in its remote-state module, and no other
+*_override.tf may set that module's bypass to anything else (no live remote-state read).
 Atmos 1.229's receipt omits the version (`atmos vendor
 verify` passes a changed pin), so --repull pulls the manifest into a scratch dir and fails a file
 that differs from the receipt or a target the pull or the receipt lacks.
@@ -73,6 +75,10 @@ TFLINT_ALLOWLIST = (
 # ships it; the vendor pull only writes the files its included_paths match and deletes nothing. An
 # unlisted house file fails (above), and so does an entry whose file is gone (stale) or that the
 # pull now records (upstream took the name: rename the house file).
+HOUSE_SUFFIX = "_house.tf"
+# Blocks no house .tf may hold (an override or an allowlisted house file): they move, forget or
+# import the vendored resources' state behind the pinned code's back.
+HOUSE_BANNED_BLOCKS = ("moved", "removed", "import")
 HOUSE_FILE_ALLOWLIST = (
     ("components/terraform/aws-guardduty", "detector_house.tf",
      "E5c OQ-W: the delegated administrator's detector, looked up in its own account and region "
@@ -216,6 +222,8 @@ def check_lock(manifest, lock, root, tflint_allowlist=None, house_allowlist=None
              if not str(why or "").strip()]
     errs += [f"{target}/{name}: HOUSE_FILE_ALLOWLIST entry has no reason" for target, name, why in house_allowlist
              if not str(why or "").strip()]
+    errs += [f"{target}/{name}: HOUSE_FILE_ALLOWLIST entry must be named *{HOUSE_SUFFIX} (a suffix Cloud Posse "
+             "does not use)" for target, name, _ in house_allowlist if not str(name).endswith(HOUSE_SUFFIX)]
     declared = {(s.get("component"), (s.get("targets") or [None])[0]) for s in sources(manifest)}
     for name, target in sorted(set(have) - declared, key=str):
         errs.append(f"{LOCK}: receipt for {name} -> {target}, which {MANIFEST} does not declare (atmos vendor clean)")
@@ -242,6 +250,7 @@ def check_lock(manifest, lock, root, tflint_allowlist=None, house_allowlist=None
         errs += [f"{target}/{r}: not from the vendor pull; only {', '.join(HOUSE_FILES)}, "
                  f"{'/'.join(TESTS)}, a top-level {TFLINT} and the HOUSE_FILE_ALLOWLIST files may be added"
                  for r in regular if r not in kept]
+        errs += house_block_errors(root, target, [r for r in kept if r not in locked and r.endswith(".tf")], listed)
         if TFLINT in regular and TFLINT not in locked:
             found, rules = tflint_errors(root, target, tflint_allowlist)
             errs += found
@@ -257,8 +266,23 @@ def check_lock(manifest, lock, root, tflint_allowlist=None, house_allowlist=None
     return errs
 
 
+def house_block_errors(root, target, house_tf, listed):
+    """House .tf files (overrides and HOUSE_FILE_ALLOWLIST files) that hold a block a house file must
+    not: moved/removed/import rewrite or adopt the vendored resources' state, and a provider in an
+    allowlisted house file would reconfigure the component's own (an override may replace one)."""
+    errs = []
+    for rel in house_tf:
+        with open(os.path.join(root, target, rel)) as fh:
+            text = fh.read()
+        banned = HOUSE_BANNED_BLOCKS + (("provider",) if rel in listed else ())
+        for kind in sorted(set(re.findall(r"^(" + "|".join(banned) + r")\b", text, re.MULTILINE))):
+            errs.append(f"{target}/{rel}: a {kind} block; house files may not hold {', '.join(banned)} blocks")
+    return errs
+
+
 def bypass_errors(root, bypassed):
-    """BYPASSED_READS whose override no longer sets `bypass = true` in the module's block."""
+    """BYPASSED_READS whose override no longer sets `bypass = true` in the module's block, or that
+    another *_override.tf (merged after it, Terraform's override order) sets to anything else."""
     errs = []
     for target, name, module, why in bypassed:
         try:
@@ -268,10 +292,18 @@ def bypass_errors(root, bypassed):
             errs.append(f"{target}/{name}: missing; it must bypass module {module} ({why})")
             continue
         # The block runs from its header to the first closing brace at column 0 (terraform fmt).
-        block = re.search(r'^module "' + re.escape(module) + r'" \{\n(.*?)^\}', text, re.MULTILINE | re.DOTALL)
+        header = r'^module "' + re.escape(module) + r'" \{\n(.*?)^\}'
+        block = re.search(header, text, re.MULTILINE | re.DOTALL)
         if not block or not re.search(r"^\s*bypass\s*=\s*true\s*$", block.group(1), re.MULTILINE):
             errs.append(f"{target}/{name}: module {module} must set `bypass = true` "
                         f"(a live remote-state read otherwise; {why})")
+        for other in sorted(set(fnmatch.filter(os.listdir(os.path.join(root, target)), HOUSE_FILES[1])) - {name}):
+            with open(os.path.join(root, target, other)) as fh:
+                blocks = re.findall(header, fh.read(), re.MULTILINE | re.DOTALL)
+            values = [v.strip() for b in blocks for v in re.findall(r"^[ \t]*bypass[ \t]*=(.*)$", b, re.MULTILINE)]
+            if any(v != "true" for v in values):
+                errs.append(f"{target}/{other}: module {module} sets bypass to other than true "
+                            f"(overrides merge, so it undoes {name}'s bypass; {why})")
     return errs
 
 
