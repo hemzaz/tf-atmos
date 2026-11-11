@@ -291,8 +291,9 @@ def bypass_errors(root, bypassed):
         except OSError:
             errs.append(f"{target}/{name}: missing; it must bypass module {module} ({why})")
             continue
-        # The block runs from its header to the first closing brace at column 0 (terraform fmt).
-        header = r'^module "' + re.escape(module) + r'" \{\n(.*?)^\}'
+        # The block runs from its header to the first closing brace at column 0 (terraform fmt); the
+        # header itself may be spaced loosely (an unformatted file still overrides).
+        header = r'^[ \t]*module[ \t]+"' + re.escape(module) + r'"[ \t]*\{[ \t]*\n(.*?)^\}'
         block = re.search(header, text, re.MULTILINE | re.DOTALL)
         if not block or not re.search(r"^\s*bypass\s*=\s*true\s*$", block.group(1), re.MULTILINE):
             errs.append(f"{target}/{name}: module {module} must set `bypass = true` "

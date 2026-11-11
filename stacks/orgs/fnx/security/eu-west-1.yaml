@@ -3,7 +3,7 @@
 # fnx-ew1-security - the security account's eu-west-1 stack
 # =============================================================================
 # A core-account stack (owner decision QE5): its stage defaults'
-# aws-account-settings, and the account's trail and Config recorder below.
+# aws-account-settings, and the account's Config recorder below.
 #
 # The account's Config recorder for eu-west-1 (aws-config, inheriting
 # aws-config/security-eu, owner OQ-EA): its own global-resource collector, with

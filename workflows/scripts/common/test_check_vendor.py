@@ -287,6 +287,13 @@ class LockTest(Fixture):
                 errs = self.bypass()
                 self.assertEqual(len(errs), 1, errs)
                 self.assertIn("z_override.tf: module detector sets bypass to other than true", errs[0])
+        # An unformatted header (extra spaces, no space before the brace) is still that module's block.
+        for header in ('module  "detector"{', 'module "detector"   {  '):
+            with self.subTest(header=header):
+                self.write(f"{TARGET}/z_override.tf", f"{header}\n  bypass = false\n}}\n")
+                errs = self.bypass()
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("z_override.tf: module detector sets bypass to other than true", errs[0])
         self.write(f"{TARGET}/z_override.tf", 'module "detector" {\n  count = 0\n}\n')
         self.assertEqual(self.bypass(), [])
 

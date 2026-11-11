@@ -375,11 +375,14 @@ and that every enabled instance is in exactly one layer.
 **Security services first-apply checks** (GuardDuty, Security Hub, Inspector: Cloud Posse's three
 steps, per region; none of this can be verified offline). Apply step 1 (the security stack's
 `<service>/delegated-administrator`, `security` layer) before step 2 (the root stack's
-`<service>/root`, the delegation), and step 3 (`org-settings`, `security-org` layer) last. Then, in
-each operated region:
+`<service>/root`, the delegation), and step 3 (`org-settings`, `security-org` layer) last. Then:
 
-1. Trusted access: `aws organizations list-aws-service-access-for-organization` lists
-   `guardduty`, `securityhub` and `inspector2.amazonaws.com`.
+1. Trusted access, once, from the management account (Organizations is not regional):
+   `aws organizations list-aws-service-access-for-organization` lists the ServicePrincipals
+   `guardduty.amazonaws.com`, `securityhub.amazonaws.com` and `inspector2.amazonaws.com`.
+
+In each operated region (`--region <r>`):
+
 2. The delegated administrator is the security account: `aws guardduty
    list-organization-admin-accounts`, `aws securityhub list-organization-admin-accounts`,
    `aws inspector2 list-delegated-admin-accounts`.
@@ -390,11 +393,18 @@ each operated region:
    read what they report and turn off by hand any the owner does not want; Terraform never will.
 4. Each member's detector: `aws guardduty get-member-detectors --detector-id <admin detector>
    --account-ids <members>` (or `aws guardduty get-detector` in the member) lists the same
-   features, ENABLED for the three managed ones.
-5. Security Hub aggregation: in us-east-1 `aws securityhub get-finding-aggregator` links
-   `us-east-2` only (`SPECIFIED_REGIONS`); `list-finding-aggregators` is empty in the EU regions.
-6. Residency: `prod-eu` is absent from `aws guardduty list-members` and `aws securityhub
-   list-members` in the US regions, and a member in eu-west-1/eu-central-1.
+   features, ENABLED for the three managed ones. A member that existed before step 3 may show
+   them DISABLED: auto-enable `NEW` targets accounts that join later, and only this check shows
+   whether step 3's CreateMembers applied the features to an existing member; enable them by hand there. Security Hub has the same open
+   question for LOCAL `auto_enable` and accounts that predate step 3 (E5c plan, before E5c6).
+5. Security Hub aggregation: `aws securityhub list-finding-aggregators --region us-east-1`, then
+   `aws securityhub get-finding-aggregator --finding-aggregator-arn <arn> --region us-east-1`
+   shows `RegionLinkingMode` `SPECIFIED_REGIONS` and `Regions` `[us-east-2]`;
+   `list-finding-aggregators` is empty in the EU regions.
+6. Residency, per region: `aws guardduty list-members --detector-id <admin detector id>
+   --only-associated false` and `aws securityhub list-members --no-only-associated` (both default
+   to associated members only, which would hide an invited but unassociated `prod-eu`) list no
+   `prod-eu` in the US regions, and list it in eu-west-1/eu-central-1.
 
 **The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
 its own workflow, run with management-account administrator credentials, never by CI:

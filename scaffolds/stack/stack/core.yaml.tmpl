@@ -20,7 +20,7 @@
 # the storage layer (workflows/deploy-full-stack.yaml).
 [[- else ]]
 # A core-account stack (owner decision QE5): its stage defaults'
-# aws-account-settings, and the account's trail and Config recorder below.
+# aws-account-settings, and the account's [[ if $home ]]trail and [[ end ]]Config recorder below.
 [[- end ]]
 [[- if $home ]]
 #
