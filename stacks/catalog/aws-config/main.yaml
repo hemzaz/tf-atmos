@@ -32,7 +32,8 @@
 #
 # Upstream's own read of the collector region's role (remote state of
 # "aws-config-<region code>") is bypassed (remote-state_override.tf); these
-# variants set iam_role_arn instead.
+# variants set iam_role_arn instead. fnx-ew1-security's variant, aws-config/security-eu
+# (its own collector and the EU aggregator), is in security-eu.yaml.
 # =============================================================================
 
 import:
@@ -66,7 +67,7 @@ components:
           - *home_role
 
     # OQ-B: the aggregator covers every account but prod-eu (whose data stays
-    # in the EU: its aggregator is fnx-ew1-security's, E5c). Cloud Posse
+    # in the EU: its aggregator is fnx-ew1-security's, security-eu.yaml). Cloud Posse
     # hardcodes all_regions, so it also reads the shared accounts' eu-west-1
     # recorders: the accepted, scoped check-data-residency exemption.
     aws-config/security:

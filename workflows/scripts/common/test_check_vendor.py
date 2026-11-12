@@ -234,6 +234,30 @@ class LockTest(Fixture):
         self.assertEqual(len(errs), 1, errs)
         self.assertIn("rename the house file", errs[0])
 
+    def test_house_entry_must_be_named_house_tf(self):
+        self.write(f"{TARGET}/detector.tf", "")
+        errs = self.house(((TARGET, "detector.tf", "a lookup"),))
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("must be named *_house.tf", errs[0])
+
+    def test_house_files_reject_state_and_provider_blocks(self):
+        # moved/removed/import in any house .tf (allowlisted or override); provider in an
+        # allowlisted house file only (an override may replace the provider).
+        for rel, text in (("detector_house.tf", 'moved {\n  from = a.b\n  to   = a.c\n}\n'),
+                          ("detector_house.tf", 'removed {\n  from = a.b\n}\n'),
+                          ("detector_house.tf", 'import {\n  to = a.b\n  id = "x"\n}\n'),
+                          ("detector_house.tf", 'provider "aws" {\n  region = "us-east-1"\n}\n'),
+                          ("main_override.tf", 'import {\n  to = a.b\n  id = "x"\n}\n')):
+            with self.subTest(rel=rel, text=text):
+                self.write(f"{TARGET}/{rel}", text)
+                errs = [e for e in self.house(self.HOUSE_LISTED) if "stale" not in e]
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn(f"{rel}: a {text.split()[0]} block", errs[0])
+                os.remove(os.path.join(self.root, TARGET, rel))
+        self.write(f"{TARGET}/detector_house.tf", 'data "aws_guardduty_detector" "this" {}\n')
+        self.write(f"{TARGET}/providers_override.tf", 'provider "aws" {\n  alias = "x"\n}\n')
+        self.assertEqual(self.house(self.HOUSE_LISTED), [])
+
     BYPASSED = ((TARGET, "remote-state_override.tf", "detector", "no live read"),)
     OVERRIDE = 'module "detector" {\n  count  = 1\n  bypass = BYPASS\n  defaults = {\n    id = "x"\n  }\n}\n'
 
@@ -253,6 +277,25 @@ class LockTest(Fixture):
                 errs = self.bypass()
                 self.assertEqual(len(errs), 1, errs)
                 self.assertIn("must set `bypass = true`", errs[0])
+
+    def test_another_override_undoing_the_bypass_fails(self):
+        # Overrides merge (z_ after remote-state_): a later bypass = false or a variable wins.
+        self.write(f"{TARGET}/remote-state_override.tf", self.OVERRIDE.replace("BYPASS", "true"))
+        for value in ("false", "var.bypass"):
+            with self.subTest(value=value):
+                self.write(f"{TARGET}/z_override.tf", self.OVERRIDE.replace("BYPASS", value))
+                errs = self.bypass()
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("z_override.tf: module detector sets bypass to other than true", errs[0])
+        # An unformatted header (extra spaces, no space before the brace) is still that module's block.
+        for header in ('module  "detector"{', 'module "detector"   {  '):
+            with self.subTest(header=header):
+                self.write(f"{TARGET}/z_override.tf", f"{header}\n  bypass = false\n}}\n")
+                errs = self.bypass()
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("z_override.tf: module detector sets bypass to other than true", errs[0])
+        self.write(f"{TARGET}/z_override.tf", 'module "detector" {\n  count = 0\n}\n')
+        self.assertEqual(self.bypass(), [])
 
     def test_missing_bypass_override_fails(self):
         errs = self.bypass()

@@ -58,7 +58,8 @@
 #       CENTRAL (it replaces CP's LOCAL one: set org-settings' auto-enable off
 #       or drop CP's resource there, one owner per region), one
 #       aws_securityhub_configuration_policy per profile (baseline: FSBP + CIS;
-#       pci: baseline + "standards/pci-dss/v/3.2.1", any disabled controls)
+#       pci: baseline + "standards/pci-dss/v/4.0.1", the current PCI DSS
+#       standard (v3.2.1 is the retiring one), any disabled controls)
 #       and aws_securityhub_configuration_policy_association per target (the
 #       plat OU, or only fnx-prod and fnx-prod-eu). CENTRAL needs the
 #       aggregator and governs only the linked regions, so the EU regions

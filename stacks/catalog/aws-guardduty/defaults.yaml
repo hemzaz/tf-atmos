@@ -35,8 +35,14 @@
 #
 # Owner decisions (E5c plan, 2026-11-10):
 #   - OQ-GD: one org-wide protection plan: S3, EKS audit logs and EBS malware
-#     scanning on; runtime monitoring, Lambda network logs and RDS login
-#     events off (RDS: no CP input, off); findings every FIFTEEN_MINUTES. The
+#     scanning on and managed; runtime monitoring, Lambda network logs and RDS
+#     login events UNMANAGED, not disabled: Cloud Posse creates a feature's
+#     resource only when its flag is true (main.tf count), so false leaves the
+#     feature at whatever GuardDuty or a console user set (RDS: no CP input at
+#     all). GuardDuty may turn some on by default for a new detector or
+#     member (and bill them): the first-apply checks (docs/OPERATIONS.md,
+#     "Security services first-apply checks") read the actual state. Findings
+#     every FIFTEEN_MINUTES. The
 #     hand-written component's Portscan auto-archive filter is dropped (CP has
 #     no filter; security-monitoring routes alert at severity >= 4).
 #   - OQ-W: step 3 reads step 1's detector id with a data source in its own
@@ -73,6 +79,7 @@ components:
         s3_protection_enabled: true
         kubernetes_audit_logs_enabled: true
         malware_protection_scan_ec2_ebs_volumes_enabled: true
+        # false = not managed by CP (no feature resource), not "disabled".
         lambda_network_logs_enabled: false
         runtime_monitoring_enabled: false
         eks_runtime_monitoring_enabled: false

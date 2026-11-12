@@ -193,6 +193,7 @@ class Wire(Copy):
                     and len(lines[i]) - len(lines[i].lstrip()) <= indent), len(lines))
         block = [line for line in lines[start[0]:end]
                  if line.strip() != "allowed_principal_arns:" and "OrganizationAccountAccessRole" not in line
+                 and "AWSReservedSSO_AdministratorAccess" not in line
                  and not any(f"*/fnx-ew1-{stage}" in line for stage in wiring.EU_CORE_STAGES)]
         text = "".join(lines[:start[0]] + block + lines[end:])
         (self.root / EU).write_text(text)
@@ -219,10 +220,10 @@ class Wire(Copy):
         self.assertEqual(self.text(US), self.committed[US])
 
     def test_committed_eu_core_write(self) -> None:
-        # E5a2: the audit account is onboarded on the EU backend and fnx-ew1-audit wired; the
-        # security account is not yet (E5c).
+        # E5a2 and E5c3: the audit and security accounts are onboarded on the EU backend, and
+        # fnx-ew1-audit and fnx-ew1-security wired.
         self.assertEqual(self.wire("fnx", "audit", "", "eu-west-1", "fnx-ew1-audit"), [])
-        self.assertIsNone(self.wire("fnx", "security", "", "eu-west-1", "fnx-ew1-security"))
+        self.assertEqual(self.wire("fnx", "security", "", "eu-west-1", "fnx-ew1-security"), [])
         self.assertEqual(self.text(EU), self.committed[EU])
         self.assertEqual(self.text(US), self.committed[US])
 

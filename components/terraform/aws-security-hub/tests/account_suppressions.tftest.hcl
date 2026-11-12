@@ -70,6 +70,53 @@ run "org_settings_rule_filters_the_shared_accounts" {
     condition     = toset([for c in aws_securityhub_automation_rule.suppress_account_control_findings["shared-iam"].criteria[0].compliance_security_control_id : c.value]) == toset(["IAM.1", "KMS.1"])
     error_message = "the rule matches the listed controls"
   }
+  assert {
+    condition = alltrue(concat(
+      [for c in aws_securityhub_automation_rule.suppress_account_control_findings["shared-iam"].criteria[0].aws_account_id : c.comparison == "EQUALS"],
+      [for c in aws_securityhub_automation_rule.suppress_account_control_findings["shared-iam"].criteria[0].compliance_security_control_id : c.comparison == "EQUALS"],
+    ))
+    error_message = "account and control filters match exactly (EQUALS), never by prefix or substring"
+  }
+  assert {
+    condition     = one([for a in aws_securityhub_automation_rule.suppress_account_control_findings["shared-iam"].actions : one(a.finding_fields_update[0].workflow).status]) == "SUPPRESSED"
+    error_message = "the rule suppresses the matching findings"
+  }
+}
+
+run "too_long_disabled_reason_fails" {
+  command = plan
+  variables {
+    account_scoped_control_suppressions = {
+      x = {
+        control_ids     = ["IAM.1"]
+        account_names   = ["fnx-prod"]
+        disabled_reason = join("", [for i in range(513) : "r"])
+      }
+    }
+  }
+  override_data {
+    target = data.aws_caller_identity.this[0]
+    values = { account_id = "222222222222" }
+  }
+  expect_failures = [var.account_scoped_control_suppressions]
+}
+
+run "bad_rule_key_fails" {
+  command = plan
+  variables {
+    account_scoped_control_suppressions = {
+      "has space" = {
+        control_ids     = ["IAM.1"]
+        account_names   = ["fnx-prod"]
+        disabled_reason = "r"
+      }
+    }
+  }
+  override_data {
+    target = data.aws_caller_identity.this[0]
+    values = { account_id = "222222222222" }
+  }
+  expect_failures = [var.account_scoped_control_suppressions]
 }
 
 # Step 1 (admin_delegated false) and root make no rule.

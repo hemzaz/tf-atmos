@@ -30,7 +30,8 @@ it cannot be checked. Within a group this fails:
     the vendored aws-cloudtrail (multi-region with global events unless set
     false, CP defaults) and aws-config (its global-resource collector, the
     instance whose global_resource_collector_region is its stack's region,
-    or unset: REGION_SINGLETONS);
+    or unset: REGION_SINGLETONS; the security account may also collect in
+    eu-west-1 for the EU Config aggregator: REGION_SINGLETON_ALLOWANCES);
     stage fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
@@ -163,6 +164,13 @@ SINGLETONS = {
 REGION_SINGLETONS = {
     ("aws-config", "global_resource_collector_region"): "AWS Config global-resource recording",
 }
+# (kind, account, region): a REGION_SINGLETONS kind an account may create a second time, in that
+# region only (one per region still holds). Owner OQ-EA (a), 2026-11-10: Cloud Posse creates the
+# Config aggregator only in the central account's collector region, so the security account's EU
+# aggregator (fnx-ew1-security, catalog/aws-config/security-eu.yaml) needs its own collector there.
+REGION_SINGLETON_ALLOWANCES = {
+    ("AWS Config global-resource recording", "security", "eu-west-1"),
+}
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
 # region (IAM is global within an account).
 ACCOUNT_WIDE = {"IAM role", "IAM policy", "IAM CI role prefix", *SINGLETONS.values(), *REGION_SINGLETONS.values()}
@@ -291,7 +299,7 @@ def check_account(stacks: dict) -> list[str]:
         for name, instance in instances_of(stacks[stack_name]):
             stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
             for kind, value, key in created(instance, stage):
-                if kind not in ACCOUNT_WIDE:
+                if kind not in ACCOUNT_WIDE or (kind, account, region) in REGION_SINGLETON_ALLOWANCES:
                     continue
                 here = (f"{stack_name}: {name} {key}", region)
                 first = owners.setdefault((account, kind, value), here)

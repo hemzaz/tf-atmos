@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# aws-config/security-eu: the variant fnx-ew1-security's aws-config inherits
+# =============================================================================
+# The EU Config aggregator (owner OQ-B, E5c OQ-EA (a), 2026-11-10): prod-eu's
+# configuration data aggregated in the EU, never by fnx-ue1-security's US
+# aggregator (aws-config/security, main.yaml). Cloud Posse's config module
+# creates the aggregator only in the central account's global-resource
+# collector region, so this recorder is its own collector in eu-west-1, with
+# its own role (<tenant>-ew1-security-aws-config-config): the security account
+# records its IAM twice (us-east-1 too), the scoped allowance in
+# check-lane-names.py REGION_SINGLETON_ALLOWANCES. prod-eu's recorder, its own
+# collector in eu-west-1, authorizes the security account there. Its own
+# file, so no other stack resolves the abstract.
+# =============================================================================
+
+import:
+  - catalog/aws-config/main
+
+components:
+  terraform:
+    aws-config/security-eu:
+      metadata:
+        component: aws-config
+        type: abstract
+        inherits:
+          - aws-config/main
+      vars:
+        global_resource_collector_region: eu-west-1
+        delegated_accounts:
+          - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
