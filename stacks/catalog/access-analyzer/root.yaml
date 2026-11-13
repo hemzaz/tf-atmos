@@ -8,11 +8,15 @@
 # delegated administrator's organization analyzers need. Global, so one stack
 # only: not fnx-ew1-root, which is the same management account.
 #
-# Disabled until E5, which enables it after E3 creates the security account
-# and enables Organizations trusted access for access-analyzer.amazonaws.com
-# (EnableAWSServiceAccess); the delegation cannot apply before both. Disabled,
-# it is also out of the backend cold start's preflight (bootstrap.yaml), which
-# would otherwise fail on the core-account placeholders in vars.account_map.
+# Enabled in E5c5 (Cloud Posse step 1 of this component, before E5c7's
+# access-analyzer/delegated-administrator in the security stacks): E3's
+# aws-organization enables Organizations trusted access for
+# access-analyzer.amazonaws.com (catalog/aws-organization/defaults.yaml), and
+# the accounts layer creates the security account before fnx-ue1-root's
+# security layer runs (docs/OPERATIONS.md "Bootstrap order"). Like the other
+# vendored security components, the first-deploy preflight fails its
+# placeholder account IDs at deploy (warn-only in lint); the backend cold start
+# applies backend/main alone, so its preflight (--cold-start) skips it.
 # =============================================================================
 
 import:
@@ -23,7 +27,6 @@ components:
     access-analyzer/root:
       metadata:
         component: access-analyzer
-        enabled: false
         inherits:
           - access-analyzer/defaults
       vars:

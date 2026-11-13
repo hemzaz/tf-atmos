@@ -89,8 +89,10 @@
 # and regional-waf (no workload stack has a waf instance yet; an empty layer plans
 # "No components matched") has at least one
 # enabled instance in every workload stack (eks-backend-services/main, the last
-# to gain instances, joined the compute layer in all 3 stacks); fnx-ue1-root
-# has only the backend layer.
+# to gain instances, joined the compute layer in all 3 stacks); the root
+# stacks have only the backend (fnx-ue1-root, fnx-ew1-root), iam
+# (aws-account-settings) and security layers (the recorder, fnx-ue1-root's
+# trail and Access Analyzer delegation, and step 2 of the org services).
 #
 # The accounts layer (the organization, its OUs, SCPs and member accounts, in
 # fnx-gbl-root) is not here: workflows/deploy-accounts.yaml deploys it in its
