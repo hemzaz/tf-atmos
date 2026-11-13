@@ -24,6 +24,7 @@ import:
   - catalog/_base/defaults
   - mixins/region/us-east-2
   - orgs/fnx/root/_defaults
+  - catalog/aws-account-settings/main-standby
   - catalog/aws-config/main
 
 settings:
@@ -33,6 +34,15 @@ settings:
 
 components:
   terraform:
+    # The management account's us-east-2 settings (E5c3c, as fnx-ew1-root's
+    # eu-west-1 ones): EBS default encryption, the IMDSv2 default, the EBS
+    # snapshot and AMI public access blocks. Its account-wide ones (alias, S3
+    # account block) are fnx-gbl-root's (main-standby). Reads no instance;
+    # deploy-full-stack's iam layer applies it.
+    aws-account-settings:
+      metadata:
+        enabled: true
+
     # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
     aws-config:
       metadata:
