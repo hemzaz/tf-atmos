@@ -13,9 +13,11 @@
 # An EU stack points its settings.tfstate here, all of it
 # (stacks/orgs/fnx/_defaults.yaml). The bucket holds prod state
 # (fnx-ew1-prod and its DR standby fnx-ec1-prod, both in the prod-eu
-# account) and the EU core stacks' (fnx-ew1-audit, fnx-ew1-security, through
-# core_write), so this stack has the prod roles (catalog/backend/roles/prod)
-# and no read/write: check-state-keys.py fails a role that matches no state.
+# account), the EU core stacks' (fnx-ew1-audit, fnx-ew1-security,
+# fnx-ec1-security, through core_write) and the management account's
+# eu-central-1 stack's (fnx-ec1-root, root_write), so this stack has the prod
+# roles (catalog/backend/roles/prod) and no read/write: check-state-keys.py
+# fails a role that matches no state.
 #
 # Bootstrap (cold start, once), then the management account's eu-west-1
 # settings (aws-account-settings, below):
@@ -23,13 +25,14 @@
 #   atmos workflow deploy-iam -f deploy-full-stack -s fnx-ew1-root
 #
 # The management account's Config recorder for eu-west-1 (aws-config,
-# inheriting aws-config/main-core-region, as the core template's eu-west-1 stacks):
+# inheriting aws-config/main-core-region-eu, as the core template's EU stacks):
 # regional resource types only, delivering to the EU archive (fnx-ew1-audit's
 # config-bucket), with the recorder role of fnx-ue1-root, the account's
-# global-resource collector, by its convention ARN (catalog/aws-config/main.yaml;
-# the scoped OQ-A exemption of check-data-residency.py), so deploy fnx-ue1-root's
-# first (docs/OPERATIONS.md "Bootstrap order"). No trail: fnx-ue1-root's
-# multi-region trail records this region (owner OQ-A).
+# global-resource collector, by its convention ARN (catalog/aws-config/main.yaml),
+# so deploy fnx-ue1-root's first (docs/OPERATIONS.md "Bootstrap order"). It
+# authorizes the EU aggregator (security, eu-west-1, fnx-ew1-security), never
+# the US one: EU Config data stays in the EU (owner 2026-11-13). No trail:
+# fnx-ue1-root's multi-region trail records this region (owner OQ-A).
 # =============================================================================
 
 import:
@@ -79,7 +82,7 @@ components:
       metadata:
         component: aws-config
         inherits:
-          - aws-config/main-core-region
+          - aws-config/main-core-region-eu
 
     backend/main:
       metadata:
@@ -130,14 +133,17 @@ components:
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ew1-prod-ci-apply'
               - 'arn:aws:iam::{{ index .settings.account_map.full_account_map "prod-eu" }}:role/fnx-ec1-prod-ci-apply'
-          # This stack's own state (backend/main): only the applying
-          # administrator (stacks/catalog/backend/defaults.yaml).
+          # This stack's own state (backend/main) and the management
+          # account's EU DR region stack's (fnx-ec1-root, E5c): only the
+          # applying administrator (stacks/catalog/backend/defaults.yaml).
           root_write:
             object_key_patterns:
               - "*/fnx-ew1-root/*"
               - "*/fnx-ew1-root-*"
+              - "*/fnx-ec1-root/*"
+              - "*/fnx-ec1-root-*"
           # The EU core stacks' state (owner decision 2026-11-03: stages audit
-          # and security in eu-west-1, routed here by
+          # and security in eu-west-1; E5c OQ-R: security in eu-central-1), routed here by
           # stacks/orgs/fnx/_defaults.yaml), as fnx-ue1-root's core_write: a
           # core stack is applied with credentials in its own account, so that
           # account's AdministratorAccess (owner decision 2026-11-05) and, until
@@ -149,6 +155,8 @@ components:
               - "*/fnx-ew1-audit-*"
               - "*/fnx-ew1-security/*"
               - "*/fnx-ew1-security-*"
+              - "*/fnx-ec1-security/*"
+              - "*/fnx-ec1-security-*"
             allowed_principal_arns:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.audit }}:role/OrganizationAccountAccessRole"
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/OrganizationAccountAccessRole"

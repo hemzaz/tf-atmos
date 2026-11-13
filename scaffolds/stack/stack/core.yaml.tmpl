@@ -1,12 +1,15 @@
 [[- $stack := printf "%s-%s-%s" .Config.tenant .Config.region_code .Config.stage -]]
 [[- $home := eq .Config.region "us-east-1" -]]
-[[- /* The EU core region: scripts/stack-wiring.py EU_CORE_REGIONS (the scaffold's guard hook allows no other eu- region for a core stack). */ -]]
-[[- $eu := eq .Config.region "eu-west-1" -]]
+[[- /* The EU core stacks: scripts/stack-wiring.py EU_CORE_STACKS (the scaffold's guard hook allows no other eu- stage and region for a core stack): eu-west-1, the EU home, and eu-central-1, the EU DR region (security only, E5c OQ-R). */ -]]
+[[- $eu := hasPrefix "eu-" .Config.region -]]
+[[- $ew1 := eq .Config.region "eu-west-1" -]]
 [[- $root := printf "%s-%s-root" .Config.tenant (ternary "ew1" "ue1" $eu) -]]
-[[- $archive := and (eq .Config.stage "audit") (or $home $eu) -]]
+[[- $archive := and (eq .Config.stage "audit") (or $home $ew1) -]]
 [[- /* fnx-ew1-security holds the EU Config aggregator (E5c OQ-EA): its own collector, aws-config/security-eu. */ -]]
-[[- $eu_aggregator := and $eu (eq .Config.stage "security") -]]
-[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) (ternary "security-eu" "main-core-region" $eu_aggregator) $home -]]
+[[- $eu_aggregator := and $ew1 (eq .Config.stage "security") -]]
+[[- /* Every other EU core stack's recorder authorizes the EU aggregator (owner 2026-11-13): aws-config/main-core-region-eu. */ -]]
+[[- $eu_shared := and $eu (not $eu_aggregator) -]]
+[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) (ternary "security-eu" (ternary "main-core-region-eu" "main-core-region" $eu_shared) $eu_aggregator) $home -]]
 ---
 # =============================================================================
 # [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
@@ -45,10 +48,14 @@
 [[- else ]]
 #
 # The account's Config recorder for [[ .Config.region ]] (aws-config, inheriting
-# aws-config/main-core-region): regional resource types only, with the recorder
+# aws-config/[[ $recorder ]]): regional resource types only, with the recorder
 # role of [[ .Config.tenant ]]-ue1-[[ .Config.stage ]], the account's global-resource collector, by
 # its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
-# first (docs/OPERATIONS.md "Bootstrap order"). No trail: the account's one
+# first (docs/OPERATIONS.md "Bootstrap order").
+[[- if $eu_shared ]] It authorizes the EU aggregator
+# (security, eu-west-1, [[ .Config.tenant ]]-ew1-security; aggregator_authorization_region),
+# never the US one: EU Config data stays in the EU (owner 2026-11-13).
+#[[- end ]] No trail: the account's one
 # multi-region trail, in its home stack, records this region (owner OQ-A).
 [[- end ]]
 #
@@ -62,11 +69,15 @@
 [[- if $eu ]]
 #
 # An EU core stack (owner decision 2026-11-03: stages audit and security in
+[[- if $ew1 ]]
 # eu-west-1, scripts/stack-wiring.py EU_CORE_STAGES/EU_CORE_REGIONS), in the
+[[- else ]]
+# eu-west-1; E5c OQ-R (a), 2026-11-10: security in [[ .Config.region ]], the EU DR
+# region, scripts/stack-wiring.py EU_CORE_STACKS), in the
+[[- end ]]
 # same shared [[ .Config.stage ]] account: GDPR-scoped (check-data-residency.py),
 # so tagged Compliance "pci-sox-gdpr", its recorder delivering to the EU
-# archive ([[ .Config.tenant ]]-ew1-audit)[[ if not $eu_aggregator ]] under the scoped OQ-A exemption for its US collector
-# region[[ end ]], and its state in the EU backend ([[ $root ]],
+# archive ([[ .Config.tenant ]]-ew1-audit), and its state in the EU backend ([[ $root ]],
 # stacks/orgs/[[ .Config.tenant ]]/root/eu-west-1.yaml), whose core_write trusts the
 # [[ .Config.stage ]] account's OrganizationAccountAccessRole.
 [[- end ]]

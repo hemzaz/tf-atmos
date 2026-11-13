@@ -514,8 +514,10 @@ def archived(component, env, region="eu-west-1", compliance=EU, deps=None, accou
 
 
 def eu_core_recorder(account, **extra_vars):
-    """A shared account's eu-west-1 recorder: its collector is the US home stack's (OQ-A)."""
-    extra_vars = {"iam_role_arn": f"arn:aws:iam::123456789012:role/fnx-ue1-{account}-aws-config-config", **extra_vars}
+    """A shared account's eu-west-1 recorder: its collector is the US home stack's (OQ-A), and it
+    authorizes the EU aggregator (aws-config/main-core-region-eu, owner 2026-11-13)."""
+    extra_vars = {"iam_role_arn": f"arn:aws:iam::123456789012:role/fnx-ue1-{account}-aws-config-config",
+                  "aggregator_authorization_region": "eu-west-1", **extra_vars}
     return archived("aws-config", "ew1", account=account, global_resource_collector_region="us-east-1", **extra_vars)
 
 
@@ -576,8 +578,8 @@ class LogArchiveTest(unittest.TestCase):
             "fnx-ue1-root": stack(**{"aws-config": home_collector("root")}),
         })
         self.assertEqual(errors, [
-            f"fnx-ew1-root: aws-config vars.iam_role_arn is {wrong!r}, not its collector's role "
-            "arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config",
+            f"fnx-ew1-root: aws-config vars.iam_role_arn is {wrong!r}, not the role of its collector region's or "
+            "its residency's collector (arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config)",
         ])
         other_account = home_collector("root")
         other_account["settings"]["environment"]["account_id"] = "210987654321"
@@ -587,9 +589,48 @@ class LogArchiveTest(unittest.TestCase):
         })
         self.assertEqual(errors, [
             "fnx-ew1-root: aws-config vars.iam_role_arn is "
-            "'arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config', not its collector's role "
-            "arn:aws:iam::210987654321:role/fnx-ue1-root-aws-config-config",
+            "'arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config', not the role of its collector "
+            "region's or its residency's collector (arn:aws:iam::210987654321:role/fnx-ue1-root-aws-config-config)",
         ])
+
+    def test_shared_eu_recorder_must_authorize_an_eu_region(self):
+        # Owner 2026-11-13: a shared account's EU recorder (eu-west-1 and eu-central-1) keeps its US
+        # home collector region (no IAM recording) only while it authorizes the EU aggregator. With
+        # no aggregator_authorization_region CP authorizes its US collector region: refused, as is
+        # authorizing a US region outright.
+        home = {"fnx-ue1-root": stack(**{"aws-config": home_collector("root")})}
+        for region, code in (("eu-west-1", "ew1"), ("eu-central-1", "ec1")):
+            with self.subTest(region=region):
+                def recorder(**override):
+                    spec = eu_core_recorder("root", **override)
+                    spec["vars"]["region"] = region
+                    return {f"fnx-{code}-root": eu_stack(**{"aws-config": spec})}
+
+                self.assertEqual(self.check(**home, **recorder()), [])
+                self.assertEqual(self.check(**home, **recorder(aggregator_authorization_region=None)), [
+                    f"fnx-{code}-root: aws-config vars.global_resource_collector_region is 'us-east-1', {OUTSIDE}",
+                ])
+                self.assertEqual(sorted(self.check(**home, **recorder(aggregator_authorization_region="us-east-1"))), [
+                    f"fnx-{code}-root: aws-config vars.aggregator_authorization_region is 'us-east-1', {OUTSIDE}",
+                    f"fnx-{code}-root: aws-config vars.global_resource_collector_region is 'us-east-1', {OUTSIDE}",
+                ])
+
+    def test_a_recorder_never_names_the_other_residencys_collector_role(self):
+        # L2: a US recorder outside its collector region may not take fnx-ew1-security's EU role.
+        eu_collector = archived("aws-config", "ew1", account="security", name="aws-config")
+        eu_collector["vars"]["context"] = {"tenant": "fnx", "environment": "ew1", "stage": "security"}
+        ue2 = archived("aws-config", "ue1", "us-east-2", US, account="security", global_resource_collector_region="us-east-1",
+                       iam_role_arn="arn:aws:iam::123456789012:role/fnx-ew1-security-aws-config-config")
+        stacks = {"fnx-ue1-security": stack(**{"aws-config": home_collector("security")}),
+                  "fnx-ew1-security": eu_stack(**{"aws-config": eu_collector}),
+                  "fnx-ue2-security": stack(**{"aws-config": ue2})}
+        self.assertIn(
+            "fnx-ue2-security: aws-config vars.iam_role_arn is "
+            "'arn:aws:iam::123456789012:role/fnx-ew1-security-aws-config-config', not the role of its collector "
+            "region's or its residency's collector (arn:aws:iam::123456789012:role/fnx-ue1-security-aws-config-config)",
+            self.check(**stacks))
+        ue2["vars"]["iam_role_arn"] = "arn:aws:iam::123456789012:role/fnx-ue1-security-aws-config-config"
+        self.assertFalse([e for e in self.check(**stacks) if "iam_role_arn" in e])
 
     def test_us_collector_region_without_a_us_collector_in_the_account_fails(self):
         # prod-eu's stacks are all GDPR-scoped; and root's US home stack here holds no collector.
@@ -632,12 +673,13 @@ class LogArchiveTest(unittest.TestCase):
             "to the collector's role and not create_iam_role" for s in ("ue2", "uw2")
         ])
 
-    def aggregator_stacks(self, delegated):
+    def aggregator_stacks(self, delegated, regions="default"):
         """US security aggregator, a US account (prod, 111) and an all-GDPR account (prod-eu, 222)."""
         return {
             "fnx-ue1-security": stack(**{"aws-config": archived(
                 "aws-config", "ue1", "us-east-1", US, account="security", account_id="333333333333",
-                central_resource_collector_account="fnx-security", delegated_accounts=delegated)}),
+                central_resource_collector_account="fnx-security", delegated_accounts=delegated,
+                aggregator_regions=["us-east-1"] if regions == "default" else regions)}),
             "fnx-ue1-prod": stack(**{"aws-config": archived(
                 "aws-config", "ue1", "us-east-1", US, account="prod", account_id="111111111111",
                 central_resource_collector_account="fnx-security")}),
@@ -656,6 +698,54 @@ class LogArchiveTest(unittest.TestCase):
             "fnx-ue1-security: aws-config leaves delegated_accounts unset, so it aggregates every account, including "
             "prod-eu, whose stacks are all GDPR-scoped",
         ])
+
+    def test_us_aggregator_names_only_non_eu_source_regions(self):
+        # Owner 2026-11-13: CP's all_regions reads EU regions too (the aggregator account's own data
+        # there as well), so the US aggregator names its regions: set, no eu- one, every US recorder's.
+        ok = ["111111111111", "333333333333"]
+        where = "fnx-ue1-security: aws-config"
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, ["us-east-1", "us-east-2"])), [])
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, None)), [
+            f"{where} leaves aggregator_regions unset: Cloud Posse then aggregates all regions, both residencies' "
+            "(its own account's too); name its residency's regions",
+        ])
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, [])), [
+            f"{where} leaves aggregator_regions []: Cloud Posse then aggregates all regions, both residencies' "
+            "(its own account's too); name its residency's regions",
+        ])
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, ["us-east-1", "eu-central-1"])), [
+            f"{where} aggregator_regions names 'eu-central-1': EU Config data may not be aggregated outside the EU",
+        ])
+        stacks = self.aggregator_stacks(ok, ["us-east-1"])
+        stacks["fnx-ue2-prod"] = stack(**{"aws-config": archived(
+            "aws-config", "ue1", "us-east-2", US, account="prod", account_id="111111111111",
+            global_resource_collector_region="us-east-1", iam_role_arn="arn:aws:iam::1:role/r",
+            central_resource_collector_account="fnx-security")})
+        self.assertIn(f"{where} aggregator_regions misses 'us-east-2', where a recorder authorizes it: its data "
+                      "would not be aggregated", self.check(**stacks))
+
+    def test_eu_aggregator_names_only_eu_source_regions(self):
+        # L1 (owner 2026-11-13): the EU aggregator names EU regions only, so the security account's
+        # US data stays out of it, and covers every EU region where a recorder authorizes it.
+        def stacks(regions):
+            eu_agg = archived("aws-config", "ew1", account="security", account_id="333333333333",
+                              central_resource_collector_account="fnx-security",
+                              delegated_accounts=["222222222222"], aggregator_regions=regions)
+            ec1 = archived("aws-config", "ew1", "eu-central-1", account="prod-eu", account_id="222222222222",
+                           central_resource_collector_account="fnx-security",
+                           global_resource_collector_region="eu-west-1", iam_role_arn="arn:aws:iam::1:role/r")
+            return {"fnx-ew1-security": eu_stack(**{"aws-config": eu_agg}),
+                    "fnx-ec1-prod": eu_stack(**{"aws-config": ec1})}
+
+        where = "fnx-ew1-security: aws-config"
+        self.assertEqual(self.check(**stacks(["eu-west-1", "eu-central-1"])), [])
+        self.assertIn(f"{where} aggregator_regions names 'us-east-1': an EU aggregator names EU regions only (the "
+                      "aggregator account's own data elsewhere stays out)",
+                      self.check(**stacks(["eu-west-1", "eu-central-1", "us-east-1"])))
+        self.assertIn(f"{where} aggregator_regions misses 'eu-central-1', where a recorder authorizes it: its data "
+                      "would not be aggregated", self.check(**stacks(["eu-west-1"])))
+        self.assertIn(f"{where} leaves aggregator_regions unset: Cloud Posse then aggregates all regions, both "
+                      "residencies' (its own account's too); name its residency's regions", self.check(**stacks(None)))
 
     def test_aggregator_ids_shared_with_another_account_are_skipped(self):
         # Today every account carries the placeholder id: it cannot be told apart, so no noise.

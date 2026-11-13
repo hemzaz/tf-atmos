@@ -129,14 +129,21 @@ the last step.
    (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`, whose preflight fails while a
    core account ID is a placeholder: their `aws-account-settings`, each account's trail and Config
    recorder, plus the log archive in `fnx-ue1-audit` and, with `-s fnx-ew1-audit`, the EU one;
-   `fnx-ew1-security`'s recorder is its own collector and holds the EU Config aggregator over `prod-eu`),
+   `fnx-ew1-security`'s recorder is its own collector and holds the EU Config aggregator, over the EU regions
+   only: `prod-eu` and the shared root, audit and security accounts' EU recorders, which authorize it
+   (`aggregator_authorization_region: eu-west-1`, `aws-config/main-core-region-eu`) while keeping their US home
+   collector region, so they record no IAM; the US aggregator in `fnx-ue1-security` reads the US regions only.
+   Both name their regions with the house `aggregator-regions_house.tf` (`aggregator_regions`): no EU region's
+   Config data reaches the US aggregator, and no US data the EU one, owner 2026-11-13),
    then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
    and [Deploying a stack](#deploying-a-stack). Order the core stacks: `fnx-ue1-audit` first
    (its storage layer holds the buckets every trail and recorder delivers to), then the other
    `fnx-ue1-<core>` stacks and the management account's trail and recorder
    (`atmos workflow deploy-security -f deploy-full-stack -s fnx-ue1-root`), and only then the
-   eu-west-1 ones (`-s fnx-ew1-audit`, `-s fnx-ew1-security`, and `deploy-security -s fnx-ew1-root`): a shared account's
-   eu-west-1 recorder uses its US home stack's recorder role by name
+   eu-west-1 ones (`-s fnx-ew1-audit`, `-s fnx-ew1-security`, and `deploy-security -s fnx-ew1-root`) and the
+   DR-region ones (`-s fnx-ue2-security`, `-s fnx-ec1-security`, `deploy-security -s fnx-ue2-root` and
+   `-s fnx-ec1-root`, E5c: recorders only, the ec1 ones delivering to the EU archive): a shared account's
+   non-home recorder uses its US home stack's recorder role by name
    (`stacks/catalog/aws-config/main.yaml`, `main-core-region`), which no dependency can enforce
    (check-data-residency.py forbids an EU stack's dependency on a US one).
 
@@ -171,7 +178,8 @@ overrides all of `settings.tfstate` to point there (`stack: fnx-ew1-root`), so i
 first; `check-data-residency.py` fails one that names a non-EU region.
 It holds prod state (`fnx-ew1-prod` and its DR stack `fnx-ec1-prod`, both in the `prod-eu`
 account, whose state stays in `eu-west-1` as `fnx-ue2-prod`'s stays in `us-east-1`) and the EU core
-stacks' (`fnx-ew1-audit`, `fnx-ew1-security`), so it has the `prod_read`, `prod_write`, `core_write`
+stacks' (`fnx-ew1-audit`, `fnx-ew1-security`, `fnx-ec1-security`) and the management account's
+`fnx-ec1-root`, so it has the `prod_read`, `prod_write`, `core_write`
 and `root_write` roles: the prod roles trust those two stacks' CI roles and the `prod-eu` account's
 `TerraformPlanAccess-Eu` / `AdministratorAccess`; `core_write` trusts the audit and security
 accounts' `AdministratorAccess`; and, until Identity Center is applied, `prod_write` and
@@ -201,8 +209,8 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names st
 | `<role_prefix>-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles; dev's `TerraformApplyAccess` and both accounts' `AdministratorAccess`, and their `OrganizationAccountAccessRole` until Identity Center is applied (step 6 of [Bootstrap order](#bootstrap-order)); like the apply roles, each reaches both stages' state |
 | `<role_prefix>-prod-read-role` (`prod_read`) | read, prod state (US: `fnx-ue1-prod`, DR `fnx-ue2-prod`; EU: `fnx-ew1-prod`, DR `fnx-ec1-prod`) | the prod stacks' CI plan roles; the prod account's `TerraformPlanAccess-Prod` (EU: `prod-eu`'s `-Eu`) |
 | `<role_prefix>-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles; the prod account's `AdministratorAccess` (EU: `prod-eu`'s), and its `OrganizationAccountAccessRole` until Identity Center is applied |
-| `<role_prefix>-core-role` (`core_write`) | read/write, the core stages' state (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`; EU: `fnx-ew1-audit`, `fnx-ew1-security`; read too, under `TFSTATE_ACCESS=read`) | no CI role; each core account's `AdministratorAccess`, and its `OrganizationAccountAccessRole` until Identity Center is applied |
-| `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-ew1-root`, `fnx-gbl-root`) | only the applying administrator |
+| `<role_prefix>-core-role` (`core_write`) | read/write, the core stages' state (`fnx-ue1-audit`, `fnx-ue1-security`, `fnx-ue1-network`, `fnx-ue1-identity`, `fnx-ue1-artifacts`, `fnx-ue2-security`; EU: `fnx-ew1-audit`, `fnx-ew1-security`, `fnx-ec1-security`; read too, under `TFSTATE_ACCESS=read`) | no CI role; each core account's `AdministratorAccess`, and its `OrganizationAccountAccessRole` until Identity Center is applied |
+| `<role_prefix>-root-role` (`root_write`) | read/write, the root stacks' own state (`fnx-ue1-root`, `fnx-gbl-root`, `fnx-ue2-root`; EU: `fnx-ew1-root`, `fnx-ec1-root`) | only the applying administrator |
 
 Humans are Identity Center permission-set roles, trusted by their reserved-path pattern for one
 account and one set (`arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<set>_*`):

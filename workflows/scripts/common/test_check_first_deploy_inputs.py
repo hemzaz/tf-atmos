@@ -345,13 +345,15 @@ class AccountModelTest(unittest.TestCase):
         return sorted(f.stack for f in errors(stacks, only) if "never share an account" in f.detail)
 
     def test_eu_core_stacks_share_their_core_account(self):
-        for stage in ("audit", "security"):
-            with self.subTest(stage=stage):
-                self.assertEqual(errors({**clean(), **self.core_pair(stage)}), [])
+        # E5a: audit and security in eu-west-1; E5c3b (OQ-R a): security in eu-central-1 too.
+        for stage, region in (("audit", "eu-west-1"), ("security", "eu-west-1"), ("security", "eu-central-1")):
+            with self.subTest(stage=stage, region=region):
+                self.assertEqual(errors({**clean(), **self.core_pair(stage, region)}), [])
 
     def test_other_eu_core_stacks_or_regions_still_fail(self):
+        # Only the (stage, region) pairs of EU_CORE_STACKS: audit has no eu-central-1 stack.
         for stage, region in (("network", "eu-west-1"), ("identity", "eu-west-1"), ("artifacts", "eu-west-1"),
-                              ("audit", "eu-central-1"), ("security", "eu-central-1")):
+                              ("audit", "eu-central-1"), ("network", "eu-central-1")):
             with self.subTest(stage=stage, region=region):
                 stacks = {**clean(), **self.core_pair(stage, region)}
                 self.assertEqual(self.shared(stacks), sorted(n for n in stacks if n.endswith(f"-{stage}")))

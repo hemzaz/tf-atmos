@@ -25,7 +25,7 @@ Errors (fatal unless --warn):
   - two stages sharing an account (one account per stage)
   - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
     region; EU prod, account prod-eu) sharing an account with a non-GDPR one,
-    except an EU core stack (stack-wiring.py's EU_CORE_STAGES in EU_CORE_REGIONS)
+    except an EU core stack (stack-wiring.py's EU_CORE_STACKS)
     and a stack of its own stage: one shared core account (owner, 2026-11-03)
   - in settings.account_map (one map, the same on every stack): a value that is
     not 12 digits, two core accounts (CORE_ACCOUNTS) sharing an ID, a workload
@@ -86,7 +86,7 @@ _spec = importlib.util.spec_from_file_location(
 )
 residency = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(residency)
-# stack-wiring.py's EU_CORE_STAGES and EU_CORE_REGIONS, the one list of the EU core stacks.
+# stack-wiring.py's EU_CORE_STACKS, the one list of the EU core stacks.
 _spec = importlib.util.spec_from_file_location(
     "stack_wiring", pathlib.Path(__file__).resolve().parents[3] / "scripts" / "stack-wiring.py"
 )
@@ -422,13 +422,13 @@ def account_findings(stacks: dict, targets: set) -> list:
 
 
 def eu_core_pair(eu: dict, us: dict) -> bool:
-    """A GDPR-scoped EU core stack (a stage of stack-wiring.py's EU_CORE_STAGES, its EU regions all in
-    EU_CORE_REGIONS) and a non-GDPR stack of the same stage: one shared core account (owner, 2026-11-03)."""
+    """A GDPR-scoped EU core stack (its stage's EU regions all in stack-wiring.py's EU_CORE_STACKS)
+    and a non-GDPR stack of the same stage: one shared core account (owner, 2026-11-03; E5c OQ-R)."""
     stage = environment(eu).get("_stage")
     regions = {str((i.get("vars") or {}).get("region") or "") for i in residency.instances(eu).values()}
     eu_regions = {r for r in regions if r.startswith("eu-")}
     return (stage in wiring.EU_CORE_STAGES and environment(us).get("_stage") == stage
-            and bool(eu_regions) and eu_regions <= set(wiring.EU_CORE_REGIONS))
+            and bool(eu_regions) and eu_regions <= {r for s, r in wiring.EU_CORE_STACKS if s == stage})
 
 
 def residency_account_findings(stacks: dict, targets: set) -> list:

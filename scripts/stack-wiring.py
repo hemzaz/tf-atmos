@@ -39,8 +39,8 @@ no enabled instance's state matches would fail check-state-keys.py); the hook
 never adds a principal to core_write.
 
 The EU regions are the prod-eu account's (GDPR, B5), with one exception (owner,
-2026-11-03): a core stack of stage EU_CORE_STAGES in EU_CORE_REGIONS, in its own
-(shared) core account, whose state is the EU backend's. Every other core stage,
+2026-11-03, and E5c OQ-R): a core stack of a (stage, region) in EU_CORE_STACKS, in its
+own (shared) core account, whose state is the EU backend's. Every other core stage,
 EU region or account pairing is refused. check-data-residency.py still holds
 such a stack to EU-only regions, state and dependencies.
 
@@ -69,10 +69,14 @@ PLATFORM_STAGES = ("dev", "staging", "prod")
 CORE_STAGES = ("audit", "security", "network", "identity", "artifacts")
 STAGES = PLATFORM_STAGES + CORE_STAGES
 ACCOUNTS = STAGES + ("prod-eu",)
-# The core stages with an EU stack, and its regions (E5a: the EU log archive and
-# security tooling). check-first-deploy-inputs.py reads these: the one list.
-EU_CORE_STAGES = ("audit", "security")
-EU_CORE_REGIONS = ("eu-west-1",)
+# The EU core stacks, (stage, region) pairs: audit and security in eu-west-1 (E5a: the EU log
+# archive and security tooling), and security in eu-central-1, the EU DR region (E5c OQ-R (a),
+# 2026-11-10: the org security services' delegated administrator in every operated region).
+# EU_CORE_STAGES and EU_CORE_REGIONS are their stages and regions. check-first-deploy-inputs.py
+# reads these: the one list.
+EU_CORE_STACKS = (("audit", "eu-west-1"), ("security", "eu-west-1"), ("security", "eu-central-1"))
+EU_CORE_STAGES = tuple(dict.fromkeys(stage for stage, _ in EU_CORE_STACKS))
+EU_CORE_REGIONS = tuple(dict.fromkeys(region for _, region in EU_CORE_STACKS))
 # Each owning backend's file and stack (the region code of its bucket's region),
 # by whether the stack's region is an EU one.
 BACKENDS = {False: ("us-east-1", "ue1"), True: ("eu-west-1", "ew1")}
@@ -99,10 +103,10 @@ def validate(tenant: str, stage: str, account: str, region: str, stack: str) -> 
         fail(f"account {account!r} does not belong to stage {stage!r} (its own, or prod-eu for prod)")
     if not REGION.fullmatch(region):
         fail(f"region {region!r} is not an AWS region")
-    eu_core = stage in EU_CORE_STAGES and region in EU_CORE_REGIONS
+    eu_core = (stage, region) in EU_CORE_STACKS
     if (account == "prod-eu") != region.startswith("eu-") and not eu_core:
         fail(f"account {account!r} and region {region!r} disagree: the EU regions are exactly the prod-eu"
-             f" account's, and core stages {'/'.join(EU_CORE_STAGES)} in {'/'.join(EU_CORE_REGIONS)}")
+             f" account's, and the core stacks {', '.join(f'{s} in {r}' for s, r in EU_CORE_STACKS)}")
     if not re.fullmatch(rf"{tenant}-[a-z]{{2}}[a-z]?[0-9]-{stage}", stack):
         fail(f"stack {stack!r} is not {tenant}-<region code>-{stage}")
     return account

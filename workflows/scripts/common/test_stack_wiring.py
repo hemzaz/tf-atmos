@@ -194,7 +194,7 @@ class Wire(Copy):
         block = [line for line in lines[start[0]:end]
                  if line.strip() != "allowed_principal_arns:" and "OrganizationAccountAccessRole" not in line
                  and "AWSReservedSSO_AdministratorAccess" not in line
-                 and not any(f"*/fnx-ew1-{stage}" in line for stage in wiring.EU_CORE_STAGES)]
+                 and not re.search(r"\*/fnx-e[a-z]\d-(" + "|".join(wiring.EU_CORE_STAGES) + ")", line)]
         text = "".join(lines[:start[0]] + block + lines[end:])
         (self.root / EU).write_text(text)
         return text
@@ -220,10 +220,13 @@ class Wire(Copy):
         self.assertEqual(self.text(US), self.committed[US])
 
     def test_committed_eu_core_write(self) -> None:
-        # E5a2 and E5c3: the audit and security accounts are onboarded on the EU backend, and
-        # fnx-ew1-audit and fnx-ew1-security wired.
+        # E5a2, E5c3 and E5c3b: the audit and security accounts are onboarded on the EU backend, and
+        # fnx-ew1-audit, fnx-ew1-security and fnx-ec1-security wired.
         self.assertEqual(self.wire("fnx", "audit", "", "eu-west-1", "fnx-ew1-audit"), [])
         self.assertEqual(self.wire("fnx", "security", "", "eu-west-1", "fnx-ew1-security"), [])
+        self.assertEqual(self.wire("fnx", "security", "", "eu-central-1", "fnx-ec1-security"), [])
+        # fnx-ue2-security (E5c3b) is on the US backend's core_write.
+        self.assertEqual(self.wire("fnx", "security", "", "us-east-2", "fnx-ue2-security"), [])
         self.assertEqual(self.text(EU), self.committed[EU])
         self.assertEqual(self.text(US), self.committed[US])
 
@@ -421,7 +424,7 @@ class Refuse(Copy):
             (("fnx", "dev", "", "us-west-2", "fnx-uw2-dev/../x"), "stack"),
             (("fnx", "dev", "", "us-west-2", "fnx-ew1-dev"), "environment"),
             # Core stages: the account is the stage's own, in the EU only audit and
-            # security, only in eu-west-1 (EU_CORE_STAGES, EU_CORE_REGIONS).
+            # security in eu-west-1 and security in eu-central-1 (EU_CORE_STACKS).
             (("fnx", "root", "", "us-east-1", "fnx-ue1-root"), "stage"),
             (("fnx", "security", "audit", "us-east-1", "fnx-ue1-security"), "does not belong to stage"),
             (("fnx", "security", "prod-eu", "eu-west-1", "fnx-ew1-security"), "does not belong to stage"),
@@ -430,7 +433,7 @@ class Refuse(Copy):
             (("fnx", "network", "", "eu-west-1", "fnx-ew1-network"), "the EU regions are exactly"),
             (("fnx", "artifacts", "", "eu-west-1", "fnx-ew1-artifacts"), "the EU regions are exactly"),
             (("fnx", "audit", "", "eu-central-1", "fnx-ec1-audit"), "the EU regions are exactly"),
-            (("fnx", "security", "", "eu-central-1", "fnx-ec1-security"), "the EU regions are exactly"),
+            (("fnx", "network", "", "eu-central-1", "fnx-ec1-network"), "the EU regions are exactly"),
             (("fnx", "staging", "", "eu-west-1", "fnx-ew1-staging"), "the EU regions are exactly"),
             (("fnx", "audit", "", "eu-west-1", "fnx-ue1-audit"), "environment"),
             (("fnx", "audit", "", "us-east-1", "fnx-ue1-security"), "stack"),

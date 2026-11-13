@@ -83,7 +83,7 @@ ROOT_FILES=(stacks/orgs/fnx/root/us-east-1.yaml stacks/orgs/fnx/root/eu-west-1.y
 # Core stacks whose account's OrganizationAccountAccessRole is in their
 # backend's core_write (stacks/orgs/fnx/root/us-east-1.yaml, eu-west-1.yaml
 # for the EU core stacks): their golden must report wired.
-ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security fnx-ue1-identity fnx-ue1-artifacts fnx-ew1-audit fnx-ew1-security"
+ONBOARDED_CORE_STACKS="fnx-ue1-audit fnx-ue1-network fnx-ue1-security fnx-ue1-identity fnx-ue1-artifacts fnx-ew1-audit fnx-ew1-security fnx-ue2-security fnx-ec1-security"
 
 # A critical_alerts answer that runs a command if any hook interpolates it
 # into shell unchecked (literal: the $( ) is the point).
@@ -128,8 +128,9 @@ REFUSALS=(
     "fnx-ew1-prod|the prod-eu account already has its prod primary (eu-west-1.yaml)|region=eu-central-1 region_code=ec1 az_ids=euc1-az1,euc1-az2,euc1-az3 dr_region=eu-west-1 dr_region_code=ew1"
     # Core stacks: profile core takes exactly the core accounts' stages, each
     # in its own account, outside the EU but for audit and security in
-    # eu-west-1 (scripts/stack-wiring.py EU_CORE_STAGES/EU_CORE_REGIONS; both
-    # exist, so the fresh stacks below regenerate fnx-ew1-security).
+    # eu-west-1 and security in eu-central-1 (scripts/stack-wiring.py
+    # EU_CORE_STACKS; all exist, so the fresh stacks below regenerate
+    # fnx-ew1-security). Audit has no eu-central-1 stack.
     "fnx-ue1-security|a core stack is a core account's stack|stage=dev account=dev"
     "fnx-ue1-dev|stage security is a core account's: its stack takes profile core|stage=security account=security"
     "fnx-ue1-security|account audit does not belong to stage security|account=audit"

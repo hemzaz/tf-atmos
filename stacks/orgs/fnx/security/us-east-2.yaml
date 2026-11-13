@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# fnx-ue2-security - the security account's us-east-2 stack
+# =============================================================================
+# A core-account stack (owner decision QE5): its stage defaults'
+# aws-account-settings, and the account's Config recorder below.
+#
+# The account's Config recorder for us-east-2 (aws-config, inheriting
+# aws-config/main-core-region): regional resource types only, with the recorder
+# role of fnx-ue1-security, the account's global-resource collector, by
+# its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
+# first (docs/OPERATIONS.md "Bootstrap order"). No trail: the account's one
+# multi-region trail, in its home stack, records this region (owner OQ-A).
+#
+# Its state goes to fnx-ue1-root's bucket
+# through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
+# whose core_write trusts the management-account administrator and the
+# security account's OrganizationAccountAccessRole, and its stage
+# defaults keep it out of every CI matrix (github.actions_enabled: false). The
+# scaffold's wire hook added this stack's pattern pair to core_write
+# (check-state-keys.py).
+#
+# Not the account's home region (us-east-1, fnx-ue1-security):
+# aws-account-settings/main-standby, after the stage defaults, leaves the
+# account-wide IAM account alias and S3 account public access block to the
+# home-region stack (check-lane-names.py SINGLETONS).
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - mixins/region/us-east-2
+  - orgs/fnx/security/_defaults
+  - catalog/aws-account-settings/main-standby
+  - catalog/aws-config/main
+
+components:
+  terraform:
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main-core-region
