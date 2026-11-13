@@ -674,8 +674,13 @@ class LogArchiveTest(unittest.TestCase):
         ])
 
     def aggregator_stacks(self, delegated, regions="default"):
-        """US security aggregator, a US account (prod, 111) and an all-GDPR account (prod-eu, 222)."""
+        """US security aggregator, a US account (prod, 111) and an all-GDPR account (prod-eu, 222),
+        whose recorder authorizes the EU aggregator (fnx-ew1-security)."""
         return {
+            "fnx-ew1-security": eu_stack(**{"aws-config": archived(
+                "aws-config", "ew1", account="security", account_id="333333333333",
+                central_resource_collector_account="fnx-security", delegated_accounts=["222222222222"],
+                aggregator_regions=["eu-west-1"])}),
             "fnx-ue1-security": stack(**{"aws-config": archived(
                 "aws-config", "ue1", "us-east-1", US, account="security", account_id="333333333333",
                 central_resource_collector_account="fnx-security", delegated_accounts=delegated,
@@ -746,6 +751,29 @@ class LogArchiveTest(unittest.TestCase):
                       "would not be aggregated", self.check(**stacks(["eu-west-1"])))
         self.assertIn(f"{where} leaves aggregator_regions unset: Cloud Posse then aggregates all regions, both "
                       "residencies' (its own account's too); name its residency's regions", self.check(**stacks(None)))
+
+    def test_a_recorder_authorizing_a_region_with_no_aggregator_fails(self):
+        # LOW-1 (#521 review): fnx-ew1-root authorizing eu-central-1, where security holds no
+        # aggregator, passed every other rule; its Config data would reach no aggregator.
+        eu_agg = archived("aws-config", "ew1", account="security", central_resource_collector_account="fnx-security",
+                          delegated_accounts=["123456789012"], aggregator_regions=["eu-west-1"])
+        stacks = {"fnx-ew1-security": eu_stack(**{"aws-config": eu_agg}),
+                  "fnx-ue1-root": stack(**{"aws-config": home_collector("root")})}
+
+        def check(region):
+            recorder = eu_core_recorder("root", central_resource_collector_account="fnx-security",
+                                        aggregator_authorization_region=region)
+            return self.check(**stacks, **{"fnx-ew1-root": eu_stack(**{"aws-config": recorder})})
+
+        self.assertEqual(check("eu-west-1"), [])
+        self.assertEqual(check("eu-central-1"), [
+            "fnx-ew1-root: aws-config authorizes fnx-security's Config aggregator in 'eu-central-1', but no stack "
+            "holds it (fnx-security's aws-config collector in 'eu-central-1'): its data would reach no aggregator",
+        ])
+        eu_agg["vars"]["enabled"] = False  # a disabled aggregator creates none
+        self.assertIn("fnx-ew1-root: aws-config authorizes fnx-security's Config aggregator in 'eu-west-1', but no "
+                      "stack holds it (fnx-security's aws-config collector in 'eu-west-1'): its data would reach no "
+                      "aggregator", check("eu-west-1"))
 
     def test_aggregator_ids_shared_with_another_account_are_skipped(self):
         # Today every account carries the placeholder id: it cannot be told apart, so no noise.

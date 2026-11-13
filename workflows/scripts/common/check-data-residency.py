@@ -51,7 +51,8 @@ of its own account (its account_id, its null-label id + "-config"): the collecto
 collector region, or one in its own residency (IAM is global; a US recorder never names an EU
 stack's role, nor the reverse). A recorder authorizes the central account's aggregator in
 vars.aggregator_authorization_region, else in its collector region (house
-aggregator-regions_house.tf; CP authorizes the collector region only). A Config aggregator (the
+aggregator-regions_house.tf; CP authorizes the collector region only), and an enabled aggregator
+must exist there, or its data reaches no aggregator. A Config aggregator (the
 aws-config instance of the central_resource_collector_account in its collector region) names its
 source regions (aggregator_regions; owner 2026-11-13): set, non-empty, only eu- regions in a
 GDPR-scoped stack and none outside it, and every region of a recorder authorizing it among them.
@@ -569,9 +570,10 @@ def authorization_region(instance: dict) -> str:
 
 
 def aggregator_region_errors_all(stacks: dict, scoped: set) -> list[str]:
-    """Every Config aggregator names its residency's regions only, covering each recorder authorizing it."""
+    """Every Config aggregator names its residency's regions only, covering each recorder authorizing it,
+    and every recorder authorizes an aggregator that exists (its central account's collector there)."""
     recorders = [i for n in stacks for name, i in instances(stacks[n]).items() if component_of(name, i) == "aws-config"]
-    errors = []
+    errors, aggregators = [], set()
     for stack_name in sorted(stacks):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             variables, where = instance.get("vars") or {}, f"{stack_name}: {name}"
@@ -579,11 +581,29 @@ def aggregator_region_errors_all(stacks: dict, scoped: set) -> list[str]:
             if component_of(name, instance) != "aws-config" or variables.get("central_resource_collector_account") != central \
                     or variables.get("global_resource_collector_region") != variables.get("region"):
                 continue
+            if flag_on(variables.get("enabled", True)):
+                aggregators.add((central, str(variables.get("region"))))
             authorizing = {str((r.get("vars") or {}).get("region")) for r in recorders
                            if (r.get("vars") or {}).get("central_resource_collector_account") == central
                            and authorization_region(r) == variables.get("region") and (r.get("vars") or {}).get("region")}
             errors += aggregator_source_region_errors(where, variables.get("aggregator_regions"), authorizing,
                                                       stack_name in scoped)
+    return errors + authorization_errors(stacks, aggregators)
+
+
+def authorization_errors(stacks: dict, aggregators: set) -> list[str]:
+    """A recorder authorizing (central account, region) where no stack holds that aggregator (LOW-1)."""
+    errors = []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            variables = instance.get("vars") or {}
+            central, region = variables.get("central_resource_collector_account"), authorization_region(instance)
+            if component_of(name, instance) != "aws-config" or not central or not variables.get("region") \
+                    or not flag_on(variables.get("enabled", True)) or (central, region) in aggregators:
+                continue
+            errors.append(f"{stack_name}: {name} authorizes {central}'s Config aggregator in {region!r}, but no stack "
+                          f"holds it ({central}'s aws-config collector in {region!r}): its data would reach no "
+                          "aggregator")
     return errors
 
 

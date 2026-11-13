@@ -3,8 +3,11 @@
 # By default fnx-ue1-security's aws-config (catalog aws-config/security): the US aggregator over
 # the US regions only, never Cloud Posse's all_regions. Later runs: the EU central collector
 # (fnx-ew1-security) and a shared account's EU recorder (aws-config/main-core-region-eu), each
-# with exactly one authorization. A run cannot see inside module.aws_config, so
-# the override's disabled_aggregation_regions (the module's own aggregator off) is not asserted.
+# with exactly one authorization. Those runs override the region (and the shared run the account)
+# inside module.aws_config too, which reads its own, so its plan matches the stack's. An assert
+# cannot address a child module's resources (only its outputs, and config 1.5.3 outputs none for
+# aggregation), so the override's disabled_aggregation_regions (the module's own aggregator and
+# authorizations off) is proven by `terraform test -verbose`: those runs plan only the house ones.
 mock_provider "aws" {
   mock_data "aws_region" {
     defaults = { name = "us-east-1", region = "us-east-1" }
@@ -108,6 +111,12 @@ run "eu_central_collector" {
     target = data.aws_region.this[0]
     values = { name = "eu-west-1", region = "eu-west-1" }
   }
+  # Cloud Posse's module reads the region itself; mocked us-east-1, it would keep its own
+  # aggregator and authorizations beside the house ones (#521 review LOW-2).
+  override_data {
+    target = module.aws_config.data.aws_region.this
+    values = { name = "eu-west-1", region = "eu-west-1" }
+  }
 
   variables {
     region                           = "eu-west-1"
@@ -142,6 +151,14 @@ run "shared_eu_recorder_authorizes_the_eu_aggregator" {
   }
   override_data {
     target = data.aws_caller_identity.this[0]
+    values = { account_id = "111111111111" }
+  }
+  override_data {
+    target = module.aws_config.data.aws_region.this
+    values = { name = "eu-west-1", region = "eu-west-1" }
+  }
+  override_data {
+    target = module.aws_config.data.aws_caller_identity.this
     values = { account_id = "111111111111" }
   }
 
