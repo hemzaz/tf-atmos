@@ -82,8 +82,9 @@ HOUSE_BANNED_BLOCKS = ("moved", "removed", "import")
 HOUSE_FILE_ALLOWLIST = (
     ("components/terraform/aws-config", "aggregator-regions_house.tf",
      "E5c3b (owner 2026-11-13): the account aggregator over named regions (CP's config module hardcodes "
-     "all_regions and has no regions input), so the US aggregator never reads EU regions; "
-     "aggregator-regions_override.tf turns the module's aggregation off where it applies"),
+     "all_regions and has no regions input) and a recorder's authorization to another region than its "
+     "collector region (a shared account's EU recorder reports to the EU aggregator, recording no IAM); "
+     "aggregator-regions_override.tf turns the module's aggregation off where either applies"),
     ("components/terraform/aws-guardduty", "detector_house.tf",
      "E5c OQ-W: the delegated administrator's detector, looked up in its own account and region "
      "for org-settings; remote-state_override.tf bypasses CP's live remote-state read with it"),

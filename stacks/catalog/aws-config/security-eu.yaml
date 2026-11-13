@@ -11,9 +11,11 @@
 # records its IAM twice (us-east-1 too), the scoped allowance in
 # check-lane-names.py REGION_SINGLETON_ALLOWANCES. prod-eu's recorder, its own
 # collector in eu-west-1, authorizes the security account there, and so do the
-# shared root and security accounts' eu-central-1 recorders
-# (aws-config/main-core-region-eu, owner 2026-11-13: their EU DR region's data
-# stays in the EU). Its own file, so no other stack resolves the abstract.
+# shared root, audit and security accounts' EU recorders
+# (aws-config/main-core-region-eu, owner 2026-11-13: EU Config data stays in
+# the EU). It aggregates the EU regions only (aggregator_regions,
+# aggregator-regions_house.tf), so the security account's US data stays out.
+# Its own file, so no other stack resolves the abstract.
 # =============================================================================
 
 import:
@@ -32,4 +34,8 @@ components:
         delegated_accounts:
           - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
           - '{{ .settings.account_map.full_account_map.root }}'
+          - '{{ .settings.account_map.full_account_map.audit }}'
           - '{{ .settings.account_map.full_account_map.security }}'
+        aggregator_regions:
+          - eu-west-1
+          - eu-central-1

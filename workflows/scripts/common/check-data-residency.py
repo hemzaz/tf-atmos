@@ -47,28 +47,31 @@ own stack is (fnx-ew1-audit, else fnx-ue1-audit), which it lists in dependencies
 No other vars key containing "bucket" may be set: a literal bucket name would bypass this.
 A recorder outside its global_resource_collector_region takes a collector's role: it sets
 iam_role_arn and not create_iam_role; a literal iam_role_arn is the ARN of an enabled collector
-of its own account (its account_id, its null-label id + "-config"; IAM is global, so the region
-does not matter). A non-GDPR stack's Config aggregator (the aws-config
-instance of the central_resource_collector_account in its collector region) lists in
-delegated_accounts no account whose stacks are all GDPR-scoped (by settings.environment
-.account_id; an id another account also carries, like the placeholder, cannot be told apart and
-is skipped), nor leaves it unset (CP then aggregates the whole account_map) while one exists.
-It also names its source regions (aggregator_regions, house aggregator-regions_house.tf; owner
-2026-11-13): set, non-empty, no eu- region, and every region of a non-GDPR stack's recorder
-among them. CP's all_regions would read every EU region, also the aggregator account's own data
-there, which no other account's authorization governs (AWS documents no rule for it).
-Scoped exemption (owner OQ-A/OQ-B, 2026-11-07), in eu-west-1 only (OQ_A_REGIONS): the shared
-accounts (root, audit, security) record IAM and keep their one multi-region trail in their US
-home stack, so a GDPR-scoped stack's aws-config in eu-west-1 may name, in
+of its own account (its account_id, its null-label id + "-config"): the collector of its
+collector region, or one in its own residency (IAM is global; a US recorder never names an EU
+stack's role, nor the reverse). A recorder authorizes the central account's aggregator in
+vars.aggregator_authorization_region, else in its collector region (house
+aggregator-regions_house.tf; CP authorizes the collector region only). A Config aggregator (the
+aws-config instance of the central_resource_collector_account in its collector region) names its
+source regions (aggregator_regions; owner 2026-11-13): set, non-empty, only eu- regions in a
+GDPR-scoped stack and none outside it, and every region of a recorder authorizing it among them.
+CP's all_regions would read both residencies' regions, also the aggregator account's own data
+there, which no other account's authorization governs (AWS documents no rule for it). A non-GDPR
+stack's aggregator also lists in delegated_accounts no account whose stacks are all GDPR-scoped
+(by settings.environment.account_id; an id another account also carries, like the placeholder,
+cannot be told apart and is skipped), nor leaves it unset (CP then aggregates the whole
+account_map) while one exists.
+Config side of OQ-A (owner 2026-11-07, narrowed 2026-11-13): the shared accounts (root, audit,
+security) record IAM in their US home stack, so a GDPR-scoped stack's aws-config may name, in
 vars.global_resource_collector_region, the region of the collector a non-GDPR stack of its own
-account (settings.environment.account) holds; prod-eu, whose stacks are all GDPR-scoped, may
-not. In any other EU region (eu-central-1: owner 2026-11-13, the exemption declined there) a
-recorder names an EU collector region, so it authorizes the EU aggregator (fnx-ew1-security in
-eu-west-1, aws-config/main-core-region-eu). Not coded, as no stack var shows it: the shared
-accounts' trails (US archive) also record their EU regions' control-plane events. The US
-aggregator reads no EU region (above), so their eu-west-1 recorders, authorizing it, are not
-aggregated. All of it is core-account control-plane metadata, not EU personal data; a
-GDPR-scoped stack's own trail or recorder still delivers only to the EU archive.
+account (settings.environment.account) holds, only while it authorizes an EU region (vars
+.aggregator_authorization_region eu-: aws-config/main-core-region-eu, the EU aggregator in
+fnx-ew1-security): its regional Config data reaches only the EU aggregator, and it records no IAM.
+prod-eu, whose stacks are all GDPR-scoped, may not. The trail side of OQ-A stays, not coded (no
+stack var shows it): the shared accounts' one multi-region trail, in their US home stack (US
+archive), also records their EU regions' control-plane events; core-account control-plane
+metadata, not EU personal data. A GDPR-scoped stack's own trail or recorder still delivers only
+to the EU archive.
 The org security services (ORG_SERVICES: the vendored aws-guardduty, aws-security-hub and
 aws-inspector2; owner OQ-RES/OQ-SH, 2026-11-10) keep EU findings in the EU. A deployable
 org-settings instance (admin_delegated on; the only step whose members are its account_map, CP
@@ -183,9 +186,6 @@ ORG_SERVICES = ("aws-guardduty", "aws-security-hub", "aws-inspector2")
 # The accounts whose stacks are all GDPR-scoped (owner B5: EU prod), declared once: check-first-deploy-inputs
 # builds the US map variant from it, and org_service_errors fails when the stacks derive another set.
 GDPR_ONLY_ACCOUNTS = ("prod-eu",)
-# The EU regions where a shared account's recorder may name its US collector region (owner OQ-A,
-# 2026-11-07); declined in eu-central-1 (owner 2026-11-13).
-OQ_A_REGIONS = ("eu-west-1",)
 GUARDDUTY_AUTO_ENABLE_DEFAULT = "NEW"  # aws-guardduty variables.tf auto_enable_organization_members
 
 
@@ -329,8 +329,8 @@ def check_instance(
     home = (account_of(instance), (instance.get("vars") or {}).get("global_resource_collector_region"))
     for field, region in regions(instance):
         if field == "vars.global_resource_collector_region" and component_of(name, instance) == "aws-config" \
-                and home in collectors and (instance.get("vars") or {}).get("region") in OQ_A_REGIONS:
-            continue  # OQ-A: a shared account's collector is in its US home stack (eu-west-1 only)
+                and home in collectors and authorization_region(instance).startswith(EU_PREFIX):
+            continue  # OQ-A: a shared account's collector is in its US home stack; it authorizes the EU
         if not region.startswith(EU_PREFIX) and not exempt(name, field, region, exemptions):
             errors.append(f"{where} {field} is {region!r}, outside the EU, in a GDPR-scoped stack")
     if not tagged_gdpr(instance):
@@ -468,10 +468,12 @@ def collector_role_errors(stacks: dict) -> list[str]:
     """A recorder naming a collector's role by a literal ARN (aws-config/main-core-region) names one.
 
     The role is Cloud Posse's: a collector instance's null-label id plus the "config" attribute
-    (cloudposse/config aws_config_label), in the recorder's own account, any region (IAM is
-    global: an EU DR recorder authorizing the EU aggregator keeps its home role). An account with
-    no enabled collector is not compared (another finding).
+    (cloudposse/config aws_config_label), in the recorder's own account: the collector of its
+    collector region (a shared account's EU recorder keeps its US home role), or another collector
+    in the recorder's own residency (GDPR-scoped stack or not). An account with no such collector
+    is not compared (another finding).
     """
+    scoped = {name for name, stack in stacks.items() if gdpr_scoped(stack)}
     collectors: dict = {}
     for stack_name, stack in stacks.items():
         for name, instance in instances(stack).items():
@@ -479,21 +481,23 @@ def collector_role_errors(stacks: dict) -> list[str]:
             if component_of(name, instance) == "aws-config" and account_of(instance) \
                     and flag_on(variables.get("enabled", True)) and variables.get("region") \
                     and variables.get("global_resource_collector_region") == variables.get("region"):
-                collectors.setdefault(account_of(instance), []).append(instance)
+                collectors.setdefault(account_of(instance), []).append((stack_name in scoped, instance))
     errors = []
     for stack_name in sorted(stacks):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             arn = (instance.get("vars") or {}).get("iam_role_arn")
             if component_of(name, instance) != "aws-config" or not isinstance(arn, str) or not arn.startswith("arn:"):
                 continue
-            homes = collectors.get(account_of(instance))
+            collector_region = (instance.get("vars") or {}).get("global_resource_collector_region")
+            homes = [h for gdpr, h in collectors.get(account_of(instance), [])
+                     if (h.get("vars") or {}).get("region") == collector_region or gdpr == (stack_name in scoped)]
             if not homes:
                 continue
             roles = [f"iam::{((h.get('settings') or {}).get('environment') or {}).get('account_id')}:role/"
                      f"{null_label_id(h)}-config" for h in homes]
             if not any(re.fullmatch(rf"arn:aws[a-z-]*:{re.escape(role)}", arn) for role in roles):
-                errors.append(f"{stack_name}: {name} vars.iam_role_arn is {arn!r}, not a collector's role of its "
-                              f"account ({', '.join(f'arn:aws:{r}' for r in sorted(roles))})")
+                errors.append(f"{stack_name}: {name} vars.iam_role_arn is {arn!r}, not the role of its collector "
+                              f"region's or its residency's collector ({', '.join(f'arn:aws:{r}' for r in sorted(roles))})")
     return errors
 
 
@@ -539,10 +543,7 @@ def gdpr_only_accounts(stacks: dict, scoped: set) -> tuple[list, set]:
 def aggregator_errors(stacks: dict, scoped: set) -> list[str]:
     """A non-GDPR stack's Config aggregator over an account whose stacks are all GDPR-scoped (owner OQ-B)."""
     eu, eu_ids = gdpr_only_accounts(stacks, scoped)
-    recorded = {str((i.get("vars") or {}).get("region")) for n in set(stacks) - scoped
-                for name, i in instances(stacks[n]).items()
-                if component_of(name, i) == "aws-config" and (i.get("vars") or {}).get("region")}
-    errors = []
+    errors = aggregator_region_errors_all(stacks, scoped)
     for stack_name in sorted(set(stacks) - scoped):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             variables, where = instance.get("vars") or {}, f"{stack_name}: {name}"
@@ -558,19 +559,48 @@ def aggregator_errors(stacks: dict, scoped: set) -> list[str]:
                 "its Config data may not be aggregated outside the EU"
                 for account_id in sorted({str(a) for a in variables.get("delegated_accounts") or []} & eu_ids)
             ]
-            errors += aggregator_source_region_errors(where, variables.get("aggregator_regions"), recorded)
     return errors
 
 
-def aggregator_source_region_errors(where: str, named: Any, recorded: set) -> list[str]:
-    """A non-GDPR Config aggregator names its source regions: no eu- one, every non-GDPR recorder's."""
+def authorization_region(instance: dict) -> str:
+    """The region whose aggregator a recorder authorizes (aggregator-regions_house.tf, else CP's)."""
+    variables = instance.get("vars") or {}
+    return str(variables.get("aggregator_authorization_region") or variables.get("global_resource_collector_region") or "")
+
+
+def aggregator_region_errors_all(stacks: dict, scoped: set) -> list[str]:
+    """Every Config aggregator names its residency's regions only, covering each recorder authorizing it."""
+    recorders = [i for n in stacks for name, i in instances(stacks[n]).items() if component_of(name, i) == "aws-config"]
+    errors = []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            variables, where = instance.get("vars") or {}, f"{stack_name}: {name}"
+            central = f"{variables.get('tenant')}-{account_of(instance)}"
+            if component_of(name, instance) != "aws-config" or variables.get("central_resource_collector_account") != central \
+                    or variables.get("global_resource_collector_region") != variables.get("region"):
+                continue
+            authorizing = {str((r.get("vars") or {}).get("region")) for r in recorders
+                           if (r.get("vars") or {}).get("central_resource_collector_account") == central
+                           and authorization_region(r) == variables.get("region") and (r.get("vars") or {}).get("region")}
+            errors += aggregator_source_region_errors(where, variables.get("aggregator_regions"), authorizing,
+                                                      stack_name in scoped)
+    return errors
+
+
+def aggregator_source_region_errors(where: str, named: Any, authorizing: set, gdpr: bool) -> list[str]:
+    """A Config aggregator's source regions: its residency's only, every authorizing recorder's region."""
     if not isinstance(named, list) or not named:
         return [f"{where} leaves aggregator_regions {'unset' if named is None else repr(named)}: Cloud Posse then "
-                "aggregates all regions, EU ones included (its own account's there too); name the non-EU regions"]
-    errors = [f"{where} aggregator_regions names {region!r}: EU Config data may not be aggregated outside the EU"
-              for region in named if str(region).startswith(EU_PREFIX)]
-    errors += [f"{where} aggregator_regions misses {region!r}, where a non-GDPR stack records: its data would not "
-               "be aggregated" for region in sorted(recorded - {str(r) for r in named})]
+                "aggregates all regions, both residencies' (its own account's too); name its residency's regions"]
+    if gdpr:
+        errors = [f"{where} aggregator_regions names {region!r}: an EU aggregator names EU regions only (the "
+                  "aggregator account's own data elsewhere stays out)" for region in named
+                  if not str(region).startswith(EU_PREFIX)]
+    else:
+        errors = [f"{where} aggregator_regions names {region!r}: EU Config data may not be aggregated outside the EU"
+                  for region in named if str(region).startswith(EU_PREFIX)]
+    errors += [f"{where} aggregator_regions misses {region!r}, where a recorder authorizes it: its data would not "
+               "be aggregated" for region in sorted(authorizing - {str(r) for r in named})]
     return errors
 
 

@@ -10,10 +10,13 @@
 # the storage layer (workflows/deploy-full-stack.yaml).
 #
 # The account's Config recorder for eu-west-1 (aws-config, inheriting
-# aws-config/main-core-region): regional resource types only, with the recorder
+# aws-config/main-core-region-eu): regional resource types only, with the recorder
 # role of fnx-ue1-audit, the account's global-resource collector, by
 # its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
-# first (docs/OPERATIONS.md "Bootstrap order"). No trail: the account's one
+# first (docs/OPERATIONS.md "Bootstrap order"). It authorizes the EU aggregator
+# (security, eu-west-1, fnx-ew1-security; aggregator_authorization_region),
+# never the US one: EU Config data stays in the EU (owner 2026-11-13).
+# No trail: the account's one
 # multi-region trail, in its home stack, records this region (owner OQ-A).
 #
 # Its state goes to fnx-ew1-root's bucket
@@ -28,8 +31,7 @@
 # eu-west-1, scripts/stack-wiring.py EU_CORE_STAGES/EU_CORE_REGIONS), in the
 # same shared audit account: GDPR-scoped (check-data-residency.py),
 # so tagged Compliance "pci-sox-gdpr", its recorder delivering to the EU
-# archive (fnx-ew1-audit) under the scoped OQ-A exemption for its US collector
-# region, and its state in the EU backend (fnx-ew1-root,
+# archive (fnx-ew1-audit), and its state in the EU backend (fnx-ew1-root,
 # stacks/orgs/fnx/root/eu-west-1.yaml), whose core_write trusts the
 # audit account's OrganizationAccountAccessRole.
 #
@@ -71,4 +73,4 @@ components:
       metadata:
         component: aws-config
         inherits:
-          - aws-config/main-core-region
+          - aws-config/main-core-region-eu

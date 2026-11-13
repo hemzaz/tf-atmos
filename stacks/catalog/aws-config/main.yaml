@@ -16,21 +16,21 @@
 #   aws-config/main          the account's home stack (its global resource
 #                            collector region): creates the recorder role.
 #   aws-config/main-core-region
-#                            a core account's stack outside its home region
-#                            (fnx-ew1-root, fnx-ew1-audit), or a nonprod
+#                            a core account's US stack outside its home region
+#                            (fnx-ue2-root, fnx-ue2-security), or a nonprod
 #                            account's second stack: the role of its
 #                            fnx-ue1-<stage> home stack by its convention ARN,
 #                            since check-data-residency.py forbids an EU
 #                            stack's dependency on a US one (IAM is global).
 #                            Deploy the home stack first.
 #   aws-config/main-core-region-eu
-#                            a shared account's stack in the EU DR region
-#                            (fnx-ec1-root, fnx-ec1-security): main-core-region
+#                            a shared account's EU stack (fnx-ew1-root,
+#                            fnx-ew1-audit, fnx-ec1-root, fnx-ec1-security):
+#                            main-core-region (US home collector region, so
+#                            regional types only, no second IAM recording)
 #                            authorizing the EU aggregator (security,
 #                            eu-west-1) instead of the US one (owner
-#                            2026-11-13: that region's Config data stays in
-#                            the EU). Not the global collector there, so
-#                            regional types only.
+#                            2026-11-13: EU Config data stays in the EU).
 #   aws-config/security      fnx-ue1-security: main plus the US account
 #                            aggregator, over the US regions only.
 #
@@ -82,9 +82,11 @@ components:
           - aws-config/main-core-region
       vars:
         # The EU aggregator's region (fnx-ew1-security, security-eu.yaml):
-        # Cloud Posse authorizes (central account, this region). The recorder
-        # role stays the account's home one (main-core-region; IAM is global).
-        global_resource_collector_region: eu-west-1
+        # the house authorization (aggregator-regions_house.tf) goes to
+        # (central account, this region) in place of Cloud Posse's, to the
+        # collector region, which stays the US home (no IAM recording here).
+        # The recorder role stays the account's home one (IAM is global).
+        aggregator_authorization_region: eu-west-1
 
     # OQ-B: the aggregator covers every account but prod-eu (whose data stays
     # in the EU: its aggregator is fnx-ew1-security's, security-eu.yaml), over

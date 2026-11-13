@@ -10,8 +10,9 @@
 # role of fnx-ue1-security, the account's global-resource collector, by
 # its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
 # first (docs/OPERATIONS.md "Bootstrap order"). It authorizes the EU aggregator
-# (security, eu-west-1, fnx-ew1-security), never the US one: this region's
-# Config data stays in the EU (owner 2026-11-13). No trail: the account's one
+# (security, eu-west-1, fnx-ew1-security; aggregator_authorization_region),
+# never the US one: EU Config data stays in the EU (owner 2026-11-13).
+# No trail: the account's one
 # multi-region trail, in its home stack, records this region (owner OQ-A).
 #
 # Its state goes to fnx-ew1-root's bucket
