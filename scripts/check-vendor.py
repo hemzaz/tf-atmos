@@ -80,6 +80,10 @@ HOUSE_SUFFIX = "_house.tf"
 # import the vendored resources' state behind the pinned code's back.
 HOUSE_BANNED_BLOCKS = ("moved", "removed", "import")
 HOUSE_FILE_ALLOWLIST = (
+    ("components/terraform/aws-config", "aggregator-regions_house.tf",
+     "E5c3b (owner 2026-11-13): the account aggregator over named regions (CP's config module hardcodes "
+     "all_regions and has no regions input), so the US aggregator never reads EU regions; "
+     "aggregator-regions_override.tf turns the module's aggregation off where it applies"),
     ("components/terraform/aws-guardduty", "detector_house.tf",
      "E5c OQ-W: the delegated administrator's detector, looked up in its own account and region "
      "for org-settings; remote-state_override.tf bypasses CP's live remote-state read with it"),

@@ -576,8 +576,8 @@ class LogArchiveTest(unittest.TestCase):
             "fnx-ue1-root": stack(**{"aws-config": home_collector("root")}),
         })
         self.assertEqual(errors, [
-            f"fnx-ew1-root: aws-config vars.iam_role_arn is {wrong!r}, not its collector's role "
-            "arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config",
+            f"fnx-ew1-root: aws-config vars.iam_role_arn is {wrong!r}, not a collector's role of its account "
+            "(arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config)",
         ])
         other_account = home_collector("root")
         other_account["settings"]["environment"]["account_id"] = "210987654321"
@@ -587,9 +587,25 @@ class LogArchiveTest(unittest.TestCase):
         })
         self.assertEqual(errors, [
             "fnx-ew1-root: aws-config vars.iam_role_arn is "
-            "'arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config', not its collector's role "
-            "arn:aws:iam::210987654321:role/fnx-ue1-root-aws-config-config",
+            "'arn:aws:iam::123456789012:role/fnx-ue1-root-aws-config-config', not a collector's role of its "
+            "account (arn:aws:iam::210987654321:role/fnx-ue1-root-aws-config-config)",
         ])
+
+    def test_eu_dr_region_recorder_must_authorize_the_eu_aggregator(self):
+        # Owner 2026-11-13: OQ-A holds in eu-west-1 only. A shared account's eu-central-1 recorder
+        # naming its US collector region would authorize the US aggregator: refused. Naming eu-west-1
+        # (aws-config/main-core-region-eu) passes, its role still the account's home collector's.
+        def ec1(region):
+            spec = eu_core_recorder("root")
+            spec["vars"]["region"] = "eu-central-1"
+            spec["vars"]["global_resource_collector_region"] = region
+            return spec
+
+        home = {"fnx-ue1-root": stack(**{"aws-config": home_collector("root")})}
+        self.assertEqual(self.check(**home, **{"fnx-ec1-root": eu_stack(**{"aws-config": ec1("us-east-1")})}), [
+            f"fnx-ec1-root: aws-config vars.global_resource_collector_region is 'us-east-1', {OUTSIDE}",
+        ])
+        self.assertEqual(self.check(**home, **{"fnx-ec1-root": eu_stack(**{"aws-config": ec1("eu-west-1")})}), [])
 
     def test_us_collector_region_without_a_us_collector_in_the_account_fails(self):
         # prod-eu's stacks are all GDPR-scoped; and root's US home stack here holds no collector.
@@ -632,12 +648,13 @@ class LogArchiveTest(unittest.TestCase):
             "to the collector's role and not create_iam_role" for s in ("ue2", "uw2")
         ])
 
-    def aggregator_stacks(self, delegated):
+    def aggregator_stacks(self, delegated, regions="default"):
         """US security aggregator, a US account (prod, 111) and an all-GDPR account (prod-eu, 222)."""
         return {
             "fnx-ue1-security": stack(**{"aws-config": archived(
                 "aws-config", "ue1", "us-east-1", US, account="security", account_id="333333333333",
-                central_resource_collector_account="fnx-security", delegated_accounts=delegated)}),
+                central_resource_collector_account="fnx-security", delegated_accounts=delegated,
+                aggregator_regions=["us-east-1"] if regions == "default" else regions)}),
             "fnx-ue1-prod": stack(**{"aws-config": archived(
                 "aws-config", "ue1", "us-east-1", US, account="prod", account_id="111111111111",
                 central_resource_collector_account="fnx-security")}),
@@ -656,6 +673,30 @@ class LogArchiveTest(unittest.TestCase):
             "fnx-ue1-security: aws-config leaves delegated_accounts unset, so it aggregates every account, including "
             "prod-eu, whose stacks are all GDPR-scoped",
         ])
+
+    def test_us_aggregator_names_only_non_eu_source_regions(self):
+        # Owner 2026-11-13: CP's all_regions reads EU regions too (the aggregator account's own data
+        # there as well), so the US aggregator names its regions: set, no eu- one, every US recorder's.
+        ok = ["111111111111", "333333333333"]
+        where = "fnx-ue1-security: aws-config"
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, ["us-east-1", "us-east-2"])), [])
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, None)), [
+            f"{where} leaves aggregator_regions unset: Cloud Posse then aggregates all regions, EU ones included "
+            "(its own account's there too); name the non-EU regions",
+        ])
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, [])), [
+            f"{where} leaves aggregator_regions []: Cloud Posse then aggregates all regions, EU ones included "
+            "(its own account's there too); name the non-EU regions",
+        ])
+        self.assertEqual(self.check(**self.aggregator_stacks(ok, ["us-east-1", "eu-central-1"])), [
+            f"{where} aggregator_regions names 'eu-central-1': EU Config data may not be aggregated outside the EU",
+        ])
+        stacks = self.aggregator_stacks(ok, ["us-east-1"])
+        stacks["fnx-ue2-prod"] = stack(**{"aws-config": archived(
+            "aws-config", "ue1", "us-east-2", US, account="prod", account_id="111111111111",
+            global_resource_collector_region="us-east-1", iam_role_arn="arn:aws:iam::1:role/r")})
+        self.assertIn(f"{where} aggregator_regions misses 'us-east-2', where a non-GDPR stack records: its data "
+                      "would not be aggregated", self.check(**stacks))
 
     def test_aggregator_ids_shared_with_another_account_are_skipped(self):
         # Today every account carries the placeholder id: it cannot be told apart, so no noise.

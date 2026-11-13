@@ -10,8 +10,10 @@
 # its own role (<tenant>-ew1-security-aws-config-config): the security account
 # records its IAM twice (us-east-1 too), the scoped allowance in
 # check-lane-names.py REGION_SINGLETON_ALLOWANCES. prod-eu's recorder, its own
-# collector in eu-west-1, authorizes the security account there. Its own
-# file, so no other stack resolves the abstract.
+# collector in eu-west-1, authorizes the security account there, and so do the
+# shared root and security accounts' eu-central-1 recorders
+# (aws-config/main-core-region-eu, owner 2026-11-13: their EU DR region's data
+# stays in the EU). Its own file, so no other stack resolves the abstract.
 # =============================================================================
 
 import:
@@ -29,3 +31,5 @@ components:
         global_resource_collector_region: eu-west-1
         delegated_accounts:
           - '{{ index .settings.account_map.full_account_map "prod-eu" }}'
+          - '{{ .settings.account_map.full_account_map.root }}'
+          - '{{ .settings.account_map.full_account_map.security }}'

@@ -23,8 +23,16 @@
 #                            since check-data-residency.py forbids an EU
 #                            stack's dependency on a US one (IAM is global).
 #                            Deploy the home stack first.
+#   aws-config/main-core-region-eu
+#                            a shared account's stack in the EU DR region
+#                            (fnx-ec1-root, fnx-ec1-security): main-core-region
+#                            authorizing the EU aggregator (security,
+#                            eu-west-1) instead of the US one (owner
+#                            2026-11-13: that region's Config data stays in
+#                            the EU). Not the global collector there, so
+#                            regional types only.
 #   aws-config/security      fnx-ue1-security: main plus the US account
-#                            aggregator.
+#                            aggregator, over the US regions only.
 #
 # A DR standby's variant, aws-config/main-region (the primary's role from its
 # state), is in main-region.yaml, imported by the standby stacks only: its
@@ -66,10 +74,25 @@ components:
         allowed_iam_arns_for_sns_publish:
           - *home_role
 
+    aws-config/main-core-region-eu:
+      metadata:
+        component: aws-config
+        type: abstract
+        inherits:
+          - aws-config/main-core-region
+      vars:
+        # The EU aggregator's region (fnx-ew1-security, security-eu.yaml):
+        # Cloud Posse authorizes (central account, this region). The recorder
+        # role stays the account's home one (main-core-region; IAM is global).
+        global_resource_collector_region: eu-west-1
+
     # OQ-B: the aggregator covers every account but prod-eu (whose data stays
-    # in the EU: its aggregator is fnx-ew1-security's, security-eu.yaml). Cloud Posse
-    # hardcodes all_regions, so it also reads the shared accounts' eu-west-1
-    # recorders: the accepted, scoped check-data-residency exemption.
+    # in the EU: its aggregator is fnx-ew1-security's, security-eu.yaml), over
+    # the US regions only (owner 2026-11-13): Cloud Posse hardcodes
+    # all_regions, and an aggregator reads its own account's data in every
+    # region, so aggregator_regions (aggregator-regions_house.tf) names them:
+    # the regions a stack may take outside the EU (the scaffold's).
+    # check-data-residency.py fails an eu- one or a missing non-EU recorder region.
     aws-config/security:
       metadata:
         component: aws-config
@@ -87,3 +110,7 @@ components:
           - '{{ .settings.account_map.full_account_map.dev }}'
           - '{{ .settings.account_map.full_account_map.staging }}'
           - '{{ .settings.account_map.full_account_map.prod }}'
+        aggregator_regions:
+          - us-east-1
+          - us-east-2
+          - us-west-2

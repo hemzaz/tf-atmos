@@ -129,7 +129,11 @@ the last step.
    (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`, whose preflight fails while a
    core account ID is a placeholder: their `aws-account-settings`, each account's trail and Config
    recorder, plus the log archive in `fnx-ue1-audit` and, with `-s fnx-ew1-audit`, the EU one;
-   `fnx-ew1-security`'s recorder is its own collector and holds the EU Config aggregator over `prod-eu`),
+   `fnx-ew1-security`'s recorder is its own collector and holds the EU Config aggregator over `prod-eu` and the
+   root and security accounts' `eu-central-1` recorders, which authorize it, not the US one; the US aggregator in
+   `fnx-ue1-security` reads the US regions only (`aggregator_regions`, house `aggregator-regions_house.tf`), so no
+   EU region's Config data reaches it, owner 2026-11-13; the shared accounts' `eu-west-1` recorders, which still
+   authorize the US aggregator under OQ-A, are therefore in no aggregator),
    then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
    and [Deploying a stack](#deploying-a-stack). Order the core stacks: `fnx-ue1-audit` first
    (its storage layer holds the buckets every trail and recorder delivers to), then the other

@@ -7,7 +7,9 @@
 [[- $archive := and (eq .Config.stage "audit") (or $home $ew1) -]]
 [[- /* fnx-ew1-security holds the EU Config aggregator (E5c OQ-EA): its own collector, aws-config/security-eu. */ -]]
 [[- $eu_aggregator := and $ew1 (eq .Config.stage "security") -]]
-[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) (ternary "security-eu" "main-core-region" $eu_aggregator) $home -]]
+[[- /* The EU DR region's recorder authorizes the EU aggregator (owner 2026-11-13): aws-config/main-core-region-eu. */ -]]
+[[- $eu_dr := and $eu (not $ew1) -]]
+[[- $recorder := ternary (ternary "security" "main" (eq .Config.stage "security")) (ternary "security-eu" (ternary "main-core-region-eu" "main-core-region" $eu_dr) $eu_aggregator) $home -]]
 ---
 # =============================================================================
 # [[ $stack ]] - the [[ .Config.stage ]] account's [[ .Config.region ]] stack
@@ -46,10 +48,14 @@
 [[- else ]]
 #
 # The account's Config recorder for [[ .Config.region ]] (aws-config, inheriting
-# aws-config/main-core-region): regional resource types only, with the recorder
+# aws-config/[[ $recorder ]]): regional resource types only, with the recorder
 # role of [[ .Config.tenant ]]-ue1-[[ .Config.stage ]], the account's global-resource collector, by
 # its convention ARN (catalog/aws-config/main.yaml), so deploy that home stack
-# first (docs/OPERATIONS.md "Bootstrap order"). No trail: the account's one
+# first (docs/OPERATIONS.md "Bootstrap order").
+[[- if $eu_dr ]] It authorizes the EU aggregator
+# (security, eu-west-1, [[ .Config.tenant ]]-ew1-security), never the US one: this region's
+# Config data stays in the EU (owner 2026-11-13).
+[[- end ]] No trail: the account's one
 # multi-region trail, in its home stack, records this region (owner OQ-A).
 [[- end ]]
 #
@@ -71,7 +77,7 @@
 [[- end ]]
 # same shared [[ .Config.stage ]] account: GDPR-scoped (check-data-residency.py),
 # so tagged Compliance "pci-sox-gdpr", its recorder delivering to the EU
-# archive ([[ .Config.tenant ]]-ew1-audit)[[ if not $eu_aggregator ]] under the scoped OQ-A exemption for its US collector
+# archive ([[ .Config.tenant ]]-ew1-audit)[[ if not (or $eu_aggregator $eu_dr) ]] under the scoped OQ-A exemption for its US collector
 # region[[ end ]], and its state in the EU backend ([[ $root ]],
 # stacks/orgs/[[ .Config.tenant ]]/root/eu-west-1.yaml), whose core_write trusts the
 # [[ .Config.stage ]] account's OrganizationAccountAccessRole.

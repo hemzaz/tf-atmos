@@ -11,12 +11,14 @@
 # pattern pair.
 #
 # The management account's Config recorder for eu-central-1 (aws-config,
-# inheriting aws-config/main-core-region, as fnx-ew1-root's): regional
-# resource types only, delivering to the EU archive (fnx-ew1-audit's
-# config-bucket), with the recorder role of fnx-ue1-root, the account's
-# global-resource collector, by its convention ARN (catalog/aws-config/main.yaml;
-# the scoped OQ-A exemption of check-data-residency.py), so deploy fnx-ue1-root's
-# first (docs/OPERATIONS.md "Bootstrap order"). No trail: fnx-ue1-root's
+# inheriting aws-config/main-core-region-eu, as the core template's
+# eu-central-1 stacks): regional resource types only, delivering to the EU
+# archive (fnx-ew1-audit's config-bucket), with the recorder role of
+# fnx-ue1-root, the account's global-resource collector, by its convention ARN
+# (catalog/aws-config/main.yaml), so deploy fnx-ue1-root's first
+# (docs/OPERATIONS.md "Bootstrap order"). It authorizes the EU aggregator
+# (security, eu-west-1, fnx-ew1-security), never the US one: this region's
+# Config data stays in the EU (owner 2026-11-13). No trail: fnx-ue1-root's
 # multi-region trail records this region (owner OQ-A). This stack is not
 # scaffolded: the core template's non-home recorder, by hand.
 # =============================================================================
@@ -53,4 +55,4 @@ components:
       metadata:
         component: aws-config
         inherits:
-          - aws-config/main-core-region
+          - aws-config/main-core-region-eu
