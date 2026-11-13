@@ -67,6 +67,17 @@ components:
         type: abstract
         inherits:
           - vendored
+      # Cloud Posse's finding_publishing_frequency has no validation block, and
+      # an override file cannot add one; the AWS provider checks it only at
+      # plan time against a real account. This JSON Schema rejects any value
+      # but FIFTEEN_MINUTES, ONE_HOUR or SIX_HOURS offline (owner decision,
+      # E5c4): `atmos validate component`, lint step component-validation.
+      settings:
+        validation:
+          validate-aws-guardduty-component-with-jsonschema:
+            schema_type: jsonschema
+            schema_path: "aws-guardduty/validate-aws-guardduty-component.json"
+            description: "finding_publishing_frequency is FIFTEEN_MINUTES, ONE_HOUR or SIX_HOURS"
       vars:
         enabled: true
         name: aws-guardduty

@@ -261,6 +261,12 @@ scaffold:
 schemas:
   atmos:
     manifest: "schemas/atmos/atmos-manifest.json"
+  # Component JSON Schemas (settings.validation.<name>.schema_path is relative
+  # to it): an input a vendored component does not validate itself, checked
+  # offline by `atmos validate component` (lint step component-validation)
+  # and by Atmos before every terraform command.
+  jsonschema:
+    base_path: "schemas/jsonschema"
 
 templates:
   settings:

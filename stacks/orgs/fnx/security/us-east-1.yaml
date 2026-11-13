@@ -14,6 +14,17 @@
 # deploy-full-stack's security layer, after the audit stack's storage layer
 # (docs/OPERATIONS.md "Bootstrap order").
 #
+# The organization's GuardDuty detector and Security Hub hub for us-east-1
+# (E5c4, Cloud Posse's step 1, delegated-administrator): fnx-security is
+# their delegated administrator once fnx-ue1-root's root step delegates them
+# (step 2); org-settings adds the members (step 3). Inspector has no step 1.
+# The detector's protection plans, per catalog/aws-guardduty/defaults.yaml
+# (owner OQ-GD): S3, EKS audit logs and EBS malware scanning, findings every
+# FIFTEEN_MINUTES. Security Hub (catalog/aws-security-hub/us.yaml, owner
+# OQ-SH): Cloud Posse's default standards, and the finding aggregator,
+# linking us-east-2 only (SPECIFIED_REGIONS): no EU region's findings reach
+# us-east-1.
+#
 # Its state goes to fnx-ue1-root's bucket
 # through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
 # whose core_write trusts the management-account administrator and the
@@ -29,6 +40,8 @@ import:
   - orgs/fnx/security/_defaults
   - catalog/aws-cloudtrail/defaults
   - catalog/aws-config/main
+  - catalog/aws-guardduty/defaults
+  - catalog/aws-security-hub/us
 
 components:
   terraform:
@@ -38,3 +51,15 @@ components:
         component: aws-config
         inherits:
           - aws-config/security
+    # Cloud Posse's instance names, step 1 (admin_delegated false): the
+    # delegated administrator's detector and hub.
+    aws-guardduty/delegated-administrator:
+      metadata:
+        component: aws-guardduty
+        inherits:
+          - aws-guardduty/delegated-administrator-defaults
+    aws-security-hub/delegated-administrator:
+      metadata:
+        component: aws-security-hub
+        inherits:
+          - aws-security-hub/delegated-administrator-us

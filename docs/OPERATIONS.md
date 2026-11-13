@@ -413,6 +413,36 @@ In each operated region (`--region <r>`):
    --only-associated false` and `aws securityhub list-members --no-only-associated` (both default
    to associated members only, which would hide an invited but unassociated `prod-eu`) list no
    `prod-eu` in the US regions, and list it in eu-west-1/eu-central-1.
+7. Step 1 alone (the four `fnx-<region>-security` stacks' `aws-guardduty/delegated-administrator`
+   and `aws-security-hub/delegated-administrator`), before step 2, in the security account, in
+   each of the four regions (`--region <r>`):
+   - `aws guardduty list-detectors --region <r>` returns one detector id; `aws guardduty
+     get-detector --detector-id <id> --region <r>` shows `FindingPublishingFrequency`
+     `FIFTEEN_MINUTES` and, in `Features[].Name`/`Status`, `S3_DATA_EVENTS`, `EKS_AUDIT_LOGS` and
+     `EBS_MALWARE_PROTECTION` `ENABLED` (the others are unmanaged, check 3).
+   - `aws securityhub get-enabled-standards --region <r>` lists exactly the `StandardsArn`s ending
+     `aws-foundational-security-best-practices/v/1.0.0` and `cis-aws-foundations-benchmark/v/1.2.0`.
+   - `aws securityhub list-enabled-products-for-import --region <r>` lists the product
+     subscriptions Cloud Posse's step 1 creates (`product_subscriptions` default): `product/aws/`
+     `guardduty`, `inspector`, `config` and `access-analyzer`. If the apply fails on an
+     `aws_securityhub_product_subscription` with `ResourceConflictException` (the integration was
+     already on), import it (ID `<product_arn>,<product_subscription_arn>`, the second from this
+     list) with `atmos terraform import aws-security-hub/delegated-administrator -s <stack>
+     'aws_securityhub_product_subscription.this["<key>"]' '<id>'` and apply again.
+   - The aggregator of check 5 exists in us-east-1 only.
+
+What step 1 makes sticky (settle before the first apply; changing it later means undoing the
+organization side first): the delegated administrator (`fnx-security` for both services in all
+four regions: moving it means disabling the delegation in every region, which disassociates every
+member, then re-delegating and re-adding them); the Security Hub aggregation region (`us-east-1`:
+an aggregator cannot move, it is deleted and recreated in the new region, re-linking the regions)
+and its linking mode (`SPECIFIED_REGIONS` `[us-east-2]`, never an EU region: an EU region once
+linked has had its findings copied to us-east-1); the hub's default-standards switch
+(`default_standards_enabled`, `enable_default_standards` on `aws_securityhub_account`, ForceNew in
+the AWS provider: changing it replaces the hub, so Security Hub is disabled and re-enabled in the
+security account); and the detector's feature set (the same catalog flags become step 3's
+organization configuration, auto-enabled in the members: turning a feature off later leaves it on
+in every member enabled meanwhile).
 
 **The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
 its own workflow, run with management-account administrator credentials, never by CI:

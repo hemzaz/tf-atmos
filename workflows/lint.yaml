@@ -328,6 +328,29 @@ workflows:
             echo "stack checks failed:$failed"
             exit 1
           fi
+      # Component JSON Schemas (atmos.yaml schemas.jsonschema): every
+      # non-abstract instance with a settings.validation entry, in every stack,
+      # passes `atmos validate component` (catalog/aws-guardduty/defaults.yaml:
+      # finding_publishing_frequency, which Cloud Posse does not validate).
+      - name: component-validation
+        type: shell
+        command: |
+          set -eu
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          pairs="$(python3 -c '
+          import json, sys
+          for stack, body in sorted(json.load(sys.stdin).items()):
+              for name, inst in sorted(((body.get("components") or {}).get("terraform") or {}).items()):
+                  if (inst.get("settings") or {}).get("validation") and (inst.get("metadata") or {}).get("type") != "abstract":
+                      print(name, stack)
+          ' < "$stacks_json")"
+          [ -n "$pairs" ] || { echo "component-validation: no instance has settings.validation"; exit 1; }
+          echo "$pairs" | while read -r component stack; do
+            atmos validate component "$component" -s "$stack" > /dev/null || { echo "FAILED: $component in $stack"; exit 1; }
+            echo "ok: $component in $stack"
+          done
       # Atmos resolves a read in an abstract for every inheriting instance, even
       # one the instance overrides: every local read an instance resolves, its
       # own or inherited, names a real instance of its stack (the DR standbys

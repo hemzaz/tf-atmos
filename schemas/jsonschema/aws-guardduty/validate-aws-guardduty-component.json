@@ -1,0 +1,20 @@
+{
+  "$id": "aws-guardduty-component",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "aws-guardduty component validation",
+  "description": "Offline guard for the vendored Cloud Posse aws-guardduty v3.0.2 inputs it does not validate itself (owner decision, E5c4): finding_publishing_frequency, which only the AWS provider checks, at plan time, once a real account is reached. Wired by stacks/catalog/aws-guardduty/defaults.yaml settings.validation; run by `atmos validate component` (lint step component-validation) and before every atmos terraform command.",
+  "type": "object",
+  "properties": {
+    "vars": {
+      "type": "object",
+      "properties": {
+        "finding_publishing_frequency": {
+          "description": "aws_guardduty_detector finding_publishing_frequency (AWS provider enum); null leaves the GuardDuty default.",
+          "type": ["string", "null"],
+          "enum": ["FIFTEEN_MINUTES", "ONE_HOUR", "SIX_HOURS", null]
+        }
+      }
+    }
+  },
+  "required": ["vars"]
+}

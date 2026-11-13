@@ -58,6 +58,25 @@
 #[[- end ]] No trail: the account's one
 # multi-region trail, in its home stack, records this region (owner OQ-A).
 [[- end ]]
+[[- if eq .Config.stage "security" ]]
+#
+# The organization's GuardDuty detector and Security Hub hub for [[ .Config.region ]]
+# (E5c4, Cloud Posse's step 1, delegated-administrator): [[ .Config.tenant ]]-security is
+# their delegated administrator once [[ $root ]]'s root step delegates them
+# (step 2); org-settings adds the members (step 3). Inspector has no step 1.
+# The detector's protection plans, per catalog/aws-guardduty/defaults.yaml
+# (owner OQ-GD): S3, EKS audit logs and EBS malware scanning, findings every
+# FIFTEEN_MINUTES. Security Hub (catalog/aws-security-hub/[[ ternary "defaults" "us" $eu ]].yaml, owner
+# OQ-SH): Cloud Posse's default standards,
+[[- if $home ]] and the finding aggregator,
+# linking us-east-2 only (SPECIFIED_REGIONS): no EU region's findings reach
+# us-east-1.
+[[- else if $eu ]] never aggregated: EU findings
+# stay in their region (QE7).
+[[- else ]] its findings aggregated into
+# [[ .Config.tenant ]]-ue1-security's hub (us-east-1); it aggregates none.
+[[- end ]]
+[[- end ]]
 #
 # Its state goes to [[ $root ]]'s bucket
 # through the backend's core role (stacks/orgs/[[ .Config.tenant ]]/_defaults.yaml),
@@ -105,6 +124,10 @@ import:
   - catalog/aws-cloudtrail/defaults
 [[- end ]]
   - catalog/aws-config/[[ ternary "security-eu" "main" $eu_aggregator ]]
+[[- if eq .Config.stage "security" ]]
+  - catalog/aws-guardduty/defaults
+  - catalog/aws-security-hub/[[ ternary "defaults" "us" $eu ]]
+[[- end ]]
 [[- if $eu ]]
 
 vars:
@@ -132,3 +155,17 @@ components:
         component: aws-config
         inherits:
           - aws-config/[[ $recorder ]]
+[[- if eq .Config.stage "security" ]]
+    # Cloud Posse's instance names, step 1 (admin_delegated false): the
+    # delegated administrator's detector and hub.
+    aws-guardduty/delegated-administrator:
+      metadata:
+        component: aws-guardduty
+        inherits:
+          - aws-guardduty/delegated-administrator-defaults
+    aws-security-hub/delegated-administrator:
+      metadata:
+        component: aws-security-hub
+        inherits:
+          - aws-security-hub/delegated-administrator-[[ ternary "eu" "us" $eu ]]
+[[- end ]]
