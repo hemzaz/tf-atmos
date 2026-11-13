@@ -57,8 +57,9 @@ record IAM and keep their one multi-region trail in their US home stack, so a GD
 stack's aws-config may name, in vars.global_resource_collector_region, the region of the
 collector a non-GDPR stack of its own account (settings.environment.account) holds; prod-eu,
 whose stacks are all GDPR-scoped, may not. Not coded, as no stack var shows it: those trails
-(US archive) also record the accounts' eu-west-1 control-plane events, and the US aggregator
-in fnx-ue1-security (all regions, CP-hardcoded) aggregates their eu-west-1 recorders. All of it
+(US archive) also record the accounts' EU-region (eu-west-1, and for root and security the EU
+DR region eu-central-1, E5c3b) control-plane events, and the US aggregator in fnx-ue1-security
+(all regions, CP-hardcoded) aggregates their EU-region recorders. All of it
 is core-account control-plane metadata, not EU personal data; a GDPR-scoped stack's own trail
 or recorder still delivers only to the EU archive.
 The org security services (ORG_SERVICES: the vendored aws-guardduty, aws-security-hub and

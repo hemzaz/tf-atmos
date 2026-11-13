@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# fnx-ue2-root - the management account's us-east-2 stack
+# =============================================================================
+# The management account in the US DR region (E5c OQ-R (a), 2026-11-10: Cloud
+# Posse runs the org security services in every operated region, so each needs
+# a root and a security stack; the services' delegation instances arrive in
+# later E5c slices). No backend: its state is fnx-ue1-root's US bucket,
+# through the backend's root role (stacks/orgs/fnx/_defaults.yaml routes stage
+# root there), whose root_write holds this stack's pattern pair.
+#
+# The management account's Config recorder for us-east-2 (aws-config,
+# inheriting aws-config/main-core-region, as the core template's non-home
+# stacks): regional resource types only, delivering to the US archive
+# (fnx-ue1-audit's config-bucket), with the recorder role of fnx-ue1-root, the
+# account's global-resource collector, by its convention ARN
+# (catalog/aws-config/main.yaml), so deploy fnx-ue1-root's first
+# (docs/OPERATIONS.md "Bootstrap order"). No trail: fnx-ue1-root's
+# multi-region trail records this region (owner OQ-A). This stack is not
+# scaffolded: the core template's non-home recorder, by hand.
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - mixins/region/us-east-2
+  - orgs/fnx/root/_defaults
+  - catalog/aws-config/main
+
+settings:
+  context:
+    tenant: fnx
+    stage: root
+
+components:
+  terraform:
+    # Cloud Posse's instance name; the variant is catalog/aws-config/main.yaml's.
+    aws-config:
+      metadata:
+        component: aws-config
+        inherits:
+          - aws-config/main-core-region
