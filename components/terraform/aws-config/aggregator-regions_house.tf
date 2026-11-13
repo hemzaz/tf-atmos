@@ -35,6 +35,7 @@ locals {
 }
 
 module "aws_config_aggregator_label" {
+  #checkov:skip=CKV_TF_1:a registry module pinned to an exact version, the same cloudposse/label/null 0.25.0 the vendored main.tf and config module use
   source     = "cloudposse/label/null"
   version    = "0.25.0"
   attributes = ["config", "aggregator"]
