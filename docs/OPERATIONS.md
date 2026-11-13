@@ -413,6 +413,23 @@ In each operated region (`--region <r>`):
    --only-associated false` and `aws securityhub list-members --no-only-associated` (both default
    to associated members only, which would hide an invited but unassociated `prod-eu`) list no
    `prod-eu` in the US regions, and list it in eu-west-1/eu-central-1.
+7. Step 1 alone (the four `fnx-<region>-security` stacks' `aws-guardduty/delegated-administrator`
+   and `aws-security-hub/delegated-administrator`), before step 2: in the security account,
+   `aws guardduty list-detectors` returns one detector, and `aws guardduty get-detector` shows
+   `FindingPublishingFrequency` `FIFTEEN_MINUTES` and `S3_DATA_EVENTS`, `EKS_AUDIT_LOGS`,
+   `EBS_MALWARE_PROTECTION` ENABLED; `aws securityhub get-enabled-standards` lists AWS
+   Foundational Security Best Practices and CIS AWS Foundations; the aggregator of check 5
+   exists in us-east-1 only.
+
+What step 1 makes sticky (settle before the first apply; changing it later means undoing the
+organization side first): the delegated administrator (`fnx-security` for both services in all
+four regions: moving it means disabling the delegation in every region, which disassociates every
+member, then re-delegating and re-adding them); the Security Hub aggregation region (`us-east-1`:
+an aggregator cannot move, it is deleted and recreated in the new region, re-linking the regions)
+and its linking mode (`SPECIFIED_REGIONS` `[us-east-2]`, never an EU region: an EU region once
+linked has had its findings copied to us-east-1); and the detector's feature set (the same catalog flags become step 3's organization
+configuration, auto-enabled in the members: turning a feature off later leaves it on in every
+member enabled meanwhile).
 
 **The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
 its own workflow, run with management-account administrator credentials, never by CI:
