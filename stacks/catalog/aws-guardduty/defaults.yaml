@@ -36,6 +36,9 @@
 #       existing members CP adds with CreateMembers too (GuardDuty API
 #       reference, CreateMembers: "irrespective of the accounts being new or
 #       existing members"); ALL would enrol every account, prod-eu included.
+#       But CP's main.tf creates that configuration only after the members
+#       (depends_on), so the house member-features_house.tf enables each
+#       managed feature on each member explicitly, after both (E5c6).
 #
 # Owner decisions (E5c plan, 2026-11-10):
 #   - OQ-GD: one org-wide protection plan: S3, EKS audit logs and EBS malware

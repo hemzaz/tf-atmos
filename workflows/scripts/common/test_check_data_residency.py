@@ -1,8 +1,13 @@
 """Tests for check-data-residency.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import copy
 import importlib.util
+import io
+import json
 import pathlib
+import sys
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "check_data_residency", pathlib.Path(__file__).with_name("check-data-residency.py")
@@ -1195,6 +1200,47 @@ class OrgServicesTest(unittest.TestCase):
                 with self.subTest(stack=stack_name, name=name):
                     self.assertIn("fnx-root", self.instances_map(stack_name, name)["full_account_map"])
         self.assertEqual(residency.check(org_services_stacks()), [])
+
+
+    def test_each_step_depends_on_exactly_its_predecessor(self):
+        # #525 review LOW-1: org-settings -> <svc>/root, GuardDuty/Security Hub root -> delegated-administrator,
+        # Inspector root and access-analyzer/root -> nothing.
+        stacks = org_services_stacks()
+        terraform = stacks["fnx-ue1-security"]["components"]["terraform"]
+        terraform["aws-guardduty/org-settings"]["dependencies"]["components"] = []
+        stacks["fnx-ue1-root"]["components"]["terraform"]["aws-inspector2/root"]["dependencies"]["components"] = [
+            {"component": "aws-inspector2/org-settings", "stack": "fnx-ue1-security"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ue1-root: aws-inspector2/root dependencies.components is ['aws-inspector2/org-settings in "
+            "fnx-ue1-security']: Cloud Posse's step order needs nothing (the same region's previous step)",
+            "fnx-ue1-security: aws-guardduty/org-settings dependencies.components is []: Cloud Posse's step order "
+            "needs exactly aws-guardduty/root in fnx-ue1-root (the same region's previous step)"])
+
+    def test_root_on_a_wrong_step_fails(self):
+        stacks = org_services_stacks()
+        stacks["fnx-ew1-root"]["components"]["terraform"]["aws-security-hub/root"]["dependencies"]["components"] = [
+            {"component": "aws-security-hub/org-settings", "stack": "fnx-ew1-security"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ew1-root: aws-security-hub/root dependencies.components is ['aws-security-hub/org-settings in "
+            "fnx-ew1-security']: Cloud Posse's step order needs exactly aws-security-hub/delegated-administrator "
+            "in fnx-ew1-security (the same region's previous step)"])
+
+    def test_a_missing_predecessor_stack_warns_and_passes(self):
+        # Owner (#525): a new region's security stack before its hand-written root stack exists.
+        stacks = org_services_stacks()
+        del stacks["fnx-ue2-root"]
+        warnings = []
+        self.assertEqual(residency.check(stacks, warnings=warnings), [])
+        self.assertEqual(len(warnings), 3)
+        self.assertIn("fnx-ue2-security: aws-guardduty/org-settings depends on aws-guardduty/root in fnx-ue2-root, "
+                      "which does not exist", warnings[0])
+        # main(): the warnings go to stderr as WARNING lines, and the exit code stays 0.
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(stacks))), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(residency.main(), 0)
+        self.assertEqual(err.getvalue().count("WARNING fnx-ue2-security: aws-"), 3)
+        self.assertNotIn("WARNING", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -30,9 +30,14 @@ resource "aws_guardduty_detector" "management" {
   count = local.create_org_delegation && var.management_account_member_enabled ? 1 : 0
 
   enable = true
-  # The administrator's frequency: a member inherits it, so the same value
-  # never drifts once the account is a member.
+  # The administrator's frequency, for the detector's first apply.
   finding_publishing_frequency = var.finding_publishing_frequency
 
   tags = module.this.tags
+
+  lifecycle {
+    # Once the account is a member (org-settings, step 3), the delegated
+    # administrator owns the value: a member inherits it and cannot set it.
+    ignore_changes = [finding_publishing_frequency]
+  }
 }

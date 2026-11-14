@@ -99,6 +99,10 @@ HOUSE_FILE_ALLOWLIST = (
     ("components/terraform/aws-security-hub", "management-member_house.tf",
      "E5c6 (owner 2026-11-14): management_account_member_enabled; members_override.tf adds the "
      "management account (its hub enabled by CP's root step) to org-settings' members, which CP leaves out"),
+    ("components/terraform/aws-guardduty", "member-features_house.tf",
+     "E5c6 (#525 review): each managed feature ENABLED on each member (aws_guardduty_member_detector_feature) "
+     "after CreateMembers and the organization configuration; CP's main.tf orders the configuration after "
+     "the members, so the members of step 3's first apply can keep the features off"),
 )
 # Cloud Posse remote-state reads the house bypasses (owner OQ-E/OQ-W: no live remote state), one
 # (target, override file, module, reason) each: the override must keep `bypass = true` in that

@@ -165,6 +165,10 @@ the last step.
       -s fnx-<r>-security` (`org-settings`: members, the management account included, and
       auto-enable; Inspector's stays `metadata.enabled: false`). Then the
       [first-apply checks](#deploying-a-stack) 8 and 9.
+   A new region's security stack (the scaffold's core profile) depends on that region's
+   `fnx-<r>-root`, which is hand-written (the root stacks are not scaffolded): add it, with its
+   `<svc>/root` instances, before step 2. Until it exists, check-data-residency.py prints a
+   `WARNING ... which does not exist` on stderr for each step that names it and still passes.
 
 **An imported account without `OrganizationAccountAccessRole`.** Organizations creates that role
 only in the accounts it creates; an account that joined by invitation has none, so step 6 and the
@@ -422,10 +426,13 @@ In each operated region (`--region <r>`):
 4. Each member's detector: `aws guardduty get-member-detectors --detector-id <admin detector>
    --account-ids <members>` (or `aws guardduty get-detector` in the member) lists the same
    features, ENABLED for the three managed ones. Step 3 adds every map account (but the
-   security account) explicitly with CreateMembers (`awsutils_guardduty_organization_settings`), and
-   AWS applies the organization configuration to an existing account it adds that way, so `NEW`
-   reaches the accounts that predate step 3; a member still showing a managed feature DISABLED
-   is the exception this check exists for: enable it by hand there. Security Hub's LOCAL
+   security account) explicitly with CreateMembers (`awsutils_guardduty_organization_settings`).
+   AWS applies the organization configuration to an existing account it adds that way, but Cloud
+   Posse's `main.tf` creates the organization configuration (`NEW`) and its features only *after*
+   the members (`depends_on`), and awsutils never calls CreateMembers again, so on step 3's first
+   apply the members, the management account included, could keep the features off. The house
+   `member-features_house.tf` closes that: one `aws_guardduty_member_detector_feature` per member and
+   managed feature, `ENABLED`, applied after both (check 9 reads them). Security Hub's LOCAL
    `auto_enable` reaches only accounts that join later, but step 3's CreateMembers
    (`awsutils_security_hub_organization_settings`) adds the existing ones too, enabling Security Hub
    and the default standards where it was off (an account whose hub was already on keeps its own
@@ -490,6 +497,9 @@ In each operated region (`--region <r>`):
      `aws guardduty list-detectors --region <r>`) shows `AutoEnableOrganizationMembers` `NEW` and,
      in `Features`, `S3_DATA_EVENTS`, `EKS_AUDIT_LOGS` and `EBS_MALWARE_PROTECTION` with `AutoEnable`
      `NEW`.
+   - `aws guardduty get-member-detectors --detector-id <id> --account-ids <member ids> --region <r>`
+     (at most 50 ids a call): every member's `Features[].Status` is `ENABLED` for `S3_DATA_EVENTS`,
+     `EKS_AUDIT_LOGS` and `EBS_MALWARE_PROTECTION` (the house `member-features_house.tf`).
    - `aws guardduty list-members --detector-id <id> --only-associated false --region <r>` lists the
      management account (`RelationshipStatus` `Enabled`; owner 2026-11-14, unlike Cloud Posse) and
      every other map account but the security account; in us-east-1 and us-east-2 no `prod-eu`,
@@ -534,7 +544,11 @@ CENTRAL later means configuration policies and re-associating every account, and
 disassociating them first) and its `auto_enable` with the default standards; and the member set
 (the account maps: removing an account from a map disassociates it, deleting its member relationship,
 and the management account, a member by owner decision 2026-11-14, keeps its own detector and hub
-when it stops being one).
+when it stops being one). Turning `management_account_member_enabled` off is ordered: apply step 3
+(`deploy-security-org -s fnx-<r>-security`) first, which removes the management account from the
+members, then the root step (`deploy-security -s fnx-<r>-root`), which destroys its GuardDuty detector;
+the other order deletes a member's detector while it is still a member. The member features
+(`member-features_house.tf`) are only dropped from state on removal: the features stay enabled.
 
 **The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
 its own workflow, run with management-account administrator credentials, never by CI:

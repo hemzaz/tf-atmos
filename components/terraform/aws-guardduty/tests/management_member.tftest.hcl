@@ -86,6 +86,10 @@ run "root_enables_the_management_detector" {
     condition     = length(module.guardduty) == 0 && length(aws_guardduty_organization_configuration.this) == 0
     error_message = "root creates no CP detector module and no organization settings"
   }
+  assert {
+    condition     = length(aws_guardduty_member_detector_feature.house) == 0
+    error_message = "root enables no member features"
+  }
 }
 
 # Steps 1 and 3 run in the security account: no management detector there.
@@ -98,6 +102,10 @@ run "security_steps_create_no_management_detector" {
   assert {
     condition     = length(aws_guardduty_detector.management) == 0 && length(module.guardduty) == 1
     error_message = "step 1 creates the administrator's detector only"
+  }
+  assert {
+    condition     = length(aws_guardduty_member_detector_feature.house) == 0
+    error_message = "step 1 (admin_delegated false) enables no member features"
   }
 }
 
@@ -118,6 +126,23 @@ run "org_settings_us_members_include_the_management_account" {
       "888888888888", "999999999999"
     ])
     error_message = "US members are the US map minus fnx-security, fnx-root included"
+  }
+  # member-features_house.tf: the three managed features ENABLED on each US member, after CreateMembers.
+  assert {
+    condition     = length(aws_guardduty_member_detector_feature.house) == 24
+    error_message = "3 managed features x 8 US members"
+  }
+  assert {
+    condition = toset(keys(aws_guardduty_member_detector_feature.house)) == toset(flatten([
+      for id in ["111111111111", "333333333333", "444444444444", "555555555555", "666666666666", "777777777777", "888888888888", "999999999999"] :
+      [for f in ["S3_DATA_EVENTS", "EKS_AUDIT_LOGS", "EBS_MALWARE_PROTECTION"] : "${id}/${f}"]
+    ]))
+    error_message = "every US member (fnx-root included, prod-eu and fnx-security not) gets the three features"
+  }
+  assert {
+    condition = alltrue([for f in values(aws_guardduty_member_detector_feature.house) :
+    f.status == "ENABLED" && f.detector_id == "d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5"])
+    error_message = "ENABLED, on the administrator's (looked-up) detector"
   }
   assert {
     condition     = length(aws_guardduty_detector.management) == 0
@@ -150,6 +175,13 @@ run "org_settings_eu_members_include_management_and_prod_eu" {
     condition     = toset(one(awsutils_guardduty_organization_settings.this[*].member_accounts)) == toset(["111111111111", "999999999999", "121212121212"])
     error_message = "EU members are the full map minus fnx-security"
   }
+  assert {
+    condition = toset(keys(aws_guardduty_member_detector_feature.house)) == toset(flatten([
+      for id in ["111111111111", "999999999999", "121212121212"] :
+      [for f in ["S3_DATA_EVENTS", "EKS_AUDIT_LOGS", "EBS_MALWARE_PROTECTION"] : "${id}/${f}"]
+    ]))
+    error_message = "EU members, prod-eu and fnx-root included, get the three features"
+  }
 }
 
 # Cloud Posse's behaviour with the flag off: no management detector, the management account no member.
@@ -167,6 +199,10 @@ run "flag_off_is_cloud_posse" {
     condition     = !contains(one(awsutils_guardduty_organization_settings.this[*].member_accounts), "111111111111")
     error_message = "with the flag off the management account is no member (CP main.tf)"
   }
+  assert {
+    condition     = length(aws_guardduty_member_detector_feature.house) == 21 && !contains(keys(aws_guardduty_member_detector_feature.house), "111111111111/S3_DATA_EVENTS")
+    error_message = "with the flag off, the features follow CP's members: 7 accounts, no fnx-root"
+  }
 }
 
 run "flag_off_root_has_no_detector" {
@@ -182,5 +218,27 @@ run "flag_off_root_has_no_detector" {
   assert {
     condition     = length(aws_guardduty_detector.management) == 0
     error_message = "with the flag off root only delegates"
+  }
+}
+
+# A protection flag off leaves that feature unmanaged on members too, as CP leaves it at the org level.
+run "member_features_follow_the_protection_flags" {
+  command = plan
+  variables {
+    admin_delegated               = true
+    kubernetes_audit_logs_enabled = false
+  }
+  override_data {
+    target = data.aws_caller_identity.this[0]
+    values = { account_id = "222222222222" }
+  }
+  assert {
+    condition = (length(aws_guardduty_member_detector_feature.house) == 16 &&
+    !anytrue([for f in values(aws_guardduty_member_detector_feature.house) : f.name == "EKS_AUDIT_LOGS"]))
+    error_message = "no EKS_AUDIT_LOGS member feature when the flag is off (2 features x 8 members)"
+  }
+  assert {
+    condition     = length(aws_guardduty_organization_configuration_feature.eks_audit_logs) == 0
+    error_message = "and none at the organization level either (CP)"
   }
 }
