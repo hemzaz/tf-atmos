@@ -92,6 +92,13 @@ HOUSE_FILE_ALLOWLIST = (
      "E5c: automation rules filtered by account (CP's disabled_control_finding_reasons matches every "
      "account), so fnx-ew1-security suppresses the shared accounts' home-region-only controls and "
      "keeps prod-eu's findings"),
+    ("components/terraform/aws-guardduty", "management-member_house.tf",
+     "E5c6 (owner 2026-11-14): management_account_member_enabled and the management account's own "
+     "detector in the root step (GuardDuty cannot enable it through CreateMembers); members_override.tf "
+     "adds the management account to org-settings' members, which CP leaves out"),
+    ("components/terraform/aws-security-hub", "management-member_house.tf",
+     "E5c6 (owner 2026-11-14): management_account_member_enabled; members_override.tf adds the "
+     "management account (its hub enabled by CP's root step) to org-settings' members, which CP leaves out"),
 )
 # Cloud Posse remote-state reads the house bypasses (owner OQ-E/OQ-W: no live remote state), one
 # (target, override file, module, reason) each: the override must keep `bypass = true` in that

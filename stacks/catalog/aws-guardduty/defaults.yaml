@@ -20,12 +20,16 @@
 #   aws-guardduty/root-defaults
 #       step 2, instance aws-guardduty/root in the management account's stack
 #       of the same region: delegates GuardDuty to <tenant>-security (CP checks
-#       Organizations trusted access, aws-organization/defaults.yaml).
+#       Organizations trusted access, aws-organization/defaults.yaml), and
+#       enables the management account's own detector (house, E5c6).
 #   aws-guardduty/org-settings-us (us.yaml), aws-guardduty/org-settings-eu
 #       step 3, instance aws-guardduty/org-settings in the security stack
 #       ("deployed again", admin_delegated: true): members and auto-enable.
-#       Members are the account map minus the security and management
-#       accounts, so the residency is the map (owner decision OQ-RES): -us
+#       Members are the account map minus the security account (Cloud
+#       Posse also leaves out the management account; the house
+#       management_account_member_enabled keeps it in, owner 2026-11-14, and
+#       the root step enables its detector, which CreateMembers cannot), so
+#       the residency is the map (owner decision OQ-RES): -us
 #       (us- regions) takes account-map-bypass-us, without prod-eu; -eu (eu-
 #       regions) the full map. CP's auto_enable_organization_members NEW (the
 #       default) applies the organization's feature configuration to the
@@ -86,6 +90,9 @@ components:
         delegated_administrator_component_name: aws-guardduty/delegated-administrator
         admin_delegated: false
         auto_enable_organization_members: NEW
+        # House (E5c6, owner 2026-11-14; management-member_house.tf, members_override.tf):
+        # the management account is a member too, unlike Cloud Posse.
+        management_account_member_enabled: true
         finding_publishing_frequency: FIFTEEN_MINUTES
         s3_protection_enabled: true
         kubernetes_audit_logs_enabled: true

@@ -151,6 +151,20 @@ the last step.
    non-home recorder uses its US home stack's recorder role by name
    (`stacks/catalog/aws-config/main.yaml`, `main-core-region`), which no dependency can enforce
    (check-data-residency.py forbids an EU stack's dependency on a US one).
+   The org security services (GuardDuty, Security Hub, Inspector; Cloud Posse's three steps) take
+   **three passes per region** `<r>` (`ue1`, `ew1`, `ue2`, `ec1`), each after the previous one in the
+   same region (`dependencies.components`; check-data-residency.py fails a step that depends on
+   another region's):
+   1. step 1, the security account: `atmos workflow deploy -f deploy-full-stack -s fnx-<r>-security`
+      (its `security` layer: the detector and hub). The run reaches the `security-org` layer
+      before step 2 exists: decline that layer at its confirm.
+   2. step 2, the management account: `atmos workflow deploy-security -f deploy-full-stack -s fnx-<r>-root`
+      (the delegations; the management account's own GuardDuty detector, which the house
+      `management-member_house.tf` adds because GuardDuty cannot enable it as a member; its hub).
+   3. step 3, the security account again: `atmos workflow deploy-security-org -f deploy-full-stack
+      -s fnx-<r>-security` (`org-settings`: members, the management account included, and
+      auto-enable; Inspector's stays `metadata.enabled: false`). Then the
+      [first-apply checks](#deploying-a-stack) 8 and 9.
 
 **An imported account without `OrganizationAccountAccessRole`.** Organizations creates that role
 only in the accounts it creates; an account that joined by invitation has none, so step 6 and the
@@ -407,10 +421,15 @@ In each operated region (`--region <r>`):
    read what they report and turn off by hand any the owner does not want; Terraform never will.
 4. Each member's detector: `aws guardduty get-member-detectors --detector-id <admin detector>
    --account-ids <members>` (or `aws guardduty get-detector` in the member) lists the same
-   features, ENABLED for the three managed ones. A member that existed before step 3 may show
-   them DISABLED: auto-enable `NEW` targets accounts that join later, and only this check shows
-   whether step 3's CreateMembers applied the features to an existing member; enable them by hand there. Security Hub has the same open
-   question for LOCAL `auto_enable` and accounts that predate step 3 (E5c plan, before E5c6).
+   features, ENABLED for the three managed ones. Step 3 adds every map account (but the
+   security account) explicitly with CreateMembers (`awsutils_guardduty_organization_settings`), and
+   AWS applies the organization configuration to an existing account it adds that way, so `NEW`
+   reaches the accounts that predate step 3; a member still showing a managed feature DISABLED
+   is the exception this check exists for: enable it by hand there. Security Hub's LOCAL
+   `auto_enable` reaches only accounts that join later, but step 3's CreateMembers
+   (`awsutils_security_hub_organization_settings`) adds the existing ones too, enabling Security Hub
+   and the default standards where it was off (an account whose hub was already on keeps its own
+   standards); Inspector's step 3 associates and enables each member explicitly.
 5. Security Hub aggregation: `aws securityhub list-finding-aggregators --region us-east-1`, then
    `aws securityhub get-finding-aggregator --finding-aggregator-arn <arn> --region us-east-1`
    shows `RegionLinkingMode` `SPECIFIED_REGIONS` and `Regions` `[us-east-2]`;
@@ -418,7 +437,8 @@ In each operated region (`--region <r>`):
 6. Residency, per region: `aws guardduty list-members --detector-id <admin detector id>
    --only-associated false` and `aws securityhub list-members --no-only-associated` (both default
    to associated members only, which would hide an invited but unassociated `prod-eu`) list no
-   `prod-eu` in the US regions, and list it in eu-west-1/eu-central-1.
+   `prod-eu` in the US regions, and list it in eu-west-1/eu-central-1; check 9 adds the
+   management account and Inspector.
 7. Step 1 alone (the four `fnx-<region>-security` stacks' `aws-guardduty/delegated-administrator`
    and `aws-security-hub/delegated-administrator`), before step 2, in the security account, in
    each of the four regions (`--region <r>`):
@@ -451,9 +471,44 @@ In each operated region (`--region <r>`):
      list-organization-admin-accounts --region <r>` list the security account, `ENABLED` (GuardDuty
      `AdminStatus`, Security Hub `Status`), and `aws inspector2 get-delegated-admin-account --region <r>` names it with
      `relationshipStatus` `ENABLED`; `aws securityhub describe-hub --region <r>` succeeds in the
-     management account (Cloud Posse's root step enables its hub, with the default standards).
+     management account (Cloud Posse's root step enables its hub, with the default standards), and
+     `aws guardduty list-detectors --region <r>` there returns one detector id (the house
+     `management-member_house.tf`: the management account must have GuardDuty enabled before step 3
+     adds it as a member).
    - `aws organizations describe-resource-policy` shows the Security Hub resource policy, written by
      `fnx-ue1-root` alone (`root-organization-policy`).
+   - If Access Analyzer's service-linked role already exists (the console or another tool created
+     it), `fnx-ue1-root`'s `access-analyzer/root` apply fails with `InvalidInput ... has been taken`:
+     import it with `atmos terraform import access-analyzer/root -s fnx-ue1-root
+     'aws_iam_service_linked_role.access_analyzer[0]'
+     'arn:aws:iam::<management account>:role/aws-service-role/access-analyzer.amazonaws.com/AWSServiceRoleForAccessAnalyzer'`
+     and apply again.
+9. Step 3 (the four `fnx-<region>-security` stacks' `aws-guardduty/org-settings` and
+   `aws-security-hub/org-settings`, `security-org` layer, `deploy-security-org`), from the security
+   account, after step 2, in each of the four regions (`--region <r>`):
+   - `aws guardduty describe-organization-configuration --detector-id <id> --region <r>` (`<id>`:
+     `aws guardduty list-detectors --region <r>`) shows `AutoEnableOrganizationMembers` `NEW` and,
+     in `Features`, `S3_DATA_EVENTS`, `EKS_AUDIT_LOGS` and `EBS_MALWARE_PROTECTION` with `AutoEnable`
+     `NEW`.
+   - `aws guardduty list-members --detector-id <id> --only-associated false --region <r>` lists the
+     management account (`RelationshipStatus` `Enabled`; owner 2026-11-14, unlike Cloud Posse) and
+     every other map account but the security account; in us-east-1 and us-east-2 no `prod-eu`,
+     in eu-west-1 and eu-central-1 `prod-eu` too.
+   - `aws securityhub describe-organization-configuration --region <r>` shows `AutoEnable` `true`,
+     `AutoEnableStandards` `DEFAULT` and `OrganizationConfiguration.ConfigurationType` `LOCAL`.
+   - `aws securityhub list-members --no-only-associated --region <r>` lists the same accounts as
+     GuardDuty's (`MemberStatus` `Enabled`): the management account present, `prod-eu` absent in
+     the US regions and present in the EU ones.
+   - `aws securityhub list-automation-rules --region <r>`: in us-east-2 and eu-central-1 the
+     `standby-suppressions` rules (`Suppress IAM.1 (GLOBAL_IAM)` ...), which match every account,
+     the management account included; in eu-west-1 the two `Suppress shared-accounts-*` rules,
+     whose criteria (`aws securityhub batch-get-automation-rules --automation-rules-arns <arn>
+     --region eu-west-1`, `Criteria.AwsAccountId`) name the shared accounts (the management account
+     among them) and never `prod-eu`; in us-east-1 none (every account's home region).
+   - `aws inspector2 describe-organization-configuration --region <r>` shows no `autoEnable` scan
+     type `true` while `aws-inspector2/org-settings` stays `metadata.enabled: false` (owner OQ-IN);
+     after turning it on it shows `ec2`, `ecr` and `lambda` `true`, and `aws
+     inspector2 list-members --no-only-associated --region <r>` lists no `prod-eu` in the US regions.
 
 What step 1 makes sticky (settle before the first apply; changing it later means undoing the
 organization side first): the delegated administrator (`fnx-security` for both services in all
@@ -468,7 +523,18 @@ security account); and the detector's feature set (the same catalog flags become
 organization configuration, auto-enabled in the members: turning a feature off later leaves it on
 in every member enabled meanwhile). Step 2 adds the owner of the Organizations resource policy
 (`fnx-ue1-root`'s `aws-security-hub/root`, the organization's only one: moving it means deleting
-the policy there first, since a second writer would overwrite it).
+the policy there first, since a second writer would overwrite it) and the management account's
+hub, enabled by `aws-security-hub/root` in the four root stacks with the same default-standards
+switch (`enable_default_standards`, ForceNew: changing it replaces the management account's hub
+in all four regions, disabling and re-enabling Security Hub there). Step 3 adds: GuardDuty's
+`auto_enable_organization_members` (`NEW`; `ALL` would enrol every existing account, `prod-eu` in
+the US regions included, so check-data-residency.py refuses it outside the EU) and the feature
+auto-enable it sets; Security Hub's `LOCAL` configuration type (Cloud Posse hardcodes it; moving to
+CENTRAL later means configuration policies and re-associating every account, and back to LOCAL means
+disassociating them first) and its `auto_enable` with the default standards; and the member set
+(the account maps: removing an account from a map disassociates it, deleting its member relationship,
+and the management account, a member by owner decision 2026-11-14, keeps its own detector and hub
+when it stops being one).
 
 **The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
 its own workflow, run with management-account administrator credentials, never by CI:
