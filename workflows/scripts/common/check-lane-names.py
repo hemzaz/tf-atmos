@@ -489,10 +489,49 @@ def check_org_services(stacks: dict) -> list[str]:
     return errors
 
 
+def check_access_analyzers(stacks: dict) -> list[str]:
+    """IAM Access Analyzer (vendored access-analyzer, E5c7) singletons: one analyzer per (account, region, type),
+    one unused-access analyzer (global) per account and residency, and the delegation
+    (organizations_delegated_administrator_enabled) once in all, in the management account."""
+    errors, analyzers, unused, delegations = [], collections.defaultdict(list), collections.defaultdict(list), []
+    for stack_name in sorted(stacks):
+        for name, instance in instances_of(stacks[stack_name]):
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            variables = instance.get("vars") or {}
+            if instance.get("component") != "access-analyzer" or stage == fixtures.FIXTURE_STAGE \
+                    or not residency.flag_on(variables.get("enabled", True)):
+                continue
+            where, account, region = f"{stack_name}: {name}", residency.own_account(instance), variables.get("region")
+            for flag, kind in (("accessanalyzer_organization_enabled", "ORGANIZATION"),
+                               ("accessanalyzer_organization_unused_access_enabled", "ORGANIZATION_UNUSED_ACCESS")):
+                if residency.flag_on(variables.get(flag)):
+                    analyzers[(account, region, kind)].append(where)
+            if residency.flag_on(variables.get("accessanalyzer_organization_unused_access_enabled")):
+                unused[(account, str(region).startswith(residency.EU_PREFIX))].append(where)
+            if residency.flag_on(variables.get("organizations_delegated_administrator_enabled")):
+                delegations.append(where)
+                if account != residency.map_root_account(instance):
+                    errors.append(f"{where} sets organizations_delegated_administrator_enabled in {account}, not the "
+                                  f"management account ({residency.map_root_account(instance)}): only the root step "
+                                  "delegates Access Analyzer (a delegated administrator's instance keeps it false)")
+    for (account, region, kind), wheres in sorted(analyzers.items()):
+        if len(wheres) > 1:
+            errors.append(f"{' and '.join(wheres)} all create the {kind} analyzer of {account} in {region}: one per "
+                          "account, region and type")
+    for (account, eu), wheres in sorted(unused.items()):
+        if len(wheres) > 1:
+            errors.append(f"{' and '.join(wheres)} all create an unused-access analyzer of {account} in the "
+                          f"{'EU' if eu else 'US'} residency: it is global (IAM), one per residency")
+    if len(delegations) > 1:
+        errors.append(f"{' and '.join(delegations)} all delegate Access Analyzer (an organization singleton, global): "
+                      "set organizations_delegated_administrator_enabled in one root stack only")
+    return errors
+
+
 def check(stacks: dict) -> list[str]:
     return (
         check_groups(stacks) + check_account(stacks) + check_instances(stacks) + check_global(stacks)
-        + check_trusted_providers(stacks) + check_org_services(stacks)
+        + check_trusted_providers(stacks) + check_org_services(stacks) + check_access_analyzers(stacks)
     )
 
 

@@ -2,11 +2,30 @@
 # =============================================================================
 # access-analyzer/delegated-administrator variants (E5c7)
 # =============================================================================
-# Cloud Posse aws-access-analyzer README, step 2: in each security stack, the
-# organization analyzer; the unused-access analyzer in fnx-ue1-security only
-# (IAM is global, so one region analyses it; E5c plan OQ-G). A security
-# stack's access-analyzer/delegated-administrator instance inherits one. Its
-# own file, so the root stack, which imports defaults.yaml, does not resolve them.
+# Cloud Posse aws-access-analyzer README, step 2: the delegated administrator's
+# (fnx-security's) organization analyzers, after fnx-ue1-root's access-analyzer/root
+# delegation (global, once). A security stack's access-analyzer/delegated-administrator
+# instance inherits one. Its own file, so the root stack, which imports
+# defaults.yaml, does not resolve them. Owner decision 2026-11-14 (EU data stays
+# in the EU, no residency exemption):
+#   - External access (ORGANIZATION) only in the EU regions (-eu: fnx-ew1-security,
+#     fnx-ec1-security). AWS reports a role whose trust reaches outside the
+#     organization (prod-eu's GitHub OIDC roles) "in each enabled Region", and an
+#     organization analyzer cannot exclude an account, so a US one would hold
+#     prod-eu's IAM findings. The EU analyzers cover every account's IAM roles
+#     (global) and the EU regions' resources. Known interim gap: US-region
+#     resources' external sharing is unmonitored by Access Analyzer until E5c7b
+#     (ACCOUNT analyzers in the non-GDPR accounts' US stacks, with or after E5c8).
+#   - Unused access (ORGANIZATION_UNUSED_ACCESS) is global, one per residency
+#     (-unused-access): fnx-ue1-security without the all-GDPR accounts (prod-eu),
+#     fnx-ew1-security without the shared accounts but the security account
+#     itself, which AWS does not let the analyzer owner exclude (its IAM is
+#     analysed in both, which keeps EU data in the EU). The house
+#     unused-access-exclusions_house.tf input names account-map keys;
+#     check-data-residency.py fails a list that is not that derivation.
+#   - fnx-ue2-security has no instance: both analyzers are off there.
+# organizations_delegated_administrator_enabled stays false (defaults.yaml): the
+# delegation is fnx-ue1-root's alone (check-lane-names.py).
 # =============================================================================
 
 import:
@@ -14,7 +33,39 @@ import:
 
 components:
   terraform:
-    access-analyzer/delegated-administrator-defaults:
+    # A US security stack: no external-access analyzer. Cloud Posse's step order: after
+    # fnx-ue1-root's delegation (global; check-data-residency.py ORG_PREDECESSORS).
+    access-analyzer/delegated-administrator-us:
+      metadata:
+        component: access-analyzer
+        type: abstract
+        inherits:
+          - access-analyzer/defaults
+      vars:
+        accessanalyzer_organization_enabled: false
+        organizations_delegated_administrator_enabled: false
+      dependencies:
+        components:
+          - component: access-analyzer/root
+            stack: '{{ .settings.context.tenant }}-ue1-root'
+
+    access-analyzer/delegated-administrator-us-unused-access:
+      metadata:
+        component: access-analyzer
+        type: abstract
+        inherits:
+          - access-analyzer/delegated-administrator-us
+      vars:
+        accessanalyzer_organization_unused_access_enabled: true
+        # The all-GDPR accounts (check-data-residency.py GDPR_ONLY_ACCOUNTS).
+        unused_access_exclusion_account_names:
+          - '{{ .settings.context.tenant }}-prod-eu'
+
+    # An EU security stack: the external-access analyzer. No dependency on
+    # fnx-ue1-root's delegation: check-data-residency.py forbids an EU stack's
+    # dependency on a US one, so the order is the bootstrap's (ue1's passes first,
+    # docs/OPERATIONS.md).
+    access-analyzer/delegated-administrator-eu:
       metadata:
         component: access-analyzer
         type: abstract
@@ -22,12 +73,24 @@ components:
           - access-analyzer/defaults
       vars:
         accessanalyzer_organization_enabled: true
+        organizations_delegated_administrator_enabled: false
 
-    access-analyzer/delegated-administrator-unused-access:
+    access-analyzer/delegated-administrator-eu-unused-access:
       metadata:
         component: access-analyzer
         type: abstract
         inherits:
-          - access-analyzer/delegated-administrator-defaults
+          - access-analyzer/delegated-administrator-eu
       vars:
         accessanalyzer_organization_unused_access_enabled: true
+        # The shared accounts (the map minus the all-GDPR ones) but the security
+        # account, the analyzer owner.
+        unused_access_exclusion_account_names:
+          - '{{ .settings.context.tenant }}-root'
+          - '{{ .settings.context.tenant }}-audit'
+          - '{{ .settings.context.tenant }}-network'
+          - '{{ .settings.context.tenant }}-identity'
+          - '{{ .settings.context.tenant }}-artifacts'
+          - '{{ .settings.context.tenant }}-dev'
+          - '{{ .settings.context.tenant }}-staging'
+          - '{{ .settings.context.tenant }}-prod'

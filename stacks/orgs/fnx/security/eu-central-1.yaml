@@ -35,6 +35,11 @@
 # no account's home region). Inspector's
 # org-settings is committed disabled (owner OQ-IN).
 #
+# IAM Access Analyzer (catalog/access-analyzer/delegated-administrator.yaml,
+# owner 2026-11-14: EU data stays in the EU), the organization external-access
+# analyzer: AWS reports an externally trusted IAM role in every region, so
+# external access is analysed in the EU regions only, for every account.
+#
 # Its state goes to fnx-ew1-root's bucket
 # through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
 # whose core_write trusts the management-account administrator and the
@@ -67,6 +72,7 @@ import:
   - catalog/aws-guardduty/defaults
   - catalog/aws-security-hub/defaults
   - catalog/aws-inspector2/defaults
+  - catalog/access-analyzer/delegated-administrator
 
 vars:
   tags:
@@ -127,3 +133,10 @@ components:
         enabled: false
         inherits:
           - aws-inspector2/org-settings-eu
+    # Cloud Posse's instance name, step 2 of access-analyzer (security-org layer,
+    # after fnx-ue1-root's global delegation; delegation off here).
+    access-analyzer/delegated-administrator:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/delegated-administrator-eu

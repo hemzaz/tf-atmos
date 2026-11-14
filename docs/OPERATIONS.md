@@ -163,8 +163,11 @@ the last step.
       `management-member_house.tf` adds because GuardDuty cannot enable it as a member; its hub).
    3. step 3, the security account again: `atmos workflow deploy-security-org -f deploy-full-stack
       -s fnx-<r>-security` (`org-settings`: members, the management account included, and
-      auto-enable; Inspector's stays `metadata.enabled: false`). Then the
-      [first-apply checks](#deploying-a-stack) 8 and 9.
+      auto-enable; Inspector's stays `metadata.enabled: false`; and the Access Analyzer analyzers,
+      which need `fnx-ue1-root`'s global delegation: run `ue1`'s passes first. The US security
+      stacks depend on it; the EU ones cannot, check-data-residency.py forbidding an EU stack's
+      dependency on a US one, so only this order holds it). Then the
+      [first-apply checks](#deploying-a-stack) 8, 9 and 10.
    A new region's security stack (the scaffold's core profile) depends on that region's
    `fnx-<r>-root`, which is hand-written (the root stacks are not scaffolded): add it, with its
    `<svc>/root` instances, before step 2. Until it exists, check-data-residency.py prints a
@@ -397,7 +400,8 @@ planned, confirmed, then applied from the saved plan. Each layer is also its own
 `security-monitoring`, `compute`, `platform`, `data`, `dns-apex`, `dns-zones`, `dns`,
 `certificates`, `addons`, `services`, `regional-waf`, `monitoring`, `security-org` (the
 GuardDuty, Security Hub and Inspector org settings, `vars.admin_delegated: true`: Cloud Posse's
-step 3, after the root stack's delegation).
+step 3, after the root stack's delegation; and Access Analyzer's
+`access-analyzer/delegated-administrator`, after `fnx-ue1-root`'s global delegation).
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that
@@ -519,6 +523,29 @@ In each operated region (`--region <r>`):
      type `true` while `aws-inspector2/org-settings` stays `metadata.enabled: false` (owner OQ-IN);
      after turning it on it shows `ec2`, `ecr` and `lambda` `true`, and `aws
      inspector2 list-members --no-only-associated --region <r>` lists no `prod-eu` in the US regions.
+   - If a member feature or member resource fails right after CreateMembers (`UnprocessedAccounts`,
+     or a member not yet visible: AWS's eventual consistency), re-run `atmos workflow
+     deploy-security-org -f deploy-full-stack -s fnx-<r>-security`; the second apply finds the members.
+10. Access Analyzer (`access-analyzer/delegated-administrator`, `security-org` layer, after
+    `fnx-ue1-root`'s `access-analyzer/root`; owner 2026-11-14, EU data stays in the EU), from the
+    security account:
+    - `aws accessanalyzer list-analyzers --type ORGANIZATION --region <r>`: one analyzer
+      (`ew1-security-access-analyzer-organization`, `ec1-...`; `status` `ACTIVE`) in eu-west-1 and
+      eu-central-1, none in us-east-1 and us-east-2 (an externally trusted IAM role is reported in
+      every region, and an organization analyzer cannot exclude an account, so a US one would hold
+      `prod-eu`'s IAM findings).
+    - `aws accessanalyzer list-analyzers --type ORGANIZATION_UNUSED_ACCESS --region <r>`: one
+      analyzer in us-east-1 and one in eu-west-1, none in us-east-2 and eu-central-1 (IAM is global:
+      one per residency).
+    - Their exclusions: `aws accessanalyzer get-analyzer --analyzer-name
+      ue1-security-access-analyzer-organization-unused-access --region us-east-1 --query
+      'analyzer.configuration.unusedAccess.analysisRule.exclusions'` lists exactly `prod-eu`'s ID;
+      the same for `ew1-security-access-analyzer-organization-unused-access` in eu-west-1 lists
+      every shared account's ID but the security account's (AWS does not let the owner exclude
+      itself; its IAM is analysed in both).
+    - Known interim gap: until E5c7b (an ACCOUNT analyzer in each non-GDPR account's US stacks,
+      with or after E5c8), external sharing of US-region resources (S3, KMS, SQS, Lambda, Secrets
+      Manager, ECR, ...) is not analysed by Access Analyzer; IAM roles are (the EU analyzers).
 
 What step 1 makes sticky (settle before the first apply; changing it later means undoing the
 organization side first): the delegated administrator (`fnx-security` for both services in all
@@ -549,6 +576,11 @@ when it stops being one). Turning `management_account_member_enabled` off is ord
 members, then the root step (`deploy-security -s fnx-<r>-root`), which destroys its GuardDuty detector;
 the other order deletes a member's detector while it is still a member. The member features
 (`member-features_house.tf`) are only dropped from state on removal: the features stay enabled.
+Access Analyzer adds the delegation (`fnx-ue1-root`'s `access-analyzer/root`, global) and the
+analyzers' placement and exclusions: an analyzer's `configuration` is ForceNew in the AWS provider,
+so changing an unused-access exclusion list (`unused_access_exclusion_account_names`, a new account
+in the map included) replaces that analyzer, which regenerates its findings and drops their
+archived status.
 
 **The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
 its own workflow, run with management-account administrator credentials, never by CI:

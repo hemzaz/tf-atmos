@@ -955,9 +955,29 @@ def org_services_stacks():
                                          if c == "aws-security-hub" and code == "ue1" else {}))
             for c in ("aws-guardduty", "aws-security-hub", "aws-inspector2")
         })
+    # E5c7 (owner 2026-11-14): the global delegation in fnx-ue1-root; external access in the EU security
+    # stacks only; unused access in fnx-ue1-security (without prod-eu) and fnx-ew1-security (without the
+    # shared accounts but the security account); nothing in fnx-ue2-security.
+    stacks["fnx-ue1-root"]["components"]["terraform"]["access-analyzer/root"] = org_instance(
+        "access-analyzer", "root", "us-east-1", organizations_delegated_administrator_enabled=True)
+    for code, analyzer in ACCESS_ANALYZERS.items():
+        stacks[f"fnx-{code}-security"]["components"]["terraform"]["access-analyzer/delegated-administrator"] = \
+            org_instance("access-analyzer", "security", ORG_REGIONS[code], **copy.deepcopy(analyzer))
     stacks["fnx-ue1-prod"] = stack(vpc=org_instance("vpc", "prod", "us-east-1"))
     stacks["fnx-ew1-prod"] = stack(vpc=org_instance("vpc", "prod-eu", "eu-west-1"))
     return stacks
+
+
+# catalog/access-analyzer/delegated-administrator.yaml's variants, per security stack.
+AA_ON_ROOT = {"deps": [{"component": "access-analyzer/root", "stack": "fnx-ue1-root"}]}
+ACCESS_ANALYZERS = {
+    "ue1": dict(AA_ON_ROOT, accessanalyzer_organization_enabled=False,
+                accessanalyzer_organization_unused_access_enabled=True,
+                unused_access_exclusion_account_names=["fnx-prod-eu"]),
+    "ew1": dict(accessanalyzer_organization_enabled=True, accessanalyzer_organization_unused_access_enabled=True,
+                unused_access_exclusion_account_names=[a for a in SHARED if a != "fnx-security"]),
+    "ec1": dict(accessanalyzer_organization_enabled=True, accessanalyzer_organization_unused_access_enabled=False),
+}
 
 
 class OrgServicesTest(unittest.TestCase):
@@ -1241,6 +1261,137 @@ class OrgServicesTest(unittest.TestCase):
             self.assertEqual(residency.main(), 0)
         self.assertEqual(err.getvalue().count("WARNING fnx-ue2-security: aws-"), 3)
         self.assertNotIn("WARNING", out.getvalue())
+
+    def test_a_missing_dependency_stack_warning_names_the_expected_stack(self):
+        # #525 review carry (a): a typo'd stack is told apart from the predecessor it should name.
+        stacks = org_services_stacks()
+        stacks["fnx-ue2-security"]["components"]["terraform"]["aws-guardduty/org-settings"]["dependencies"][
+            "components"] = [{"component": "aws-guardduty/root", "stack": "fnx-ue2-rot"}]
+        warnings = []
+        self.assertEqual(residency.check(stacks, warnings=warnings), [])
+        self.assertEqual(warnings, [
+            "fnx-ue2-security: aws-guardduty/org-settings depends on aws-guardduty/root in fnx-ue2-rot, which does not "
+            "exist (expected fnx-ue2-root): add the hand-written stack before this one deploys (a new region needs its "
+            "fnx-ue2-root)"])
+
+
+class AccessAnalyzerTest(unittest.TestCase):
+    """IAM Access Analyzer (E5c7, owner 2026-11-14): EU data stays in the EU, no exemption."""
+
+    @staticmethod
+    def analyzer(stacks, code):
+        return stacks[f"fnx-{code}-security"]["components"]["terraform"]["access-analyzer/delegated-administrator"]
+
+    def test_simulated_e5c7_passes(self):
+        self.assertEqual(residency.check(org_services_stacks()), [])
+
+    def test_a_us_external_access_analyzer_fails_outright(self):
+        for code, region in (("ue1", "us-east-1"), ("ue2", "us-east-2")):
+            with self.subTest(code=code):
+                stacks = org_services_stacks()
+                if code == "ue2":
+                    stacks["fnx-ue2-security"]["components"]["terraform"]["access-analyzer/delegated-administrator"] = \
+                        org_instance("access-analyzer", "security", region, **copy.deepcopy(AA_ON_ROOT))
+                self.analyzer(stacks, code)["vars"]["accessanalyzer_organization_enabled"] = True
+                errs = residency.check(stacks)
+                self.assertEqual(len(errs), 1, errs)
+                self.assertTrue(errs[0].startswith(
+                    f"fnx-{code}-security: access-analyzer/delegated-administrator creates an ORGANIZATION "
+                    "external-access analyzer outside the EU"), errs[0])
+
+    def test_a_us_unused_access_analyzer_must_exclude_every_all_gdpr_account(self):
+        for names in ([], ["fnx-prod"], ["fnx-prod-eu", "fnx-prod"], None):
+            with self.subTest(names=names):
+                stacks = org_services_stacks()
+                self.analyzer(stacks, "ue1")["vars"]["unused_access_exclusion_account_names"] = names
+                errs = residency.check(stacks)
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn("fnx-ue1-security: access-analyzer/delegated-administrator unused_access_exclusion_account_"
+                              "names is", errs[0])
+                self.assertIn("excludes exactly the accounts whose stacks are all GDPR-scoped (['fnx-prod-eu'])", errs[0])
+
+    def test_an_eu_unused_access_analyzer_never_excludes_an_all_gdpr_account(self):
+        stacks = org_services_stacks()
+        self.analyzer(stacks, "ew1")["vars"]["unused_access_exclusion_account_names"].append("fnx-prod-eu")
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ew1-security: access-analyzer/delegated-administrator unused_access_exclusion_account_names names "
+            "fnx-prod-eu, an account whose stacks are all GDPR-scoped: the EU unused-access analyzer is theirs"])
+
+    def test_an_eu_unused_access_analyzer_excludes_exactly_the_shared_accounts_but_the_owner(self):
+        stacks = org_services_stacks()
+        names = self.analyzer(stacks, "ew1")["vars"]["unused_access_exclusion_account_names"]
+        names.remove("fnx-prod")  # a shared account's IAM metadata would stay in the EU analyzer: the derivation
+        errs = residency.check(stacks)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("are not the shared accounts but the owner", errs[0])
+        stacks = org_services_stacks()
+        self.analyzer(stacks, "ew1")["vars"]["unused_access_exclusion_account_names"].append("fnx-security")
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ew1-security: access-analyzer/delegated-administrator unused_access_exclusion_account_names names "
+            "fnx-security, the analyzer owner account: AWS rejects it"])
+
+    def test_exclusions_without_the_unused_access_analyzer_fail(self):
+        stacks = org_services_stacks()
+        self.analyzer(stacks, "ec1")["vars"]["unused_access_exclusion_account_names"] = ["fnx-prod"]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ec1-security: access-analyzer/delegated-administrator sets unused_access_exclusion_account_names "
+            "without the unused-access analyzer (accessanalyzer_organization_unused_access_enabled)"])
+
+    def test_an_unused_access_analyzer_on_account_map_state_fails(self):
+        stacks = org_services_stacks()
+        self.analyzer(stacks, "ue1")["vars"]["account_map_enabled"] = True
+        errs = residency.check(stacks)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("sets account_map_enabled", errs[0])
+
+    def test_the_us_delegated_administrator_follows_the_global_delegation(self):
+        # ORG_PREDECESSORS: fnx-ue1-root's access-analyzer/root, whatever the US region (not the region's own root).
+        for deps, want in (
+            ([], "dependencies.components is []: Cloud Posse's step order needs exactly access-analyzer/root in "
+                 "fnx-ue1-root"),
+            ([{"component": "access-analyzer/root", "stack": "fnx-ue2-root"}],
+             "depends on access-analyzer/root in fnx-ue2-root (us-east-2), not in its own region us-east-1"),
+        ):
+            with self.subTest(deps=deps):
+                stacks = org_services_stacks()
+                self.analyzer(stacks, "ue1")["dependencies"]["components"] = deps
+                errs = residency.check(stacks)
+                self.assertEqual(len(errs), 1, errs)
+                self.assertIn(want, errs[0])
+        # fnx-ue2-security's (another US region) on fnx-ue1-root passes; on its own fnx-ue2-root it fails.
+        stacks = org_services_stacks()
+        stacks["fnx-ue2-security"]["components"]["terraform"]["access-analyzer/delegated-administrator"] = org_instance(
+            "access-analyzer", "security", "us-east-2", **copy.deepcopy(ACCESS_ANALYZERS["ue1"]))
+        self.assertEqual(residency.check(stacks), [])
+        self.analyzer(stacks, "ue2")["dependencies"]["components"] = [
+            {"component": "access-analyzer/root", "stack": "fnx-ue2-root"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ue2-security: access-analyzer/delegated-administrator dependencies.components is "
+            "['access-analyzer/root in fnx-ue2-root']: Cloud Posse's step order needs exactly access-analyzer/root "
+            "in fnx-ue1-root (the same region's previous step)"])
+
+    def test_an_eu_delegated_administrator_depends_on_nothing(self):
+        # The US global delegation is another residency: the dependency rule fails it; nothing else is expected.
+        stacks = org_services_stacks()
+        self.analyzer(stacks, "ew1")["dependencies"]["components"] = [
+            {"component": "access-analyzer/root", "stack": "fnx-ue1-root"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ew1-security: access-analyzer/delegated-administrator depends on access-analyzer/root in fnx-ue1-root, "
+            "which is not GDPR-scoped"])
+        stacks = org_services_stacks()
+        self.analyzer(stacks, "ec1")["dependencies"]["components"] = [
+            {"component": "access-analyzer/root", "stack": "fnx-ew1-root"}]
+        errs = residency.check(stacks)
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("(eu-west-1), not in its own region eu-central-1", errs[0])
+
+    def test_a_missing_global_delegation_stack_warns(self):
+        stacks = org_services_stacks()
+        del stacks["fnx-ue1-root"]
+        warnings = []
+        residency.check(stacks, warnings=warnings)
+        self.assertIn("fnx-ue1-security: access-analyzer/delegated-administrator depends on access-analyzer/root in "
+                      "fnx-ue1-root, which does not exist (expected fnx-ue1-root)", "\n".join(warnings))
 
 
 if __name__ == "__main__":

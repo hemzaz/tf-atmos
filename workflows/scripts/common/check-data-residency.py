@@ -96,9 +96,16 @@ account-suppressions_house.tf) is set only in a GDPR-scoped stack, and each entr
 is exactly its account_map's keys minus the all-GDPR ones: it never suppresses an all-GDPR account's
 findings (their home region is the EU one). Their dependencies.components
 (root <-> security) stay in one residency by the dependency rules above, and each step's are exactly
-the same region's previous step (ORG_PREDECESSORS, org_dependency_findings). A dependency on a stack
-that does not exist is a WARNING on stderr, never a failure: onboarding a new region needs its
-hand-written <tenant>-<env>-root (docs/OPERATIONS.md, Bootstrap order). A
+the same region's previous step (ORG_PREDECESSORS, org_dependency_findings); Access Analyzer's
+delegated administrator follows the global delegation in <tenant>-ue1-root (US regions; an EU one
+depends on nothing). A dependency on a stack that does not exist is a WARNING on stderr naming the
+expected stack, never a failure: onboarding a new region needs its hand-written <tenant>-<env>-root
+(docs/OPERATIONS.md, Bootstrap order). IAM Access Analyzer (vendored access-analyzer, E5c7, owner
+2026-11-14): no ORGANIZATION external-access analyzer outside the GDPR scope (an externally trusted
+IAM role is reported in every region, and the analyzer cannot exclude an account); an unused-access
+analyzer's unused_access_exclusion_account_names (house unused-access-exclusions_house.tf) is exactly
+the all-GDPR accounts outside it and exactly the shared accounts but the analyzer's own inside it
+(access_analyzer_errors). A
 non-abstract instance with metadata.enabled false is checked too (Inspector's committed-disabled
 org-settings, owner OQ-IN: one flag from deploying).
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
@@ -388,6 +395,7 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS, warnings: Optional[list]
     errors += global_datastore_errors(stacks, scoped)
     errors += log_archive_errors(stacks, scoped)
     errors += org_service_errors(stacks, scoped)
+    errors += access_analyzer_errors(stacks, scoped)
     dependency_errors, dependency_warnings = org_dependency_findings(stacks)
     errors += dependency_errors
     if warnings is not None:
@@ -743,6 +751,62 @@ def suppression_errors(where: str, variables: dict, tenant: str, gdpr: bool) -> 
     return errors
 
 
+def access_analyzer_errors(stacks: dict, scoped: set) -> list[str]:
+    """IAM Access Analyzer's organization analyzers kept in their residency (E5c7, owner 2026-11-14).
+
+    External access (ORGANIZATION) reports an externally trusted IAM role in every region and cannot exclude an
+    account, so a US one would hold the all-GDPR accounts' IAM findings: only EU stacks create it. Unused access
+    (ORGANIZATION_UNUSED_ACCESS) is global; its house exclusion list (unused_access_exclusion_account_names,
+    unused-access-exclusions_house.tf) is, outside the GDPR scope, exactly the all-GDPR accounts, and inside it
+    exactly the shared accounts (the map minus the all-GDPR ones) but the analyzer's own (AWS forbids the owner),
+    never an all-GDPR one. An instance creating neither analyzer may not set the list."""
+    errors = []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(org_service_instances(stacks[stack_name]).items()):
+            variables = instance.get("vars") or {}
+            if component_of(name, instance) != "access-analyzer" or not flag_on(variables.get("enabled", True)):
+                continue
+            where, gdpr = f"{stack_name}: {name}", stack_name in scoped
+            external = flag_on(variables.get("accessanalyzer_organization_enabled"))
+            unused = flag_on(variables.get("accessanalyzer_organization_unused_access_enabled"))
+            names = [str(n) for n in variables.get("unused_access_exclusion_account_names") or []]
+            if external and not gdpr:
+                errors.append(f"{where} creates an ORGANIZATION external-access analyzer outside the EU: AWS reports "
+                              "an externally trusted IAM role in every region and the analyzer cannot exclude an "
+                              "account, so it would hold the all-GDPR accounts' IAM findings; external access is "
+                              "analysed in the EU security stacks only")
+            if not unused:
+                if names:
+                    errors.append(f"{where} sets unused_access_exclusion_account_names without the unused-access "
+                                  "analyzer (accessanalyzer_organization_unused_access_enabled)")
+                continue
+            if flag_on(variables.get("account_map_enabled", False)):
+                errors.append(f"{where} sets account_map_enabled: its exclusions resolve from the account-map state and "
+                              "cannot be checked; use the static account_map (catalog/_base account-map-bypass)")
+                continue
+            tenant = str(tenant_of(instance))
+            eu_keys = {f"{tenant}-{a}" for a in GDPR_ONLY_ACCOUNTS}
+            full = set((variables.get("account_map") or {}).get("full_account_map") or {})
+            if not gdpr:
+                if set(names) != eu_keys:
+                    errors.append(f"{where} unused_access_exclusion_account_names is {sorted(names)}: outside the EU the "
+                                  f"unused-access analyzer excludes exactly the accounts whose stacks are all "
+                                  f"GDPR-scoped ({sorted(eu_keys)}); IAM is global, so it would hold their IAM metadata")
+                continue
+            own = own_account(instance)
+            errors += [f"{where} unused_access_exclusion_account_names names {n}, an account whose stacks are all "
+                       "GDPR-scoped: the EU unused-access analyzer is theirs" for n in sorted(set(names) & eu_keys)]
+            if own in names:
+                errors.append(f"{where} unused_access_exclusion_account_names names {own}, the analyzer owner account: "
+                              "AWS rejects it")
+            shared = full - eu_keys - {own}
+            if set(names) - eu_keys - {own} != shared:
+                errors.append(f"{where} unused_access_exclusion_account_names {sorted(set(names) - eu_keys - {own})} are "
+                              f"not the shared accounts but the owner (the account map minus {sorted(eu_keys)} and "
+                              f"{own}: {sorted(shared)})")
+    return errors
+
+
 def stack_region(stack: dict) -> Optional[str]:
     """A stack's region: its instances' vars.region (one per stack)."""
     for instance in ((stack.get("components") or {}).get("terraform") or {}).values():
@@ -753,15 +817,20 @@ def stack_region(stack: dict) -> Optional[str]:
 
 
 # Cloud Posse's step order per region (E5c, #525 review LOW-1): each instance's dependencies.components is
-# exactly its predecessor, (instance, stage of its stack); the others depend on nothing.
+# exactly its predecessor, (instance, stage of its stack, environment of its stack: None for the instance's own
+# region, else a global step's one stack); the others depend on nothing. Access Analyzer's delegation is global,
+# made once in <tenant>-ue1-root (E5c7), so every region's delegated administrator follows that one stack; an EU
+# instance, which may not depend on a US stack (the dependency rules above), then depends on nothing and the
+# bootstrap orders it (ue1's passes first, docs/OPERATIONS.md).
 ORG_PREDECESSORS = {
-    "aws-guardduty/root": ("aws-guardduty/delegated-administrator", "security"),
-    "aws-security-hub/root": ("aws-security-hub/delegated-administrator", "security"),
-    "aws-guardduty/org-settings": ("aws-guardduty/root", "root"),
-    "aws-security-hub/org-settings": ("aws-security-hub/root", "root"),
-    "aws-inspector2/org-settings": ("aws-inspector2/root", "root"),
+    "aws-guardduty/root": ("aws-guardduty/delegated-administrator", "security", None),
+    "aws-security-hub/root": ("aws-security-hub/delegated-administrator", "security", None),
+    "aws-guardduty/org-settings": ("aws-guardduty/root", "root", None),
+    "aws-security-hub/org-settings": ("aws-security-hub/root", "root", None),
+    "aws-inspector2/org-settings": ("aws-inspector2/root", "root", None),
     "aws-inspector2/root": None,
     "access-analyzer/root": None,
+    "access-analyzer/delegated-administrator": ("access-analyzer/root", "root", "ue1"),
 }
 
 
@@ -770,10 +839,13 @@ def org_dependency_findings(stacks: dict) -> tuple[list[str], list[str]]:
 
     An ORG_PREDECESSORS instance depends on exactly its predecessor, the same region's previous step
     (<svc>/root after <svc>/delegated-administrator in <tenant>-<env>-security, <svc>/org-settings after
-    <svc>/root in <tenant>-<env>-root; Inspector's root and access-analyzer/root on nothing), and any
-    org-service dependency names a stack in the instance's own region. A target stack that does not exist
-    is a WARNING, never a failure: onboarding a new region (the scaffold's fresh security stack) needs its
-    hand-written <tenant>-<env>-root, added in its own change (docs/OPERATIONS.md, Bootstrap order)."""
+    <svc>/root in <tenant>-<env>-root; Inspector's root and access-analyzer/root on nothing;
+    access-analyzer/delegated-administrator after the global delegation, <tenant>-ue1-root's
+    access-analyzer/root, or on nothing in the other residency), and any other org-service dependency
+    names a stack in the instance's own region. A target stack that does not exist is a WARNING naming
+    the expected predecessor stack, never a failure: onboarding a new region (the scaffold's fresh
+    security stack) needs its hand-written <tenant>-<env>-root, added in its own change
+    (docs/OPERATIONS.md, Bootstrap order)."""
     errors, warnings = [], []
     for stack_name in sorted(stacks):
         for name, instance in sorted(org_service_instances(stacks[stack_name]).items()):
@@ -784,31 +856,39 @@ def org_dependency_findings(stacks: dict) -> tuple[list[str], list[str]]:
             where, region = f"{stack_name}: {name}", variables.get("region")
             deps = [(str(d.get("component") or ""), d.get("stack") or stack_name)
                     for d in (instance.get("dependencies") or {}).get("components") or []]
+            step = ORG_PREDECESSORS.get(name)
+            # <tenant>-<environment>-<stage> (atmos.yaml name_template): the predecessor's stack is this one's
+            # tenant and region code (a global step: its own) with the predecessor's stage.
+            tenant, env = (stack_name.split("-") + ["", ""])[:2]
+            predecessor = (step[0], f"{tenant}-{step[2] or env}-{step[1]}") if step else None
+            hint = f" (expected {predecessor[1]})" if predecessor else ""
             region_errors, crossed = [], False
             for target, target_stack in deps:
                 if target.split("/", 1)[0] not in ORG_SERVICES + ("access-analyzer",):
                     continue
                 if target_stack not in stacks:
-                    warnings.append(f"{where} depends on {target} in {target_stack}, which does not exist: add the "
-                                    "hand-written stack before this one deploys (a new region needs its "
-                                    f"{target_stack})")
+                    warnings.append(f"{where} depends on {target} in {target_stack}, which does not exist{hint}: add "
+                                    "the hand-written stack before this one deploys (a new region needs its "
+                                    f"{predecessor[1] if predecessor else target_stack})")
                     continue
                 target_region = stack_region(stacks[target_stack])
                 # Across residencies the dependency rules above already fail it.
                 if target_region and region and target_region.startswith(EU_PREFIX) != region.startswith(EU_PREFIX):
                     crossed = True
                     continue
+                if step and step[2] and (target, target_stack) == predecessor:
+                    continue  # the global step's one stack, in another region by design
                 if target_region != region:
                     region_errors.append(f"{where} depends on {target} in {target_stack} ({target_region}), not in "
                                          f"its own region {region}: each step depends on its own region's")
             errors += region_errors
             if name not in ORG_PREDECESSORS or region_errors or crossed:
                 continue
-            step = ORG_PREDECESSORS[name]
-            # <tenant>-<environment>-<stage> (atmos.yaml name_template): the predecessor's stack is this one's
-            # tenant and region code with the predecessor's stage.
-            tenant, env = (stack_name.split("-") + ["", ""])[:2]
-            expected = [] if step is None else [(step[0], f"{tenant}-{env}-{step[1]}")]
+            expected = [predecessor] if predecessor else []
+            if step and step[2] and predecessor[1] in stacks and region:
+                global_region = stack_region(stacks[predecessor[1]]) or ""
+                if global_region.startswith(EU_PREFIX) != region.startswith(EU_PREFIX):
+                    expected = []  # the other residency's global step: no dependency may name it
             if sorted(deps) == expected:
                 continue
             if expected and not deps and expected[0][1] not in stacks:

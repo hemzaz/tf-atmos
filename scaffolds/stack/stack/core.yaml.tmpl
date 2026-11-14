@@ -97,6 +97,24 @@
 # no account's home region).
 [[- end ]] Inspector's
 # org-settings is committed disabled (owner OQ-IN).
+#
+# IAM Access Analyzer (catalog/access-analyzer/delegated-administrator.yaml,
+# owner 2026-11-14: EU data stays in the EU),
+[[- if $eu ]] the organization external-access
+# analyzer: AWS reports an externally trusted IAM role in every region, so
+# external access is analysed in the EU regions only, for every account.
+[[- if $ew1 ]] And
+# the EU unused-access analyzer (IAM is global: one per residency), excluding
+# the shared accounts but this one (AWS does not let the owner exclude itself).
+[[- end ]]
+[[- else if $home ]] the US unused-access analyzer (IAM
+# is global: one per residency), excluding prod-eu; no external-access analyzer,
+# which would hold prod-eu's IAM findings (until E5c7b, US-region external
+# sharing is unmonitored by Access Analyzer).
+[[- else ]] none here: no external-access
+# analyzer in a US region (it would hold prod-eu's IAM findings), and unused
+# access is [[ .Config.tenant ]]-ue1-security's (global).
+[[- end ]]
 [[- end ]]
 #
 # Its state goes to [[ $root ]]'s bucket
@@ -149,6 +167,9 @@ import:
   - catalog/aws-guardduty/[[ ternary "defaults" "us" $eu ]]
   - catalog/aws-security-hub/[[ ternary "defaults" "us" $eu ]]
   - catalog/aws-inspector2/[[ ternary "defaults" "us" $eu ]]
+[[- if or $eu $home ]]
+  - catalog/access-analyzer/delegated-administrator
+[[- end ]]
 [[- end ]]
 [[- if $eu ]]
 
@@ -217,4 +238,13 @@ components:
         enabled: false
         inherits:
           - aws-inspector2/org-settings-[[ ternary "eu" "us" $eu ]]
+[[- if or $eu $home ]]
+    # Cloud Posse's instance name, step 2 of access-analyzer (security-org layer,
+    # after [[ .Config.tenant ]]-ue1-root's global delegation; delegation off here).
+    access-analyzer/delegated-administrator:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/delegated-administrator-[[ ternary "eu" "us" $eu ]][[ if or $ew1 $home ]]-unused-access[[ end ]]
+[[- end ]]
 [[- end ]]
