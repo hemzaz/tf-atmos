@@ -332,12 +332,17 @@ workflows:
       # non-abstract instance with a settings.validation entry, in every stack,
       # passes `atmos validate component` (catalog/aws-guardduty/defaults.yaml:
       # finding_publishing_frequency, which Cloud Posse does not validate).
+      # A validated component must not use !terraform.state (or another YAML
+      # function that reads AWS): `atmos validate component` resolves YAML
+      # functions, so it would need live state here. Every failure is printed
+      # before the step fails.
       - name: component-validation
         type: shell
         command: |
           set -eu
           stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
+          pairs_file="$(mktemp)"
+          trap 'rm -f "$stacks_json" "$pairs_file"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           pairs="$(python3 -c '
           import json, sys
@@ -347,10 +352,17 @@ workflows:
                       print(name, stack)
           ' < "$stacks_json")"
           [ -n "$pairs" ] || { echo "component-validation: no instance has settings.validation"; exit 1; }
-          echo "$pairs" | while read -r component stack; do
-            atmos validate component "$component" -s "$stack" > /dev/null || { echo "FAILED: $component in $stack"; exit 1; }
-            echo "ok: $component in $stack"
-          done
+          printf '%s\n' "$pairs" > "$pairs_file"
+          failed=0
+          while read -r component stack; do
+            if atmos validate component "$component" -s "$stack" > /dev/null; then
+              echo "ok: $component in $stack"
+            else
+              echo "FAILED: $component in $stack"
+              failed=$((failed + 1))
+            fi
+          done < "$pairs_file"
+          [ "$failed" -eq 0 ] || { echo "component-validation: $failed instance(s) failed"; exit 1; }
       # Atmos resolves a read in an abstract for every inheriting instance, even
       # one the instance overrides: every local read an instance resolves, its
       # own or inherited, names a real instance of its stack (the DR standbys

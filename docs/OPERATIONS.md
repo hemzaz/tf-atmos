@@ -76,7 +76,9 @@ and `fixtures` stacks are exempt.
 single-layer runs skip it), `apply-environment.yaml` (`apply`) and `security-hardening.yaml`
 (`harden`). Resuming a workflow with `--from-step` past it skips it; the cold start
 passes `--cold-start`, which makes a placeholder account in the backend's access-role principals a
-notice (it applies none of them). `atmos workflow lint` runs it with `--warn`: it
+notice (it applies none of them) and checks only the stack's `backend` instance, the one it applies:
+a root stack's Config recorder and the org security services' delegations wait for the accounts
+layer, and `deploy-security` checks them fatally. `atmos workflow lint` runs it with `--warn`: it
 never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
 them all). It stands in for Cloud Posse's cold-start checks: there, `account-map` holds the
 account IDs and the accounts layer is deployed and verified first
@@ -139,7 +141,10 @@ the last step.
    and [Deploying a stack](#deploying-a-stack). Order the core stacks: `fnx-ue1-audit` first
    (its storage layer holds the buckets every trail and recorder delivers to), then the other
    `fnx-ue1-<core>` stacks and the management account's trail and recorder
-   (`atmos workflow deploy-security -f deploy-full-stack -s fnx-ue1-root`), and only then the
+   (`atmos workflow deploy-security -f deploy-full-stack -s fnx-ue1-root`; that layer also applies
+   the root stacks' step-2 delegations of GuardDuty, Security Hub and Inspector, which depend on the
+   same region's security stack's step 1, so each `deploy-security -s fnx-<r>-root` runs after
+   `fnx-<r>-security`, and Access Analyzer's, once, in `fnx-ue1-root`), and only then the
    eu-west-1 ones (`-s fnx-ew1-audit`, `-s fnx-ew1-security`, and `deploy-security -s fnx-ew1-root`) and the
    DR-region ones (`-s fnx-ue2-security`, `-s fnx-ec1-security`, `deploy-security -s fnx-ue2-root` and
    `-s fnx-ec1-root`, E5c: recorders only, the ec1 ones delivering to the EU archive): a shared account's
@@ -387,7 +392,8 @@ steps, per region; none of this can be verified offline). Apply step 1 (the secu
 
 1. Trusted access, once, from the management account (Organizations is not regional):
    `aws organizations list-aws-service-access-for-organization` lists the ServicePrincipals
-   `guardduty.amazonaws.com`, `securityhub.amazonaws.com` and `inspector2.amazonaws.com`.
+   `guardduty.amazonaws.com`, `securityhub.amazonaws.com`, `inspector2.amazonaws.com` and
+   `access-analyzer.amazonaws.com`.
 
 In each operated region (`--region <r>`):
 
@@ -428,8 +434,26 @@ In each operated region (`--region <r>`):
      `aws_securityhub_product_subscription` with `ResourceConflictException` (the integration was
      already on), import it (ID `<product_arn>,<product_subscription_arn>`, the second from this
      list) with `atmos terraform import aws-security-hub/delegated-administrator -s <stack>
-     'aws_securityhub_product_subscription.this["<key>"]' '<id>'` and apply again.
+     'aws_securityhub_product_subscription.this["<key>"]' '<id>'` and apply again. `<key>` is the
+     resource's `for_each` key (`product-subscriptions.tf`), not the product path: `guardduty`,
+     `inspector`, `config` or `access_analyzer`.
    - The aggregator of check 5 exists in us-east-1 only.
+8. Step 2 (the four `fnx-<region>-root` stacks' `aws-guardduty/root`, `aws-security-hub/root` and
+   `aws-inspector2/root`, and `fnx-ue1-root`'s `access-analyzer/root`), from the management
+   account, after step 1 and before step 3:
+   - Once (Organizations is global): `aws organizations list-delegated-administrators
+     --service-principal <principal>` returns the security account alone, for each of
+     `guardduty.amazonaws.com`, `securityhub.amazonaws.com`, `inspector2.amazonaws.com` and
+     `access-analyzer.amazonaws.com`; `aws iam get-role --role-name AWSServiceRoleForAccessAnalyzer`
+     finds Access Analyzer's service-linked role.
+   - In each of the four regions (`--region <r>`): `aws guardduty
+     list-organization-admin-accounts --region <r>` and `aws securityhub
+     list-organization-admin-accounts --region <r>` list the security account, `ENABLED` (GuardDuty
+     `AdminStatus`, Security Hub `Status`), and `aws inspector2 get-delegated-admin-account --region <r>` names it with
+     `relationshipStatus` `ENABLED`; `aws securityhub describe-hub --region <r>` succeeds in the
+     management account (Cloud Posse's root step enables its hub, with the default standards).
+   - `aws organizations describe-resource-policy` shows the Security Hub resource policy, written by
+     `fnx-ue1-root` alone (`root-organization-policy`).
 
 What step 1 makes sticky (settle before the first apply; changing it later means undoing the
 organization side first): the delegated administrator (`fnx-security` for both services in all
@@ -442,7 +466,9 @@ linked has had its findings copied to us-east-1); the hub's default-standards sw
 the AWS provider: changing it replaces the hub, so Security Hub is disabled and re-enabled in the
 security account); and the detector's feature set (the same catalog flags become step 3's
 organization configuration, auto-enabled in the members: turning a feature off later leaves it on
-in every member enabled meanwhile).
+in every member enabled meanwhile). Step 2 adds the owner of the Organizations resource policy
+(`fnx-ue1-root`'s `aws-security-hub/root`, the organization's only one: moving it means deleting
+the policy there first, since a second writer would overwrite it).
 
 **The accounts layer** (`fnx-gbl-root`: the organization, its OUs, SCPs and member accounts) has
 its own workflow, run with management-account administrator credentials, never by CI:

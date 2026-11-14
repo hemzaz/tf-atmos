@@ -828,6 +828,42 @@ class BootstrapOrderTest(unittest.TestCase):
         found = preflight.check(stacks, ["fnx-ue1-root"], cold_start=True)
         self.assertEqual([f.key for f in found if f.level == "error"], ["backend_main vars.account_id"])
 
+    def root_with_delegation(self):
+        """fnx-ue1-root as E5c5 leaves it: the backend, the Config recorder and an org service's delegation,
+        whose static map holds the core accounts' placeholders until the accounts layer creates them."""
+        stacks = self.root()
+        terraform = stacks["fnx-ue1-root"]["components"]["terraform"]
+        environment = terraform["backend_main"]["settings"]["environment"]
+        static = {"full_account_map": {f"fnx-{k}": v for k, v in self.PLACEHOLDER_CORE.items()}}
+        for name, component in (("aws-config", "aws-config"), ("aws-guardduty/root", "aws-guardduty")):
+            terraform[name] = inst("root", environment, component, accounts=self.PLACEHOLDER_CORE,
+                                   account_map=static)
+            terraform[name]["settings"]["static_account_map"] = static
+        for spec in terraform.values():
+            spec["settings"]["account_map"]["full_account_map"] = self.PLACEHOLDER_CORE
+        return stacks
+
+    def test_cold_start_checks_only_the_backend_it_applies(self):
+        findings = preflight.check(self.root_with_delegation(), ["fnx-ue1-root"], cold_start=True)
+        self.assertEqual([f.line(False) for f in findings if f.level in ("error", "fatal")], [])
+        core = [f for f in findings if "full_account_map." in f.key]
+        self.assertEqual(({f.level for f in core}, len(core)), ({"notice"}, 2))
+
+    def test_root_stack_deploy_fails_on_the_delegation_placeholders(self):
+        found = errors(self.root_with_delegation(), ["fnx-ue1-root"])
+        keys = {f.key for f in found}
+        self.assertIn("aws-guardduty/root vars.account_map.full_account_map.fnx-security", keys)
+        self.assertIn("aws-config vars.account_map.full_account_map.fnx-audit", keys)
+        self.assertIn("settings.account_map.full_account_map.security", keys)
+        self.assertTrue(all(f.level == "error" for f in found))
+
+    def test_cold_start_still_fails_a_drifted_static_map(self):
+        stacks = self.root_with_delegation()
+        delegation = stacks["fnx-ue1-root"]["components"]["terraform"]["aws-guardduty/root"]
+        delegation["vars"]["account_map"] = {"full_account_map": {"fnx-root": MGMT}}
+        fatal = [f for f in preflight.check(stacks, ["fnx-ue1-root"], cold_start=True) if f.level == "fatal"]
+        self.assertEqual([f.key for f in fatal], ["aws-guardduty/root vars.account_map"])
+
     def test_accounts_layer_does_not_need_the_core_accounts(self):
         stacks = clean()
         stacks["fnx-gbl-root"] = stack("root", None, **{

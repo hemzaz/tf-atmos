@@ -4,8 +4,8 @@
 # =============================================================================
 # The management account in the EU DR region (E5c OQ-R (a), 2026-11-10: Cloud
 # Posse runs the org security services in every operated region, so each needs
-# a root and a security stack; the services' delegation instances arrive in
-# later E5c slices). No backend: GDPR-scoped (check-data-residency.py), its
+# a root and a security stack; this one holds their step-2 delegations,
+# below, E5c5). No backend: GDPR-scoped (check-data-residency.py), its
 # state is fnx-ew1-root's EU bucket (stacks/orgs/fnx/root/eu-west-1.yaml),
 # through that backend's root role, whose root_write holds this stack's
 # pattern pair.
@@ -29,6 +29,9 @@ import:
   - orgs/fnx/root/_defaults
   - catalog/aws-account-settings/main-standby
   - catalog/aws-config/main
+  - catalog/aws-guardduty/defaults
+  - catalog/aws-security-hub/defaults
+  - catalog/aws-inspector2/defaults
 
 vars:
   tags:
@@ -67,3 +70,27 @@ components:
         component: aws-config
         inherits:
           - aws-config/main-core-region-eu
+
+    # Cloud Posse's instance names, step 2 (E5c5): from the management account,
+    # delegate GuardDuty, Security Hub and Inspector in this region to
+    # <tenant>-security (catalog/aws-guardduty, aws-security-hub, aws-inspector2
+    # defaults). The GuardDuty and Security Hub ones depend on the same region's
+    # security stack's step 1 (its delegated-administrator detector and hub, the
+    # root-defaults abstracts), never another residency's; Inspector has no
+    # step 1. They read no state. deploy-full-stack's security layer applies
+    # them, after that security stack (docs/OPERATIONS.md "Bootstrap order").
+    aws-guardduty/root:
+      metadata:
+        component: aws-guardduty
+        inherits:
+          - aws-guardduty/root-defaults
+    aws-security-hub/root:
+      metadata:
+        component: aws-security-hub
+        inherits:
+          - aws-security-hub/root-defaults
+    aws-inspector2/root:
+      metadata:
+        component: aws-inspector2
+        inherits:
+          - aws-inspector2/root-defaults

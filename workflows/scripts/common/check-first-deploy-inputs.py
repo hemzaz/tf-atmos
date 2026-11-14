@@ -63,7 +63,12 @@ a backend instance's access_roles allowed_principal_arns is a notice, not an
 error: the cold start applies with TFSTATE_COLD_START=true, so every access
 role trusts only the caller and those ARNs are not applied (the accounts they
 name do not exist yet); the re-apply after the accounts layer (backend-only)
-checks them fatally.
+checks them fatally. The cold start applies backend/main alone, so only the
+stack's backend instances are checked then, and only they decide whether the
+core accounts are needed: a root stack's other instances (the Config
+recorder, the org security services' delegations) wait for the accounts
+layer, and their own deploy (deploy-full-stack) checks them fatally. The
+fatal config checks still cover every instance.
 
 Only deployable stacks are checked: every stage but EXEMPT_STAGES. --stacks
 limits the placeholder checks to some of them (the bootstrap workflow passes
@@ -98,6 +103,8 @@ DOCS = "docs/OPERATIONS.md#first-deploy-inputs"
 EXEMPT_STAGES = {"local", "fixtures"}
 # The management account's own stage: its account IS management_account_id.
 MANAGEMENT_STAGES = {"root"}
+# The one component the backend cold start applies (bootstrap.yaml apply-local-state: backend/main).
+COLD_START_COMPONENT = "backend"
 
 PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
 # Cloud Posse's core accounts (owner decision Q1): settings.account_map keys. Every other key is a
@@ -341,6 +348,8 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
             continue
         variables = spec.get("vars") or {}
         component = spec.get("component") or (spec.get("metadata") or {}).get("component")
+        if cold_start and component != COLD_START_COMPONENT:
+            continue
         for path, text in strings(variables, "vars"):
             finding = placeholder(name, f"{instance_name} {path}", text)
             if finding and cold_start and finding.row == "Account IDs" and cold_start_principal(component, path):
@@ -482,15 +491,17 @@ def account_map(config: dict):
     return None
 
 
-def needs_core_accounts(config: dict) -> bool:
-    """A core account's own stack, or one deploying a component that reads the core accounts."""
+def needs_core_accounts(config: dict, cold_start: bool = False) -> bool:
+    """A core account's own stack, or one deploying a component that reads the core accounts (with
+    cold_start, only the backend instances the cold start applies count)."""
     if environment(config).get("_stage") in set(CORE_ACCOUNTS) - MANAGEMENT_STAGES:
         return True
-    return any(deployable(spec or {}) and ((spec or {}).get("metadata") or {}).get("component") in MAP_CONSUMERS
+    return any(deployable(spec or {}) and component_of(spec or {}) in MAP_CONSUMERS
+               and (not cold_start or component_of(spec or {}) == COLD_START_COMPONENT)
                for spec in instances(config).values())
 
 
-def core_account_findings(stacks: dict, targets: set) -> list:
+def core_account_findings(stacks: dict, targets: set, cold_start: bool = False) -> list:
     """settings.account_map: one map on every stack, 12-digit IDs, core accounts distinct from each
     other and from every workload account (and no target stack in another role's core account). A
     missing or placeholder core account is an error only when a target needs_core_accounts (the
@@ -507,7 +518,7 @@ def core_account_findings(stacks: dict, targets: set) -> list:
         if not re.fullmatch(r"\d{12}", str(account)):
             findings.append(Finding("error", "repository", f"{key}.{name}",
                                     f"{account!r} is not a 12-digit account ID", "Account IDs"))
-    level = "error" if any(needs_core_accounts(stacks[name]) for name in targets) else "notice"
+    level = "error" if any(needs_core_accounts(stacks[name], cold_start) for name in targets) else "notice"
     owner = {}
     for name in CORE_ACCOUNTS:
         account = str(full.get(name) or "")
@@ -565,7 +576,7 @@ def check(stacks: dict, only=None, cold_start: bool = False) -> list:
     for name in sorted(targets):
         findings.extend(stack_findings(name, deployable_stacks[name], cold_start))
     findings.extend(account_findings(deployable_stacks, targets))
-    findings.extend(core_account_findings(deployable_stacks, targets))
+    findings.extend(core_account_findings(deployable_stacks, targets, cold_start))
     findings.extend(account_email_findings(deployable_stacks))
     return findings + notices()
 
