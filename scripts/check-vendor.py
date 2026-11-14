@@ -103,6 +103,10 @@ HOUSE_FILE_ALLOWLIST = (
      "E5c6 (#525 review): each managed feature ENABLED on each member (aws_guardduty_member_detector_feature) "
      "after CreateMembers and the organization configuration; CP's main.tf orders the configuration after "
      "the members, so the members of step 3's first apply can keep the features off"),
+    ("components/terraform/access-analyzer", "unused-access-exclusions_house.tf",
+     "E5c7 (owner 2026-11-14): unused_access_exclusion_account_names (CP's analyzer has no analysis rule); "
+     "unused-access_override.tf excludes those accounts from the global unused-access analyzer, so the US one "
+     "leaves out prod-eu and the EU one analyses only the all-GDPR accounts (and the security account, the owner)"),
 )
 # Cloud Posse remote-state reads the house bypasses (owner OQ-E/OQ-W: no live remote state), one
 # (target, override file, module, reason) each: the override must keep `bypass = true` in that

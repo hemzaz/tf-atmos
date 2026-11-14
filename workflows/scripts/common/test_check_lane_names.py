@@ -680,5 +680,52 @@ class OrgServicesTest(unittest.TestCase):
         self.assertEqual(self.org(stacks), [])
 
 
+class AccessAnalyzerTest(unittest.TestCase):
+    """IAM Access Analyzer singletons (E5c7): per (account, region, type), unused access per residency, one delegation."""
+
+    @staticmethod
+    def instances(stacks, stack_name):
+        return stacks[stack_name]["components"]["terraform"]
+
+    def found(self, stacks):
+        return [e for e in check_lane_names.check(stacks) if "access-analyzer" in e]
+
+    def test_simulated_e5c7_passes(self):
+        self.assertEqual(check_lane_names.check(residency_test.org_services_stacks()), [])
+
+    def test_two_analyzers_of_one_account_region_and_type_fail(self):
+        stacks = residency_test.org_services_stacks()
+        spec = self.instances(stacks, "fnx-ec1-security")["access-analyzer/delegated-administrator"]
+        stacks["fnx-ec1-security-x"] = {"components": {"terraform": {"access-analyzer/delegated-administrator": spec}}}
+        self.assertEqual(self.found(stacks), [
+            "fnx-ec1-security: access-analyzer/delegated-administrator and fnx-ec1-security-x: "
+            "access-analyzer/delegated-administrator all create the ORGANIZATION analyzer of fnx-security in "
+            "eu-central-1: one per account, region and type"])
+
+    def test_a_second_unused_access_analyzer_in_one_residency_fails(self):
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ec1-security")["access-analyzer/delegated-administrator"]["vars"][
+            "accessanalyzer_organization_unused_access_enabled"] = True
+        found = self.found(stacks)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("all create an unused-access analyzer of fnx-security in the EU residency", found[0])
+
+    def test_delegation_only_once_and_only_in_the_management_account(self):
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue1-security")["access-analyzer/delegated-administrator"]["vars"][
+            "organizations_delegated_administrator_enabled"] = True
+        found = self.found(stacks)
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("fnx-ue1-security: access-analyzer/delegated-administrator sets "
+                      "organizations_delegated_administrator_enabled in fnx-security, not the management account", found[0])
+        self.assertIn("all delegate Access Analyzer (an organization singleton, global)", found[1])
+        stacks = residency_test.org_services_stacks()
+        stacks["fnx-ew1-root"]["components"]["terraform"]["access-analyzer/root"] = residency_test.org_instance(
+            "access-analyzer", "root", "eu-west-1", organizations_delegated_administrator_enabled=True)
+        found = self.found(stacks)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("all delegate Access Analyzer", found[0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,11 @@
 # no account's home region). Inspector's
 # org-settings is committed disabled (owner OQ-IN).
 #
+# IAM Access Analyzer (catalog/access-analyzer/delegated-administrator.yaml,
+# owner 2026-11-14: EU data stays in the EU), none here: no external-access
+# analyzer in a US region (it would hold prod-eu's IAM findings), and unused
+# access is fnx-ue1-security's (global).
+#
 # Its state goes to fnx-ue1-root's bucket
 # through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
 # whose core_write trusts the management-account administrator and the
