@@ -20,8 +20,10 @@
 #       (an organization singleton, global; one owner).
 #   aws-security-hub/org-settings-us (us.yaml), -eu
 #       step 3, instance aws-security-hub/org-settings in the security stack:
-#       members (the map minus self and the management account: -us without
-#       prod-eu, OQ-RES) and auto-enable of new accounts with the default
+#       members (the map minus self: -us without prod-eu, OQ-RES; the
+#       management account, whose hub the root step enables, is a member too,
+#       unlike Cloud Posse: house management_account_member_enabled, owner
+#       2026-11-14) and auto-enable of new accounts with the default
 #       standards. CP's organization configuration is LOCAL (hardcoded).
 #   aws-security-hub/standby-suppressions
 #       added to org-settings in a region that is no account's home
@@ -102,6 +104,9 @@ components:
         default_standards_enabled: true
         enabled_standards: []
         auto_enable_organization_members: true
+        # House (E5c6, owner 2026-11-14; management-member_house.tf, members_override.tf):
+        # the management account is a member too, unlike Cloud Posse.
+        management_account_member_enabled: true
         finding_aggregator_enabled: false
         organizations_resource_policy_enabled: false
         create_sns_topic: false

@@ -14,13 +14,23 @@
 #
 # The organization's GuardDuty detector and Security Hub hub for us-east-2
 # (E5c4, Cloud Posse's step 1, delegated-administrator): fnx-security is
-# their delegated administrator once fnx-ue1-root's root step delegates them
-# (step 2); org-settings adds the members (step 3). Inspector has no step 1.
+# their delegated administrator once fnx-ue2-root's root step delegates them
+# (step 2); org-settings adds the members (step 3, below). Inspector has no step 1.
 # The detector's protection plans, per catalog/aws-guardduty/defaults.yaml
 # (owner OQ-GD): S3, EKS audit logs and EBS malware scanning, findings every
 # FIFTEEN_MINUTES. Security Hub (catalog/aws-security-hub/us.yaml, owner
 # OQ-SH): Cloud Posse's default standards, its findings aggregated into
 # fnx-ue1-security's hub (us-east-1); it aggregates none.
+#
+# Step 3, org-settings (catalog aws-guardduty, aws-security-hub and
+# aws-inspector2 us.yaml; security-org layer, after the root step):
+# the members are the account map minus this account, the management account
+# included (owner 2026-11-14, a deviation from Cloud Posse, which leaves it
+# out); here without prod-eu, whose EU personal data never reaches a US
+# region (owner OQ-RES). Security Hub suppresses the home-region-only
+# IAM, KMS and CloudWatch controls for every account (standby-suppressions:
+# no account's home region). Inspector's
+# org-settings is committed disabled (owner OQ-IN).
 #
 # Its state goes to fnx-ue1-root's bucket
 # through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
@@ -42,8 +52,9 @@ import:
   - orgs/fnx/security/_defaults
   - catalog/aws-account-settings/main-standby
   - catalog/aws-config/main
-  - catalog/aws-guardduty/defaults
+  - catalog/aws-guardduty/us
   - catalog/aws-security-hub/us
+  - catalog/aws-inspector2/us
 
 components:
   terraform:
@@ -65,3 +76,26 @@ components:
         component: aws-security-hub
         inherits:
           - aws-security-hub/delegated-administrator-us
+    # Step 3 (admin_delegated true, deploy-full-stack's security-org layer,
+    # after fnx-ue2-root's delegation): members and auto-enable. The
+    # -us variants' map leaves prod-eu out (owner OQ-RES); the
+    # management account is a member too (owner 2026-11-14).
+    aws-guardduty/org-settings:
+      metadata:
+        component: aws-guardduty
+        inherits:
+          - aws-guardduty/org-settings-us
+    aws-security-hub/org-settings:
+      metadata:
+        component: aws-security-hub
+        inherits:
+          - aws-security-hub/org-settings-us
+          - aws-security-hub/standby-suppressions
+    # Delegated (root step) but scanning nothing yet (owner OQ-IN): turning
+    # Inspector on is this flag.
+    aws-inspector2/org-settings:
+      metadata:
+        component: aws-inspector2
+        enabled: false
+        inherits:
+          - aws-inspector2/org-settings-us

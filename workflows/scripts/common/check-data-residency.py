@@ -95,7 +95,10 @@ also one enabled later); a GDPR-scoped stack's never aggregates. Security Hub's 
 account-suppressions_house.tf) is set only in a GDPR-scoped stack, and each entry's account_names
 is exactly its account_map's keys minus the all-GDPR ones: it never suppresses an all-GDPR account's
 findings (their home region is the EU one). Their dependencies.components
-(root <-> security) stay in one residency by the dependency rules above.
+(root <-> security) stay in one residency by the dependency rules above, and in the instance's own
+region (each of Cloud Posse's steps runs per region, after the same region's previous step). A
+non-abstract instance with metadata.enabled false is checked too (Inspector's committed-disabled
+org-settings, owner OQ-IN: one flag from deploying).
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
 
@@ -733,16 +736,55 @@ def suppression_errors(where: str, variables: dict, tenant: str, gdpr: bool) -> 
     return errors
 
 
+def stack_region(stack: dict) -> Optional[str]:
+    """A stack's region: its instances' vars.region (one per stack)."""
+    for instance in ((stack.get("components") or {}).get("terraform") or {}).values():
+        region = ((instance or {}).get("vars") or {}).get("region")
+        if region:
+            return region
+    return None
+
+
+def dependency_region_errors(stacks: dict, stack_name: str, where: str, instance: dict) -> list[str]:
+    """An org service step depends on the same region's other steps only (CP: each step per region; a
+    us-east-2 org-settings after us-east-1's delegation would run before its own region's)."""
+    region, errors = (instance.get("vars") or {}).get("region"), []
+    for dep in (instance.get("dependencies") or {}).get("components") or []:
+        target, target_stack = str(dep.get("component") or ""), dep.get("stack") or stack_name
+        if target.split("/", 1)[0] not in ORG_SERVICES:
+            continue
+        if target_stack not in stacks:
+            # A stack not onboarded yet (the scaffold's fresh core stack in a new region, whose root
+            # stack is hand-written later): nothing to compare.
+            continue
+        target_region = stack_region(stacks[target_stack])
+        # Across residencies the dependency rules above already fail it.
+        if target_region and region and target_region.startswith(EU_PREFIX) != region.startswith(EU_PREFIX):
+            continue
+        if target_region != region:
+            errors.append(f"{where} depends on {target} in {target_stack} ({target_region}), not in its own region "
+                          f"{region}: each step depends on its own region's")
+    return errors
+
+
+def org_service_instances(stack: dict) -> dict:
+    """Non-abstract instances, metadata.enabled false included: a committed-disabled org-settings (Inspector,
+    owner OQ-IN) is one flag from deploying, so its members and dependencies are checked already."""
+    return {name: instance for name, instance in ((stack.get("components") or {}).get("terraform") or {}).items()
+            if ((instance or {}).get("metadata") or {}).get("type") != "abstract"}
+
+
 def org_service_errors(stacks: dict, scoped: set) -> list[str]:
     """ORG_SERVICES members and Security Hub aggregation kept in their residency (owner OQ-RES/OQ-SH)."""
     eu, eu_ids = gdpr_only_accounts(stacks, scoped)
     errors, seen = [], False
     for stack_name in sorted(stacks):
-        for name, instance in sorted(instances(stacks[stack_name]).items()):
+        for name, instance in sorted(org_service_instances(stacks[stack_name]).items()):
             component, variables = component_of(name, instance), instance.get("vars") or {}
             if component not in ORG_SERVICES or not flag_on(variables.get("enabled", True)):
                 continue
             where, seen = f"{stack_name}: {name}", True
+            errors += dependency_region_errors(stacks, stack_name, where, instance)
             if component == "aws-security-hub" and creates_aggregator(instance):
                 if stack_name in scoped:
                     errors.append(f"{where} creates a Security Hub finding aggregator in a GDPR-scoped stack: EU hubs "
