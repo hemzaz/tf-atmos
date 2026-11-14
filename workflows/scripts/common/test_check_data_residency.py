@@ -1,8 +1,13 @@
 """Tests for check-data-residency.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import copy
 import importlib.util
+import io
+import json
 import pathlib
+import sys
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "check_data_residency", pathlib.Path(__file__).with_name("check-data-residency.py")
@@ -1092,9 +1097,13 @@ class OrgServicesTest(unittest.TestCase):
             inspector["member_association_excludes"] = excludes
             self.assertEqual(len(self.org(stacks)), 1, excludes)
             self.assertIn(exact, self.org(stacks)[0])
-        # OQ-IN: org-settings is committed disabled, so it is not judged until it is turned on.
+        # OQ-IN: org-settings is committed disabled, one flag from deploying, so it is judged already (E5c6:
+        # flipping metadata.enabled must not be what enrols prod-eu).
         stacks["fnx-ue1-security"]["components"]["terraform"]["aws-inspector2/org-settings"]["metadata"] = {
             "component": "aws-inspector2", "enabled": False}
+        self.assertEqual(len(self.org(stacks)), 1)
+        self.assertIn(exact, self.org(stacks)[0])
+        inspector["member_association_excludes"] = [ORG_IDS["prod-eu"]]
         self.assertEqual(self.org(stacks), [])
 
     def test_us_guardduty_auto_enable_all_fails(self):
@@ -1168,6 +1177,70 @@ class OrgServicesTest(unittest.TestCase):
             "which is not GDPR-scoped",
             "fnx-ue1-security: aws-guardduty/org-settings depends on aws-guardduty/root in fnx-ew1-root, which is "
             "GDPR-scoped: EU data may not be read outside the EU"])
+
+
+    def test_org_steps_depend_on_their_own_region_only(self):
+        # #524 review LOW-1: same residency, another region (us-east-2's steps after us-east-1's).
+        stacks = org_services_stacks()
+        stacks["fnx-ue2-root"]["components"]["terraform"]["aws-guardduty/root"]["dependencies"]["components"] = [
+            {"component": "aws-guardduty/delegated-administrator", "stack": "fnx-ue1-security"}]
+        stacks["fnx-ue2-security"]["components"]["terraform"]["aws-security-hub/org-settings"]["dependencies"][
+            "components"] = [{"component": "aws-security-hub/root", "stack": "fnx-ue1-root"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ue2-root: aws-guardduty/root depends on aws-guardduty/delegated-administrator in fnx-ue1-security "
+            "(us-east-1), not in its own region us-east-2: each step depends on its own region's",
+            "fnx-ue2-security: aws-security-hub/org-settings depends on aws-security-hub/root in fnx-ue1-root "
+            "(us-east-1), not in its own region us-east-2: each step depends on its own region's"])
+
+    def test_management_account_is_a_member_in_both_residencies(self):
+        # Owner 2026-11-14: the management account (shared, US residency) is a member everywhere; both maps
+        # (account-map-bypass and -us) hold it, and the guards accept it.
+        for stack_name in ("fnx-ue1-security", "fnx-ue2-security", "fnx-ew1-security", "fnx-ec1-security"):
+            for name in ("aws-guardduty/org-settings", "aws-security-hub/org-settings"):
+                with self.subTest(stack=stack_name, name=name):
+                    self.assertIn("fnx-root", self.instances_map(stack_name, name)["full_account_map"])
+        self.assertEqual(residency.check(org_services_stacks()), [])
+
+
+    def test_each_step_depends_on_exactly_its_predecessor(self):
+        # #525 review LOW-1: org-settings -> <svc>/root, GuardDuty/Security Hub root -> delegated-administrator,
+        # Inspector root and access-analyzer/root -> nothing.
+        stacks = org_services_stacks()
+        terraform = stacks["fnx-ue1-security"]["components"]["terraform"]
+        terraform["aws-guardduty/org-settings"]["dependencies"]["components"] = []
+        stacks["fnx-ue1-root"]["components"]["terraform"]["aws-inspector2/root"]["dependencies"]["components"] = [
+            {"component": "aws-inspector2/org-settings", "stack": "fnx-ue1-security"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ue1-root: aws-inspector2/root dependencies.components is ['aws-inspector2/org-settings in "
+            "fnx-ue1-security']: Cloud Posse's step order needs nothing (the same region's previous step)",
+            "fnx-ue1-security: aws-guardduty/org-settings dependencies.components is []: Cloud Posse's step order "
+            "needs exactly aws-guardduty/root in fnx-ue1-root (the same region's previous step)"])
+
+    def test_root_on_a_wrong_step_fails(self):
+        stacks = org_services_stacks()
+        stacks["fnx-ew1-root"]["components"]["terraform"]["aws-security-hub/root"]["dependencies"]["components"] = [
+            {"component": "aws-security-hub/org-settings", "stack": "fnx-ew1-security"}]
+        self.assertEqual(residency.check(stacks), [
+            "fnx-ew1-root: aws-security-hub/root dependencies.components is ['aws-security-hub/org-settings in "
+            "fnx-ew1-security']: Cloud Posse's step order needs exactly aws-security-hub/delegated-administrator "
+            "in fnx-ew1-security (the same region's previous step)"])
+
+    def test_a_missing_predecessor_stack_warns_and_passes(self):
+        # Owner (#525): a new region's security stack before its hand-written root stack exists.
+        stacks = org_services_stacks()
+        del stacks["fnx-ue2-root"]
+        warnings = []
+        self.assertEqual(residency.check(stacks, warnings=warnings), [])
+        self.assertEqual(len(warnings), 3)
+        self.assertIn("fnx-ue2-security: aws-guardduty/org-settings depends on aws-guardduty/root in fnx-ue2-root, "
+                      "which does not exist", warnings[0])
+        # main(): the warnings go to stderr as WARNING lines, and the exit code stays 0.
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(stacks))), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(residency.main(), 0)
+        self.assertEqual(err.getvalue().count("WARNING fnx-ue2-security: aws-"), 3)
+        self.assertNotIn("WARNING", out.getvalue())
 
 
 if __name__ == "__main__":

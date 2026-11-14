@@ -95,7 +95,12 @@ also one enabled later); a GDPR-scoped stack's never aggregates. Security Hub's 
 account-suppressions_house.tf) is set only in a GDPR-scoped stack, and each entry's account_names
 is exactly its account_map's keys minus the all-GDPR ones: it never suppresses an all-GDPR account's
 findings (their home region is the EU one). Their dependencies.components
-(root <-> security) stay in one residency by the dependency rules above.
+(root <-> security) stay in one residency by the dependency rules above, and each step's are exactly
+the same region's previous step (ORG_PREDECESSORS, org_dependency_findings). A dependency on a stack
+that does not exist is a WARNING on stderr, never a failure: onboarding a new region needs its
+hand-written <tenant>-<env>-root (docs/OPERATIONS.md, Bootstrap order). A
+non-abstract instance with metadata.enabled false is checked too (Inspector's committed-disabled
+org-settings, owner OQ-IN: one flag from deploying).
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
 violation.
 
@@ -369,7 +374,8 @@ def check_instance(
     return errors
 
 
-def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
+def check(stacks: dict, exemptions: tuple = EXEMPTIONS, warnings: Optional[list] = None) -> list[str]:
+    """The violations; warnings, when given, collects the non-fatal findings (org_dependency_findings)."""
     errors = []
     scoped = {name for name, stack in stacks.items() if gdpr_scoped(stack)}
     holders, collectors = zone_holders(stacks), us_collectors(stacks, scoped)
@@ -382,6 +388,10 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS) -> list[str]:
     errors += global_datastore_errors(stacks, scoped)
     errors += log_archive_errors(stacks, scoped)
     errors += org_service_errors(stacks, scoped)
+    dependency_errors, dependency_warnings = org_dependency_findings(stacks)
+    errors += dependency_errors
+    if warnings is not None:
+        warnings += list(dict.fromkeys(dependency_warnings))
     return list(dict.fromkeys(errors))
 
 
@@ -733,12 +743,99 @@ def suppression_errors(where: str, variables: dict, tenant: str, gdpr: bool) -> 
     return errors
 
 
+def stack_region(stack: dict) -> Optional[str]:
+    """A stack's region: its instances' vars.region (one per stack)."""
+    for instance in ((stack.get("components") or {}).get("terraform") or {}).values():
+        region = ((instance or {}).get("vars") or {}).get("region")
+        if region:
+            return region
+    return None
+
+
+# Cloud Posse's step order per region (E5c, #525 review LOW-1): each instance's dependencies.components is
+# exactly its predecessor, (instance, stage of its stack); the others depend on nothing.
+ORG_PREDECESSORS = {
+    "aws-guardduty/root": ("aws-guardduty/delegated-administrator", "security"),
+    "aws-security-hub/root": ("aws-security-hub/delegated-administrator", "security"),
+    "aws-guardduty/org-settings": ("aws-guardduty/root", "root"),
+    "aws-security-hub/org-settings": ("aws-security-hub/root", "root"),
+    "aws-inspector2/org-settings": ("aws-inspector2/root", "root"),
+    "aws-inspector2/root": None,
+    "access-analyzer/root": None,
+}
+
+
+def org_dependency_findings(stacks: dict) -> tuple[list[str], list[str]]:
+    """(errors, warnings) for the org security steps' dependencies.components.
+
+    An ORG_PREDECESSORS instance depends on exactly its predecessor, the same region's previous step
+    (<svc>/root after <svc>/delegated-administrator in <tenant>-<env>-security, <svc>/org-settings after
+    <svc>/root in <tenant>-<env>-root; Inspector's root and access-analyzer/root on nothing), and any
+    org-service dependency names a stack in the instance's own region. A target stack that does not exist
+    is a WARNING, never a failure: onboarding a new region (the scaffold's fresh security stack) needs its
+    hand-written <tenant>-<env>-root, added in its own change (docs/OPERATIONS.md, Bootstrap order)."""
+    errors, warnings = [], []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(org_service_instances(stacks[stack_name]).items()):
+            variables = instance.get("vars") or {}
+            component = component_of(name, instance)
+            if component not in ORG_SERVICES + ("access-analyzer",) or not flag_on(variables.get("enabled", True)):
+                continue
+            where, region = f"{stack_name}: {name}", variables.get("region")
+            deps = [(str(d.get("component") or ""), d.get("stack") or stack_name)
+                    for d in (instance.get("dependencies") or {}).get("components") or []]
+            region_errors, crossed = [], False
+            for target, target_stack in deps:
+                if target.split("/", 1)[0] not in ORG_SERVICES + ("access-analyzer",):
+                    continue
+                if target_stack not in stacks:
+                    warnings.append(f"{where} depends on {target} in {target_stack}, which does not exist: add the "
+                                    "hand-written stack before this one deploys (a new region needs its "
+                                    f"{target_stack})")
+                    continue
+                target_region = stack_region(stacks[target_stack])
+                # Across residencies the dependency rules above already fail it.
+                if target_region and region and target_region.startswith(EU_PREFIX) != region.startswith(EU_PREFIX):
+                    crossed = True
+                    continue
+                if target_region != region:
+                    region_errors.append(f"{where} depends on {target} in {target_stack} ({target_region}), not in "
+                                         f"its own region {region}: each step depends on its own region's")
+            errors += region_errors
+            if name not in ORG_PREDECESSORS or region_errors or crossed:
+                continue
+            step = ORG_PREDECESSORS[name]
+            # <tenant>-<environment>-<stage> (atmos.yaml name_template): the predecessor's stack is this one's
+            # tenant and region code with the predecessor's stage.
+            tenant, env = (stack_name.split("-") + ["", ""])[:2]
+            expected = [] if step is None else [(step[0], f"{tenant}-{env}-{step[1]}")]
+            if sorted(deps) == expected:
+                continue
+            if expected and not deps and expected[0][1] not in stacks:
+                warnings.append(f"{where} has no dependency on its predecessor {expected[0][0]} in {expected[0][1]}, "
+                                f"which does not exist: add the hand-written {expected[0][1]} first")
+                continue
+            if any(t not in stacks for _, t in deps) and all(t not in stacks or (c, t) in expected for c, t in deps):
+                continue  # only a missing stack differs: warned above
+            want = f"exactly {expected[0][0]} in {expected[0][1]}" if expected else "nothing"
+            errors.append(f"{where} dependencies.components is {[f'{c} in {t}' for c, t in deps]}: Cloud Posse's "
+                          f"step order needs {want} (the same region's previous step)")
+    return errors, warnings
+
+
+def org_service_instances(stack: dict) -> dict:
+    """Non-abstract instances, metadata.enabled false included: a committed-disabled org-settings (Inspector,
+    owner OQ-IN) is one flag from deploying, so its members and dependencies are checked already."""
+    return {name: instance for name, instance in ((stack.get("components") or {}).get("terraform") or {}).items()
+            if ((instance or {}).get("metadata") or {}).get("type") != "abstract"}
+
+
 def org_service_errors(stacks: dict, scoped: set) -> list[str]:
     """ORG_SERVICES members and Security Hub aggregation kept in their residency (owner OQ-RES/OQ-SH)."""
     eu, eu_ids = gdpr_only_accounts(stacks, scoped)
     errors, seen = [], False
     for stack_name in sorted(stacks):
-        for name, instance in sorted(instances(stacks[stack_name]).items()):
+        for name, instance in sorted(org_service_instances(stacks[stack_name]).items()):
             component, variables = component_of(name, instance), instance.get("vars") or {}
             if component not in ORG_SERVICES or not flag_on(variables.get("enabled", True)):
                 continue
@@ -818,7 +915,10 @@ def outside_reader_errors(stack_name: str, name: str, instance: dict, scoped: se
 
 
 def main() -> int:
-    errors = fixtures.fatal(check(json.load(sys.stdin)), CHECK)
+    warnings: list[str] = []
+    errors = fixtures.fatal(check(json.load(sys.stdin), warnings=warnings), CHECK)
+    for warning in warnings:
+        print(f"WARNING {warning}", file=sys.stderr)
     for error in errors:
         print(f"ERROR {error}")
     if errors:

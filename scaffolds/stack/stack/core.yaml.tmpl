@@ -4,6 +4,8 @@
 [[- $eu := hasPrefix "eu-" .Config.region -]]
 [[- $ew1 := eq .Config.region "eu-west-1" -]]
 [[- $root := printf "%s-%s-root" .Config.tenant (ternary "ew1" "ue1" $eu) -]]
+[[- /* The management account's stack in this stack's region: the org security services' root step (E5c). */ -]]
+[[- $delegator := printf "%s-%s-root" .Config.tenant .Config.region_code -]]
 [[- $archive := and (eq .Config.stage "audit") (or $home $ew1) -]]
 [[- /* fnx-ew1-security holds the EU Config aggregator (E5c OQ-EA): its own collector, aws-config/security-eu. */ -]]
 [[- $eu_aggregator := and $ew1 (eq .Config.stage "security") -]]
@@ -62,8 +64,8 @@
 #
 # The organization's GuardDuty detector and Security Hub hub for [[ .Config.region ]]
 # (E5c4, Cloud Posse's step 1, delegated-administrator): [[ .Config.tenant ]]-security is
-# their delegated administrator once [[ $root ]]'s root step delegates them
-# (step 2); org-settings adds the members (step 3). Inspector has no step 1.
+# their delegated administrator once [[ $delegator ]]'s root step delegates them
+# (step 2); org-settings adds the members (step 3, below). Inspector has no step 1.
 # The detector's protection plans, per catalog/aws-guardduty/defaults.yaml
 # (owner OQ-GD): S3, EKS audit logs and EBS malware scanning, findings every
 # FIFTEEN_MINUTES. Security Hub (catalog/aws-security-hub/[[ ternary "defaults" "us" $eu ]].yaml, owner
@@ -76,6 +78,25 @@
 [[- else ]] its findings aggregated into
 # [[ .Config.tenant ]]-ue1-security's hub (us-east-1); it aggregates none.
 [[- end ]]
+#
+# Step 3, org-settings (catalog aws-guardduty, aws-security-hub and
+# aws-inspector2 [[ ternary "defaults" "us" $eu ]].yaml; security-org layer, after the root step):
+# the members are the account map minus this account, the management account
+# included (owner 2026-11-14, a deviation from Cloud Posse, which leaves it
+# out);
+[[- if $eu ]] here every account, prod-eu included: the EU admin is the
+# all-GDPR accounts' (owner OQ-RES).
+[[- else ]] here without prod-eu, whose EU personal data never reaches a US
+# region (owner OQ-RES).
+[[- end ]]
+[[- if $ew1 ]] Security Hub suppresses the home-region-only IAM, KMS
+# and CloudWatch controls for the shared accounts alone
+# (eu-shared-account-suppressions; prod-eu's home is here).
+[[- else if not $home ]] Security Hub suppresses the home-region-only
+# IAM, KMS and CloudWatch controls for every account (standby-suppressions:
+# no account's home region).
+[[- end ]] Inspector's
+# org-settings is committed disabled (owner OQ-IN).
 [[- end ]]
 #
 # Its state goes to [[ $root ]]'s bucket
@@ -125,8 +146,9 @@ import:
 [[- end ]]
   - catalog/aws-config/[[ ternary "security-eu" "main" $eu_aggregator ]]
 [[- if eq .Config.stage "security" ]]
-  - catalog/aws-guardduty/defaults
+  - catalog/aws-guardduty/[[ ternary "defaults" "us" $eu ]]
   - catalog/aws-security-hub/[[ ternary "defaults" "us" $eu ]]
+  - catalog/aws-inspector2/[[ ternary "defaults" "us" $eu ]]
 [[- end ]]
 [[- if $eu ]]
 
@@ -168,4 +190,31 @@ components:
         component: aws-security-hub
         inherits:
           - aws-security-hub/delegated-administrator-[[ ternary "eu" "us" $eu ]]
+    # Step 3 (admin_delegated true, deploy-full-stack's security-org layer,
+    # after [[ $delegator ]]'s delegation): members and auto-enable. The
+    # [[ ternary "-eu" "-us" $eu ]] variants' map [[ if $eu ]]holds every account, prod-eu included[[ else ]]leaves prod-eu out (owner OQ-RES)[[ end ]]; the
+    # management account is a member too (owner 2026-11-14).
+    aws-guardduty/org-settings:
+      metadata:
+        component: aws-guardduty
+        inherits:
+          - aws-guardduty/org-settings-[[ ternary "eu" "us" $eu ]]
+    aws-security-hub/org-settings:
+      metadata:
+        component: aws-security-hub
+        inherits:
+          - aws-security-hub/org-settings-[[ ternary "eu" "us" $eu ]]
+[[- if $ew1 ]]
+          - aws-security-hub/eu-shared-account-suppressions
+[[- else if not $home ]]
+          - aws-security-hub/standby-suppressions
+[[- end ]]
+    # Delegated (root step) but scanning nothing yet (owner OQ-IN): turning
+    # Inspector on is this flag.
+    aws-inspector2/org-settings:
+      metadata:
+        component: aws-inspector2
+        enabled: false
+        inherits:
+          - aws-inspector2/org-settings-[[ ternary "eu" "us" $eu ]]
 [[- end ]]
