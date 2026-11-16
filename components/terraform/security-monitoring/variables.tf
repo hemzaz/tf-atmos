@@ -18,41 +18,40 @@ variable "tags" {
   }
 }
 
-# GuardDuty, Security Hub and Inspector are owned by the guardduty,
-# securityhub and inspector2 components. Stacks pass their outputs in with
-# !terraform.state; null turns the matching finding route off.
-variable "guardduty_detector_id" {
-  type        = string
-  description = "ID of the GuardDuty detector owned by the guardduty component (its `detector_id` output). Null disables GuardDuty finding routing."
-  default     = null
-
-  validation {
-    condition     = var.guardduty_detector_id == null || can(regex("^[a-z0-9]{1,300}$", var.guardduty_detector_id))
-    error_message = "guardduty_detector_id must be a GuardDuty detector ID (lowercase letters and digits), or null."
-  }
+# GuardDuty, Security Hub and Inspector are organization services: the
+# security account's delegated administrator (vendored aws-guardduty,
+# aws-security-hub, aws-inspector2 in the region's security stack) enrolls
+# this account as a member, and the member's detector and hub still publish
+# this account's findings to its own EventBridge. This component holds no
+# service resource and reads no state: one flag per finding route (owner
+# OQ-AL). check-data-residency.py fails a route that is on in an account the
+# region's delegated administrator does not enroll.
+variable "enable_guardduty_route" {
+  type        = bool
+  description = "Route this account's GuardDuty findings (severity 4.0 and above) to the alert topic. The detector is the member detector the region's delegated administrator manages (aws-guardduty org-settings)"
+  default     = true
+  nullable    = false
 }
 
 variable "require_guardduty_route" {
   type        = bool
-  description = "Fail the plan when guardduty_detector_id is null, instead of silently planning without the GuardDuty finding route (e.g. guardduty/main not applied yet)"
+  description = "Fail the plan when enable_guardduty_route is false, so the GuardDuty route is never turned off by one override: turning it off takes both flags"
   default     = true
+  nullable    = false
 }
 
-variable "securityhub_account_arn" {
-  type        = string
-  description = "ARN of the Security Hub hub owned by the securityhub component (its `account_arn` output). Null disables Security Hub finding routing."
-  default     = null
-
-  validation {
-    condition     = var.securityhub_account_arn == null || can(regex("^arn:aws[a-z-]*:securityhub:[a-z0-9-]+:[0-9]{12}:hub/default$", var.securityhub_account_arn))
-    error_message = "securityhub_account_arn must be a Security Hub hub ARN (arn:aws:securityhub:<region>:<account>:hub/default), or null."
-  }
+variable "enable_securityhub_route" {
+  type        = bool
+  description = "Route this account's new, active, failed HIGH/CRITICAL Security Hub findings to the alert topic. The hub is the member hub the region's delegated administrator manages (aws-security-hub org-settings)"
+  default     = true
+  nullable    = false
 }
 
 variable "require_securityhub_route" {
   type        = bool
-  description = "Fail the plan when securityhub_account_arn is null, instead of silently planning without the Security Hub finding route (e.g. securityhub/main not applied yet)"
+  description = "Fail the plan when enable_securityhub_route is false, so the Security Hub route is never turned off by one override: turning it off takes both flags"
   default     = true
+  nullable    = false
 }
 
 variable "cloudtrail_log_group_name" {
@@ -72,15 +71,11 @@ variable "require_cloudtrail_route" {
   default     = true
 }
 
-variable "inspector2_account_id" {
-  type        = string
-  description = "Account ID Inspector is enabled in, owned by the inspector2 component (its `account_id` output, null while inspector2 is disabled). Null disables Inspector finding routing."
-  default     = null
-
-  validation {
-    condition     = var.inspector2_account_id == null || can(regex("^[0-9]{12}$", var.inspector2_account_id))
-    error_message = "inspector2_account_id must be a 12-digit AWS account ID, or null."
-  }
+variable "enable_inspector2_route" {
+  type        = bool
+  description = "Route this account's HIGH/CRITICAL Inspector findings to the alert topic. Inspector scans the account only while the region's aws-inspector2 org-settings is deployed (committed disabled, owner OQ-IN); until then the rule matches nothing"
+  default     = true
+  nullable    = false
 }
 
 variable "enable_security_group_change_events" {

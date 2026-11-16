@@ -48,9 +48,6 @@ import:
   - catalog/acm/services
   - catalog/aws-cloudtrail/defaults
   - catalog/aws-config/main
-  - catalog/guardduty/main
-  - catalog/securityhub/main
-  - catalog/inspector2/main
   - catalog/apigateway-account/main
   - catalog/security-monitoring/main
   - catalog/backup/main

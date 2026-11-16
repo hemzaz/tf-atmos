@@ -1,12 +1,14 @@
-# security-monitoring consumes GuardDuty, Security Hub and Inspector; it never
-# creates them.
+# security-monitoring routes GuardDuty, Security Hub and Inspector findings; it
+# never creates the services and reads none of their state.
 #
-# The guardduty, securityhub and inspector2 components own the detector, the
-# hub and the Inspector enabler (one component per service, the Cloud Posse
-# model). Stacks pass their IDs in with
-# !terraform.state. These runs prove that the finding routes follow those IDs,
-# that a null ID fails the plan unless the route is explicitly optional, that a
-# null ID turns an optional route off, and that malformed IDs are rejected.
+# The region's delegated administrator in the security account (vendored
+# aws-guardduty, aws-security-hub, aws-inspector2 org-settings) enrolls the
+# account; the member's detector and hub publish its own findings to its own
+# EventBridge. Stacks pass one flag per route (owner OQ-AL). These runs prove
+# that the routes are on by default with no service input at all, that turning
+# GuardDuty or Security Hub off fails the plan unless its require_*_route is
+# cleared too, that clearing both turns the route off, and that the Inspector
+# route follows its flag alone.
 #
 # mock_provider avoids needing real AWS credentials. Most runs use
 # `command = plan`; the topic-policy run applies against the mock so the topic
@@ -39,18 +41,16 @@ variables {
     Tenant      = "fnx"
     ManagedBy   = "Terraform"
   }
-  guardduty_detector_id     = "12abc34d567e8fa901bc2d34e56789f0"
-  securityhub_account_arn   = "arn:aws:securityhub:us-east-1:123456789012:hub/default"
   kms_key_id                = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
   cloudtrail_log_group_name = "/aws/cloudtrail/test-cloudtrail"
 }
 
-run "routes_consumed_detector_and_hub" {
+run "routes_member_findings_by_default" {
   command = plan
 
   assert {
-    condition     = length(aws_cloudwatch_event_rule.guardduty_findings) == 1 && length(aws_cloudwatch_event_rule.securityhub_findings) == 1
-    error_message = "Both finding routes must exist when the detector ID and hub ARN are passed in."
+    condition     = length(aws_cloudwatch_event_rule.guardduty_findings) == 1 && length(aws_cloudwatch_event_rule.securityhub_findings) == 1 && length(aws_cloudwatch_event_rule.inspector_findings) == 1
+    error_message = "The GuardDuty, Security Hub and Inspector routes must default on, with no detector, hub or account input."
   }
 
   assert {
@@ -69,18 +69,30 @@ run "routes_consumed_detector_and_hub" {
   }
 
   assert {
+    condition = (
+      jsondecode(aws_cloudwatch_event_rule.inspector_findings[0].event_pattern).source == ["aws.inspector2"]
+      && jsondecode(aws_cloudwatch_event_rule.inspector_findings[0].event_pattern).detail.severity == ["HIGH", "CRITICAL"]
+    )
+    error_message = "The Inspector route matches HIGH and CRITICAL Inspector2 findings."
+  }
+
+  # The rules match on the service events only, never on an account: a member
+  # receives its own findings in its own EventBridge, so no account filter is
+  # needed (and one would drop them).
+  assert {
+    condition = alltrue([
+      for p in [
+        jsondecode(aws_cloudwatch_event_rule.guardduty_findings[0].event_pattern),
+        jsondecode(aws_cloudwatch_event_rule.securityhub_findings[0].event_pattern),
+        jsondecode(aws_cloudwatch_event_rule.inspector_findings[0].event_pattern),
+      ] : !contains(keys(p), "account") && !contains(keys(p.detail), "accountId")
+    ])
+    error_message = "The finding routes must not filter on an account."
+  }
+
+  assert {
     condition     = aws_sns_topic.security_alerts.kms_master_key_id == var.kms_key_id
     error_message = "The alert topic must be encrypted with the key passed in (kms/main)."
-  }
-
-  assert {
-    condition     = output.guardduty_detector_id == "12abc34d567e8fa901bc2d34e56789f0"
-    error_message = "guardduty_detector_id must pass the consumed detector ID through."
-  }
-
-  assert {
-    condition     = output.security_hub_account_arn == "arn:aws:securityhub:us-east-1:123456789012:hub/default"
-    error_message = "security_hub_account_arn must pass the consumed hub ARN through."
   }
 }
 
@@ -120,6 +132,14 @@ run "topic_policy_is_same_account_only" {
   command = apply
 
   assert {
+    condition = length(aws_cloudwatch_event_target.guardduty_sns) == 1 && length(aws_cloudwatch_event_target.securityhub_sns) == 1 && length(aws_cloudwatch_event_target.inspector_sns) == 1 && alltrue([
+      for t in concat(aws_cloudwatch_event_target.guardduty_sns, aws_cloudwatch_event_target.securityhub_sns, aws_cloudwatch_event_target.inspector_sns) :
+      t.arn == aws_sns_topic.security_alerts.arn
+    ])
+    error_message = "Each finding route must target the alert topic."
+  }
+
+  assert {
     condition = alltrue([
       for s in jsondecode(aws_sns_topic_policy.security_alerts.policy).Statement :
       s.Condition.StringEquals["aws:SourceAccount"] == "123456789012"
@@ -144,21 +164,21 @@ run "topic_policy_is_same_account_only" {
   }
 }
 
-run "null_detector_fails_when_route_required" {
+run "guardduty_route_off_fails_while_required" {
   command = plan
 
   variables {
-    guardduty_detector_id = null
+    enable_guardduty_route = false
   }
 
   expect_failures = [aws_sns_topic.security_alerts]
 }
 
-run "null_hub_fails_when_route_required" {
+run "securityhub_route_off_fails_while_required" {
   command = plan
 
   variables {
-    securityhub_account_arn = null
+    enable_securityhub_route = false
   }
 
   expect_failures = [aws_sns_topic.security_alerts]
@@ -174,12 +194,13 @@ run "null_log_group_fails_when_route_required" {
   expect_failures = [aws_sns_topic.security_alerts]
 }
 
-run "null_ids_disable_optional_routes" {
+run "routes_off_with_both_flags_cleared" {
   command = plan
 
   variables {
-    guardduty_detector_id     = null
-    securityhub_account_arn   = null
+    enable_guardduty_route    = false
+    enable_securityhub_route  = false
+    enable_inspector2_route   = false
     cloudtrail_log_group_name = null
     require_guardduty_route   = false
     require_securityhub_route = false
@@ -192,39 +213,54 @@ run "null_ids_disable_optional_routes" {
   }
 
   assert {
-    condition     = length(aws_cloudwatch_event_rule.guardduty_findings) == 0
-    error_message = "Without a detector ID there must be no GuardDuty route."
+    condition     = length(aws_cloudwatch_event_rule.guardduty_findings) == 0 && length(aws_cloudwatch_event_target.guardduty_sns) == 0
+    error_message = "With enable_guardduty_route false there must be no GuardDuty route."
   }
 
   assert {
-    condition     = length(aws_cloudwatch_event_rule.securityhub_findings) == 0
-    error_message = "Without a hub ARN there must be no Security Hub route."
+    condition     = length(aws_cloudwatch_event_rule.securityhub_findings) == 0 && length(aws_cloudwatch_event_target.securityhub_sns) == 0
+    error_message = "With enable_securityhub_route false there must be no Security Hub route."
   }
 
   assert {
-    condition     = output.guardduty_detector_id == null && output.security_hub_account_arn == null
-    error_message = "Both pass-through outputs must be null when nothing is consumed."
+    condition     = output.guardduty_event_rule_arn == null && output.securityhub_event_rule_arn == null && output.inspector_event_rule_arn == null
+    error_message = "The rule ARN outputs must be null without their routes."
   }
 }
 
-run "rejects_malformed_detector_id" {
+run "inspector_route_off_needs_only_its_flag" {
   command = plan
 
   variables {
-    guardduty_detector_id = "arn:aws:guardduty:us-east-1:123456789012:detector/abc"
+    enable_inspector2_route = false
   }
 
-  expect_failures = [var.guardduty_detector_id]
+  assert {
+    condition     = length(aws_cloudwatch_event_rule.inspector_findings) == 0 && length(aws_cloudwatch_event_target.inspector_sns) == 0
+    error_message = "enable_inspector2_route false turns the Inspector route off, and no plan failure (no require_* switch)."
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_event_rule.guardduty_findings) == 1 && length(aws_cloudwatch_event_rule.securityhub_findings) == 1
+    error_message = "The Inspector flag must not touch the GuardDuty or Security Hub route."
+  }
 }
 
-run "rejects_non_hub_arn" {
+# nullable = false: a null from a stack (an unset or failed lookup) takes the
+# default, so it can never turn a route off.
+run "null_route_flags_keep_the_routes_on" {
   command = plan
 
   variables {
-    securityhub_account_arn = "123456789012"
+    enable_guardduty_route   = null
+    enable_securityhub_route = null
+    enable_inspector2_route  = null
   }
 
-  expect_failures = [var.securityhub_account_arn]
+  assert {
+    condition     = length(aws_cloudwatch_event_rule.guardduty_findings) == 1 && length(aws_cloudwatch_event_rule.securityhub_findings) == 1 && length(aws_cloudwatch_event_rule.inspector_findings) == 1
+    error_message = "A null route flag must keep its route on (the default)."
+  }
 }
 
 run "rejects_non_arn_kms_key" {
@@ -235,49 +271,4 @@ run "rejects_non_arn_kms_key" {
   }
 
   expect_failures = [var.kms_key_id]
-}
-
-run "inspector_route_off_without_account_id" {
-  command = plan
-
-  assert {
-    condition     = length(aws_cloudwatch_event_rule.inspector_findings) == 0 && length(aws_cloudwatch_event_target.inspector_sns) == 0
-    error_message = "inspector2 is off by default (null account_id): no Inspector route, and no plan failure."
-  }
-
-  assert {
-    condition     = output.inspector_event_rule_arn == null
-    error_message = "inspector_event_rule_arn must be null without a route."
-  }
-}
-
-run "routes_inspector_findings_when_enabled" {
-  command = plan
-
-  variables {
-    inspector2_account_id = "123456789012"
-  }
-
-  assert {
-    condition     = length(aws_cloudwatch_event_rule.inspector_findings) == 1 && length(aws_cloudwatch_event_target.inspector_sns) == 1
-    error_message = "An inspector2 account_id turns the Inspector route to the alert topic on."
-  }
-
-  assert {
-    condition = (
-      jsondecode(aws_cloudwatch_event_rule.inspector_findings[0].event_pattern).source == ["aws.inspector2"]
-      && jsondecode(aws_cloudwatch_event_rule.inspector_findings[0].event_pattern).detail.severity == ["HIGH", "CRITICAL"]
-    )
-    error_message = "The Inspector route matches HIGH and CRITICAL Inspector2 findings."
-  }
-}
-
-run "rejects_malformed_inspector2_account_id" {
-  command = plan
-
-  variables {
-    inspector2_account_id = "arn:aws:inspector2:us-east-1:123456789012:owner/123456789012"
-  }
-
-  expect_failures = [var.inspector2_account_id]
 }

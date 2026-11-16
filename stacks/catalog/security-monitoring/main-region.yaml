@@ -23,8 +23,8 @@ components:
       metadata:
         component: security-monitoring
       vars:
-        guardduty_detector_id: !terraform.state guardduty/main .detector_id
-        securityhub_account_arn: !terraform.state securityhub/main .account_arn
+        enable_guardduty_route: true
+        enable_securityhub_route: true
         require_guardduty_route: true
         require_securityhub_route: true
         require_cloudtrail_route: false
@@ -38,7 +38,7 @@ components:
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
           - !terraform.state iam/ci .ci_apply_role_arn
         kms_key_id: !terraform.state kms/main .key_arn
-        inspector2_account_id: !terraform.state inspector2/main .account_id
+        enable_inspector2_route: true
         enable_alert_enrichment: false
         security_email_subscriptions: []
         tags:
@@ -46,7 +46,4 @@ components:
       dependencies:
         components:
           - component: kms/main
-          - component: guardduty/main
-          - component: securityhub/main
-          - component: inspector2/main
           - component: iam/ci

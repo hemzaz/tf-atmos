@@ -49,9 +49,6 @@ import:
   - catalog/acm/services
   - catalog/aws-cloudtrail/defaults
   - catalog/aws-config/main
-  - catalog/guardduty/main-prod
-  - catalog/securityhub/main-prod
-  - catalog/inspector2/main
   - catalog/apigateway-account/main
   - catalog/security-monitoring/main
   - catalog/backup/main-prod
@@ -285,7 +282,7 @@ components:
     # IAM with least privilege, KMS encryption, secrets replicated to the DR
     # region. Every security instance's wiring is catalog/<c>/<i>: the -prod
     # files where a prod primary differs (each shared with fnx-ew1-prod), else
-    # the default one (acm/services, cloudtrail, aws-config, inspector2,
+    # the default one (acm/services, cloudtrail, aws-config,
     # apigateway-account, security-monitoring); this file keeps their
     # per-stack values.
     # ========================================================================

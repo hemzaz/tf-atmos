@@ -289,7 +289,9 @@ class DataResidencyTest(unittest.TestCase):
 
     def test_security_monitoring_alert_enrichment_fails_in_eu_only(self):
         def monitoring(value, **extra):
-            spec = instance(enable_alert_enrichment=value, **extra)
+            # No org-settings in these stacks: the finding routes are off (RouteEnrolmentTest covers them).
+            routes = dict.fromkeys(residency.MONITORING_ROUTES, False)
+            spec = instance(enable_alert_enrichment=value, **routes, **extra)
             spec["metadata"] = {"component": "security-monitoring", "inherits": ["security-monitoring/defaults"]}
             return spec
 
@@ -1392,6 +1394,84 @@ class AccessAnalyzerTest(unittest.TestCase):
         residency.check(stacks, warnings=warnings)
         self.assertIn("fnx-ue1-security: access-analyzer/delegated-administrator depends on access-analyzer/root in "
                       "fnx-ue1-root, which does not exist (expected fnx-ue1-root)", "\n".join(warnings))
+
+
+def monitored_stacks():
+    """org_services_stacks with security-monitoring in the US prod and EU prod-eu workloads, every route on."""
+    stacks = org_services_stacks()
+    for stack_name, account, region in (("fnx-ue1-prod", "prod", "us-east-1"), ("fnx-ew1-prod", "prod-eu", "eu-west-1")):
+        stacks[stack_name]["components"]["terraform"]["security-monitoring/main"] = org_instance(
+            "security-monitoring", account, region, enable_guardduty_route=True, enable_securityhub_route=True,
+            enable_inspector2_route=True)
+    return stacks
+
+
+class RouteEnrolmentTest(unittest.TestCase):
+    """security-monitoring routes only an enrolled member's findings (E5c8, owner OQ-AL)."""
+
+    @staticmethod
+    def terraform(stacks, stack_name):
+        return stacks[stack_name]["components"]["terraform"]
+
+    @staticmethod
+    def routes(stacks):
+        return [e for e in residency.check(stacks) if "security-monitoring/main sets enable_" in e]
+
+    def test_enrolled_members_pass(self):
+        # Inspector's committed-disabled org-settings (owner OQ-IN) still counts: the route waits for it.
+        stacks = monitored_stacks()
+        for code in ORG_REGIONS:
+            self.terraform(stacks, f"fnx-{code}-security")["aws-inspector2/org-settings"]["metadata"]["enabled"] = False
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_member_missing_from_the_map_fails(self):
+        stacks = monitored_stacks()
+        guardduty = self.terraform(stacks, "fnx-ue1-security")["aws-guardduty/org-settings"]["vars"]
+        guardduty["account_map"] = copy.deepcopy(US_MAP)
+        del guardduty["account_map"]["full_account_map"]["fnx-prod"]
+        self.assertEqual(self.routes(stacks), [
+            "fnx-ue1-prod: security-monitoring/main sets enable_guardduty_route but its region's "
+            "aws-guardduty/org-settings does not make fnx-prod a member: the route would watch a detector or hub that "
+            "does not exist; set enable_guardduty_route false (and its require_* flag) or enroll the account"])
+        # Turning the route off is the other way out.
+        self.terraform(stacks, "fnx-ue1-prod")["security-monitoring/main"]["vars"]["enable_guardduty_route"] = False
+        self.assertEqual(self.routes(stacks), [])
+
+    def test_route_in_a_region_without_org_settings_fails(self):
+        # A prod-eu route in a US region: the US admin never enrolls prod-eu (owner OQ-RES), so it must be off.
+        stacks = monitored_stacks()
+        self.terraform(stacks, "fnx-ew1-prod")["security-monitoring/main"]["vars"]["region"] = "us-east-1"
+        self.terraform(stacks, "fnx-ew1-prod")["security-monitoring/main"]["vars"]["tags"]["Compliance"] = US
+        errors = self.routes(stacks)
+        self.assertEqual(len(errors), 3, errors)
+        self.assertTrue(all("does not make fnx-prod-eu a member" in e for e in errors), errors)
+        # No org-settings at all in the region (or one switched off with vars.enabled false).
+        stacks = monitored_stacks()
+        self.terraform(stacks, "fnx-ue1-security")["aws-security-hub/org-settings"]["vars"]["enabled"] = False
+        self.assertEqual(self.routes(stacks), [
+            "fnx-ue1-prod: security-monitoring/main sets enable_securityhub_route but no org-settings in its tenant "
+            "and region: the route would watch a detector or hub that does not exist; set enable_securityhub_route "
+            "false (and its require_* flag) or enroll the account"])
+
+    def test_an_unset_route_flag_is_on(self):
+        # The component defaults every route to true.
+        stacks = monitored_stacks()
+        monitoring = self.terraform(stacks, "fnx-ue1-prod")["security-monitoring/main"]["vars"]
+        del monitoring["enable_inspector2_route"]
+        self.terraform(stacks, "fnx-ue1-security")["aws-inspector2/org-settings"]["vars"][
+            "member_association_excludes"] = [ORG_IDS["prod-eu"], ORG_IDS["prod"]]
+        self.assertTrue(any("sets enable_inspector2_route but its region's aws-inspector2/org-settings does not make "
+                            "fnx-prod a member" in e for e in self.routes(stacks)), self.routes(stacks))
+
+    def test_inspector_exclusion_by_a_shared_id_does_not_count(self):
+        # The placeholder ID every account carries cannot be told apart, so it excludes no one here.
+        stacks = monitored_stacks()
+        for stack_ in stacks.values():
+            for spec in stack_["components"]["terraform"].values():
+                spec["settings"]["environment"]["account_id"] = "123456789012"
+        self.terraform(stacks, "fnx-ue1-security")["aws-inspector2/org-settings"]["vars"][
+            "member_association_excludes"] = ["123456789012"]
+        self.assertEqual(self.routes(stacks), [])
 
 
 if __name__ == "__main__":

@@ -46,15 +46,27 @@ esac
 # Owned by these components. Creating the services with the aws CLI instead
 # would leave Terraform failing with "already exists" on its next apply, so
 # hardening deploys the components and never touches the services directly.
-# aws-config comes before securityhub/main, whose controls are AWS Config
-# rules. aws-config, the vendored Config recorder (catalog/aws-config), is in
-# every stack: its absence fails the run. The others are skipped where the
-# stack genuinely lacks them: cloudtrail, the account's vendored aws-cloudtrail
+# aws-config comes before Security Hub, whose controls are AWS Config rules.
+# aws-config, the vendored Config recorder (catalog/aws-config), is in every
+# stack: its absence fails the run. The others are skipped where the stack
+# genuinely lacks them: cloudtrail, the account's vendored aws-cloudtrail
 # trail (catalog/aws-cloudtrail/defaults), is in the account's home stack only
-# (a DR standby or a nonprod account's second region has none), and a core
-# stack has no guardduty/main or securityhub/main (E5b).
+# (a DR standby or a nonprod account's second region has none). GuardDuty,
+# Security Hub and Inspector are the organization's (E5c, Cloud Posse's
+# delegated administrator): only a security stack (<tenant>-<env>-security)
+# has their instances. Hardening deploys step 1 (delegated-administrator, the
+# security account's own detector and hub; the security layer of
+# deploy-full-stack) and never step 3 (org-settings): its plan reads step 1's
+# detector and needs the region's root step (<svc>/root in <tenant>-<env>-root)
+# applied first, so planning it beside step 1 fails a fresh stack before
+# anything is applied. Step 3 is deploy-security-org's (docs/OPERATIONS.md,
+# Bootstrap order), named below when the stack has it. A member stack
+# (workload, other core) has none of them: the status report below shows its
+# member detector and hub, read through the aws CLI only.
 REQUIRED=(aws-config)
-COMPONENTS=(cloudtrail aws-config guardduty/main securityhub/main)
+COMPONENTS=(cloudtrail aws-config
+  aws-guardduty/delegated-administrator aws-security-hub/delegated-administrator)
+ORG_SETTINGS=(aws-guardduty/org-settings aws-security-hub/org-settings aws-inspector2/org-settings)
 
 echo "Configuration:"
 echo "  Stack: ${STACK}"
@@ -68,14 +80,17 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 0
 fi
 
-# The stack's deployable (non-abstract) instances, listed once: a failed
-# describe or an unknown stack stops the run instead of skipping everything.
+# The stack's deployable instances (not abstract, not metadata.enabled false,
+# e.g. Inspector's committed-disabled org-settings, owner OQ-IN), listed once:
+# a failed describe or an unknown stack stops the run instead of skipping
+# everything.
 if ! STACK_JSON="$(atmos describe stacks -s "$STACK" --process-functions=false --format json)"; then
   log_error "atmos describe stacks -s ${STACK} failed (see the error above); nothing hardened"
   exit 1
 fi
 if ! INSTANCES="$(jq -r --arg s "$STACK" 'if has($s) then .[$s].components.terraform // {}
-    | to_entries[] | select(.value.metadata.type != "abstract") | .key else error("unknown") end' \
+    | to_entries[] | select(.value.metadata.type != "abstract" and .value.metadata.enabled != false) | .key
+    else error("unknown") end' \
     <<<"$STACK_JSON")"; then
   log_error "stack ${STACK} is unknown to atmos (atmos list stacks); nothing hardened"
   exit 1
@@ -84,21 +99,37 @@ has_instance() { grep -Fxq -- "$1" <<<"$INSTANCES"; }
 
 for component in "${REQUIRED[@]}"; do
   if ! has_instance "$component"; then
-    log_error "${STACK} has no ${component} instance (every stack has one; Security Hub's controls need it)"
+    log_error "${STACK} has no enabled ${component} instance (every stack has one, metadata.enabled not false; Security Hub's controls need it)"
     exit 1
   fi
 done
 PRESENT=()
+ABSENT_ORG=()
 for component in "${COMPONENTS[@]}"; do
   if has_instance "$component"; then
     PRESENT+=("$component")
+  elif [[ "$component" == */delegated-administrator ]]; then
+    ABSENT_ORG+=("$component")
   else
-    log_skip "${component}: ${STACK} has no such instance (only an account's home stack has the trail, a core stack no guardduty/securityhub)"
+    log_skip "${component}: ${STACK} has no enabled instance (only an account's home stack has the trail)"
   fi
 done
+# One line, not one per service: every member stack lacks both.
+if ((${#ABSENT_ORG[@]})); then
+  log_skip "${ABSENT_ORG[*]}: ${STACK} has no enabled instance (only a security stack has the organization's GuardDuty and Security Hub; a member's are reported below)"
+fi
+ORG_PRESENT=()
+for component in "${ORG_SETTINGS[@]}"; do
+  if has_instance "$component"; then
+    ORG_PRESENT+=("$component")
+  fi
+done
+if ((${#ORG_PRESENT[@]})); then
+  log_skip "${ORG_PRESENT[*]}: step 3, not hardening's: after the region's root step, run atmos workflow deploy-security-org -f deploy-full-stack -s ${STACK}"
+fi
 
 # =================================================================
-# CloudTrail, AWS Config, GuardDuty and Security Hub
+# CloudTrail, AWS Config, GuardDuty, Security Hub and Inspector
 # =================================================================
 # Plan first and print the plan (atmos saves the planfile), so what is
 # confirmed is what is applied: the apply step uses --from-plan, and Terraform
@@ -125,12 +156,24 @@ for component in ${PRESENT[@]+"${PRESENT[@]}"}; do
   fi
 done
 
-# Report (read-only): what is actually enabled in the account/region now.
+# Report (read-only): what is actually enabled in the account/region now. In
+# a member account the detector and hub are the delegated administrator's
+# (no instance in its stack), so the report also names the administrator.
+# get-administrator-account prints None (text output of a missing field) in
+# the delegated administrator itself and in an account no administrator manages.
+admin_label() {
+  case "$1" in
+    "" | None) echo "none (this account is the delegated administrator, or not a member)" ;;
+    *) echo "$1" ;;
+  esac
+}
 log_info "GuardDuty / Security Hub status in ${REGION}:"
 GD_DETECTOR=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text 2>/dev/null || echo "None")
 if [[ -n "$GD_DETECTOR" ]] && [[ "$GD_DETECTOR" != "None" ]]; then
   GD_STATUS=$(aws guardduty get-detector --region "$REGION" --detector-id "$GD_DETECTOR" --query 'Status' --output text 2>/dev/null || echo "unknown")
-  echo "  GuardDuty:    detector ${GD_DETECTOR} (${GD_STATUS})"
+  GD_ADMIN=$(admin_label "$(aws guardduty get-administrator-account --region "$REGION" --detector-id "$GD_DETECTOR" \
+    --query 'Administrator.AccountId' --output text 2>/dev/null || true)")
+  echo "  GuardDuty:    detector ${GD_DETECTOR} (${GD_STATUS}, administrator: ${GD_ADMIN})"
 else
   echo "  GuardDuty:    no detector"
 fi
@@ -139,7 +182,9 @@ if [[ -n "$SH_HUB" ]] && [[ "$SH_HUB" != "None" ]]; then
   SH_STANDARDS_RAW=$(aws securityhub get-enabled-standards --region "$REGION" \
     --query 'StandardsSubscriptions[].StandardsArn' --output text 2>/dev/null || echo "unknown")
   SH_STANDARDS=$(tr '\t' '\n' <<<"$SH_STANDARDS_RAW" | sed 's|.*:standards/||; s|.*:ruleset/||' | paste -sd, -)
-  echo "  Security Hub: ${SH_HUB} (standards: ${SH_STANDARDS:-none})"
+  SH_ADMIN=$(admin_label "$(aws securityhub get-administrator-account --region "$REGION" \
+    --query 'Administrator.AccountId' --output text 2>/dev/null || true)")
+  echo "  Security Hub: ${SH_HUB} (standards: ${SH_STANDARDS:-none}, administrator: ${SH_ADMIN})"
 else
   echo "  Security Hub: not enabled"
 fi

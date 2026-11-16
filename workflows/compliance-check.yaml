@@ -1,15 +1,17 @@
 # Compliance posture from AWS Security Hub standards, mapped to Atmos
 # components by `atmos aws compliance report`. Security Hub must be enabled:
-# the securityhub/main component owns it in every stack
-# (`atmos terraform deploy securityhub/main -s <stack>`, or
-# `atmos workflow harden -f security-hardening`, which deploys it).
+# the organization's (Cloud Posse aws-security-hub): the region's security
+# stack's delegated administrator enables a member hub in every account
+# (`atmos workflow deploy-security-org -f deploy-full-stack -s
+# <tenant>-<env>-security`, after the security stack's own hub and the root
+# stack's delegation; docs/OPERATIONS.md, Bootstrap order).
 #
 # Usage:
 #   atmos workflow check -f compliance-check -s <stack>
 #   atmos workflow report -f compliance-check -s <stack>
 workflows:
   check:
-    description: Run compliance checks (CIS, FSBP, PCI DSS, ...) for one stack
+    description: Run compliance checks (CIS, FSBP, ...) for one stack
     steps:
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos

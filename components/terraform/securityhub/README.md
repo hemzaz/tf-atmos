@@ -5,12 +5,11 @@ the standards in `standards`, given as short `<name>/v/<version>` paths.
 
 ## Wiring
 
-- Instance: `securityhub/main` in the three AWS stacks, `fnx-ue2-prod`, `fnx-ew1-prod` and
-  `fnx-ec1-prod`; prod
-  adds `pci-dss/v/3.2.1` (`securityhub/prod`, `stacks/catalog/securityhub/prod.yaml`).
+- Instance: none (E5c8): the organization's vendored `aws-security-hub` (delegated administrator in
+  each `<tenant>-<env>-security` stack) replaced it; this component is deleted in E5c9.
 - No finding aggregator: each region's findings stay in that region (the EU stacks' in the EU).
 - Depends on `aws-config` (ordering only): most controls evaluate AWS Config recordings.
-- Used by: `security-monitoring` (`.account_arn`). `harden.sh` deploys this component.
+- Used by: nothing (security-monitoring routes the member hub's findings by a flag).
 
 ## Notes
 

@@ -46,7 +46,7 @@
 # grouped by domain (globals, networking, security, compute, services).
 # Every instance's wiring is the catalog's -standby files, shared with
 # fnx-ue2-prod (settings.dr.standby_of names fnx-ew1-prod), plus the plain
-# inspector2/main and apigateway-account/main files every dev, staging and
+# apigateway-account/main file every dev, staging and
 # prod stack imports; each domain section below says what this file keeps.
 # =============================================================================
 
@@ -69,11 +69,8 @@ import:
   - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
   - catalog/aws-config/main-region
-  - catalog/guardduty/main-standby
-  - catalog/securityhub/main-standby
   - catalog/security-monitoring/main-standby
   - catalog/backup/main-standby
-  - catalog/inspector2/main
   - catalog/apigateway-account/main
 
   # --- compute
@@ -212,8 +209,9 @@ components:
     #
     # As fnx-ue2-prod is to fnx-ue1-prod (orgs/fnx/prod/us-east-2.yaml, whose
     # security section this mirrors): regional services run here as in
-    # fnx-ew1-prod (GuardDuty, Security Hub, AWS Config, Inspector, finding
-    # routing, backups); account-wide ones do not:
+    # fnx-ew1-prod (AWS Config, finding routing, backups; GuardDuty, Security
+    # Hub and Inspector are the organization's, fnx-ec1-security enrolls this
+    # account); account-wide ones do not:
     #   - KMS: no kms/main here. This region's key is fnx-ew1-prod kms/main's
     #     multi-region replica (replica_keys["eu-central-1"], alias ec1-main),
     #     read cross-stack wherever fnx-ew1-prod reads kms/main.

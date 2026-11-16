@@ -18,8 +18,9 @@
 # the account budget (cost-optimization/main).
 # Today the account and identity layer (iam/main, iam/ci), kms/main
 # (replicated to eu-central-1), those singletons, networking (vpc/main, the
-# EU apex zone network/main) and the regional security services (GuardDuty,
-# Security Hub, Inspector, finding routing, API Gateway account settings,
+# EU apex zone network/main) and the regional security services (finding
+# routing; fnx-ew1-security's GuardDuty, Security Hub and Inspector enroll
+# the account; API Gateway account settings,
 # backups copied to eu-central-1, the apex certificate, secrets), compute
 # (eks/main ew1-main, the bastion, the in-VPC runner pool, external-secrets,
 # eks-addons, eks-backend-services) and services (rds/main,
@@ -58,9 +59,6 @@ import:
   - catalog/kms/main-prod
   - catalog/aws-cloudtrail/defaults
   - catalog/aws-config/main
-  - catalog/guardduty/main-prod
-  - catalog/securityhub/main-prod
-  - catalog/inspector2/main
   - catalog/security-monitoring/main
   - catalog/apigateway-account/main
   - catalog/backup/main-prod
@@ -248,9 +246,10 @@ components:
     # (kms/main) and the prod-eu account's singletons: the multi-region
     # CloudTrail trail (cloudtrail) and AWS Config's global-resource
     # recording (aws-config); the account budget is cost-optimization/main
-    # (services section). Then the regional security services: GuardDuty,
-    # Security Hub, Inspector and finding routing with the CIS metric filters
-    # on this stack's trail (security-monitoring/main); the API Gateway
+    # (services section). Then the regional security services: finding
+    # routing for the GuardDuty, Security Hub and Inspector members
+    # fnx-ew1-security enrolls, with the CIS metric filters on this stack's
+    # trail (security-monitoring/main); the API Gateway
     # account settings, backups, the EU apex's certificate and the prod secret
     # sets. As in fnx-ue1-prod (orgs/fnx/prod/us-east-1.yaml's security; every
     # instance's wiring is the same catalog/<c>/<i> file, -prod where a prod

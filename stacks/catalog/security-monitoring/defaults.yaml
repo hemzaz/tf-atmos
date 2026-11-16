@@ -2,21 +2,26 @@
 ##################################################
 # Catalog Configuration for security-monitoring
 ##################################################
-# Routes security findings to an SNS topic. It does NOT own the GuardDuty
-# detector, the Security Hub hub or the Inspector enabler: the guardduty,
-# securityhub and inspector2 components do, and this component consumes their
-# outputs. They, kms/main (the topic's key), cloudtrail (the account's
-# vendored aws-cloudtrail trail, catalog/aws-cloudtrail/defaults: the CIS
-# filters' log group) and iam/ci (the CI apply role excluded from security
-# group change alerts) are declared in dependencies.components so they deploy
-# first; workflows/scripts/common/check-dependencies.py enforces that.
+# Routes security findings to an SNS topic. GuardDuty, Security Hub and
+# Inspector are organization services (E5c, Cloud Posse's delegated
+# administrator): the region's security stack (<tenant>-<env>-security,
+# aws-guardduty, aws-security-hub and aws-inspector2 org-settings) enrolls
+# this account, and the member's detector and hub publish its own findings to
+# its own EventBridge. So this component reads no service state: one route
+# flag each (owner OQ-AL), on by default; check-data-residency.py fails a
+# route left on in an account the region's org-settings does not enroll.
+# kms/main (the topic's key), cloudtrail (the account's vendored
+# aws-cloudtrail trail, catalog/aws-cloudtrail/defaults: the CIS filters' log
+# group) and iam/ci (the CI apply role excluded from security group change
+# alerts) are declared in dependencies.components so they deploy first;
+# workflows/scripts/common/check-dependencies.py enforces that.
 #
 # Only main.yaml imports this file, and every stack that imports main.yaml
-# (the 4 workload primaries) runs kms/main, cloudtrail, guardduty/main,
-# securityhub/main, inspector2/main and iam/ci, so the references resolve in
-# all of them. The DR standbys (main-standby.yaml) have no kms/main or
-# cloudtrail and neither import nor inherit it; nor does main-region.yaml (a
-# nonprod account's second region). Keep both in sync with this file.
+# (the 4 workload primaries) runs kms/main, cloudtrail and iam/ci, so the
+# references resolve in all of them. The DR standbys (main-standby.yaml) have
+# no kms/main or cloudtrail and neither import nor inherit it; nor does
+# main-region.yaml (a nonprod account's second region). Keep both in sync
+# with this file.
 
 components:
   terraform:
@@ -28,15 +33,12 @@ components:
         components:
           - component: kms/main
           - component: cloudtrail
-          - component: guardduty/main
-          - component: securityhub/main
-          - component: inspector2/main
           - component: iam/ci
       vars:
-        guardduty_detector_id: !terraform.state guardduty/main .detector_id
-        securityhub_account_arn: !terraform.state securityhub/main .account_arn
-        # Fail the plan when either ID resolves to null (the owning component
-        # has no state yet) instead of silently planning with alerting off.
+        enable_guardduty_route: true
+        enable_securityhub_route: true
+        # Fail the plan when a stack turns either route off without also
+        # clearing its require_* flag: alerting is never off by one override.
         require_guardduty_route: true
         require_securityhub_route: true
         # The CIS metric filters (root usage, unauthorized API calls, IAM
@@ -81,10 +83,10 @@ components:
         # allow_eventbridge and allow_cloudwatch_alarms so EventBridge and CloudWatch
         # can publish to it.
         kms_key_id: !terraform.state kms/main .key_arn
-        # Inspector findings are routed while inspector2/main is enabled: its
-        # account_id is null while it is off (the catalog default, Inspector
-        # bills per resource scanned), which turns the route off.
-        inspector2_account_id: !terraform.state inspector2/main .account_id
+        # Inspector findings: the route is on, and matches nothing until the
+        # region's aws-inspector2 org-settings is deployed (committed disabled,
+        # owner OQ-IN: Inspector bills per resource scanned).
+        enable_inspector2_route: true
         enable_alert_enrichment: false
         security_email_subscriptions: []
         tags:
