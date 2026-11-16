@@ -400,7 +400,7 @@ class CoreAccountTest(unittest.TestCase):
         self.assertEqual(self.core_errors(), [])
 
     def test_placeholder_core_accounts_fail_for_a_map_consumer(self):
-        found = errors(self.with_map("guardduty", audit="123456789012", identity="000000000000"), ["fnx-ue1-dev"])
+        found = errors(self.with_map("aws-guardduty", audit="123456789012", identity="000000000000"), ["fnx-ue1-dev"])
         self.assertEqual(sorted(f.key.rsplit(".", 1)[-1] for f in found), ["audit", "identity"])
         self.assertTrue(all(f.stack == "repository" and f.row == "Account IDs" for f in found))
 
@@ -460,7 +460,7 @@ class CoreAccountTest(unittest.TestCase):
         self.assertEqual([f.detail for f in errors(stacks)], ["no account map in any deployable stack"])
 
     def test_an_empty_map_fails(self):
-        stacks = {"fnx-ue1-dev": stack("dev", "222222222222", main={"component": "guardduty", "accounts": {}})}
+        stacks = {"fnx-ue1-dev": stack("dev", "222222222222", main={"component": "aws-guardduty", "accounts": {}})}
         self.assertEqual({f.detail for f in errors(stacks)}, {"core account missing"})
 
     def test_bad_core_account_fails_main_and_leads_warn(self):

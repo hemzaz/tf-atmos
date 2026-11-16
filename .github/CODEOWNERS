@@ -24,9 +24,9 @@
 /stacks/catalog/secretsmanager/   @hemzaz
 /stacks/catalog/aws-cloudtrail/   @hemzaz
 /stacks/catalog/aws-config/       @hemzaz
-/stacks/catalog/guardduty/        @hemzaz
-/stacks/catalog/securityhub/      @hemzaz
-/stacks/catalog/inspector2/       @hemzaz
+/stacks/catalog/aws-guardduty/    @hemzaz
+/stacks/catalog/aws-security-hub/ @hemzaz
+/stacks/catalog/aws-inspector2/   @hemzaz
 /stacks/catalog/security-monitoring/ @hemzaz
 /stacks/catalog/apigateway-account/ @hemzaz
 /stacks/catalog/backup/           @hemzaz

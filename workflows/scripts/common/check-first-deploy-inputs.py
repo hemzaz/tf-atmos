@@ -111,13 +111,11 @@ PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
 # workload account (a stage's, or prod-eu).
 CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts")
 # Components (metadata.component) that read the core accounts: the Cloud Posse identity and security
-# components Wave E brings in (E4, E5), and today's account-level security components that E5 turns
-# org-wide. Deploying one needs real core account IDs. Not the accounts layer (aws-organization,
+# components Wave E brings in (E4, E5). Deploying one needs real core account IDs. Not the accounts layer (aws-organization,
 # aws-organizational-unit, aws-scp, aws-account: deploy-accounts.yaml), which creates the core accounts
 # and reads none of their IDs, nor aws-account-settings, which configures only its own account.
 MAP_CONSUMERS = frozenset({
     "aws-identity-center", "aws-teams", "aws-team-roles", "access-analyzer",
-    "guardduty", "securityhub", "inspector2",
     # The audit buckets' delivery policies and the Config bucket key's policy
     # list every account of their residency (E5a4).
     "aws-cloudtrail-bucket", "aws-config-bucket",

@@ -45,7 +45,7 @@
 #
 # Owner decision OQ-SH (2026-11-10): Cloud Posse's default standards (AWS
 # Foundational Security Best Practices v1.0.0 and CIS AWS Foundations 1.2.0)
-# org-wide, LOCAL; prod's PCI DSS standard (hand-written securityhub/prod) is
+# org-wide, LOCAL; prod's PCI DSS standard (the hand-written securityhub, deleted in E5c9) is
 # dropped. Dependencies within one residency: root after step 1, org-settings
 # after root. Controls are AWS Config rules: each member region needs its
 # aws-config recorder (E5b).
@@ -156,7 +156,7 @@ components:
           - component: aws-security-hub/root
             stack: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-root'
 
-    # The hand-written securityhub/main-standby's disabled controls (AWS
+    # The deleted hand-written securityhub standby's disabled controls (AWS
     # Security Hub User Guide, "Controls that you might want to disable",
     # controls-to-disable.html), by consolidated control ID, PCI-only IDs out:
     # AWS Config records IAM in each account's home region only, so the IAM
