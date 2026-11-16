@@ -20,13 +20,13 @@ components:
       metadata:
         component: security-monitoring
       vars:
-        guardduty_detector_id: !terraform.state guardduty/main .detector_id
-        securityhub_account_arn: !terraform.state securityhub/main .account_arn
+        enable_guardduty_route: true
+        enable_securityhub_route: true
         require_guardduty_route: true
         require_securityhub_route: true
         require_cloudtrail_route: false
         enable_security_group_change_events: true
-        inspector2_account_id: !terraform.state inspector2/main .account_id
+        enable_inspector2_route: true
         tags:
           Component: "SecurityMonitoring"
         security_group_change_excluded_role_arns:
@@ -40,7 +40,4 @@ components:
         components:
           - component: kms/main
             stack: "{{ .settings.dr.standby_of }}"
-          - component: guardduty/main
-          - component: securityhub/main
-          - component: inspector2/main
           - component: iam/ci

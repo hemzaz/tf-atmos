@@ -135,10 +135,7 @@ SYNTH = [
     # dns zone_name_servers.<key>: a delegation NS record's records (B3).
     (r'name_servers$',                ['ns-0001.awsdns-01.org', 'ns-0002.awsdns-02.co.uk',
                                        'ns-0003.awsdns-03.com', 'ns-0004.awsdns-04.net']),
-    # security-monitoring consumes guardduty's detector, securityhub's hub and
-    # inspector2's account.
-    (r'^detector_id$',                '12abc34d567e8fa901bc2d34e56789f0'),
-    (r'^account_arn$',                'arn:aws:securityhub:us-east-1:123456789012:hub/default'),
+    # An account ID (aws-account's account_id).
     (r'^account_id$',                 '123456789012'),
     # Output names read by stacks/catalog/templates/microservices-platform.yaml,
     # each shaped like the value the component really returns.
@@ -1197,9 +1194,9 @@ def self_test(components_dir, tmp):
         'rds/main': {'component': 'rds', 'vars': {}},
         'elasticache/main': {'component': 'elasticache', 'vars': {}},
         'external-secrets/main': {'component': 'external-secrets', 'vars': {}},
-        # The reader that makes `redis` a key of the synthetic secret_arns map.
-        'inspector2/main': {'component': 'inspector2', 'vars': {}},
+        'aws-account/main': {'component': 'aws-account', 'vars': {}},
         'apigateway/main': {'component': 'apigateway', 'vars': {}},
+        # The reader that makes `redis` a key of the synthetic secret_arns map.
         'secretsmanager/main': {'component': 'secretsmanager', 'vars': {
             'x': '!terraform.state secretsmanager/main .secret_arns.redis'}},
         # E6b: the vendored dns components (OUTPUT_SHAPES), and a reader of
@@ -1587,10 +1584,10 @@ def self_test(components_dir, tmp):
          lambda v: isinstance(v, list) and len(v) > 0),
         ("elasticache/main '.client_security_group_id | [.]'", 'additional_security_group_ids',
          lambda v: isinstance(v, list) and all(re.match(r'^sg-[a-f0-9]+$', x) for x in v)),
-        # security-monitoring's ^[0-9]{12}$ and monitoring's list(string).
+        # An account ID's ^[0-9]{12}$ and monitoring's list(string).
         # Atmos re-reads yq's output as YAML, so the ID arrives as a number;
         # Terraform converts it back to the string the regex sees.
-        ('inspector2/main .account_id', 'inspector2_account_id',
+        ('aws-account/main .account_id', 'account_id',
          lambda v: re.match(r'^[0-9]{12}$', str(v))),
         ("apigateway/main '.rest_api_stage_name | [.]'", 'api_gateway_stages',
          lambda v: isinstance(v, list) and len(v) == 1 and isinstance(v[0], str) and v[0] != ''),

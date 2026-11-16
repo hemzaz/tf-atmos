@@ -105,7 +105,10 @@ expected stack, never a failure: onboarding a new region needs its hand-written 
 IAM role is reported in every region, and the analyzer cannot exclude an account); an unused-access
 analyzer's unused_access_exclusion_account_names (house unused-access-exclusions_house.tf) is exactly
 the all-GDPR accounts outside it and exactly the shared accounts but the analyzer's own inside it
-(access_analyzer_errors). A
+(access_analyzer_errors). A security-monitoring
+route (enable_guardduty_route, enable_securityhub_route, enable_inspector2_route; E5c8, owner OQ-AL) on in an
+account no org-settings of its tenant and region enrolls (account_map key, Inspector less its excluded IDs)
+fails: it would watch a member detector or hub that does not exist (route_enrolment_errors). A
 non-abstract instance with metadata.enabled false is checked too (Inspector's committed-disabled
 org-settings, owner OQ-IN: one flag from deploying).
 Fixture stacks are checked too (KNOWN_BROKEN_FIXTURES relaxes one). Exits 1 on any
@@ -396,6 +399,7 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS, warnings: Optional[list]
     errors += log_archive_errors(stacks, scoped)
     errors += org_service_errors(stacks, scoped)
     errors += access_analyzer_errors(stacks, scoped)
+    errors += route_enrolment_errors(stacks)
     dependency_errors, dependency_warnings = org_dependency_findings(stacks)
     errors += dependency_errors
     if warnings is not None:
@@ -936,6 +940,66 @@ def org_service_errors(stacks: dict, scoped: set) -> list[str]:
     if seen and eu and set(eu) != set(GDPR_ONLY_ACCOUNTS):
         errors.append(f"the accounts whose stacks are all GDPR-scoped are {eu}, not GDPR_ONLY_ACCOUNTS "
                       f"{list(GDPR_ONLY_ACCOUNTS)}: update the declaration (check-data-residency.py)")
+    return errors
+
+
+# security-monitoring's finding routes (E5c8, owner OQ-AL): each flag routes the findings of one org service's
+# member detector/hub, which exists only while the region's delegated administrator enrolls the account.
+MONITORING_ROUTES = {
+    "enable_guardduty_route": "aws-guardduty",
+    "enable_securityhub_route": "aws-security-hub",
+    "enable_inspector2_route": "aws-inspector2",
+}
+
+
+def enrolls(org: dict, member: str, member_id: str, ids: dict) -> bool:
+    """Whether an org-settings instance makes the <tenant>-<account> member one of its members (CP main.tf: its
+    account_map's full_account_map; Inspector less member_association_excludes, compared by ID, so an ID that
+    other accounts also carry, like the placeholder, cannot be told apart and does not exclude)."""
+    variables = org.get("vars") or {}
+    if member not in ((variables.get("account_map") or {}).get("full_account_map") or {}):
+        return False
+    excludes = {str(i) for i in variables.get("member_association_excludes") or []}
+    return component_of("", org) != "aws-inspector2" or member_id not in excludes or len(ids.get(member_id, ())) > 1
+
+
+def route_enrolment_errors(stacks: dict) -> list[str]:
+    """A security-monitoring route on in an account the region's org-settings does not enroll (E5c8).
+
+    Its findings come from the member detector/hub the region's delegated administrator creates, so with no
+    enrolling org-settings (same tenant and region, admin_delegated on, metadata.enabled false included:
+    Inspector's committed-disabled one, owner OQ-IN) the route watches nothing: it fails, never silently
+    alerts on nothing. An all-GDPR account in a US region is the expected case (owner OQ-RES): its route is
+    on only in its EU stacks."""
+    ids: dict = {}  # account_id -> {<tenant>-<account>}
+    orgs: dict = {}  # (tenant, region, component) -> [org-settings instance]
+    for stack in stacks.values():
+        for name, instance in org_service_instances(stack).items():
+            if own_account(instance):
+                env = (instance.get("settings") or {}).get("environment") or {}
+                ids.setdefault(str(env.get("account_id")), set()).add(own_account(instance))
+            variables = instance.get("vars") or {}
+            component = component_of(name, instance)
+            if component in ORG_SERVICES and flag_on(variables.get("enabled", True)) \
+                    and flag_on(variables.get("admin_delegated")) and not is_management(instance):
+                orgs.setdefault((tenant_of(instance), variables.get("region"), component), []).append(instance)
+    errors = []
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            if component_of(name, instance) != "security-monitoring":
+                continue
+            variables, member = instance.get("vars") or {}, own_account(instance)
+            member_id = str(((instance.get("settings") or {}).get("environment") or {}).get("account_id"))
+            for flag, component in MONITORING_ROUTES.items():
+                if not flag_on(variables.get(flag, True)):
+                    continue
+                candidates = orgs.get((tenant_of(instance), variables.get("region"), component), [])
+                if member and any(enrolls(org, member, member_id, ids) for org in candidates):
+                    continue
+                why = "no org-settings in its tenant and region" if not candidates else \
+                    f"its region's {component}/org-settings does not make {member} a member"
+                errors.append(f"{stack_name}: {name} sets {flag} but {why}: the route would watch a detector or hub "
+                              f"that does not exist; set {flag} false (and its require_* flag) or enroll the account")
     return errors
 
 

@@ -32,9 +32,14 @@ CONTEXT = {"settings": {"context": {"tenant": "fnx", "stage": "prod"}, "environm
            "backend": {"bucket": "fnx-terraform-state"}}
 
 
-def stacks(stack, *instances, abstract=()):
+STEP1 = ["aws-guardduty/delegated-administrator", "aws-security-hub/delegated-administrator"]
+STEP3 = ["aws-guardduty/org-settings", "aws-security-hub/org-settings"]
+
+
+def stacks(stack, *instances, abstract=(), disabled=()):
     terraform = {name: {"metadata": {"component": name}} for name in instances}
     terraform.update({name: {"metadata": {"type": "abstract"}} for name in abstract})
+    terraform.update({name: {"metadata": {"component": name, "enabled": False}} for name in disabled})
     return {stack: {"components": {"terraform": terraform}}}
 
 
@@ -62,22 +67,56 @@ class HardenSelectionTest(unittest.TestCase):
         plans = [line.split()[3] for line in log.read_text().splitlines() if line.startswith("atmos terraform plan")]
         return result.returncode, plans, result.stdout + result.stderr
 
-    def test_standby_without_trail_skips_it_and_plans_the_rest(self):
-        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "aws-config", "guardduty/main", "securityhub/main",
+    def test_member_standby_plans_only_its_recorder(self):
+        # A member stack has no GuardDuty/Security Hub instance (E5c8): the delegated administrator's
+        # member detector and hub are only reported, through the aws CLI.
+        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "aws-config", "security-monitoring/main",
                                                 "vpc/main", abstract=("aws-config/main-region",)))
         self.assertEqual(rc, 0, out)
-        self.assertEqual(plans, ["aws-config", "guardduty/main", "securityhub/main"])
-        self.assertIn("[SKIP]", out)
+        self.assertEqual(plans, ["aws-config"])
         self.assertIn("cloudtrail: fnx-ue2-prod has no such instance", out)
+        self.assertIn("aws-guardduty/delegated-administrator: fnx-ue2-prod has no such instance", out)
 
-    def test_home_stack_plans_all_four_in_order(self):
-        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "securityhub/main", "guardduty/main", "aws-config",
-                                                "cloudtrail"))
+    def test_member_home_stack_plans_trail_and_recorder(self):
+        rc, plans, out = self.run_harden(stacks("fnx-ue1-prod", "security-monitoring/main", "aws-config",
+                                                "cloudtrail"), stack="fnx-ue1-prod")
         self.assertEqual(rc, 0, out)
-        self.assertEqual(plans, ["cloudtrail", "aws-config", "guardduty/main", "securityhub/main"])
+        self.assertEqual(plans, ["cloudtrail", "aws-config"])
+
+    def test_security_stack_plans_step1_never_step3(self):
+        # Step 3's plan reads step 1's detector and needs the root step, so planning it beside step 1
+        # fails a fresh security stack before anything is applied: it is deploy-security-org's, named.
+        # Inspector's committed-disabled org-settings (owner OQ-IN) is neither planned nor named.
+        rc, plans, out = self.run_harden(stacks(
+            "fnx-ue1-security", *reversed(STEP3 + STEP1), "aws-config", "cloudtrail",
+            "access-analyzer/delegated-administrator", abstract=("aws-guardduty/org-settings-us",),
+            disabled=("aws-inspector2/org-settings",)), stack="fnx-ue1-security")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(plans, ["cloudtrail", "aws-config"] + STEP1)
+        self.assertIn("aws-guardduty/org-settings aws-security-hub/org-settings: step 3, not hardening's", out)
+        self.assertIn("deploy-security-org -f deploy-full-stack -s fnx-ue1-security", out)
+        self.assertNotIn("aws-inspector2/org-settings", out)
+
+    def test_enabled_inspector_org_settings_is_never_planned(self):
+        rc, plans, out = self.run_harden(stacks("fnx-ue1-security", "aws-config", "aws-inspector2/org-settings",
+                                                *STEP1, *STEP3), stack="fnx-ue1-security")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(plans, ["aws-config"] + STEP1)
+        self.assertIn("aws-inspector2/org-settings: step 3, not hardening's", out)
+
+    def test_member_stack_names_no_step3(self):
+        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "aws-config"))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("deploy-security-org", out)
 
     def test_core_stack_plans_only_its_recorder(self):
         rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "aws-config", "aws-account-settings"))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(plans, ["aws-config"])
+
+    def test_retired_member_instances_are_never_planned(self):
+        # The hand-written guardduty/main and securityhub/main (deleted in E5c9) are not hardening targets.
+        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "aws-config", "guardduty/main", "securityhub/main"))
         self.assertEqual(rc, 0, out)
         self.assertEqual(plans, ["aws-config"])
 
@@ -95,7 +134,7 @@ class HardenSelectionTest(unittest.TestCase):
 
     def test_stack_without_aws_config_fails(self):
         # An abstract aws-config variant is not an instance.
-        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "cloudtrail", "guardduty/main", "securityhub/main",
+        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "cloudtrail", "security-monitoring/main",
                                                 abstract=("aws-config", "aws-config/main")))
         self.assertEqual(rc, 1, out)
         self.assertEqual(plans, [])

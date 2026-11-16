@@ -1,18 +1,20 @@
 locals {
   name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "security")}"
 
-  # The detector, the hub and the Inspector enabler are owned by the
-  # guardduty, securityhub and inspector2 components (one component per
-  # service, the Cloud Posse model). This component only routes their
-  # findings, so a null ID turns the matching EventBridge rule off -- unless
-  # require_*_route is set, in which case the topic's precondition fails the
-  # plan instead. Inspector is opt-in (inspector2 enabled defaults to false and
-  # returns a null account_id), so its route has no require_* switch. The CloudTrail log group
-  # works the same way for the CIS metric filters and alarms. All are plain
-  # variables, so the counts below are known at plan time.
-  guardduty_enabled    = var.guardduty_detector_id != null
-  security_hub_enabled = var.securityhub_account_arn != null
-  inspector_enabled    = var.inspector2_account_id != null
+  # The member detector and hub (and Inspector's scans) belong to the
+  # organization: the region's delegated administrator in the security
+  # account enrolls this account (Cloud Posse's aws-guardduty,
+  # aws-security-hub, aws-inspector2 org-settings), and each member still
+  # publishes its own findings to its own EventBridge. This component only
+  # routes them, one flag per route; turning GuardDuty or Security Hub off
+  # also takes require_*_route = false, or the topic's precondition fails the
+  # plan. Inspector scans nothing until its org-settings is deployed (owner
+  # OQ-IN), so its route is on but has no require_* switch. A null CloudTrail
+  # log group turns the CIS metric filters and alarms off the same way. All
+  # are plain variables, so the counts below are known at plan time.
+  guardduty_enabled    = var.enable_guardduty_route
+  security_hub_enabled = var.enable_securityhub_route
+  inspector_enabled    = var.enable_inspector2_route
   cloudtrail_enabled   = var.cloudtrail_log_group_name != null
 
   # CIS AWS Foundations Benchmark v1.2.0 metric filters (the version Security
@@ -87,17 +89,21 @@ resource "aws_sns_topic" "security_alerts" {
 
   tags = { Name = "${local.name_prefix}-alerts" }
 
-  # A null ID silently turns a finding route off. On a first deploy that means
-  # guardduty/securityhub had no state yet; failing here makes that loud.
+  # A finding route is off only on purpose: one override of enable_*_route
+  # fails here unless require_*_route is cleared too. Whether the region's
+  # delegated administrator enrolls this account is stack config, not
+  # anything this plan can see without the security account's state (owner
+  # OQ-E: no live remote state), so check-data-residency.py fails a route that
+  # is on in an account the region's org-settings does not make a member.
   lifecycle {
     precondition {
       condition     = !var.require_guardduty_route || local.guardduty_enabled
-      error_message = "require_guardduty_route is set but guardduty_detector_id is null. Apply guardduty/main first (its detector_id output), or set require_guardduty_route = false to run without GuardDuty alerting."
+      error_message = "require_guardduty_route is set but enable_guardduty_route is false. Keep the GuardDuty route on (the region's aws-guardduty org-settings enrolls this account), or set require_guardduty_route = false too to run without GuardDuty alerting."
     }
 
     precondition {
       condition     = !var.require_securityhub_route || local.security_hub_enabled
-      error_message = "require_securityhub_route is set but securityhub_account_arn is null. Apply securityhub/main first (its account_arn output), or set require_securityhub_route = false to run without Security Hub alerting."
+      error_message = "require_securityhub_route is set but enable_securityhub_route is false. Keep the Security Hub route on (the region's aws-security-hub org-settings enrolls this account), or set require_securityhub_route = false too to run without Security Hub alerting."
     }
 
     precondition {
@@ -221,7 +227,7 @@ resource "aws_cloudwatch_event_target" "securityhub_sns" {
   arn       = aws_sns_topic.security_alerts.arn
 }
 
-# EventBridge rule for Inspector findings (inspector2 component)
+# EventBridge rule for Inspector findings (the region's aws-inspector2 org-settings)
 resource "aws_cloudwatch_event_rule" "inspector_findings" {
   count = local.inspector_enabled ? 1 : 0
 

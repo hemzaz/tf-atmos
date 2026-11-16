@@ -1,13 +1,3 @@
-output "guardduty_detector_id" {
-  description = "GuardDuty detector ID this component routes findings for (owned by the guardduty component)"
-  value       = var.guardduty_detector_id
-}
-
-output "security_hub_account_arn" {
-  description = "Security Hub hub ARN this component routes findings for (owned by the securityhub component)"
-  value       = var.securityhub_account_arn
-}
-
 output "security_alerts_topic_arn" {
   description = "SNS topic ARN for security alerts"
   value       = aws_sns_topic.security_alerts.arn
@@ -19,17 +9,17 @@ output "alert_enrichment_function_arn" {
 }
 
 output "guardduty_event_rule_arn" {
-  description = "EventBridge rule ARN for GuardDuty findings"
+  description = "EventBridge rule ARN for GuardDuty findings (null while enable_guardduty_route is false)"
   value       = local.guardduty_enabled ? aws_cloudwatch_event_rule.guardduty_findings[0].arn : null
 }
 
 output "securityhub_event_rule_arn" {
-  description = "EventBridge rule ARN for Security Hub findings"
+  description = "EventBridge rule ARN for Security Hub findings (null while enable_securityhub_route is false)"
   value       = local.security_hub_enabled ? aws_cloudwatch_event_rule.securityhub_findings[0].arn : null
 }
 
 output "inspector_event_rule_arn" {
-  description = "EventBridge rule ARN for Inspector findings (null while inspector2_account_id is null)"
+  description = "EventBridge rule ARN for Inspector findings (null while enable_inspector2_route is false)"
   value       = local.inspector_enabled ? aws_cloudwatch_event_rule.inspector_findings[0].arn : null
 }
 

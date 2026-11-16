@@ -7,14 +7,10 @@ resource scanned.
 
 ## Wiring
 
-- Instance: `inspector2/main` in the three AWS stacks, `fnx-ue2-prod`, `fnx-ew1-prod` and
-  `fnx-ec1-prod`,
-  `enabled: false` from `stacks/catalog/inspector2/defaults.yaml`. A stack opts in by setting
-  `enabled: true` on it.
-- Deploys in the `security` layer of `workflows/deploy-full-stack.yaml`.
-- Used by: `security-monitoring` (`.account_id` as `inspector2_account_id`). The output is null
-  while the component is disabled, which keeps security-monitoring's Inspector finding route off;
-  enabling Inspector turns the route on at the next security-monitoring plan.
+- Instance: none (E5c8): the organization's vendored `aws-inspector2` (delegated administrator in
+  each `<tenant>-<env>-security` stack, org-settings committed `metadata.enabled: false`, owner
+  OQ-IN) replaced it; this component is deleted in E5c9.
+- Used by: nothing (security-monitoring routes Inspector findings by a flag).
 
 ## Notes
 

@@ -1,12 +1,14 @@
 # security-monitoring
 
 Routes security findings to one KMS-encrypted SNS topic: EventBridge rules for GuardDuty findings
-of severity 4.0 and above, new active failed HIGH/CRITICAL Security Hub control findings and,
-while the inspector2 component is enabled, HIGH/CRITICAL Inspector findings; every security group
+of severity 4.0 and above, new active failed HIGH/CRITICAL Security Hub control findings and
+HIGH/CRITICAL Inspector findings; every security group
 create, delete and rule change not made by automation (CloudTrail EC2 API calls); plus the four
 CIS v1.2.0 metric filters and alarms on the CloudTrail log group, email subscriptions, and an
-optional Slack/PagerDuty enrichment Lambda. It creates no detector, hub or Inspector enabler (one
-component per service, the Cloud Posse model).
+optional Slack/PagerDuty enrichment Lambda. It creates no detector, hub or Inspector enabler: the
+account is a member of the organization's (vendored `aws-guardduty`, `aws-security-hub`,
+`aws-inspector2`, delegated administrator in the region's `<tenant>-<env>-security` stack), and a
+member's detector and hub still publish its findings to its own EventBridge.
 
 ## Wiring
 
@@ -16,24 +18,26 @@ component per service, the Cloud Posse model).
   `catalog/security-monitoring/main-region`: no trail and no CIS filters there either, since a
   metric filter must be in its log group's region and the home stack's multi-region trail delivers
   this region's events to the home region, where its filters run.
-- Reads: `guardduty/main .detector_id`, `securityhub/main .account_arn`,
-  `inspector2/main .account_id`, `cloudtrail .cloudtrail_logs_log_group_name` (the vendored
-  `aws-cloudtrail` trail),
-  `kms/main .key_arn`, `iam/ci .ci_apply_role_arn`.
+- Reads: `cloudtrail .cloudtrail_logs_log_group_name` (the vendored `aws-cloudtrail` trail),
+  `kms/main .key_arn`, `iam/ci .ci_apply_role_arn`. No service state (owner OQ-AL): one flag per
+  route, `enable_guardduty_route`, `enable_securityhub_route`, `enable_inspector2_route`, all on.
 
 ## Notes
 
-- Apply `kms/main`, the account's trail (`cloudtrail`), `guardduty/main` and `securityhub/main` first. A null input
-  fails the plan on the `require_*_route` preconditions (on by default) instead of silently
-  turning alerting off.
+- Apply `kms/main` and the account's trail (`cloudtrail`) first. The routes match nothing until
+  the region's org-settings enrolls the account (`deploy-security-org`, docs/OPERATIONS.md,
+  Bootstrap order). Turning the GuardDuty or Security Hub route off also takes its
+  `require_*_route` flag (on by default), or the plan fails: alerting is never off by one override.
+- `check-data-residency.py` fails a route that is on in an account no org-settings of its tenant
+  and region enrolls (an all-GDPR account in a US region, or one left out of the account map).
 - `kms/main` needs `allow_eventbridge` and `allow_cloudwatch_alarms` (on in `kms/defaults`) so
   the rules and alarms can publish to the encrypted topic.
 - The Security Hub rule matches `RecordState: ACTIVE` and `Workflow.Status: NEW`: a finding left in
   NEW re-alerts on each re-import until triaged.
 - There is no GuardDuty CloudWatch alarm (GuardDuty publishes no findings metric); the EventBridge
   rule is the route.
-- The Inspector route follows `inspector2_account_id`: null (inspector2 disabled, the catalog
-  default) turns it off without failing the plan, so there is no `require_inspector_route`.
+- The Inspector route is on but matches nothing while `aws-inspector2/org-settings` stays
+  `metadata.enabled: false` (owner OQ-IN), so there is no `require_inspector_route`.
 - Security group changes alert twice by design: the EventBridge rule sends each change as it
   happens (`ModifySecurityGroupRules` included), the CIS `SecurityGroupChanges` alarm fires when
   more than `sg_changes_threshold` changes land in 5 minutes. `UpdateSecurityGroupRuleDescriptions*`

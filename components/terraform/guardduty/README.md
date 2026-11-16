@@ -6,11 +6,8 @@ protection on, EKS and malware scanning off (prod turns both on).
 
 ## Wiring
 
-- Instance: `guardduty/main` in the three AWS stacks, `fnx-ue2-prod`, `fnx-ew1-prod` and
-  `fnx-ec1-prod`; the prod
-  stacks inherit `guardduty/prod` (`stacks/catalog/guardduty/prod.yaml`).
-- Used by: `security-monitoring` (`.detector_id`). `workflows/scripts/security/harden.sh`
-  deploys this component rather than calling the GuardDuty API.
+- Instance: none (E5c8): the organization's vendored `aws-guardduty` (delegated administrator in
+  each `<tenant>-<env>-security` stack) replaced it; this component is deleted in E5c9.
 
 ## Notes
 

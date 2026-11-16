@@ -23,9 +23,9 @@
 # (the network account's dns-delegation role that aws-dns-delegated's aws.primary provider
 # assumes) shares the iam layer too.
 # Connectivity follows networking, security-monitoring
-# follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; aws-config
-# shares the security layer with securityhub, which only lists it in
-# dependencies.components), lambda (compute) precedes apigateway (services), as
+# follows security (it reads cloudtrail state; its GuardDuty, Security Hub and Inspector
+# routes are flags, the member detector and hub the security stack's delegated
+# administrator's, security-org layer), lambda (compute) precedes apigateway (services), as
 # does apigateway-account (security: the account's CloudWatch role REST stage
 # logging needs; apigateway lists it in dependencies.components only), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).

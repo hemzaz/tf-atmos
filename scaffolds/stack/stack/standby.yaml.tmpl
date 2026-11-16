@@ -46,8 +46,8 @@
 # standby). One file per stack: the imports, then one vars/settings/components
 # body, grouped by domain (globals, networking, security, compute, services).
 # Every instance's wiring is the catalog's -standby files
-# (settings.dr.standby_of names [[ $primary ]]), plus the plain inspector2/main
-# and apigateway-account/main files every dev, staging and prod stack imports;
+# (settings.dr.standby_of names [[ $primary ]]), plus the plain
+# apigateway-account/main file every dev, staging and prod stack imports;
 # each domain section below says what this file keeps.
 # =============================================================================
 
@@ -79,11 +79,8 @@ import:
   - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
   - catalog/aws-config/main-region
-  - catalog/guardduty/main-standby
-  - catalog/securityhub/main-standby
   - catalog/security-monitoring/main-standby
   - catalog/backup/main-standby
-  - catalog/inspector2/main
   - catalog/apigateway-account/main
 
   # --- compute
@@ -216,8 +213,10 @@ components:
     # ========================================================================
     # Security
     #
-    # Regional services run here as in [[ $primary ]] (GuardDuty, Security Hub,
-    # AWS Config, Inspector, finding routing, backups); account-wide ones do
+    # Regional services run here as in [[ $primary ]] (AWS Config, finding
+    # routing, backups; GuardDuty, Security Hub and Inspector are the
+    # organization's, the region's security stack enrolls this account);
+    # account-wide ones do
     # not: no kms/main (this region's key is [[ $primary ]] kms/main's
     # multi-region replica, alias [[ .Config.region_code ]]-main), no iam/main, no cloudtrail
     # (the primary's trail is multi-region), and aws-config records this
