@@ -293,8 +293,6 @@ LIST_SCALAR_ATTRS = {
     'member_clusters',
     # aws_route53_zone: the zone's delegation name servers (dns zone_name_servers).
     'name_servers',
-    # aws_inspector2_enabler: the accounts Inspector is enabled in.
-    'account_ids',
 }
 FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
 IDENT = r'[A-Za-z_][A-Za-z0-9_-]*'

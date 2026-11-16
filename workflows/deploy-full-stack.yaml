@@ -252,10 +252,10 @@ workflows:
       - name: plan-security
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "aws-cloudtrail"
+          terraform plan --query '.metadata.component == "secretsmanager"
+          or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or .metadata.component == "apigateway-account" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
@@ -271,10 +271,9 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
-          or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
@@ -658,10 +657,10 @@ workflows:
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "aws-cloudtrail"
+          terraform plan --query '.metadata.component == "secretsmanager"
+          or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or .metadata.component == "apigateway-account" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
@@ -677,10 +676,9 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
-          or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
