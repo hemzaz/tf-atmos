@@ -99,18 +99,25 @@ has_instance() { grep -Fxq -- "$1" <<<"$INSTANCES"; }
 
 for component in "${REQUIRED[@]}"; do
   if ! has_instance "$component"; then
-    log_error "${STACK} has no ${component} instance (every stack has one; Security Hub's controls need it)"
+    log_error "${STACK} has no enabled ${component} instance (every stack has one, metadata.enabled not false; Security Hub's controls need it)"
     exit 1
   fi
 done
 PRESENT=()
+ABSENT_ORG=()
 for component in "${COMPONENTS[@]}"; do
   if has_instance "$component"; then
     PRESENT+=("$component")
+  elif [[ "$component" == */delegated-administrator ]]; then
+    ABSENT_ORG+=("$component")
   else
-    log_skip "${component}: ${STACK} has no such instance (only an account's home stack has the trail, only a security stack the organization's GuardDuty, Security Hub and Inspector)"
+    log_skip "${component}: ${STACK} has no enabled instance (only an account's home stack has the trail)"
   fi
 done
+# One line, not one per service: every member stack lacks both.
+if ((${#ABSENT_ORG[@]})); then
+  log_skip "${ABSENT_ORG[*]}: ${STACK} has no enabled instance (only a security stack has the organization's GuardDuty and Security Hub; a member's are reported below)"
+fi
 ORG_PRESENT=()
 for component in "${ORG_SETTINGS[@]}"; do
   if has_instance "$component"; then
@@ -152,13 +159,21 @@ done
 # Report (read-only): what is actually enabled in the account/region now. In
 # a member account the detector and hub are the delegated administrator's
 # (no instance in its stack), so the report also names the administrator.
+# get-administrator-account prints None (text output of a missing field) in
+# the delegated administrator itself and in an account no administrator manages.
+admin_label() {
+  case "$1" in
+    "" | None) echo "none (this account is the delegated administrator, or not a member)" ;;
+    *) echo "$1" ;;
+  esac
+}
 log_info "GuardDuty / Security Hub status in ${REGION}:"
 GD_DETECTOR=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text 2>/dev/null || echo "None")
 if [[ -n "$GD_DETECTOR" ]] && [[ "$GD_DETECTOR" != "None" ]]; then
   GD_STATUS=$(aws guardduty get-detector --region "$REGION" --detector-id "$GD_DETECTOR" --query 'Status' --output text 2>/dev/null || echo "unknown")
-  GD_ADMIN=$(aws guardduty get-administrator-account --region "$REGION" --detector-id "$GD_DETECTOR" \
-    --query 'Administrator.AccountId' --output text 2>/dev/null || echo "none")
-  echo "  GuardDuty:    detector ${GD_DETECTOR} (${GD_STATUS}, administrator: ${GD_ADMIN:-none})"
+  GD_ADMIN=$(admin_label "$(aws guardduty get-administrator-account --region "$REGION" --detector-id "$GD_DETECTOR" \
+    --query 'Administrator.AccountId' --output text 2>/dev/null || true)")
+  echo "  GuardDuty:    detector ${GD_DETECTOR} (${GD_STATUS}, administrator: ${GD_ADMIN})"
 else
   echo "  GuardDuty:    no detector"
 fi
@@ -167,9 +182,9 @@ if [[ -n "$SH_HUB" ]] && [[ "$SH_HUB" != "None" ]]; then
   SH_STANDARDS_RAW=$(aws securityhub get-enabled-standards --region "$REGION" \
     --query 'StandardsSubscriptions[].StandardsArn' --output text 2>/dev/null || echo "unknown")
   SH_STANDARDS=$(tr '\t' '\n' <<<"$SH_STANDARDS_RAW" | sed 's|.*:standards/||; s|.*:ruleset/||' | paste -sd, -)
-  SH_ADMIN=$(aws securityhub get-administrator-account --region "$REGION" \
-    --query 'Administrator.AccountId' --output text 2>/dev/null || echo "none")
-  echo "  Security Hub: ${SH_HUB} (standards: ${SH_STANDARDS:-none}, administrator: ${SH_ADMIN:-none})"
+  SH_ADMIN=$(admin_label "$(aws securityhub get-administrator-account --region "$REGION" \
+    --query 'Administrator.AccountId' --output text 2>/dev/null || true)")
+  echo "  Security Hub: ${SH_HUB} (standards: ${SH_STANDARDS:-none}, administrator: ${SH_ADMIN})"
 else
   echo "  Security Hub: not enabled"
 fi

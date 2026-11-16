@@ -68,7 +68,7 @@ workflows:
           AWS_SDK_LOAD_CONFIG: "1"
       - name: confirm
         type: confirm
-        prompt: Apply the cloudtrail/aws-config/guardduty/securityhub plans above and the account hardening? (No = report only)
+        prompt: Apply the hardening plans above (cloudtrail/aws-config and, in a security stack, the GuardDuty/Security Hub delegated-administrator) and the account hardening? (No = report only)
         default: false
       - name: harden
         type: shell

@@ -996,8 +996,12 @@ def route_enrolment_errors(stacks: dict) -> list[str]:
                 candidates = orgs.get((tenant_of(instance), variables.get("region"), component), [])
                 if member and any(enrolls(org, member, member_id, ids) for org in candidates):
                     continue
-                why = "no org-settings in its tenant and region" if not candidates else \
-                    f"its region's {component}/org-settings does not make {member} a member"
+                if not candidates:
+                    why = "no org-settings in its tenant and region"
+                elif not member:
+                    why = "its account could not be resolved (settings.environment.account), so no org-settings enrolls it"
+                else:
+                    why = f"its region's {component}/org-settings does not make {member} a member"
                 errors.append(f"{stack_name}: {name} sets {flag} but {why}: the route would watch a detector or hub "
                               f"that does not exist; set {flag} false (and its require_* flag) or enroll the account")
     return errors

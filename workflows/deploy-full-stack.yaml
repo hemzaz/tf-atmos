@@ -87,7 +87,7 @@
 # reaches security-org before the root stack's step 2 exists, so the operator declines that
 # layer at its confirm, deploys the root stack, then runs deploy-security-org (docs/OPERATIONS.md).
 # Every layer except backend, dns-apex (aws-dns-primary is only in fnx-ue1-network), security-org
-# (only the security stacks, none of which has an org-settings instance yet)
+# (only the security stacks: their org-settings and Access Analyzer)
 # and regional-waf (no workload stack has a waf instance yet; an empty layer plans
 # "No components matched") has at least one
 # enabled instance in every workload stack (eks-backend-services/main, the last

@@ -74,8 +74,8 @@ class HardenSelectionTest(unittest.TestCase):
                                                 "vpc/main", abstract=("aws-config/main-region",)))
         self.assertEqual(rc, 0, out)
         self.assertEqual(plans, ["aws-config"])
-        self.assertIn("cloudtrail: fnx-ue2-prod has no such instance", out)
-        self.assertIn("aws-guardduty/delegated-administrator: fnx-ue2-prod has no such instance", out)
+        self.assertIn("cloudtrail: fnx-ue2-prod has no enabled instance", out)
+        self.assertIn(" ".join(STEP1) + ": fnx-ue2-prod has no enabled instance", out)
 
     def test_member_home_stack_plans_trail_and_recorder(self):
         rc, plans, out = self.run_harden(stacks("fnx-ue1-prod", "security-monitoring/main", "aws-config",
@@ -108,6 +108,24 @@ class HardenSelectionTest(unittest.TestCase):
         rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "aws-config"))
         self.assertEqual(rc, 0, out)
         self.assertNotIn("deploy-security-org", out)
+        # One skip line for both delegated administrators, not one each.
+        self.assertEqual(out.count("delegated-administrator"), 2, out)
+        self.assertIn(" ".join(STEP1) + ": fnx-ue2-prod has no enabled instance", out)
+
+    def test_root_stack_plans_trail_and_recorder_only(self):
+        # Step 2 (<svc>/root, the delegation) is deploy-security's, never hardening's.
+        rc, plans, out = self.run_harden(stacks(
+            "fnx-ue1-root", "cloudtrail", "aws-config", "aws-guardduty/root", "aws-security-hub/root",
+            "aws-inspector2/root", "backend/main"), stack="fnx-ue1-root")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(plans, ["cloudtrail", "aws-config"])
+        self.assertNotIn("deploy-security-org", out)
+
+    def test_disabled_recorder_is_named_as_disabled(self):
+        rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", disabled=("aws-config",)))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(plans, [])
+        self.assertIn("fnx-ue2-prod has no enabled aws-config instance", out)
 
     def test_core_stack_plans_only_its_recorder(self):
         rc, plans, out = self.run_harden(stacks("fnx-ue2-prod", "aws-config", "aws-account-settings"))
@@ -138,7 +156,7 @@ class HardenSelectionTest(unittest.TestCase):
                                                 abstract=("aws-config", "aws-config/main")))
         self.assertEqual(rc, 1, out)
         self.assertEqual(plans, [])
-        self.assertIn("fnx-ue2-prod has no aws-config instance", out)
+        self.assertIn("fnx-ue2-prod has no enabled aws-config instance", out)
 
 
 if __name__ == "__main__":
