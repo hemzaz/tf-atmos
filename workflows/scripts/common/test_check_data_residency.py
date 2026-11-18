@@ -967,7 +967,27 @@ def org_services_stacks():
             org_instance("access-analyzer", "security", ORG_REGIONS[code], **copy.deepcopy(analyzer))
     stacks["fnx-ue1-prod"] = stack(vpc=org_instance("vpc", "prod", "us-east-1"))
     stacks["fnx-ew1-prod"] = stack(vpc=org_instance("vpc", "prod-eu", "eu-west-1"))
+    # E5c7b (owner 2026-11-18): each non-GDPR account's ACCOUNT analyzer in each of its US stacks.
+    for stack_name, account in US_ACCOUNT_STACKS.items():
+        stacks[stack_name]["components"]["terraform"]["access-analyzer/account"] = account_analyzer(stack_name, account)
     return stacks
+
+
+# catalog/access-analyzer/account.yaml (access-analyzer/account-defaults), per simulated US stack.
+US_ACCOUNT_STACKS = {"fnx-ue1-root": "root", "fnx-ue2-root": "root", "fnx-ue1-security": "security",
+                     "fnx-ue2-security": "security", "fnx-ue1-prod": "prod"}
+
+
+# The management account's follows the global delegation step (MANAGEMENT_PREDECESSORS).
+AA_ACCOUNT_ON_ROOT = [{"component": "access-analyzer/root", "stack": "fnx-ue1-root"}]
+
+
+def account_analyzer(stack_name, account, deps=None, **variables):
+    deps = (AA_ACCOUNT_ON_ROOT if account == "root" else []) if deps is None else deps
+    return org_instance("access-analyzer", account, ORG_REGIONS[stack_name.split("-")[1]], deps, **{
+        "accessanalyzer_account_enabled": True, "accessanalyzer_organization_enabled": False,
+        "accessanalyzer_organization_unused_access_enabled": False,
+        "organizations_delegated_administrator_enabled": False, **variables})
 
 
 # catalog/access-analyzer/delegated-administrator.yaml's variants, per security stack.
@@ -1174,7 +1194,8 @@ class OrgServicesTest(unittest.TestCase):
         stacks["fnx-ec1-prod"] = stack(vpc=org_instance("vpc", "prod-eu", "eu-central-1"))
         self.assertEqual(self.org(stacks), [])
         # The prod account's only stack moved to the EU: it is all-GDPR now, but not declared.
-        stacks["fnx-ue1-prod"]["components"]["terraform"]["vpc"]["settings"]["environment"]["account"] = "prod-us"
+        for name in ("vpc", "access-analyzer/account"):
+            stacks["fnx-ue1-prod"]["components"]["terraform"][name]["settings"]["environment"]["account"] = "prod-us"
         stacks["fnx-ew1-prod"]["components"]["terraform"]["vpc"]["settings"]["environment"]["account"] = "prod"
         found = [e for e in residency.check(stacks) if "GDPR_ONLY_ACCOUNTS" in e]
         self.assertEqual(found, ["the accounts whose stacks are all GDPR-scoped are ['prod', 'prod-eu'], not "
@@ -1404,6 +1425,128 @@ def monitored_stacks():
             "security-monitoring", account, region, enable_guardduty_route=True, enable_securityhub_route=True,
             enable_inspector2_route=True)
     return stacks
+
+
+class AccountAnalyzerTest(unittest.TestCase):
+    """ACCOUNT external-access analyzers (E5c7b, owner 2026-11-18): one per non-GDPR account's US stack, none in the EU."""
+
+    def found(self, stacks):
+        return [e for e in residency.check(stacks) if "ACCOUNT analyzer" in e]
+
+    @staticmethod
+    def terraform(stacks, stack_name):
+        return stacks[stack_name]["components"]["terraform"]
+
+    def test_simulated_e5c7b_passes(self):
+        self.assertEqual(residency.check(org_services_stacks()), [])
+
+    def test_a_missing_account_analyzer_fails(self):
+        for stack_name, account in US_ACCOUNT_STACKS.items():
+            with self.subTest(stack=stack_name):
+                stacks = org_services_stacks()
+                del self.terraform(stacks, stack_name)["access-analyzer/account"]
+                region = ORG_REGIONS[stack_name.split("-")[1]]
+                self.assertEqual(self.found(stacks), [
+                    f"{stack_name}: account {account} has no enabled ACCOUNT analyzer in {region} "
+                    "(access-analyzer/account, catalog/access-analyzer/account.yaml): that region's external sharing "
+                    "would be unmonitored by Access Analyzer"])
+
+    def test_a_disabled_account_analyzer_counts_as_missing(self):
+        for disable in ({"vars": {"enabled": False}}, {"metadata": {"enabled": False}},
+                        {"vars": {"accessanalyzer_account_enabled": False}}):
+            with self.subTest(disable=disable):
+                stacks = org_services_stacks()
+                spec = self.terraform(stacks, "fnx-ue1-prod")["access-analyzer/account"]
+                for key, value in disable.items():
+                    spec[key].update(value)
+                found = self.found(stacks)
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(found[0].startswith("fnx-ue1-prod: account prod has no enabled ACCOUNT analyzer"))
+
+    def test_a_second_account_analyzer_of_one_account_and_region_fails(self):
+        stacks = org_services_stacks()
+        stacks["fnx-ue1-prod-lane"] = stack(**{"access-analyzer/account": account_analyzer("fnx-ue1-prod", "prod")})
+        self.assertEqual(self.found(stacks), [
+            "fnx-ue1-prod: access-analyzer/account and fnx-ue1-prod-lane: access-analyzer/account all create the "
+            "ACCOUNT analyzer of prod in us-east-1: one per account and region"])
+
+    def test_an_account_analyzer_in_an_eu_stack_fails(self):
+        for stack_name, account in (("fnx-ew1-security", "security"), ("fnx-ec1-security", "security"),
+                                    ("fnx-ew1-prod", "prod-eu")):
+            with self.subTest(stack=stack_name):
+                stacks = org_services_stacks()
+                self.terraform(stacks, stack_name)["access-analyzer/account"] = account_analyzer(stack_name, account)
+                self.assertEqual(self.found(stacks), [
+                    f"{stack_name}: access-analyzer/account creates an ACCOUNT analyzer in a GDPR-scoped stack: the "
+                    "EU security stacks' ORGANIZATION analyzers cover the EU regions; ACCOUNT analyzers are for the "
+                    "US stacks"])
+
+    def test_an_account_analyzer_of_an_all_gdpr_account_fails(self):
+        # A US-tagged prod-eu stack outside the EU would fail the residency rules too; this rule names the account.
+        stacks = org_services_stacks()
+        spec = account_analyzer("fnx-ue1-prod", "prod-eu")
+        stacks["fnx-ue1-prodeu"] = stack(**{"access-analyzer/account": spec})
+        self.assertIn("fnx-ue1-prodeu: access-analyzer/account creates an ACCOUNT analyzer in prod-eu, an account whose "
+                      "stacks are all GDPR-scoped: its findings belong to the EU organization analyzers",
+                      self.found(stacks))
+
+    def test_fixture_and_local_stages_need_none(self):
+        stacks = org_services_stacks()
+        for stage in ("fixtures", "local"):
+            spec = org_instance("vpc", "dev", "us-east-1")
+            spec["settings"]["environment"]["account"] = stage
+            spec["settings"]["context"]["stage"] = stage
+            stacks[f"fnx-ue1-{stage}-x"] = stack(vpc=spec)
+        self.assertEqual(self.found(stacks), [])
+
+    def test_any_enabled_access_analyzer_triggers_completeness(self):
+        # The delegation disabled, the ACCOUNT analyzers still there: one missing still fails.
+        stacks = org_services_stacks()
+        self.terraform(stacks, "fnx-ue1-root")["access-analyzer/root"]["vars"]["enabled"] = False
+        del self.terraform(stacks, "fnx-ue1-prod")["access-analyzer/account"]
+        found = self.found(stacks)
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith("fnx-ue1-prod: account prod has no enabled ACCOUNT analyzer in us-east-1"))
+
+    def test_a_stack_set_without_access_analyzer_is_exempt(self):
+        stacks = org_services_stacks()
+        for terraform in (st["components"]["terraform"] for st in stacks.values()):
+            for name in [n for n in terraform if n.startswith("access-analyzer/")]:
+                del terraform[name]
+        self.assertEqual(self.found(stacks), [])
+        stacks = {"fnx-ue1-prod": stack(vpc=org_instance("vpc", "prod", "us-east-1"))}
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_a_management_account_analyzer_without_the_global_step_fails(self):
+        for stack_name in ("fnx-ue1-root", "fnx-ue2-root"):
+            with self.subTest(stack=stack_name):
+                stacks = org_services_stacks()
+                self.terraform(stacks, stack_name)["access-analyzer/account"]["dependencies"]["components"] = []
+                self.assertEqual([e for e in residency.check(stacks) if "dependencies" in e], [
+                    f"{stack_name}: access-analyzer/account dependencies.components is []: Cloud Posse's step order "
+                    "needs exactly access-analyzer/root in fnx-ue1-root (the same region's previous step)"])
+
+    def test_the_fnx_ue2_root_analyzer_on_its_own_region_root_fails(self):
+        stacks = org_services_stacks()
+        self.terraform(stacks, "fnx-ue2-root")["access-analyzer/account"]["dependencies"]["components"] = [
+            {"component": "access-analyzer/root", "stack": "fnx-ue2-root"}]
+        self.assertEqual([e for e in residency.check(stacks) if "dependencies" in e or "depends" in e], [
+            "fnx-ue2-root: access-analyzer/account dependencies.components is ['access-analyzer/root in fnx-ue2-root']: "
+            "Cloud Posse's step order needs exactly access-analyzer/root in fnx-ue1-root (the same region's previous "
+            "step)"])
+
+    def test_a_member_account_analyzer_needs_no_dependency(self):
+        stacks = org_services_stacks()
+        for stack_name in ("fnx-ue1-security", "fnx-ue2-security", "fnx-ue1-prod"):
+            self.assertEqual(self.terraform(stacks, stack_name)["access-analyzer/account"]["dependencies"]["components"],
+                             [])
+        self.assertEqual(residency.check(stacks), [])
+        # ...and may not name the management account's step (it has none to follow).
+        self.terraform(stacks, "fnx-ue1-prod")["access-analyzer/account"]["dependencies"]["components"] = list(
+            AA_ACCOUNT_ON_ROOT)
+        self.assertEqual([e for e in residency.check(stacks) if "dependencies" in e], [
+            "fnx-ue1-prod: access-analyzer/account dependencies.components is ['access-analyzer/root in fnx-ue1-root']: "
+            "Cloud Posse's step order needs nothing (the same region's previous step)"])
 
 
 class RouteEnrolmentTest(unittest.TestCase):

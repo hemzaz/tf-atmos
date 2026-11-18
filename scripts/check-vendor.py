@@ -107,6 +107,10 @@ HOUSE_FILE_ALLOWLIST = (
      "E5c7 (owner 2026-11-14): unused_access_exclusion_account_names (CP's analyzer has no analysis rule); "
      "unused-access_override.tf excludes those accounts from the global unused-access analyzer, so the US one "
      "leaves out prod-eu and the EU one analyses only the all-GDPR accounts (and the security account, the owner)"),
+    ("components/terraform/access-analyzer", "account-analyzer_house.tf",
+     "E5c7b (owner 2026-11-18): accessanalyzer_account_enabled and an ACCOUNT external-access analyzer (CP has "
+     "only the two ORGANIZATION types); each non-GDPR account's US stacks get one, as the organization "
+     "external-access analyzer runs only in the EU security stacks"),
 )
 # Cloud Posse remote-state reads the house bypasses (owner OQ-E/OQ-W: no live remote state), one
 # (target, override file, module, reason) each: the override must keep `bypass = true` in that

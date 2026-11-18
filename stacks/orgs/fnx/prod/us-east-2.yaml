@@ -62,6 +62,7 @@ import:
   - catalog/security-monitoring/main-standby
   - catalog/backup/main-standby
   - catalog/apigateway-account/main
+  - catalog/access-analyzer/account
 
   # --- compute
   - catalog/eks/main-standby
@@ -209,6 +210,15 @@ components:
         component: aws-config
         inherits:
           - aws-config/main-region
+
+    # IAM Access Analyzer: the account's ACCOUNT external-access analyzer for
+    # us-east-2 (catalog/access-analyzer/account.yaml, E5c7b), US stacks
+    # only: the EU's are covered by the EU security stacks' organization one.
+    access-analyzer/account:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/account-defaults
 
     security-monitoring/main:
       vars:

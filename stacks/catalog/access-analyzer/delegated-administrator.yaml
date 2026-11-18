@@ -13,9 +13,9 @@
 #     organization (prod-eu's GitHub OIDC roles) "in each enabled Region", and an
 #     organization analyzer cannot exclude an account, so a US one would hold
 #     prod-eu's IAM findings. The EU analyzers cover every account's IAM roles
-#     (global) and the EU regions' resources. Known interim gap: US-region
-#     resources' external sharing is unmonitored by Access Analyzer until E5c7b
-#     (ACCOUNT analyzers in the non-GDPR accounts' US stacks, with or after E5c8).
+#     (global) and the EU regions' resources. US-region resources are each
+#     account's own ACCOUNT analyzer's (account.yaml, E5c7b: every non-GDPR
+#     account's US stacks).
 #   - Unused access (ORGANIZATION_UNUSED_ACCESS) is global, one per residency
 #     (-unused-access): fnx-ue1-security without the all-GDPR accounts (prod-eu),
 #     fnx-ew1-security without the shared accounts but the security account

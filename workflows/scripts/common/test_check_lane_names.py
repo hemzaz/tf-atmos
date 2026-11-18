@@ -727,5 +727,32 @@ class AccessAnalyzerTest(unittest.TestCase):
         self.assertIn("all delegate Access Analyzer", found[0])
 
 
+    def test_account_analyzer_beside_the_root_step_and_the_delegated_administrator_passes(self):
+        # E5c7b: fnx-ue1-root holds access-analyzer/root and /account, fnx-ue1-security the delegated
+        # administrator's analyzers and /account: different analyzer types, so no same-name pair.
+        stacks = residency_test.org_services_stacks()
+        self.assertIn("access-analyzer/account", self.instances(stacks, "fnx-ue1-root"))
+        self.assertIn("access-analyzer/account", self.instances(stacks, "fnx-ue1-security"))
+        self.assertEqual(self.found(stacks), [])
+
+    def test_two_account_analyzers_of_one_account_and_region_fail(self):
+        stacks = residency_test.org_services_stacks()
+        stacks["fnx-ue1-prod-lane"] = {"components": {"terraform": {
+            "access-analyzer/account": residency_test.account_analyzer("fnx-ue1-prod", "prod")}}}
+        found = self.found(stacks)
+        self.assertIn("fnx-ue1-prod: access-analyzer/account and fnx-ue1-prod-lane: access-analyzer/account all "
+                      "create the ACCOUNT analyzer of fnx-prod in us-east-1: one per account, region and type", found)
+
+    def test_two_instances_creating_the_same_analyzer_type_in_one_stack_fail(self):
+        stacks = residency_test.org_services_stacks()
+        self.instances(stacks, "fnx-ue1-security")["access-analyzer/account-2"] = residency_test.account_analyzer(
+            "fnx-ue1-security", "security")
+        found = self.found(stacks)
+        self.assertTrue(any(e.startswith("fnx-ue1-security: access-analyzer/account, access-analyzer/account-2 "
+                                         "(access-analyzer) set the same name") for e in found), found)
+        self.assertIn("fnx-ue1-security: access-analyzer/account and fnx-ue1-security: access-analyzer/account-2 all "
+                      "create the ACCOUNT analyzer of fnx-security in us-east-1: one per account, region and type", found)
+
+
 if __name__ == "__main__":
     unittest.main()

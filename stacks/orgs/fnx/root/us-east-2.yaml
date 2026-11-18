@@ -18,6 +18,10 @@
 # (docs/OPERATIONS.md "Bootstrap order"). No trail: fnx-ue1-root's
 # multi-region trail records this region (owner OQ-A). This stack is not
 # scaffolded: the core template's non-home recorder, by hand.
+#
+# IAM Access Analyzer: as in every non-GDPR account's US stack, the account's
+# own ACCOUNT external-access analyzer for us-east-2 (access-analyzer/account,
+# E5c7b).
 # =============================================================================
 
 import:
@@ -26,6 +30,7 @@ import:
   - orgs/fnx/root/_defaults
   - catalog/aws-account-settings/main-standby
   - catalog/aws-config/main
+  - catalog/access-analyzer/account
   - catalog/aws-guardduty/defaults
   - catalog/aws-security-hub/defaults
   - catalog/aws-inspector2/defaults
@@ -52,6 +57,22 @@ components:
         component: aws-config
         inherits:
           - aws-config/main-core-region
+
+    # The management account's ACCOUNT external-access analyzer for us-east-2
+    # (catalog/access-analyzer/account.yaml, E5c7b). After fnx-ue1-root's
+    # access-analyzer/root, the global step that creates the account's Access
+    # Analyzer service-linked role (AWS would otherwise create it with this
+    # analyzer, failing that step): check-data-residency.py requires this
+    # dependency in a management account's US stack (MANAGEMENT_PREDECESSORS).
+    access-analyzer/account:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/account-defaults
+      dependencies:
+        components:
+          - component: access-analyzer/root
+            stack: '{{ .settings.context.tenant }}-ue1-root'
 
     # Cloud Posse's instance names, step 2 (E5c5): from the management account,
     # delegate GuardDuty, Security Hub and Inspector in this region to

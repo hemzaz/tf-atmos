@@ -81,9 +81,12 @@
 # account's delegation (step 2, in the root stacks) are in the security layer; the security
 # account's org settings (step 3, vars.admin_delegated true, "deployed again" after the
 # delegation) are the last layer, security-org, with Access Analyzer's delegated administrator
-# (access-analyzer, organizations_delegated_administrator_enabled false: its analyzers need
-# fnx-ue1-root's global delegation, in that stack's security layer). Only the security stacks hold org-settings
-# (never a workload stack). Steps 1 -> 2 -> 3 cross stacks: a first `deploy -s fnx-<r>-security`
+# (access-analyzer, organizations_delegated_administrator_enabled and accessanalyzer_account_enabled
+# false: its organization analyzers need fnx-ue1-root's global delegation, in that stack's security
+# layer). Only the security stacks hold org-settings and that instance (never a workload stack). An
+# account's own ACCOUNT analyzer (access-analyzer, accessanalyzer_account_enabled true, E5c7b: every
+# non-GDPR account's US stacks) needs no delegation and is in the security layer; in fnx-ue1-root it
+# follows access-analyzer/root there (dependencies.components). Steps 1 -> 2 -> 3 cross stacks: a first `deploy -s fnx-<r>-security`
 # reaches security-org before the root stack's step 2 exists, so the operator declines that
 # layer at its confirm, deploys the root stack, then runs deploy-security-org (docs/OPERATIONS.md).
 # Every layer except backend, dns-apex (aws-dns-primary is only in fnx-ue1-network), security-org
@@ -94,7 +97,8 @@
 # to gain instances, joined the compute layer in all 3 stacks); the root
 # stacks have only the backend (fnx-ue1-root, fnx-ew1-root), iam
 # (aws-account-settings) and security layers (the recorder, fnx-ue1-root's
-# trail and Access Analyzer delegation, and step 2 of the org services).
+# trail and Access Analyzer delegation, the US root stacks' ACCOUNT analyzers,
+# and step 2 of the org services).
 #
 # The accounts layer (the organization, its OUs, SCPs and member accounts, in
 # fnx-gbl-root) is not here: workflows/deploy-accounts.yaml deploys it in its
@@ -256,6 +260,7 @@ workflows:
           or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or (.metadata.component == "access-analyzer" and .vars.accessanalyzer_account_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
@@ -274,6 +279,7 @@ workflows:
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or (.metadata.component == "access-analyzer" and .vars.accessanalyzer_account_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
@@ -492,7 +498,7 @@ workflows:
           or .metadata.component == "cost-optimization"'
       - name: plan-security-org
         type: atmos
-        command: terraform plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true)'
+        command: terraform plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true and .vars.accessanalyzer_account_enabled != true)'
       - name: confirm_security_org
         type: confirm
         prompt: Apply the security-org layer plan above?
@@ -502,7 +508,7 @@ workflows:
         command: test "{{ .steps.confirm_security_org.value }}" = "true" || { echo "Deployment cancelled before the security-org layer."; exit 1; }
       - name: deploy-security-org
         type: atmos
-        command: terraform deploy --from-plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true)'
+        command: terraform deploy --from-plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true and .vars.accessanalyzer_account_enabled != true)'
       - type: toast
         level: success
         content: All layers deployed
@@ -648,7 +654,7 @@ workflows:
           or .atmos_component == "lambda/cognito-user-migration"'
 
   deploy-security:
-    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, Inspector, IAM Access Analyzer, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
+    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, Inspector, IAM Access Analyzer (the delegation and the ACCOUNT analyzers), CloudTrail, AWS Config, Cognito and the API Gateway account settings"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -661,6 +667,7 @@ workflows:
           or .metadata.component == "aws-cloudtrail"
           or .metadata.component == "aws-config" or .metadata.component == "cognito"
           or .metadata.component == "apigateway-account" or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or (.metadata.component == "access-analyzer" and .vars.accessanalyzer_account_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
@@ -679,6 +686,7 @@ workflows:
           or .metadata.component == "aws-cloudtrail" or .metadata.component == "aws-config"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
           or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled == true)
+          or (.metadata.component == "access-analyzer" and .vars.accessanalyzer_account_enabled == true)
           or (.metadata.component == "aws-guardduty" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-security-hub" and .vars.admin_delegated != true)
           or (.metadata.component == "aws-inspector2" and .vars.admin_delegated != true)
@@ -946,7 +954,7 @@ workflows:
           or .metadata.component == "cost-optimization"'
 
   deploy-security-org:
-    description: "Deploy the security-org layer: the GuardDuty, Security Hub and Inspector org settings (admin_delegated, Cloud Posse step 3) and the Access Analyzer analyzers, after the management account's delegation"
+    description: "Deploy the security-org layer: the GuardDuty, Security Hub and Inspector org settings (admin_delegated, Cloud Posse step 3) and the Access Analyzer organization analyzers, after the management account's delegation"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -954,7 +962,7 @@ workflows:
       - *preflight
       - name: plan
         type: atmos
-        command: terraform plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true)'
+        command: terraform plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true and .vars.accessanalyzer_account_enabled != true)'
       - name: confirm
         type: confirm
         prompt: Deploy the security-org layer?
@@ -964,4 +972,4 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true)'
+        command: terraform deploy --from-plan --query '(.metadata.component == "aws-guardduty" and .vars.admin_delegated == true) or (.metadata.component == "aws-security-hub" and .vars.admin_delegated == true) or (.metadata.component == "aws-inspector2" and .vars.admin_delegated == true) or (.metadata.component == "access-analyzer" and .vars.organizations_delegated_administrator_enabled != true and .vars.accessanalyzer_account_enabled != true)'

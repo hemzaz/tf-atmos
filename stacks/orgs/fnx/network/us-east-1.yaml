@@ -18,6 +18,11 @@
 # deploy-full-stack's security layer, after the audit stack's storage layer
 # (docs/OPERATIONS.md "Bootstrap order").
 #
+# IAM Access Analyzer for this account and region (catalog/access-analyzer/account.yaml,
+# E5c7b): an ACCOUNT external-access analyzer (access-analyzer/account), as in
+# every non-GDPR account's US stack, since the organization one runs only in
+# the EU (security layer).
+#
 # Its state goes to fnx-ue1-root's
 # bucket through the backend's core role (stacks/orgs/fnx/_defaults.yaml),
 # whose core_write holds this stack's pattern pair (check-state-keys.py) and
@@ -32,6 +37,7 @@ import:
   - orgs/fnx/network/_defaults
   - catalog/aws-cloudtrail/defaults
   - catalog/aws-config/main
+  - catalog/access-analyzer/account
 
 components:
   terraform:
@@ -41,3 +47,10 @@ components:
         component: aws-config
         inherits:
           - aws-config/main
+
+    # The account's ACCOUNT external-access analyzer for us-east-1 (E5c7b).
+    access-analyzer/account:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/account-defaults

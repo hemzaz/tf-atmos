@@ -6,6 +6,7 @@
 [[- $net := trimSuffix ".0.0/16" .Config.vpc_cidr_main -]]
 [[- $svc := trimSuffix ".0.0/16" (default "" .Config.vpc_cidr_services) -]]
 [[- $transformer_timeout := 900 -]]
+[[- $us := not (hasPrefix "eu-" .Config.region) -]]
 [[- /* The guard's pairing, also under --skip-hooks: the data plane runs in the
 prod account's primary only, the prod-eu account's EU primary has none (owner
 decision B5); no reference stack pins the other two combinations. */ -]]
@@ -117,6 +118,9 @@ import:
   - catalog/acm/main-prod
   - catalog/secretsmanager/app-prod
   - catalog/secretsmanager/infra-prod
+[[- end ]]
+[[- if $us ]]
+  - catalog/access-analyzer/account
 [[- end ]]
 
   # --- compute
@@ -445,6 +449,17 @@ components:
       # components/terraform/aws-cloudtrail/account-verification_override.tf.
       vars:
         account_verification_enabled: false
+[[- end ]]
+[[- if $us ]]
+
+    # IAM Access Analyzer: the account's ACCOUNT external-access analyzer for
+    # [[ .Config.region ]] (catalog/access-analyzer/account.yaml, E5c7b), US stacks
+    # only: the EU's are covered by the EU security stacks' organization one.
+    access-analyzer/account:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/account-defaults
 [[- end ]]
 [[- if $data_plane ]]
 

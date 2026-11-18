@@ -48,7 +48,11 @@ organizations_resource_policy_enabled on (CP default): the policy is an
 organization singleton; two Security Hub finding aggregators of one account; and an
 organization_management_account_name other than its account_map's root account (an instance
 naming its own account management is not a root step). Two steps of one service in one stack are not a
-same-name pair (only step 1 names a resource) unless one sets create_sns_topic.
+same-name pair (only step 1 names a resource) unless one sets create_sns_topic. Access Analyzer
+(vendored access-analyzer): one analyzer per account, region and type (ORGANIZATION,
+ORGANIZATION_UNUSED_ACCESS, and the house ACCOUNT one, E5c7b), one unused-access analyzer per
+account and residency, one delegation in all; two of its instances in one stack creating different
+analyzer types are not a same-name pair (each analyzer's name ends in its type).
 Account-wide names (IAM, the account singletons) are also compared between
 the regions of one account: fnx-ue1-prod and its DR stack fnx-ue2-prod share
 the prod account, so they cannot create the same IAM role or both the GitHub
@@ -364,7 +368,7 @@ def check_instances(stacks: dict) -> list[str]:
         for component, members in sorted(by_component.items()):
             for index, (name_a, instance_a) in enumerate(members):
                 for name_b, instance_b in members[index + 1:]:
-                    if org_steps_differ(instance_a, instance_b):
+                    if org_steps_differ(instance_a, instance_b) or analyzer_kinds_differ(instance_a, instance_b):
                         continue
                     why = same_names(instance_a.get("vars") or {}, instance_b.get("vars") or {}, component)
                     if why:
@@ -453,6 +457,29 @@ def org_steps_differ(a: dict, b: dict) -> bool:
     return bool(step_a and step_b and step_a != step_b)
 
 
+# access-analyzer's analyzer flags and the type each creates (CP main.tf, house account-analyzer_house.tf).
+ANALYZER_KINDS = (
+    ("accessanalyzer_organization_enabled", "ORGANIZATION"),
+    ("accessanalyzer_organization_unused_access_enabled", "ORGANIZATION_UNUSED_ACCESS"),
+    ("accessanalyzer_account_enabled", "ACCOUNT"),
+)
+
+
+def analyzer_kinds(instance: dict) -> set:
+    variables = instance.get("vars") or {}
+    return {kind for flag, kind in ANALYZER_KINDS if residency.flag_on(variables.get(flag))}
+
+
+def analyzer_kinds_differ(a: dict, b: dict) -> bool:
+    """Two access-analyzer instances of one stack creating different analyzer types: each analyzer's name ends in
+    its type (<id>-organization, -organization-unused-access, -account), so they share no name (E5c7b: an
+    account's ACCOUNT analyzer beside the root step or the delegated administrator's)."""
+    if a.get("component") != "access-analyzer" or b.get("component") != "access-analyzer":
+        return False
+    kinds_a, kinds_b = analyzer_kinds(a), analyzer_kinds(b)
+    return bool(kinds_a | kinds_b) and not kinds_a & kinds_b
+
+
 def check_org_services(stacks: dict) -> list[str]:
     """ORG_SERVICES account singletons: one root (management account), delegated-administrator and
     org-settings (security account) per service and region, and one Security Hub Organizations
@@ -491,6 +518,8 @@ def check_org_services(stacks: dict) -> list[str]:
 
 def check_access_analyzers(stacks: dict) -> list[str]:
     """IAM Access Analyzer (vendored access-analyzer, E5c7) singletons: one analyzer per (account, region, type),
+    ACCOUNT included (E5c7b, house account-analyzer_house.tf; deliberately also check-data-residency.py's
+    account_analyzer_errors rule, which checks it as residency completeness, this one as a name collision),
     one unused-access analyzer (global) per account and residency, and the delegation
     (organizations_delegated_administrator_enabled) once in all, in the management account."""
     errors, analyzers, unused, delegations = [], collections.defaultdict(list), collections.defaultdict(list), []
@@ -502,10 +531,8 @@ def check_access_analyzers(stacks: dict) -> list[str]:
                     or not residency.flag_on(variables.get("enabled", True)):
                 continue
             where, account, region = f"{stack_name}: {name}", residency.own_account(instance), variables.get("region")
-            for flag, kind in (("accessanalyzer_organization_enabled", "ORGANIZATION"),
-                               ("accessanalyzer_organization_unused_access_enabled", "ORGANIZATION_UNUSED_ACCESS")):
-                if residency.flag_on(variables.get(flag)):
-                    analyzers[(account, region, kind)].append(where)
+            for kind in sorted(analyzer_kinds(instance)):
+                analyzers[(account, region, kind)].append(where)
             if residency.flag_on(variables.get("accessanalyzer_organization_unused_access_enabled")):
                 unused[(account, str(region).startswith(residency.EU_PREFIX))].append(where)
             if residency.flag_on(variables.get("organizations_delegated_administrator_enabled")):
