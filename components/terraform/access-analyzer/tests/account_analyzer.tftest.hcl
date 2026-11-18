@@ -56,8 +56,8 @@ run "flag_on_creates_one_account_analyzer" {
     error_message = "the analyzer's type is ACCOUNT"
   }
   assert {
-    condition     = aws_accessanalyzer_analyzer.account[0].analyzer_name == format("%s-account", module.this.id)
-    error_message = "the analyzer is named <id>-account"
+    condition     = aws_accessanalyzer_analyzer.account[0].analyzer_name == "ue1-dev-access-analyzer-account"
+    error_message = "the analyzer is named <id>-account (this null-label context: ue1-dev-access-analyzer)"
   }
   assert {
     condition     = length(aws_accessanalyzer_analyzer.organization) == 0 && length(aws_accessanalyzer_analyzer.organization_unused_access) == 0 && length(aws_organizations_delegated_administrator.default) == 0

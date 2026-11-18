@@ -518,7 +518,8 @@ def check_org_services(stacks: dict) -> list[str]:
 
 def check_access_analyzers(stacks: dict) -> list[str]:
     """IAM Access Analyzer (vendored access-analyzer, E5c7) singletons: one analyzer per (account, region, type),
-    ACCOUNT included (E5c7b, house account-analyzer_house.tf),
+    ACCOUNT included (E5c7b, house account-analyzer_house.tf; deliberately also check-data-residency.py's
+    account_analyzer_errors rule, which checks it as residency completeness, this one as a name collision),
     one unused-access analyzer (global) per account and residency, and the delegation
     (organizations_delegated_administrator_enabled) once in all, in the management account."""
     errors, analyzers, unused, delegations = [], collections.defaultdict(list), collections.defaultdict(list), []

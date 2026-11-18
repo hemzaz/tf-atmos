@@ -978,8 +978,13 @@ US_ACCOUNT_STACKS = {"fnx-ue1-root": "root", "fnx-ue2-root": "root", "fnx-ue1-se
                      "fnx-ue2-security": "security", "fnx-ue1-prod": "prod"}
 
 
-def account_analyzer(stack_name, account, **variables):
-    return org_instance("access-analyzer", account, ORG_REGIONS[stack_name.split("-")[1]], **{
+# The management account's follows the global delegation step (MANAGEMENT_PREDECESSORS).
+AA_ACCOUNT_ON_ROOT = [{"component": "access-analyzer/root", "stack": "fnx-ue1-root"}]
+
+
+def account_analyzer(stack_name, account, deps=None, **variables):
+    deps = (AA_ACCOUNT_ON_ROOT if account == "root" else []) if deps is None else deps
+    return org_instance("access-analyzer", account, ORG_REGIONS[stack_name.split("-")[1]], deps, **{
         "accessanalyzer_account_enabled": True, "accessanalyzer_organization_enabled": False,
         "accessanalyzer_organization_unused_access_enabled": False,
         "organizations_delegated_administrator_enabled": False, **variables})
@@ -1494,12 +1499,54 @@ class AccountAnalyzerTest(unittest.TestCase):
             stacks[f"fnx-ue1-{stage}-x"] = stack(vpc=spec)
         self.assertEqual(self.found(stacks), [])
 
-    def test_without_the_delegation_completeness_is_not_required(self):
-        # A stack set that does not use Access Analyzer (no delegation) needs no ACCOUNT analyzers.
+    def test_any_enabled_access_analyzer_triggers_completeness(self):
+        # The delegation disabled, the ACCOUNT analyzers still there: one missing still fails.
         stacks = org_services_stacks()
-        del self.terraform(stacks, "fnx-ue1-root")["access-analyzer/root"]
+        self.terraform(stacks, "fnx-ue1-root")["access-analyzer/root"]["vars"]["enabled"] = False
         del self.terraform(stacks, "fnx-ue1-prod")["access-analyzer/account"]
+        found = self.found(stacks)
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith("fnx-ue1-prod: account prod has no enabled ACCOUNT analyzer in us-east-1"))
+
+    def test_a_stack_set_without_access_analyzer_is_exempt(self):
+        stacks = org_services_stacks()
+        for terraform in (st["components"]["terraform"] for st in stacks.values()):
+            for name in [n for n in terraform if n.startswith("access-analyzer/")]:
+                del terraform[name]
         self.assertEqual(self.found(stacks), [])
+        stacks = {"fnx-ue1-prod": stack(vpc=org_instance("vpc", "prod", "us-east-1"))}
+        self.assertEqual(residency.check(stacks), [])
+
+    def test_a_management_account_analyzer_without_the_global_step_fails(self):
+        for stack_name in ("fnx-ue1-root", "fnx-ue2-root"):
+            with self.subTest(stack=stack_name):
+                stacks = org_services_stacks()
+                self.terraform(stacks, stack_name)["access-analyzer/account"]["dependencies"]["components"] = []
+                self.assertEqual([e for e in residency.check(stacks) if "dependencies" in e], [
+                    f"{stack_name}: access-analyzer/account dependencies.components is []: Cloud Posse's step order "
+                    "needs exactly access-analyzer/root in fnx-ue1-root (the same region's previous step)"])
+
+    def test_the_fnx_ue2_root_analyzer_on_its_own_region_root_fails(self):
+        stacks = org_services_stacks()
+        self.terraform(stacks, "fnx-ue2-root")["access-analyzer/account"]["dependencies"]["components"] = [
+            {"component": "access-analyzer/root", "stack": "fnx-ue2-root"}]
+        self.assertEqual([e for e in residency.check(stacks) if "dependencies" in e or "depends" in e], [
+            "fnx-ue2-root: access-analyzer/account dependencies.components is ['access-analyzer/root in fnx-ue2-root']: "
+            "Cloud Posse's step order needs exactly access-analyzer/root in fnx-ue1-root (the same region's previous "
+            "step)"])
+
+    def test_a_member_account_analyzer_needs_no_dependency(self):
+        stacks = org_services_stacks()
+        for stack_name in ("fnx-ue1-security", "fnx-ue2-security", "fnx-ue1-prod"):
+            self.assertEqual(self.terraform(stacks, stack_name)["access-analyzer/account"]["dependencies"]["components"],
+                             [])
+        self.assertEqual(residency.check(stacks), [])
+        # ...and may not name the management account's step (it has none to follow).
+        self.terraform(stacks, "fnx-ue1-prod")["access-analyzer/account"]["dependencies"]["components"] = list(
+            AA_ACCOUNT_ON_ROOT)
+        self.assertEqual([e for e in residency.check(stacks) if "dependencies" in e], [
+            "fnx-ue1-prod: access-analyzer/account dependencies.components is ['access-analyzer/root in fnx-ue1-root']: "
+            "Cloud Posse's step order needs nothing (the same region's previous step)"])
 
 
 class RouteEnrolmentTest(unittest.TestCase):

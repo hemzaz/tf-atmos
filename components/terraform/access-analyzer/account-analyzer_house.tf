@@ -25,6 +25,10 @@ resource "aws_accessanalyzer_analyzer" "account" {
   type          = "ACCOUNT"
 
   tags = module.this.tags
+
+  # In the management account the root step creates Access Analyzer's service-linked role; AWS would otherwise
+  # create it with this analyzer when both are in one apply (an empty list elsewhere).
+  depends_on = [aws_iam_service_linked_role.access_analyzer]
 }
 
 output "account_accessanalyzer_arn" {

@@ -108,10 +108,12 @@ the all-GDPR accounts outside it and exactly the shared accounts but the analyze
 (access_analyzer_errors). Each account's own ACCOUNT external-access analyzer (house
 account-analyzer_house.tf, accessanalyzer_account_enabled, E5c7b, owner 2026-11-18) closes the US
 regions' gap the EU-only organization one leaves: none in a GDPR-scoped stack or an all-GDPR
-account's (the EU organization analyzers cover them); and, once the organization uses Access Analyzer
-(an enabled delegation, organizations_delegated_administrator_enabled), exactly one enabled per
-account and region with a stack outside the GDPR scope, so the gap cannot reopen
-(account_analyzer_errors; stages fixtures and local, never real accounts, are exempt). A security-monitoring
+account's (the EU organization analyzers cover them); and, once the stack set uses Access Analyzer
+(any enabled access-analyzer instance), exactly one enabled per account and region with a stack
+outside the GDPR scope, so the gap cannot reopen (account_analyzer_errors; stages fixtures and
+local, never real accounts, are exempt). In the management account it depends on
+<tenant>-ue1-root's access-analyzer/root (its service-linked role), in a member account on nothing
+(MANAGEMENT_PREDECESSORS, org_dependency_findings). A security-monitoring
 route (enable_guardduty_route, enable_securityhub_route, enable_inspector2_route; E5c8, owner OQ-AL) on in an
 account no org-settings of its tenant and region enrolls (account_map key, Inspector less its excluded IDs)
 fails: it would watch a member detector or hub that does not exist (route_enrolment_errors). A
@@ -827,9 +829,11 @@ def account_analyzer_errors(stacks: dict, scoped: set) -> list[str]:
 
     The organization external-access analyzer runs only in the EU (access_analyzer_errors), so US-region
     resources are analysed by an ACCOUNT analyzer per account and region: never in a GDPR-scoped stack or an
-    all-GDPR account's (GDPR_ONLY_ACCOUNTS: the EU organization analyzers cover them), and, when the organization
-    delegates Access Analyzer at all, exactly one per (account, region) that has a stack outside the GDPR scope."""
-    errors, analyzers, groups, delegated = [], {}, {}, False
+    all-GDPR account's (GDPR_ONLY_ACCOUNTS: the EU organization analyzers cover them), and, when the stack set
+    uses Access Analyzer at all (any enabled access-analyzer instance), exactly one per (account, region) that has a
+    stack outside the GDPR scope. The one-per-(account, region) rule is deliberately also check-lane-names.py's
+    (there as a name collision, here as residency completeness), so either check alone fails a duplicate."""
+    errors, analyzers, groups, used = [], {}, {}, False
     for stack_name in sorted(stacks):
         for name, instance in sorted(instances(stacks[stack_name]).items()):
             variables = instance.get("vars") or {}
@@ -840,7 +844,7 @@ def account_analyzer_errors(stacks: dict, scoped: set) -> list[str]:
                 groups.setdefault((account, region), set()).add(stack_name)
             if component_of(name, instance) != "access-analyzer" or not flag_on(variables.get("enabled", True)):
                 continue
-            delegated = delegated or flag_on(variables.get("organizations_delegated_administrator_enabled"))
+            used = True
             if not flag_on(variables.get("accessanalyzer_account_enabled")):
                 continue
             if stack_name in scoped:
@@ -855,7 +859,7 @@ def account_analyzer_errors(stacks: dict, scoped: set) -> list[str]:
         if len(wheres) > 1:
             errors.append(f"{' and '.join(wheres)} all create the ACCOUNT analyzer of {account} in {region}: one per "
                           "account and region")
-    if delegated:
+    if used:
         errors += [f"{', '.join(sorted(groups[key]))}: account {key[0]} has no enabled ACCOUNT analyzer in {key[1]} "
                    "(access-analyzer/account, catalog/access-analyzer/account.yaml): that region's external sharing "
                    "would be unmonitored by Access Analyzer"
@@ -887,7 +891,24 @@ ORG_PREDECESSORS = {
     "aws-inspector2/root": None,
     "access-analyzer/root": None,
     "access-analyzer/delegated-administrator": ("access-analyzer/root", "root", "ue1"),
+    # A member account's ACCOUNT analyzer (E5c7b) depends on nothing; the management account's: see below.
+    "access-analyzer/account": None,
 }
+# E5c7b: in the management account (stage root) the ACCOUNT analyzer follows the global delegation step,
+# <tenant>-ue1-root's access-analyzer/root, in every US region: AWS creates the account's Access Analyzer
+# service-linked role with its first analyzer, and that step's aws_iam_service_linked_role would then fail as
+# taken. A member account has no such step, so its analyzer depends on nothing.
+MANAGEMENT_PREDECESSORS = {
+    "access-analyzer/account": ("access-analyzer/root", "root", "ue1"),
+}
+
+
+def predecessor_step(name: str, instance: dict) -> Optional[tuple]:
+    """ORG_PREDECESSORS' step for the instance, the management account's (MANAGEMENT_PREDECESSORS) when stage root."""
+    if name in MANAGEMENT_PREDECESSORS and \
+            ((instance.get("settings") or {}).get("context") or {}).get("stage") == "root":
+        return MANAGEMENT_PREDECESSORS[name]
+    return ORG_PREDECESSORS.get(name)
 
 
 def org_dependency_findings(stacks: dict) -> tuple[list[str], list[str]]:
@@ -912,7 +933,7 @@ def org_dependency_findings(stacks: dict) -> tuple[list[str], list[str]]:
             where, region = f"{stack_name}: {name}", variables.get("region")
             deps = [(str(d.get("component") or ""), d.get("stack") or stack_name)
                     for d in (instance.get("dependencies") or {}).get("components") or []]
-            step = ORG_PREDECESSORS.get(name)
+            step = predecessor_step(name, instance)
             # <tenant>-<environment>-<stage> (atmos.yaml name_template): the predecessor's stack is this one's
             # tenant and region code (a global step: its own) with the predecessor's stage.
             tenant, env = (stack_name.split("-") + ["", ""])[:2]

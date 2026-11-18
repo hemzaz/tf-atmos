@@ -14,9 +14,10 @@
 # No delegation and no organization analyzer, so no dependency on the root
 # step and no !terraform.state read: AWS creates the account's Access Analyzer
 # service-linked role with its first analyzer. In the management account the
-# root step's aws_iam_service_linked_role must apply first (fnx-ue1-root's
-# instance depends on it; fnx-ue2-root follows fnx-ue1-root in the bootstrap,
-# docs/OPERATIONS.md). deploy-full-stack's security layer applies it
+# root step's aws_iam_service_linked_role must apply first: each US root
+# stack's instance depends on <tenant>-ue1-root's access-analyzer/root
+# (check-data-residency.py MANAGEMENT_PREDECESSORS requires it; a member
+# account's depends on nothing). deploy-full-stack's security layer applies it
 # (.vars.accessanalyzer_account_enabled == true), never security-org.
 # =============================================================================
 

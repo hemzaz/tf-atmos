@@ -551,9 +551,12 @@ In each operated region (`--region <r>`):
       in us-east-1 and `fnx-ue2-{prod,root,security}` in us-east-2. In an EU region it returns none
       (the EU organization analyzers cover every account there), and `prod-eu` has none in any
       region. check-data-residency.py fails a missing, duplicated or EU one. In the management
-      account, `fnx-ue1-root`'s analyzer applies after `access-analyzer/root` (its service-linked
-      role; AWS would otherwise create the role with the first analyzer, and the root step's apply
-      would fail as above), and `fnx-ue2-root`'s after `fnx-ue1-root` (the bootstrap order).
+      account, both US root stacks' analyzers depend on `fnx-ue1-root`'s `access-analyzer/root`
+      (its service-linked role; AWS would otherwise create the role with the first analyzer, and the
+      root step's apply would fail as above), which check-data-residency.py requires. Within
+      `fnx-ue1-root` the security layer applies them in dependency order; `fnx-ue2-root`'s
+      `deploy-security` runs after `fnx-ue1-root`'s (the order above), as the US security stacks'
+      delegated administrators do.
 
 What step 1 makes sticky (settle before the first apply; changing it later means undoing the
 organization side first): the delegated administrator (`fnx-security` for both services in all

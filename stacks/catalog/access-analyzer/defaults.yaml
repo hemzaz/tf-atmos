@@ -40,6 +40,8 @@ components:
         accessanalyzer_service_principal: "access-analyzer.amazonaws.com"
         accessanalyzer_organization_enabled: false
         accessanalyzer_organization_unused_access_enabled: false
+        # The house ACCOUNT analyzer (account-analyzer_house.tf, account.yaml, E5c7b).
+        accessanalyzer_account_enabled: false
         organizations_delegated_administrator_enabled: false
         service_linked_role_enabled: true
         tags:

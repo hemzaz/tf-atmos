@@ -64,7 +64,8 @@ components:
     # (catalog/access-analyzer/account.yaml, E5c7b). After access-analyzer/root
     # in this stack (one security layer, dependency order): AWS creates the
     # account's Access Analyzer service-linked role with its first analyzer, and
-    # the root step's aws_iam_service_linked_role would then fail as taken.
+    # the root step's aws_iam_service_linked_role would then fail as taken
+    # (required: check-data-residency.py MANAGEMENT_PREDECESSORS).
     access-analyzer/account:
       metadata:
         component: access-analyzer
