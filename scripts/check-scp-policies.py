@@ -23,7 +23,14 @@ instance (disabled ones too, which E3e enables):
     another OU (owner decision OQ-F); a detector one excepts BREAK_GLASS (AdministratorAccess)
     and, on core, otherwise only roles pinned to the security account
     (settings.account_map.full_account_map.security), including a ci-apply pattern; on any other
-    OU nothing else (E5c10: since E5c8 no workload stack manages a detector or hub);
+    OU nothing else (E5c10: since E5c8 no workload stack manages a detector or hub); a NotAction
+    Deny with no region condition counts as denying every kind its NotAction does not exclude;
+  - per stack, a non-core OU's security-services policy denies no detector action core's does not
+    (core adds only the delegated administrator's org configuration), and the same
+    CloudTrail/Config and Access Analyzer actions as core's (no drift between the two copies);
+  - CATALOG (read from the repository, not stdin) pins an account only as
+    {{ .settings.account_map.full_account_map.security }}, never another key or a literal id: the
+    sweep's placeholder ids are all equal, so the rendered pin alone proves nothing;
   - an Identity Center (AWSReservedSSO_) principal pattern names one permission set under
     the reserved path role/aws-reserved/sso.amazonaws.com/ (SSO_ROLE), and every role
     exception of a policy (ArnNotLike aws:PrincipalArn, Identity Center's too) is covered by a
@@ -33,7 +40,8 @@ instance (disabled ones too, which E3e enables):
   - per protected role: whoever every protection covering a Deny's role exception exempts (and so
     may create or re-trust that role, then act as it) is exempt from that Deny too, in the account
     the role is pinned to (a principal arn:aws:iam::*:role/X acts in its own account, so only
-    those in account A can create a role pinned to A); action names compare case-insensitively;
+    those in account A can create a role pinned to A); patterns compare by IAM glob (* and ?
+    only); action names compare case-insensitively;
   - no aws-scp/security-services-* instance is enabled while the stack's aws-identity-center is
     disabled (until Identity Center is applied, OrganizationAccountAccessRole runs the accounts);
   - no target has more than four (AWS allows five per target, FullAWSAccess included);
@@ -56,6 +64,7 @@ Exit 0 when clean, 1 on a finding, 2 on unreadable input.
 import difflib
 import fnmatch
 import json
+import pathlib
 import re
 import sys
 
@@ -74,7 +83,6 @@ DETECTORS = ("guardduty:", "securityhub:", "inspector2:")
 ANALYZERS = ("access-analyzer:",)
 KINDS = (("CloudTrail/Config", TRAIL_CONFIG), ("detector (GuardDuty, Security Hub, Inspector)", DETECTORS),
          ("Access Analyzer", ANALYZERS))
-SECURITY_SERVICES = TRAIL_CONFIG + DETECTORS + ANALYZERS
 OAAR = "arn:aws:iam::*:role/OrganizationAccountAccessRole"
 # The break-glass, the one detector exception in every account.
 BREAK_GLASS = "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
@@ -86,6 +94,10 @@ IDENTITY_CENTER, SECURITY_SERVICES_SCP = "aws-identity-center", "aws-scp/securit
 CI_APPLY = re.compile(r"^arn:aws:iam::(\*|\d{12}):role/[a-z0-9]+-\*-ci-apply$")
 ROLE_ARN = re.compile(r"^arn:aws:iam::([^:]*):role/(.+)$")
 RESERVED = ":role/aws-reserved/"
+# The catalog whose raw account pins are checked, and the one pin it may use.
+CATALOG = "stacks/catalog/aws-scp/defaults.yaml"
+SECURITY_PIN = "{{ .settings.account_map.full_account_map.security }}"
+PIN = re.compile(r"arn:aws:iam::([^:]*):")
 # An Identity Center role: one named permission set under the path only Identity Center
 # creates in (the * before the name admits the home region's path segment), any hash.
 # `<set>_*` is that one set; `<set>-*` also takes its per-backend variants (TerraformApplyAccess-Prod),
@@ -233,10 +245,19 @@ def detector_findings(where, allowed, ous, security_account):
     return errs
 
 
+def denied_kinds(st):
+    """The KINDS a statement denies: by its Action, or every kind its NotAction does not wholly exclude."""
+    if "NotAction" in st:
+        excluded = [a.lower() for a in as_list(st["NotAction"])]
+        return [name for name, prefixes in KINDS
+                if not all(any(within(f"{p}*", e) for e in excluded) for p in prefixes)]
+    actions = [a.lower() for a in as_list(st.get("Action"))]
+    return [name for name, prefixes in KINDS if any(a.startswith(prefixes) for a in actions)]
+
+
 def security_findings(where, st, ous, security_account=None):
     """A Deny of security-service actions: its deploy-role exception, per kind and OU."""
-    actions, allowed = as_list(st.get("Action")), principal_exceptions(st)
-    kinds = [name for name, prefixes in KINDS if any(a.lower().startswith(prefixes) for a in actions)]
+    allowed, kinds = principal_exceptions(st), denied_kinds(st)
     if len(kinds) > 1:
         return [f"{where}: denies {' and '.join(kinds)} actions in one statement; split it "
                 "(DenyTrailConfigTampering, DenyDetectorTampering, DenyAnalyzerTampering): their exceptions differ"]
@@ -301,14 +322,17 @@ def statement_findings(where, st, ous=(), security_account=None):
         missing = [g for g in GLOBAL_SERVICES if g not in as_list(st["NotAction"])]
         if missing:
             errs.append(f"{where}: region deny does not exempt global service(s) {', '.join(missing)}")
-    if cond is None and any(a.lower().startswith(SECURITY_SERVICES) for a in actions):
+    if cond is None and denied_kinds(st):
         errs += security_findings(where, st, ous, security_account)
     return errs
 
 
 def within(pattern, outer):
-    """True when every ARN pattern matches is one outer matches (its wildcards taken literally)."""
-    return fnmatch.fnmatchcase(pattern, outer)
+    """True when everything pattern matches, outer matches too, by IAM glob (ArnLike, StringLike):
+    only * (any run) and ? (one character) are wildcards, [ is literal. An outer * covers any part
+    of pattern, wildcards included; an outer ? covers one character, never a pattern's * (a run)."""
+    regex = "".join(".*" if c == "*" else "[^*]" if c == "?" else re.escape(c) for c in outer)
+    return re.fullmatch(regex, pattern, re.DOTALL) is not None
 
 
 def covering(statements, role):
@@ -421,6 +445,38 @@ def security_account_of(comp):
     return str(account_map["security"]) if account_map.get("security") else None
 
 
+def drift_findings(stack, by_ou):
+    """by_ou: {OU instance: [statement]} of a stack's security-services policies. A non-core OU's
+    copy denies no detector action core's does not, and the same CloudTrail/Config and Access
+    Analyzer actions (core adds only the delegated administrator's org configuration)."""
+    def actions(statements, kind):
+        return {a.lower() for st in statements if st.get("Effect") == "Deny" and denied_kinds(st) == [kind]
+                for a in as_list(st.get("Action"))}
+    core = [o for o in by_ou if o in OAAR_TRAIL_OUS]
+    if not core:
+        return []
+    errs = []
+    for ou in sorted(set(by_ou) - set(core)):
+        for kind, _ in KINDS:
+            mine, theirs = actions(by_ou[ou], kind), actions(by_ou[core[0]], kind)
+            if kind == KINDS[1][0] and mine - theirs:
+                errs.append(f"{stack}: {ou}'s security-services denies detector action(s) "
+                            f"{', '.join(sorted(mine - theirs))} that {core[0]}'s does not (core's list is plat's "
+                            "plus the org configuration)")
+            elif kind != KINDS[1][0] and mine != theirs:
+                errs.append(f"{stack}: {ou}'s and {core[0]}'s security-services deny different {kind} actions "
+                            f"({', '.join(sorted(mine ^ theirs))}); they share one list")
+    return errs
+
+
+def catalog_pin_findings(text, path=CATALOG):
+    """Account pins in the raw catalog other than * or SECURITY_PIN (another key, or a literal id)."""
+    return [f"{path}:{n}: pins account {m.group(1)!r}; the only pin allowed is {SECURITY_PIN} (the "
+            "security account), never another key or a literal id"
+            for n, line in enumerate(text.splitlines(), 1) if not line.lstrip().startswith("#")
+            for m in PIN.finditer(line) if m.group(1) not in ("*", SECURITY_PIN)]
+
+
 def policy_sizes(stacks):
     """[(stack, instance, characters)] of every aws-scp instance's policy that parses."""
     sizes = []
@@ -437,7 +493,7 @@ def policy_sizes(stacks):
 
 
 def check(stacks):
-    errs, per_target, ou_statements = [], {}, {}
+    errs, per_target, ou_statements, security_services = [], {}, {}, {}
     for stack, body in sorted(stacks.items()):
         errs += lockout_findings(stack, terraform(body))
         for name, comp in sorted(terraform(body).items()):
@@ -466,6 +522,10 @@ def check(stacks):
                 m = READ.match(str(t))
                 if m:
                     ou_statements.setdefault((stack, m.group(1)), []).extend((name, st) for st in doc["Statement"])
+                    if name.startswith(SECURITY_SERVICES_SCP):
+                        security_services.setdefault(stack, {}).setdefault(m.group(1), []).extend(doc["Statement"])
+    for stack, by_ou in sorted(security_services.items()):
+        errs += drift_findings(stack, by_ou)
     for (stack, target), names in sorted(per_target.items()):
         if len(names) > MAX_PER_TARGET:
             errs.append(f"{stack}: {len(names)} SCPs on {target} ({', '.join(names)}); AWS allows "
@@ -540,6 +600,11 @@ def main(argv):
         print(f"check-scp-policies: cannot read the describe output: {exc}", file=sys.stderr)
         return 2
     errs = check(stacks)
+    catalog = pathlib.Path(__file__).resolve().parents[1] / CATALOG
+    try:
+        errs += catalog_pin_findings(catalog.read_text(), CATALOG)
+    except OSError as exc:
+        errs.append(f"cannot read {CATALOG}: {exc}")
     for stack, name, size in policy_sizes(stacks):
         print(f"check-scp-policies: {stack} {name}: {size} of {MAX_CHARS} characters")
     for err in errs:

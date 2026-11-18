@@ -23,6 +23,13 @@
 # no Deny protects from squatting, a misspelled condition key, a region list missing a global service, a stack in
 # a region its OU denies or denied a us-east-1 call its components make (the
 # relay, DNSSEC, query logging), and an EU account allowed data calls there.
+# For security-services (E5c10) it also fails a statement mixing CloudTrail/
+# Config, detector and Access Analyzer actions (NotAction included), a
+# detector exception other than the break-glass (and, on core, the security
+# account's pinned deploy roles), an aws-reserved/ protection with an
+# exception, a role an exempt principal could create and act as, plat
+# detector actions core lacks or trail/analyzer lists that differ, and an
+# account pin here other than .settings.account_map.full_account_map.security.
 #
 #   policy             core  plat  eu   source
 #   baseline            x     x    (1)  Cloud Posse catalog (catalog/*.yaml)
@@ -101,7 +108,10 @@ components:
     # out), and the Identity Center roles of the TerraformApplyAccess sets (-Prod
     # and -Eu too) and AdministratorAccess (the break-glass), by their reserved
     # path aws-reserved/sso.amazonaws.com/ (no region segment: the home region is
-    # us-east-1; the * admits the regional form). Not listed:
+    # us-east-1; the * admits the regional form). The set patterns stay broad
+    # (any hash, TerraformApplyAccess-<x>): minting a permission set is the
+    # Identity Center administrator's, in the management account, part of the
+    # trust root these policies cannot bind. Not listed:
     # guardduty:DisableOrganizationAdminAccount and the Security Hub and
     # Inspector equivalents, management-account calls, which SCPs never bind.
     # Service-linked roles (org auto-enable, and Identity Center's

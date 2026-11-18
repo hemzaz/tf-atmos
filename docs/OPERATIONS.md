@@ -606,12 +606,18 @@ once enabled). CloudTrail and Config (`DenyTrailConfigTampering`) and Access Ana
 `TerraformApplyAccess*`, `AdministratorAccess`; in core also `OrganizationAccountAccessRole`).
 GuardDuty, Security Hub and Inspector (`DenyDetectorTampering`): in a workload account only
 `AdministratorAccess`, the break-glass; in core the security account's deploy roles (which run the
-delegated administrators and alone may change the org configuration or member features) and
-`AdministratorAccess` in any account. A member's detector or hub that needs a hand fix is fixed as
+delegated administrators) and `AdministratorAccess` in any account. The org configuration
+(auto-enable) and member features may be changed only by the security account's deploy roles and,
+as break-glass, `AdministratorAccess`. A member's detector or hub that needs a hand fix is fixed as
 `AdministratorAccess` in that account. Nobody may create or change a role under `aws-reserved/`
 (Identity Center's service-linked role, which SCPs do not bind, is the only writer there), and
 only the deploy roles may change the CI roles or `OrganizationAccountAccessRole`. The
-management account is never bound (the delegations' disable calls run there).
+management account is never bound (the delegations' disable calls run there). Last resort, when
+Identity Center is unavailable (no `AdministratorAccess` sign-in): from the management account,
+detach `security-services-plat` or `-core` from its OU (`aws organizations detach-policy
+--policy-id <p-...> --target-id <ou id>`, or edit it), repair, then re-attach it
+(`atmos terraform apply aws-scp/security-services-<ou> -s fnx-gbl-root`) and confirm with
+`aws organizations list-policies-for-target --target-id <ou id> --filter SERVICE_CONTROL_POLICY`.
 
 **Before `certificates`: delegate the stack's domain.** ACM validates in `network/main`'s `main`
 zone, so its domain must resolve, or validation times out after 45 minutes. The US domains follow

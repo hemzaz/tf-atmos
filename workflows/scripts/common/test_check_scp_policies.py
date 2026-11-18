@@ -434,6 +434,102 @@ class CheckWiring(unittest.TestCase):
         self.assertTrue(all("escapes the deny" in e for e in errs))
 
 
+class CopyDrift(unittest.TestCase):
+    """E5c10 review: plat's copy must not drift from core's (plat's detector actions within core's,
+    the trail/Config and Access Analyzer actions equal)."""
+
+    def stacks(self, core, plat):
+        comps = {"aws-scp/security-services-core": scp(core, CORE),
+                 "aws-scp/security-services-plat": scp(plat, PLAT),
+                 "aws-identity-center": IDENTITY_CENTER}
+        return {"fnx-gbl-root": {"components": {"terraform": comps}}}
+
+    def test_core_only_org_configuration_passes(self):
+        core = catalog(CORE)
+        core[1] = dict(core[1], Action=core[1]["Action"] + ["guardduty:UpdateOrganizationConfiguration"])
+        self.assertEqual(check.check(self.stacks(core, catalog(PLAT))), [])
+
+    def test_plat_detector_action_core_lacks_fails(self):
+        plat = catalog(PLAT)
+        plat[1] = dict(plat[1], Action=plat[1]["Action"] + ["inspector2:DisassociateMember"])
+        errs = check.check(self.stacks(catalog(CORE), plat))
+        self.assertEqual(len(errs), 1)
+        self.assertIn("inspector2:disassociatemember", errs[0])
+        self.assertIn("that aws-organizational-unit/core's does not", errs[0])
+
+    def test_analyzer_or_trail_lists_differ_fails(self):
+        for i, extra in ((0, "cloudtrail:PutInsightSelectors"), (2, "access-analyzer:UpdateArchiveRule")):
+            with self.subTest(extra=extra):
+                core = catalog(CORE)
+                core[i] = dict(core[i], Action=core[i]["Action"] + [extra])
+                errs = check.check(self.stacks(core, catalog(PLAT)))
+                self.assertEqual(len(errs), 1)
+                self.assertIn("share one list", errs[0])
+
+
+class CatalogPins(unittest.TestCase):
+    """E5c10 review: the raw catalog pins only the security account, by its settings key."""
+
+    def test_security_pin_and_any_account_pass(self):
+        text = ('values:\n  - "arn:aws:iam::{{ .settings.account_map.full_account_map.security }}:role/x"\n'
+                '  - "arn:aws:iam::*:role/y"\n')
+        self.assertEqual(check.catalog_pin_findings(text), [])
+
+    def test_other_key_or_literal_fails(self):
+        for pin in ("{{ .settings.account_map.full_account_map.audit }}",
+                    "{{ index .settings.account_map.full_account_map \"security\" }}", "123456789012"):
+            with self.subTest(pin=pin):
+                errs = check.catalog_pin_findings(f'  - "arn:aws:iam::{pin}:role/fnx-*-ci-apply"\n')
+                self.assertEqual(len(errs), 1)
+                self.assertIn(":1: pins account", errs[0])
+
+    def test_comments_are_ignored(self):
+        self.assertEqual(check.catalog_pin_findings("# arn:aws:iam::<security id>:role/x\n"), [])
+
+    def test_the_catalog_passes(self):
+        path = pathlib.Path(__file__).resolve().parents[3] / check.CATALOG
+        text = path.read_text()
+        self.assertIn(check.SECURITY_PIN, text)
+        self.assertEqual(check.catalog_pin_findings(text), [])
+
+
+class IamGlob(unittest.TestCase):
+    def test_star_covers_any_run_and_wildcards(self):
+        self.assertTrue(check.within("arn:aws:iam::111111111111:role/fnx-*-ci-apply", "arn:aws:iam::*:role/fnx-*-ci-apply"))
+        self.assertTrue(check.within(BREAK_GLASS, "arn:aws:iam::*:role/aws-reserved/*"))
+        self.assertFalse(check.within("arn:aws:iam::*:role/fnx-*-ci-apply", "arn:aws:iam::111111111111:role/fnx-*-ci-apply"))
+
+    def test_question_mark_is_one_character_never_a_run(self):
+        self.assertTrue(check.within("role/a1", "role/a?"))
+        self.assertTrue(check.within("role/a?", "role/a?"))
+        self.assertFalse(check.within("role/a*", "role/a?"))
+        self.assertFalse(check.within("role/a12", "role/a?"))
+
+    def test_brackets_are_literal(self):
+        # fnmatch would read [ab] as a character class; IAM does not.
+        self.assertFalse(check.within("role/a", "role/[ab]"))
+        self.assertTrue(check.within("role/[ab]", "role/[ab]"))
+
+
+class NotActionDeny(unittest.TestCase):
+    def test_not_action_deny_runs_the_kind_rules(self):
+        # NotAction s3:* denies every security service: one statement, every kind, break-glass only.
+        st = {"Sid": "DenyAllButS3", "Effect": "Deny", "NotAction": ["s3:*"], "Resource": "*",
+              "Condition": {"ArnNotLike": {"aws:PrincipalArn": [BREAK_GLASS]}}}
+        errs = check.statement_findings("s", st, [PLAT], SEC)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("split it", errs[0])
+
+    def test_not_action_excluding_the_other_kinds_is_one_kind(self):
+        st = {"Effect": "Deny", "NotAction": ["cloudtrail:*", "config:*", "access-analyzer:*", "s3:*"],
+              "Resource": "*", "Condition": {"ArnNotLike": {"aws:PrincipalArn": [CI_APPLY]}}}
+        # Only the detector kind is left, so the detector rule applies: no break-glass, and ci-apply.
+        errs = check.statement_findings("s", st, [PLAT], SEC)
+        self.assertEqual(len(errs), 2)
+        self.assertIn("does not except " + BREAK_GLASS, errs[0])
+        self.assertIn("only " + BREAK_GLASS, errs[1])
+
+
 class Limits(unittest.TestCase):
     def test_size_counts_minified_json(self):
         # AWS counts the policy without whitespace outside strings: indentation is free.
