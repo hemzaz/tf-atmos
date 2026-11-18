@@ -268,9 +268,10 @@ components:
     # root (organization_root_id) as a target.
     #
     # Disabled until Identity Center is applied: security-services excepts the
-    # CI apply roles, OrganizationAccountAccessRole (core; in plat only from
-    # the detector deny, E5b8) and the Identity Center
-    # TerraformApplyAccess/AdministratorAccess roles (E4b1), and protects them
+    # CI apply roles, OrganizationAccountAccessRole (core only) and the Identity
+    # Center TerraformApplyAccess/AdministratorAccess roles (E4b1; from
+    # GuardDuty, Security Hub and Inspector, core only the security account's
+    # and plat only AdministratorAccess, E5c10), and protects them
     # (OrganizationAccountAccessRole stays excepted until Identity Center is
     # applied, owner decision Evolution 4). check-scp-policies.py fails an
     # enabled security-services instance while aws-identity-center is
