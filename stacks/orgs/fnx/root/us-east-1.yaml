@@ -22,6 +22,10 @@
 # (docs/OPERATIONS.md "Bootstrap order"). This stack is not scaffolded: the
 # same instances as the core template's home-region stacks
 # (scaffolds/stack/stack/core.yaml.tmpl), by hand.
+#
+# IAM Access Analyzer: the organization delegation (access-analyzer/root) and,
+# as in every non-GDPR account's US stack, the account's own ACCOUNT
+# external-access analyzer for us-east-1 (access-analyzer/account, E5c7b).
 # =============================================================================
 
 import:
@@ -34,6 +38,7 @@ import:
   - catalog/access-analyzer/root
   - catalog/aws-cloudtrail/defaults
   - catalog/aws-config/main
+  - catalog/access-analyzer/account
   - catalog/aws-guardduty/defaults
   - catalog/aws-security-hub/defaults
   - catalog/aws-inspector2/defaults
@@ -54,6 +59,20 @@ components:
         component: aws-config
         inherits:
           - aws-config/main
+
+    # The management account's ACCOUNT external-access analyzer for us-east-1
+    # (catalog/access-analyzer/account.yaml, E5c7b). After access-analyzer/root
+    # in this stack (one security layer, dependency order): AWS creates the
+    # account's Access Analyzer service-linked role with its first analyzer, and
+    # the root step's aws_iam_service_linked_role would then fail as taken.
+    access-analyzer/account:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/account-defaults
+      dependencies:
+        components:
+          - component: access-analyzer/root
 
     # Cloud Posse's instance names, step 2 (E5c5): from the management account,
     # delegate GuardDuty, Security Hub and Inspector in this region to

@@ -105,7 +105,13 @@ expected stack, never a failure: onboarding a new region needs its hand-written 
 IAM role is reported in every region, and the analyzer cannot exclude an account); an unused-access
 analyzer's unused_access_exclusion_account_names (house unused-access-exclusions_house.tf) is exactly
 the all-GDPR accounts outside it and exactly the shared accounts but the analyzer's own inside it
-(access_analyzer_errors). A security-monitoring
+(access_analyzer_errors). Each account's own ACCOUNT external-access analyzer (house
+account-analyzer_house.tf, accessanalyzer_account_enabled, E5c7b, owner 2026-11-18) closes the US
+regions' gap the EU-only organization one leaves: none in a GDPR-scoped stack or an all-GDPR
+account's (the EU organization analyzers cover them); and, once the organization uses Access Analyzer
+(an enabled delegation, organizations_delegated_administrator_enabled), exactly one enabled per
+account and region with a stack outside the GDPR scope, so the gap cannot reopen
+(account_analyzer_errors; stages fixtures and local, never real accounts, are exempt). A security-monitoring
 route (enable_guardduty_route, enable_securityhub_route, enable_inspector2_route; E5c8, owner OQ-AL) on in an
 account no org-settings of its tenant and region enrolls (account_map key, Inspector less its excluded IDs)
 fails: it would watch a member detector or hub that does not exist (route_enrolment_errors). A
@@ -399,6 +405,7 @@ def check(stacks: dict, exemptions: tuple = EXEMPTIONS, warnings: Optional[list]
     errors += log_archive_errors(stacks, scoped)
     errors += org_service_errors(stacks, scoped)
     errors += access_analyzer_errors(stacks, scoped)
+    errors += account_analyzer_errors(stacks, scoped)
     errors += route_enrolment_errors(stacks)
     dependency_errors, dependency_warnings = org_dependency_findings(stacks)
     errors += dependency_errors
@@ -808,6 +815,51 @@ def access_analyzer_errors(stacks: dict, scoped: set) -> list[str]:
                 errors.append(f"{where} unused_access_exclusion_account_names {sorted(set(names) - eu_keys - {own})} are "
                               f"not the shared accounts but the owner (the account map minus {sorted(eu_keys)} and "
                               f"{own}: {sorted(shared)})")
+    return errors
+
+
+# Stages that are never a real account's (the never-deployed fixtures, the emulator-only local stacks).
+ACCOUNT_ANALYZER_EXEMPT_STAGES = (fixtures.FIXTURE_STAGE, "local")
+
+
+def account_analyzer_errors(stacks: dict, scoped: set) -> list[str]:
+    """Each account's ACCOUNT external-access analyzer (E5c7b, owner 2026-11-18) in its US stacks only.
+
+    The organization external-access analyzer runs only in the EU (access_analyzer_errors), so US-region
+    resources are analysed by an ACCOUNT analyzer per account and region: never in a GDPR-scoped stack or an
+    all-GDPR account's (GDPR_ONLY_ACCOUNTS: the EU organization analyzers cover them), and, when the organization
+    delegates Access Analyzer at all, exactly one per (account, region) that has a stack outside the GDPR scope."""
+    errors, analyzers, groups, delegated = [], {}, {}, False
+    for stack_name in sorted(stacks):
+        for name, instance in sorted(instances(stacks[stack_name]).items()):
+            variables = instance.get("vars") or {}
+            if ((instance.get("settings") or {}).get("context") or {}).get("stage") in ACCOUNT_ANALYZER_EXEMPT_STAGES:
+                continue
+            account, region, where = account_of(instance), variables.get("region"), f"{stack_name}: {name}"
+            if account and region and stack_name not in scoped and account not in GDPR_ONLY_ACCOUNTS:
+                groups.setdefault((account, region), set()).add(stack_name)
+            if component_of(name, instance) != "access-analyzer" or not flag_on(variables.get("enabled", True)):
+                continue
+            delegated = delegated or flag_on(variables.get("organizations_delegated_administrator_enabled"))
+            if not flag_on(variables.get("accessanalyzer_account_enabled")):
+                continue
+            if stack_name in scoped:
+                errors.append(f"{where} creates an ACCOUNT analyzer in a GDPR-scoped stack: the EU security stacks' "
+                              "ORGANIZATION analyzers cover the EU regions; ACCOUNT analyzers are for the US stacks")
+            elif account in GDPR_ONLY_ACCOUNTS:
+                errors.append(f"{where} creates an ACCOUNT analyzer in {account}, an account whose stacks are all "
+                              "GDPR-scoped: its findings belong to the EU organization analyzers")
+            else:
+                analyzers.setdefault((account, region), []).append(where)
+    for (account, region), wheres in sorted(analyzers.items()):
+        if len(wheres) > 1:
+            errors.append(f"{' and '.join(wheres)} all create the ACCOUNT analyzer of {account} in {region}: one per "
+                          "account and region")
+    if delegated:
+        errors += [f"{', '.join(sorted(groups[key]))}: account {key[0]} has no enabled ACCOUNT analyzer in {key[1]} "
+                   "(access-analyzer/account, catalog/access-analyzer/account.yaml): that region's external sharing "
+                   "would be unmonitored by Access Analyzer"
+                   for key in sorted(set(groups) - set(analyzers))]
     return errors
 
 

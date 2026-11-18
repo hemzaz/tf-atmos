@@ -48,6 +48,7 @@ import:
   - catalog/acm/services
   - catalog/aws-cloudtrail/defaults
   - catalog/aws-config/main
+  - catalog/access-analyzer/account
   - catalog/apigateway-account/main
   - catalog/security-monitoring/main
   - catalog/backup/main
@@ -270,6 +271,15 @@ components:
         component: aws-config
         inherits:
           - aws-config/main
+
+    # IAM Access Analyzer: the account's ACCOUNT external-access analyzer for
+    # this region (catalog/access-analyzer/account.yaml, E5c7b; the organization
+    # one runs only in the EU security stacks).
+    access-analyzer/account:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/account-defaults
 
     # KMS - customer-managed key for Secrets Manager and other encrypted
     # services

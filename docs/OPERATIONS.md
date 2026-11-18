@@ -163,8 +163,8 @@ the last step.
       `management-member_house.tf` adds because GuardDuty cannot enable it as a member; its hub).
    3. step 3, the security account again: `atmos workflow deploy-security-org -f deploy-full-stack
       -s fnx-<r>-security` (`org-settings`: members, the management account included, and
-      auto-enable; Inspector's stays `metadata.enabled: false`; and the Access Analyzer analyzers,
-      which need `fnx-ue1-root`'s global delegation: run `ue1`'s passes first. The US security
+      auto-enable; Inspector's stays `metadata.enabled: false`; and the Access Analyzer organization
+      analyzers, which need `fnx-ue1-root`'s global delegation: run `ue1`'s passes first. The US security
       stacks depend on it; the EU ones cannot, check-data-residency.py forbidding an EU stack's
       dependency on a US one, so only this order holds it). Then the
       [first-apply checks](#deploying-a-stack) 8, 9 and 10.
@@ -528,7 +528,7 @@ In each operated region (`--region <r>`):
      deploy-security-org -f deploy-full-stack -s fnx-<r>-security`; the second apply finds the members.
 10. Access Analyzer (`access-analyzer/delegated-administrator`, `security-org` layer, after
     `fnx-ue1-root`'s `access-analyzer/root`; owner 2026-11-14, EU data stays in the EU), from the
-    security account:
+    security account, and each account's own analyzer (`access-analyzer/account`, `security` layer):
     - `aws accessanalyzer list-analyzers --type ORGANIZATION --region <r>`: one analyzer
       (`ew1-security-access-analyzer-organization`, `ec1-...`; `status` `ACTIVE`) in eu-west-1 and
       eu-central-1, none in us-east-1 and us-east-2 (an externally trusted IAM role is reported in
@@ -543,9 +543,17 @@ In each operated region (`--region <r>`):
       the same for `ew1-security-access-analyzer-organization-unused-access` in eu-west-1 lists
       every shared account's ID but the security account's (AWS does not let the owner exclude
       itself; its IAM is analysed, and billed per role and user, in both unused-access analyzers).
-    - Known interim gap: until E5c7b (an ACCOUNT analyzer in each non-GDPR account's US stacks,
-      with or after E5c8), external sharing of US-region resources (S3, KMS, SQS, Lambda, Secrets
-      Manager, ECR, ...) is not analysed by Access Analyzer; IAM roles are (the EU analyzers).
+    - US-region resources (S3, KMS, SQS, Lambda, Secrets Manager, ECR, ...) are analysed by each
+      account's own ACCOUNT analyzer (E5c7b, owner 2026-11-18; the house `account-analyzer_house.tf`,
+      `stacks/catalog/access-analyzer/account.yaml`): in each US stack, from that stack's account,
+      `aws accessanalyzer list-analyzers --type ACCOUNT --region <r>` returns one analyzer,
+      `<code>-<stage>-access-analyzer-account`, `status` `ACTIVE`: `fnx-ue1-{dev,staging,prod,root,audit,security,network,identity,artifacts}`
+      in us-east-1 and `fnx-ue2-{prod,root,security}` in us-east-2. In an EU region it returns none
+      (the EU organization analyzers cover every account there), and `prod-eu` has none in any
+      region. check-data-residency.py fails a missing, duplicated or EU one. In the management
+      account, `fnx-ue1-root`'s analyzer applies after `access-analyzer/root` (its service-linked
+      role; AWS would otherwise create the role with the first analyzer, and the root step's apply
+      would fail as above), and `fnx-ue2-root`'s after `fnx-ue1-root` (the bootstrap order).
 
 What step 1 makes sticky (settle before the first apply; changing it later means undoing the
 organization side first): the delegated administrator (`fnx-security` for both services in all
@@ -577,7 +585,8 @@ members, then the root step (`deploy-security -s fnx-<r>-root`), which destroys 
 the other order deletes a member's detector while it is still a member. The member features
 (`member-features_house.tf`) are only dropped from state on removal: the features stay enabled.
 Access Analyzer adds the delegation (`fnx-ue1-root`'s `access-analyzer/root`, global) and the
-analyzers' placement and exclusions: an analyzer's `configuration` is ForceNew in the AWS provider,
+analyzers' placement and exclusions (an ACCOUNT analyzer's name and type are ForceNew too: renaming a
+stack replaces its analyzer and regenerates its findings): an analyzer's `configuration` is ForceNew in the AWS provider,
 so changing an unused-access exclusion list (`unused_access_exclusion_account_names`, a new account
 in the map included) replaces that analyzer, which regenerates its findings and drops their
 archived status.

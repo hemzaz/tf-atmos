@@ -1,0 +1,38 @@
+# =============================================================================
+# access-analyzer/account-defaults: an account's own external-access analyzer (E5c7b)
+# =============================================================================
+# The ACCOUNT analyzer of the house account-analyzer_house.tf (a deviation from
+# Cloud Posse's aws-access-analyzer, which has only the delegated administrator's
+# ORGANIZATION analyzers; owner 2026-11-18). The organization external-access
+# analyzer runs only in the EU security stacks (delegated-administrator.yaml: a
+# US one would hold prod-eu's IAM findings), so every non-GDPR account's US
+# stack instantiates this one as access-analyzer/account: it analyses that
+# account's resources in that region, nothing of prod-eu's. Never in an EU
+# stack or an all-GDPR account's (check-data-residency.py), one per account and
+# region (check-lane-names.py). External-access analyzers are free.
+#
+# No delegation and no organization analyzer, so no dependency on the root
+# step and no !terraform.state read: AWS creates the account's Access Analyzer
+# service-linked role with its first analyzer. In the management account the
+# root step's aws_iam_service_linked_role must apply first (fnx-ue1-root's
+# instance depends on it; fnx-ue2-root follows fnx-ue1-root in the bootstrap,
+# docs/OPERATIONS.md). deploy-full-stack's security layer applies it
+# (.vars.accessanalyzer_account_enabled == true), never security-org.
+# =============================================================================
+
+import:
+  - catalog/access-analyzer/defaults
+
+components:
+  terraform:
+    access-analyzer/account-defaults:
+      metadata:
+        component: access-analyzer
+        type: abstract
+        inherits:
+          - access-analyzer/defaults
+      vars:
+        accessanalyzer_account_enabled: true
+        accessanalyzer_organization_enabled: false
+        accessanalyzer_organization_unused_access_enabled: false
+        organizations_delegated_administrator_enabled: false

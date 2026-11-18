@@ -4,6 +4,7 @@
 [[- $primary := .Config.standby_of -]]
 [[- $primary_code := index (splitList "-" $primary) 1 -]]
 [[- $net := trimSuffix ".0.0/16" .Config.vpc_cidr_main -]]
+[[- $us := not (hasPrefix "eu-" .Config.region) -]]
 ---
 # =============================================================================
 # [[ $stack ]]: the [[ $account ]] account's [[ .Config.region ]] stack,
@@ -82,6 +83,9 @@ import:
   - catalog/security-monitoring/main-standby
   - catalog/backup/main-standby
   - catalog/apigateway-account/main
+[[- if $us ]]
+  - catalog/access-analyzer/account
+[[- end ]]
 
   # --- compute
   - catalog/eks/main-standby
@@ -245,6 +249,17 @@ components:
       # components/terraform/aws-cloudtrail/account-verification_override.tf.
       vars:
         account_verification_enabled: false
+[[- end ]]
+[[- if $us ]]
+
+    # IAM Access Analyzer: the account's ACCOUNT external-access analyzer for
+    # [[ .Config.region ]] (catalog/access-analyzer/account.yaml, E5c7b), US stacks
+    # only: the EU's are covered by the EU security stacks' organization one.
+    access-analyzer/account:
+      metadata:
+        component: access-analyzer
+        inherits:
+          - access-analyzer/account-defaults
 [[- end ]]
 
     security-monitoring/main:

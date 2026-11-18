@@ -4,8 +4,8 @@
 ##################################################
 # Vendored Cloud Posse aws-access-analyzer v2.0.1 (vendor.yaml), configured as
 # its README's "Defaults (Abstract Component)": every flag off, an instance
-# turns on its step. The component has organization analyzers only (no
-# ACCOUNT analyzer), in two steps:
+# turns on its step. Cloud Posse's component has organization analyzers only,
+# in two steps (the house ACCOUNT analyzer is account.yaml's, E5c7b):
 #   1. access-analyzer/root (root.yaml) in the management account
 #      (fnx-ue1-root): delegates Access Analyzer to the security account and
 #      creates the service-linked role. Once per organization.
