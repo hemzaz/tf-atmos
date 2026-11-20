@@ -51,9 +51,9 @@ Fatal (a config bug, not a placeholder: always printed, exit 1 even with --warn)
     from the config_source_accounts of the kms instance its key is read from,
     disabled instances included
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
-feature plan, cross-account caller role existence, Lambda packages, GitHub
-protection, deploy tags, the GitHub App's private key and outside-collaborator
-approval, the cost-allocation tag), each stack's budget amount to confirm, and
+feature plan, Lambda packages, GitHub protection, deploy tags, the GitHub App's
+private key and outside-collaborator approval, the cost-allocation tag), each
+stack's budget amount to confirm, and
 an enabled security-monitoring instance with no security_email_subscriptions,
 and an enabled aws-identity-center instance (Identity Center enabled by clickops
 in its home region).
