@@ -10,7 +10,7 @@ stack-wide `deploy --affected` / `plan -s <stack>`, because:
     runners in the VPC (--runner in-vpc --label <label>; the github-runners
     component, docs/OPERATIONS.md "In-cluster components"). An instance with
     settings.github.actions_enabled: false runs on neither (an operator
-    applies it). Atmos 1.229 rejects --query together with --affected;
+    applies it). Atmos (1.229 and 1.233.2) rejects --query with --affected;
   - a stack-wide bulk run builds the dependency graph from the filtered set
     alone and fails on any dependency outside it (iam/ci -> fnx-ue1-root's
     backend/main).

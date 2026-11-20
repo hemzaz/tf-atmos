@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fixtures  # noqa: E402
 
 FUNCTIONS = ("!terraform.state", "!terraform.output")
-# Characters that open a yq expression rather than a stack name (Atmos 1.229.0 isExpressionStart).
+# Characters that open a yq expression rather than a stack name (Atmos isExpressionStart, same in 1.229.0 and 1.233.2).
 EXPRESSION_STARTS = tuple(".[{|'\"")
 COMPONENTS_DIR = "components/terraform"
 # The first `.name` / `.["name"]` of a yq expression is the output it reads:

@@ -8,9 +8,9 @@ base_path: "."
 
 version:
   constraint:
-    require: ">=1.229.0"
+    require: ">=1.233.2"
     enforcement: fatal
-    message: "This repository requires Atmos >= 1.229.0 (CI runs the ghcr.io/cloudposse/atmos image pinned in .github/atmos-image/Dockerfile)."
+    message: "This repository requires Atmos >= 1.233.2 (CI runs the ghcr.io/cloudposse/atmos image pinned in .github/atmos-image/Dockerfile)."
 
 components:
   terraform:
