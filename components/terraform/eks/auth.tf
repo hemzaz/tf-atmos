@@ -23,7 +23,9 @@
 # component's input (cloudposse-terraform-components/aws-eks-cluster,
 # src/main.tf iam_roles_access_entry_map). Each role becomes an
 # access_entry_map entry below, merged under var.access_entry_map as upstream
-# merges it under overridable_access_map.
+# merges it under overridable_access_map. Or by permission set name:
+# var.aws_sso_permission_sets_rbac, upstream's aws-sso.tf, resolved at plan
+# time by data.aws_iam_roles.sso_roles below.
 
 locals {
   # A full policy name that is not in the abbreviation map below (for example
@@ -56,8 +58,22 @@ locals {
     }
   }
 
+  # Cloud Posse's aws_sso_access_entry_map (aws-eks-cluster, src/aws-sso.tf):
+  # the role of each var.aws_sso_permission_sets_rbac set, resolved by
+  # data.aws_iam_roles.sso_roles below, in the same full shape. As upstream,
+  # it merges first, so map_additional_iam_roles and access_entry_map win on
+  # the same ARN.
+  aws_sso_access_entry_map = {
+    for role in var.aws_sso_permission_sets_rbac : tolist(data.aws_iam_roles.sso_roles[role.aws_sso_permission_set].arns)[0] => {
+      user_name                  = null
+      kubernetes_groups          = role.groups
+      type                       = "STANDARD"
+      access_policy_associations = {}
+    } if local.enabled
+  }
+
   # Expand abbreviated access policies to full ARNs
-  access_entry_expanded_map = { for k, v in merge(local.iam_roles_access_entry_map, var.access_entry_map) : k => merge({
+  access_entry_expanded_map = { for k, v in merge(local.aws_sso_access_entry_map, local.iam_roles_access_entry_map, var.access_entry_map) : k => merge({
     access_policy_associations = {
       for kk, vv in v.access_policy_associations :
       try(local.eks_policy_abbreviation_map[kk], startswith(kk, "arn:") ? kk : "${local.eks_access_policy_arn_prefix}${kk}") => vv
@@ -123,6 +139,31 @@ locals {
   entry_principal_arns     = concat(local.map_entry_principal_arns, [for e in local.access_entries : e.principal_arn])
 }
 
+# Cloud Posse's data "aws_iam_roles" "sso_roles" (aws-eks-cluster,
+# src/aws-sso.tf), with its postcondition: the plan fails, naming the set,
+# unless exactly one role matches. Divergences:
+# - name_regex is anchored and ends in the hex hash
+#   ("^AWSReservedSSO_<set>_[0-9a-f]{16}$", with `.` and `+` in the set name
+#   escaped) where upstream has "AWSReservedSSO_<set>_.*": upstream's matches
+#   set "Admin" against a set "Admin_ReadOnly" too and then fails as "more
+#   than one".
+# - for_each is empty while var.enabled is false (upstream reads anyway), so a
+#   disabled instance or the default [] reads nothing.
+data "aws_iam_roles" "sso_roles" {
+  for_each    = local.enabled ? toset(var.aws_sso_permission_sets_rbac[*].aws_sso_permission_set) : toset([])
+  name_regex  = format("^AWSReservedSSO_%s_[0-9a-f]{16}$", replace(each.value, "/([.+])/", "\\$1"))
+  path_prefix = "/aws-reserved/sso.amazonaws.com/"
+
+  lifecycle {
+    postcondition {
+      condition = length(self.arns) == 1
+      error_message = length(self.arns) == 0 ? "Could not find Role ARN for the AWS SSO permission set: ${each.value}" : (
+        "Found more than one (${length(self.arns)}) Role ARN for the AWS SSO permission set: ${each.value}"
+      )
+    }
+  }
+}
+
 # The preferred way to keep track of entries is by key, but the list form is
 # supported too, because keys need to be known at plan time.
 resource "aws_eks_access_entry" "map" {
@@ -174,7 +215,7 @@ resource "aws_eks_access_entry" "standard" {
         !contains(local.map_entry_principal_arns, local.access_entries[count.index].principal_arn) &&
         length([for e in local.access_entries : e if e.principal_arn == local.access_entries[count.index].principal_arn]) == 1
       )
-      error_message = "access_entries principal ${local.access_entries[count.index].principal_arn} already has an access entry (access_entry_map, map_additional_iam_roles or another access_entries item); EKS allows one per principal."
+      error_message = "access_entries principal ${local.access_entries[count.index].principal_arn} already has an access entry (access_entry_map, map_additional_iam_roles, aws_sso_permission_sets_rbac or another access_entries item); EKS allows one per principal."
     }
   }
 }
@@ -200,7 +241,7 @@ resource "aws_eks_access_policy_association" "list" {
     # EKS associates access policies with an existing access entry only.
     precondition {
       condition     = contains(local.entry_principal_arns, local.access_policy_associations[count.index].principal_arn)
-      error_message = "access_policy_associations principal ${local.access_policy_associations[count.index].principal_arn} has no access entry: add it to access_entries, access_entry_map or map_additional_iam_roles."
+      error_message = "access_policy_associations principal ${local.access_policy_associations[count.index].principal_arn} has no access entry: add it to access_entries, access_entry_map, map_additional_iam_roles or aws_sso_permission_sets_rbac."
     }
   }
 
