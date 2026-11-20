@@ -865,3 +865,205 @@ run "disabled_creates_no_access_or_addon" {
     error_message = "enabled = false must create no access entry, association, addon or role."
   }
 }
+
+# Cloud Posse's aws_sso_permission_sets_rbac: a permission set by name. Its
+# role (hash unknown until the set is assigned) comes from
+# data.aws_iam_roles.sso_roles, overridden here with what AWS would return.
+run "sso_permission_sets_default_reads_nothing" {
+  command = plan
+
+  assert {
+    condition     = length(data.aws_iam_roles.sso_roles) == 0 && length(aws_eks_access_entry.map) == 0
+    error_message = "The default aws_sso_permission_sets_rbac = [] must read no IAM roles and add no access entry."
+  }
+}
+
+run "sso_permission_set_resolves_to_its_role" {
+  command = plan
+
+  variables {
+    aws_sso_permission_sets_rbac = [{
+      aws_sso_permission_set = "AdministratorAccess"
+      groups                 = ["system:masters"]
+    }]
+  }
+
+  override_data {
+    target = data.aws_iam_roles.sso_roles
+    values = {
+      arns = ["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"]
+    }
+  }
+
+  assert {
+    condition = (
+      data.aws_iam_roles.sso_roles["AdministratorAccess"].path_prefix == "/aws-reserved/sso.amazonaws.com/" &&
+      data.aws_iam_roles.sso_roles["AdministratorAccess"].name_regex == "^AWSReservedSSO_AdministratorAccess_[0-9a-f]{16}$"
+    )
+    error_message = "The permission set must be looked up under the Identity Center path with an anchored name regex."
+  }
+
+  assert {
+    condition = (
+      can(regex(data.aws_iam_roles.sso_roles["AdministratorAccess"].name_regex, "AWSReservedSSO_AdministratorAccess_0123456789abcdef")) &&
+      !can(regex(data.aws_iam_roles.sso_roles["AdministratorAccess"].name_regex, "AWSReservedSSO_AdministratorAccess_ReadOnly_0123456789abcdef")) &&
+      !can(regex(data.aws_iam_roles.sso_roles["AdministratorAccess"].name_regex, "AWSReservedSSO_AdministratorAccess_0123456789abcdef0")) &&
+      !can(regex(data.aws_iam_roles.sso_roles["AdministratorAccess"].name_regex, "XAWSReservedSSO_AdministratorAccess_0123456789abcdef"))
+    )
+    error_message = "The name regex must match the set's own role name and reject a sibling set (AdministratorAccess_ReadOnly), a longer hash and a prefixed name."
+  }
+
+  assert {
+    condition = (
+      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].type == "STANDARD" &&
+      length(aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].kubernetes_groups) == 0 &&
+      length(aws_eks_access_entry.map) == 1
+    )
+    error_message = "The resolved role must be one STANDARD access entry keyed by its full ARN, with system:masters removed from its groups."
+  }
+
+  assert {
+    condition     = aws_eks_access_policy_association.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef-arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"].access_scope[0].type == "cluster"
+    error_message = "system:masters on a permission set must become a cluster-scoped AmazonEKSClusterAdminPolicy association."
+  }
+}
+
+run "sso_permission_set_groups_pass_through" {
+  command = plan
+
+  variables {
+    aws_sso_permission_sets_rbac = [{
+      aws_sso_permission_set = "Ops.Read+Only"
+      groups                 = ["view"]
+    }]
+  }
+
+  override_data {
+    target = data.aws_iam_roles.sso_roles
+    values = {
+      arns = ["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Ops.Read+Only_fedcba9876543210"]
+    }
+  }
+
+  assert {
+    condition     = data.aws_iam_roles.sso_roles["Ops.Read+Only"].name_regex == "^AWSReservedSSO_Ops\\.Read\\+Only_[0-9a-f]{16}$"
+    error_message = "Regex metacharacters in the set name must be escaped."
+  }
+
+  assert {
+    condition = (
+      can(regex(data.aws_iam_roles.sso_roles["Ops.Read+Only"].name_regex, "AWSReservedSSO_Ops.Read+Only_fedcba9876543210")) &&
+      !can(regex(data.aws_iam_roles.sso_roles["Ops.Read+Only"].name_regex, "AWSReservedSSO_OpsXReadOnly_fedcba9876543210"))
+    )
+    error_message = "The escaped regex must match the set's literal name only."
+  }
+
+  assert {
+    condition = (
+      tolist(aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Ops.Read+Only_fedcba9876543210"].kubernetes_groups) == tolist(["view"]) &&
+      length(aws_eks_access_policy_association.map) == 0
+    )
+    error_message = "A permission set's non-admin groups must reach its access entry unchanged, with no policy association."
+  }
+}
+
+run "sso_permission_set_without_a_role_fails" {
+  command = plan
+
+  variables {
+    aws_sso_permission_sets_rbac = [{
+      aws_sso_permission_set = "AdministratorAccess"
+      groups                 = ["system:masters"]
+    }]
+  }
+
+  override_data {
+    target = data.aws_iam_roles.sso_roles
+    values = {
+      arns = []
+    }
+  }
+
+  expect_failures = [data.aws_iam_roles.sso_roles]
+}
+
+run "sso_permission_set_with_two_roles_fails" {
+  command = plan
+
+  variables {
+    aws_sso_permission_sets_rbac = [{
+      aws_sso_permission_set = "AdministratorAccess"
+      groups                 = ["system:masters"]
+    }]
+  }
+
+  # Unreachable with one Identity Center instance (one home region, one role
+  # per set per account): this mock exists only to prove the postcondition.
+  override_data {
+    target = data.aws_iam_roles.sso_roles
+    values = {
+      arns = [
+        "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef",
+        "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-1/AWSReservedSSO_AdministratorAccess_fedcba9876543210",
+      ]
+    }
+  }
+
+  expect_failures = [data.aws_iam_roles.sso_roles]
+}
+
+run "sso_permission_set_role_arn_is_rejected" {
+  command = plan
+
+  variables {
+    aws_sso_permission_sets_rbac = [{
+      aws_sso_permission_set = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
+      groups                 = ["system:masters"]
+    }]
+  }
+
+  expect_failures = [var.aws_sso_permission_sets_rbac]
+}
+
+run "sso_permission_set_listed_twice_is_rejected" {
+  command = plan
+
+  variables {
+    aws_sso_permission_sets_rbac = [
+      { aws_sso_permission_set = "AdministratorAccess", groups = ["system:masters"] },
+      { aws_sso_permission_set = "AdministratorAccess", groups = ["view"] },
+    ]
+  }
+
+  expect_failures = [var.aws_sso_permission_sets_rbac]
+}
+
+run "sso_permission_set_with_another_system_group_is_rejected" {
+  command = plan
+
+  variables {
+    aws_sso_permission_sets_rbac = [{
+      aws_sso_permission_set = "AdministratorAccess"
+      groups                 = ["system:nodes"]
+    }]
+  }
+
+  expect_failures = [var.aws_sso_permission_sets_rbac]
+}
+
+run "sso_permission_set_disabled_reads_nothing" {
+  command = plan
+
+  variables {
+    enabled = false
+    aws_sso_permission_sets_rbac = [{
+      aws_sso_permission_set = "AdministratorAccess"
+      groups                 = ["system:masters"]
+    }]
+  }
+
+  assert {
+    condition     = length(data.aws_iam_roles.sso_roles) == 0 && length(aws_eks_access_entry.map) == 0
+    error_message = "enabled = false must read no IAM roles and create no access entry."
+  }
+}

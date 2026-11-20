@@ -37,6 +37,17 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   endpoint through `ec2/bastion`'s SSM port-forward (docs/OPERATIONS.md "In-cluster components"):
   each instance sets `allowed_security_group_ids` to the bastion's security group, and `eks/data`
   (in `vpc/services`) is reached over `network/vpc-peering`.
+- Or by permission set name: Cloud Posse's `aws_sso_permission_sets_rbac`
+  (`[{aws_sso_permission_set: AdministratorAccess, groups: ["system:masters"]}]`). The plan looks up
+  the set's `AWSReservedSSO_<set>_<hash>` role under `/aws-reserved/sso.amazonaws.com/` and fails,
+  naming the set, unless exactly one role matches: the set must be assigned in the account first. A
+  recreated or reassigned set has a new hash, so the plan destroys the old ARN's access entry and
+  association and creates new ones: a prod or DR-standby deploy then needs one
+  `Allow-Destroy: <component>/<stack>:<address>` trailer per destroyed address, entry and association
+  (`check-plan-destroys.py`), e.g.
+  `Allow-Destroy: eks/main/fnx-ue1-prod:aws_eks_access_entry.map["<old ARN>"]`. The resolved role is
+  an entry like `map_additional_iam_roles`, which wins on the same ARN. The default `[]` reads nothing;
+  a set needs `iam:ListRoles`, which the CI plan role's default `ReadOnlyAccess` grants.
 - `allowed_security_group_ids` / `allowed_cidr_blocks` (Cloud Posse's names; the aws-eks-cluster
   component calls the first `allowed_security_groups`) add ingress rules on the EKS-managed cluster
   security group, TCP 443 only where Cloud Posse opens all protocols. A `/0` is rejected.

@@ -622,6 +622,55 @@ variable "map_additional_iam_roles" {
   }
 }
 
+# Cloud Posse eks/cluster's aws_sso_permission_sets_rbac
+# (cloudposse-terraform-components/aws-eks-cluster, src/variables.tf): same
+# name, type, default and nullable. Divergences: the description says access
+# entries (this cluster has no aws-auth ConfigMap), and the validations below
+# are house rules (upstream has none).
+variable "aws_sso_permission_sets_rbac" {
+  type = list(object({
+    aws_sso_permission_set = string
+    groups                 = list(string)
+  }))
+
+  description = <<-EOT
+    AWS SSO (IAM Identity Center) permission sets in the EKS deployment account to grant cluster access,
+    by name, as in Cloud Posse's eks/cluster component. Each set's role,
+    arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/[<sso-region>/]AWSReservedSSO_<set>_<hash>,
+    is looked up at plan time (data.aws_iam_roles) and becomes an access entry with `groups`, like a
+    map_additional_iam_roles entry: ["system:masters"] grants a cluster-scoped
+    AmazonEKSClusterAdminPolicy association. The plan fails unless exactly one role matches, so the
+    set must already be provisioned (assigned) in the account. Reassigning or recreating the set
+    changes the hash, so the plan destroys the old ARN's access entry and association and creates
+    new ones; in prod and DR-standby, CD fails that plan unless a deployed commit carries one
+    `Allow-Destroy: <component>/<stack>:<address>` trailer per destroyed address, entry and association
+    (check-plan-destroys.py), e.g.
+    `Allow-Destroy: eks/main/fnx-ue1-prod:aws_eks_access_entry.map["<old ARN>"]`.
+    EOT
+
+  default  = []
+  nullable = false
+
+  validation {
+    condition = alltrue([for s in var.aws_sso_permission_sets_rbac :
+      can(regex("^[\\w+=,.@-]{1,32}$", s.aws_sso_permission_set))
+    ])
+    error_message = "aws_sso_permission_sets_rbac aws_sso_permission_set must be a permission set name (1-32 characters of [A-Za-z0-9_+=,.@-]), not a role name or ARN."
+  }
+
+  validation {
+    condition     = length(distinct([for s in var.aws_sso_permission_sets_rbac : s.aws_sso_permission_set])) == length(var.aws_sso_permission_sets_rbac)
+    error_message = "aws_sso_permission_sets_rbac lists a permission set more than once."
+  }
+
+  validation {
+    condition = alltrue([for s in var.aws_sso_permission_sets_rbac : alltrue([
+      for g in s.groups : g == "system:masters" || !startswith(g, "system:")
+    ])])
+    error_message = "aws_sso_permission_sets_rbac groups may not contain system:* groups other than system:masters."
+  }
+}
+
 # cloudposse/terraform-aws-eks-cluster: upgrade_policy. Divergence: Cloud
 # Posse defaults to null, which AWS treats as EXTENDED; STANDARD fails closed
 # against extended-support charges once a version leaves standard support.
