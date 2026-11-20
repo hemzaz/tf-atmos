@@ -164,10 +164,11 @@ components:
     # Globals
     # ========================================================================
     # Human cluster admins of eks/main (compute section), as in fnx-ew1-prod:
-    # the same operators fail the in-cluster services over. Each rolearn, an
-    # IAM role in the prod-eu account, must also be in the EU backend's
-    # access_roles.prod_write (stacks/orgs/fnx/root/eu-west-1.yaml). Empty
-    # until the owner supplies the ARN (row "EKS cluster admins").
+    # the same operators fail the in-cluster services over. The prod-eu
+    # account's AdministratorAccess comes from stacks/catalog/eks/defaults.yaml;
+    # any other admin role goes here, and each rolearn, an IAM role in the
+    # prod-eu account, must also be in the EU backend's access_roles.prod_write
+    # (stacks/orgs/fnx/root/eu-west-1.yaml).
     eks/defaults:
       vars:
         map_additional_iam_roles: []

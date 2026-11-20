@@ -25,7 +25,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
 | GitHub App | the self-hosted CI runners' just-in-time registration: a GitHub App installed on this repository (Administration read/write); its IDs in `settings.github_app` (`app_id`, `installation_id`; `0` until set) in `stacks/orgs/fnx/_defaults.yaml`; and, after each runner pool's first apply, its private key in that account's SSM, in the pool's region (`fnx-ew1-prod`'s: `prod-eu`, eu-west-1; `fnx-ec1-prod`'s: `prod-eu`, eu-central-1), at the pool's `.app_private_key_parameter_name`, encrypted with the pool's own key (`.app_key_kms_key_alias`): see `components/terraform/github-runners/README.md`. The repository is public: turn on Settings → Actions → General → "Require approval for all outside collaborators" |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
-| EKS cluster admins | `map_additional_iam_roles` in each stack's file: see [In-cluster components](#in-cluster-components). While empty, nobody can apply the in-cluster components. `fnx-ew1-prod`'s and `fnx-ec1-prod`'s roles are in the `prod-eu` account and must also be in `backend/main`'s `access_roles.prod_write` `allowed_principal_arns` in `stacks/orgs/fnx/root/eu-west-1.yaml` (`fnx-ew1-root`) |
+| EKS cluster admins | each account's Identity Center `AdministratorAccess`, by name (`aws_sso_permission_sets_rbac` in `stacks/catalog/eks/defaults.yaml`): nothing to fill in, but the set must be assigned in the account (the `aws-identity-center` instance, applied by `deploy-accounts`) before any `eks` plan of the stack, and the preflight fails an `eks` instance with a set while `aws-identity-center` is disabled; see [In-cluster components](#in-cluster-components). Other admin roles: `map_additional_iam_roles` in the stack's file, each also in its backend write role (`fnx-ew1-prod`'s and `fnx-ec1-prod`'s, in the `prod-eu` account: `backend/main`'s `access_roles.prod_write` `allowed_principal_arns` in `stacks/orgs/fnx/root/eu-west-1.yaml`, `fnx-ew1-root`) |
 | Backend service images | `settings.environment.backend_service_images` in each stack's file (`eks-backend-services/main`): the release pipeline's `ghcr.io/fnx-platform/<service>:1.4.2` placeholders until it publishes real ones, flagged per stack and service; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s |
 
 Every workload `account_id` must differ from `management_account_id`. The stage split of state
@@ -136,7 +136,10 @@ the last step.
    Both name their regions with the house `aggregator-regions_house.tf` (`aggregator_regions`): no EU region's
    Config data reaches the US aggregator, and no US data the EU one, owner 2026-11-13),
    then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
-   and [Deploying a stack](#deploying-a-stack). Order the core stacks: `fnx-ue1-audit` first
+   and [Deploying a stack](#deploying-a-stack), only after Identity Center is applied (step 3's
+   second `deploy-accounts` run): every `eks` instance admits the account's `AdministratorAccess`
+   by name and its plan fails until that set is assigned there, so the preflight fails a workload
+   stack with an `eks` instance while `aws-identity-center` is disabled. Order the core stacks: `fnx-ue1-audit` first
    (its storage layer holds the buckets every trail and recorder delivers to), then the other
    `fnx-ue1-<core>` stacks and the management account's trail and recorder
    (`atmos workflow deploy-security -f deploy-full-stack -s fnx-ue1-root`; that layer also applies

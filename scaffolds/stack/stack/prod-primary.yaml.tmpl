@@ -262,10 +262,12 @@ components:
     # Globals
     # ========================================================================
     # Human cluster admins of [[ if $data_plane ]]every eks instance (eks/main and eks/data
-    # inherit eks/defaults)[[ else ]]eks/main[[ end ]]: each rolearn, an IAM role in this
+    # inherit eks/defaults)[[ else ]]eks/main[[ end ]]: this account's Identity Center
+    # AdministratorAccess, admitted by name in stacks/catalog/eks/defaults.yaml.
+    # Any other admin role goes here: each rolearn, an IAM role in this
     # account, must also be in the state backend's access_roles.prod_write
-    # allowed_principal_arns; check-cluster-api-ci.py fails one that is not,
-    # and warns while this is empty. Empty until the owner supplies the ARN.
+    # allowed_principal_arns, as the set's pattern is; check-cluster-api-ci.py
+    # fails a role or set that is not.
     eks/defaults:
       vars:
         map_additional_iam_roles: []
