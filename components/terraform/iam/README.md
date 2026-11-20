@@ -8,9 +8,9 @@ package uploader role for an application repo's CI.
 
 ## Wiring
 
-- Instances: `iam/ci` in the three AWS stacks (OIDC roles only, `create_cross_account_role:
-  false`); `iam/dev` in dev; `iam/main` in staging, prod and `fnx-ue1-local-localemu`. The AWS-stack
-  instances depend on `backend/main` in `fnx-ue1-root` for ordering only (localemu's does not).
+- Instances: `iam/ci` in the three AWS stacks (OIDC roles only); `iam/dev` in dev; `iam/main` in
+  staging, prod and `fnx-ue1-local-localemu`. The AWS-stack instances depend on `backend/main` in
+  `fnx-ue1-root` for ordering only (localemu's does not).
 - Used by: `eks` (`iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` as access entries), `kms/main`
   (dependency on the instance that creates the Auto Scaling service-linked role). The backend
   trusts the CI roles by name (`<ci_role_name_prefix>-plan` / `-apply`), not by reading state.
@@ -50,8 +50,10 @@ package uploader role for an application repo's CI.
   an `aws:PrincipalArn` ArnEquals condition to `trusted_principal_arns` (the backend's
   `access_roles` pattern), which is required, wildcard-free and must sit in those accounts. List
   the full ARN, path included (SSO roles live under `aws-reserved/sso.amazonaws.com/<region>/`).
-  `catalog/iam/defaults.yaml` names a placeholder `<tenant>-cross-account-operator` role in the
-  management account until the owner supplies the real callers.
+  The workload instances (`catalog/iam/defaults.yaml`) create no cross-account role: human access
+  is IAM Identity Center. `catalog/iam/oidc-spoke.yaml` documents the pattern that creates one.
 - The role cannot write bucket policies or subscribe to SNS topics (`s3:PutBucketPolicy` and
   `sns:Subscribe` would let it hand a bucket or a topic's messages to another account).
-- A CI-only instance sets `create_cross_account_role: false`; the managed ARN lists are optional.
+- The `iam` abstract (`catalog/iam/defaults.yaml`) sets `create_cross_account_role: false`; only
+  the `iam/oidc-spoke` abstract and localemu's `iam/main` (which inherits nothing) create the role.
+  The managed ARN lists are optional.
