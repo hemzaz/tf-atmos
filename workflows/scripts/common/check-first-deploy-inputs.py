@@ -9,7 +9,7 @@ whatever file they are written in. Covers every row of docs/OPERATIONS.md
 
 Errors (fatal unless --warn):
   - an AWS docs placeholder account ID (123456789012, 000000000000) in any
-    string: account IDs, ARNs (backend access_roles, trusted_principal_arns...)
+    string: account IDs, ARNs (backend access_roles...)
   - the placeholder AWS Organization ID (o-xxxxxxxxxx) or OU ID (ou-xxxx-xxxxxxxx)
   - a reserved example domain (RFC 2606: example.com/.net/.org, *.example,
     *.test, *.invalid) in a domain, an alert address or an aws-account
@@ -147,7 +147,6 @@ EXAMPLE_DOMAIN_RE = re.compile(
     r"(?:^|[.@/])(?:example\.(?:com|net|org)|[a-z0-9-]+\.(?:example|test|invalid))(?![a-z0-9-])",
     re.IGNORECASE,
 )
-OPERATOR_ROLE = "-cross-account-operator"
 # The release pipeline's placeholder images (the stacks' settings.environment.backend_service_images).
 # 1.4.2 is a reserved placeholder tag: a real release must never be published as
 # ghcr.io/fnx-platform/<service>:1.4.2, or this check would keep flagging it.
@@ -336,7 +335,6 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
             add(Finding("error", name, f"settings.environment.backend_service_images.{service}",
                         f"placeholder image {image!r}: set the image the release pipeline publishes",
                         "Backend service images"))
-    operator_roles = False
     for instance_name, spec in sorted(instances(config).items()):
         spec = spec or {}
         add(static_map_drift(name, instance_name, spec))
@@ -356,8 +354,6 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
                                   "the caller); fill in settings.account_map after the accounts layer and re-apply "
                                   "with backend-only", "Account IDs")
             add(finding)
-            if path.startswith("vars.trusted_principal_arns") and OPERATOR_ROLE in text:
-                operator_roles = True
         if component == "eks" and not variables.get("map_additional_iam_roles"):
             add(Finding("error", name, f"{instance_name} vars.map_additional_iam_roles",
                         "empty: no EKS cluster admin role (an operator's full IAM role ARN, path included)",
@@ -389,10 +385,6 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
                         "Cognito feature plan"))
     for finding in config_key_drift(name, config):
         add(finding)
-    if operator_roles:
-        add(Finding("notice", name, "vars.trusted_principal_arns",
-                    f"the <tenant>{OPERATOR_ROLE} role must exist in the management account (not checkable here)",
-                    "Cross-account role callers"))
     return findings
 
 
