@@ -36,6 +36,40 @@ def admin_eks(arn, stage="dev", bucket="fnx-terraform-state"):
     return eks
 
 
+def sso_eks(account, stage="dev", permission_set="AdministratorAccess"):
+    """An eks instance whose cluster admin is a permission set, as stacks/catalog/eks/defaults.yaml."""
+    eks = instance("eks")
+    eks["settings"] = {"context": {"stage": stage}, "environment": {"account_id": account}}
+    eks["backend"] = {"bucket": "fnx-terraform-state"}
+    eks["vars"]["aws_sso_permission_sets_rbac"] = [
+        {"aws_sso_permission_set": permission_set, "groups": ["system:masters"]}
+    ]
+    return eks
+
+
+def sso_pattern(account, permission_set):
+    """The backend's reserved-path pattern for one account and one set (stacks/orgs/fnx/root/us-east-1.yaml)."""
+    return f"arn:aws:iam::{account}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_{permission_set}_*"
+
+
+ASSIGNED = {"fnx-dev": {"groups": {"DevOps": {"permission_sets": ["AdministratorAccess"]}}}}
+
+
+def set_stacks(eks, stack="fnx-ue1-dev", assignments=ASSIGNED, ic_enabled=True):
+    """eks/main with an in-cluster dependent, plus fnx-gbl-root's aws-identity-center (unless assignments is None)."""
+    stacks = {stack: {"components": {"terraform": {
+        "eks/main": eks, "eks-addons/main": addon("eks-addons", "eks/main"),
+    }}}}
+    if assignments is not None:
+        ic = instance("aws-identity-center", enabled=ic_enabled)
+        ic["vars"] = {
+            "account_map": {"full_account_map": {"fnx-dev": "111111111111", "fnx-staging": "222222222222"}},
+            "account_assignments": assignments,
+        }
+        stacks["fnx-gbl-root"] = {"components": {"terraform": {"aws-identity-center": ic}}}
+    return stacks
+
+
 def addon(component, cluster):
     """An opted-out in-cluster instance whose dependencies.components names its eks instance."""
     i = instance(component, actions_enabled=False)
@@ -169,6 +203,82 @@ class CheckClusterApiCiTest(unittest.TestCase):
         errors, _ = check_cluster_api_ci.check_operators(us, CLUSTER)
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("state bucket 'fnx-ew1-terraform-state' has no one owning backend instance", errors[0])
+
+    def test_admin_permission_set_counts_and_needs_its_pattern_and_assignment(self):
+        stacks = with_backend(
+            set_stacks(sso_eks("111111111111")),
+            write=[sso_pattern("111111111111", "AdministratorAccess")],
+        )
+        self.assertEqual(check_cluster_api_ci.check_operators(stacks, CLUSTER), ([], []))
+        # The exact role ARN (region segment and hash) is trusted too.
+        exact = with_backend(
+            set_stacks(sso_eks("111111111111")),
+            write=["arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/us-east-1/"
+                   "AWSReservedSSO_AdministratorAccess_0123456789abcdef"],
+        )
+        self.assertEqual(check_cluster_api_ci.check_operators(exact, CLUSTER), ([], []))
+
+    def test_admin_permission_set_pattern_must_be_the_stack_account_and_set(self):
+        for trusted in (
+            [],
+            [sso_pattern("222222222222", "AdministratorAccess")],  # another account
+            [sso_pattern("111111111111", "PowerUserAccess")],  # another set
+            [sso_pattern("111111111111", "AdministratorAccess-Prod")],  # a set whose name only starts the same
+        ):
+            with self.subTest(trusted=trusted):
+                stacks = with_backend(set_stacks(sso_eks("111111111111")), write=trusted)
+                errors, warnings = check_cluster_api_ci.check_operators(stacks, CLUSTER)
+                self.assertEqual(warnings, [])
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn("admin permission set AdministratorAccess has no Identity Center pattern for "
+                              "account 111111111111", errors[0])
+                self.assertIn("access_roles.write", errors[0])
+
+    def test_prod_admin_permission_set_needs_prod_write(self):
+        stacks = with_backend(
+            set_stacks(sso_eks("111111111111", stage="prod"), stack="fnx-ue1-prod"),
+            write=[sso_pattern("111111111111", "AdministratorAccess")],
+        )
+        errors, _ = check_cluster_api_ci.check_operators(stacks, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("access_roles.prod_write", errors[0])
+
+    def test_admin_permission_set_must_be_assigned_in_the_stack_account(self):
+        for assignments in (
+            {"fnx-dev": {"groups": {"DevOps": {"permission_sets": ["TerraformApplyAccess"]}}}},  # another set
+            {"fnx-staging": {"groups": {"DevOps": {"permission_sets": ["AdministratorAccess"]}}}},  # another account
+            None,  # no aws-identity-center instance at all
+        ):
+            with self.subTest(assignments=assignments):
+                stacks = with_backend(
+                    set_stacks(sso_eks("111111111111"), assignments=assignments),
+                    write=[sso_pattern("111111111111", "AdministratorAccess")],
+                )
+                errors, _ = check_cluster_api_ci.check_operators(stacks, CLUSTER)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn("admin permission set AdministratorAccess is not assigned in account 111111111111 "
+                              "by aws-identity-center's account_assignments", errors[0])
+
+    def test_admin_permission_set_assigned_by_a_disabled_identity_center_passes(self):
+        stacks = with_backend(
+            set_stacks(sso_eks("111111111111"), ic_enabled=False),
+            write=[sso_pattern("111111111111", "AdministratorAccess")],
+        )
+        self.assertEqual(check_cluster_api_ci.check_operators(stacks, CLUSTER), ([], []))
+
+    def test_non_admin_permission_sets_do_not_count(self):
+        viewer = sso_eks("111111111111")
+        viewer["vars"]["aws_sso_permission_sets_rbac"][0]["groups"] = ["viewers"]
+        errors, warnings = check_cluster_api_ci.check_operators(with_backend(set_stacks(viewer)), CLUSTER)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("no map_additional_iam_roles or aws_sso_permission_sets_rbac entry", warnings[0])
+
+    def test_fixture_permission_sets_skip_the_pattern_and_assignment_checks(self):
+        # The fixtures stage is never deployed; its account (000000000000) is in no map.
+        stacks = with_backend(set_stacks(sso_eks("000000000000", stage="fixtures"), stack="fnx-ue1-fixtures-x",
+                                         assignments=None), write=[])
+        self.assertEqual(check_cluster_api_ci.check_operators(stacks, CLUSTER), ([], []))
 
     def test_non_admin_roles_and_stacks_without_in_cluster_components_are_ignored(self):
         viewer = admin_eks(ADMIN)

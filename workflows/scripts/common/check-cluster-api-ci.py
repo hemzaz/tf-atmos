@@ -36,17 +36,26 @@ image may lack: every deployable instance of a component whose providers exec
 a command must list that command's tool in dependencies.tools (aws ->
 aws/aws-cli), and an unknown command is an ERROR.
 
-That operator is an eks map_additional_iam_roles role with system:masters (a
-cluster-scoped AmazonEKSClusterAdminPolicy access entry, set on eks/defaults
-in each stack file). In such a stack, every one of those roles must also be
-trusted by the stage's state write role of the backend instance owning the eks
-instance's state bucket (backends.owner_of: backend/main for fnx-terraform-state,
-its EU twin for the EU bucket; access_roles.write for dev/staging, .prod_write
-for prod), or it cannot write the state: an ERROR, as is no backend owning that
-bucket (nothing to check against). An eks
-instance with no such role leaves nobody able to apply the in-cluster instances
-that depend on it: one WARN per stack, while the owner has not supplied the real
-ARNs (an access entry for a placeholder role would fail eks/main's apply).
+That operator is an eks cluster admin, a cluster-scoped
+AmazonEKSClusterAdminPolicy access entry: a map_additional_iam_roles role with
+system:masters (set on eks/defaults in a stack file), or the role of an
+aws_sso_permission_sets_rbac permission set with system:masters
+(stacks/catalog/eks/defaults.yaml: AdministratorAccess). In such a stack, every
+one of them must also be trusted by the stage's state write role of the
+backend instance owning the eks instance's state bucket (backends.owner_of:
+backend/main for fnx-terraform-state, its EU twin for the EU bucket;
+access_roles.write for dev/staging, .prod_write for prod), or it cannot write
+the state: an ERROR, as is no backend owning that bucket (nothing to check
+against). A permission set is trusted by the backend's Identity Center pattern
+for that set in the stack's account (settings.environment.account_id;
+arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_<set>_*,
+check-ci-state-roles.py's SSO_ROLE_ARN), and the aws-identity-center
+instance's account_assignments must assign it in that account, disabled
+instance included (else the eks plan's role lookup finds no role and fails):
+an ERROR otherwise. The fixtures stage (never deployed, its account not in the
+map) skips the permission-set checks. An eks instance with no admin of either
+kind leaves nobody able to apply the in-cluster instances that depend on it:
+one WARN per stack.
 
 The operator reaches a private endpoint through the bastion's SSM port-forward,
 so such an eks instance (private endpoint, in-cluster instances depending on
@@ -63,6 +72,7 @@ otherwise. Literal security group IDs and cross-stack reads are not followed.
 
 Exits 1 on any ERROR; WARN lines never fail.
 """
+import importlib.util
 import json
 import pathlib
 import re
@@ -71,6 +81,13 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import backends  # noqa: E402
 import fixtures  # noqa: E402
+
+# check-ci-state-roles.py's Identity Center pattern and assignments, the one definition.
+_spec = importlib.util.spec_from_file_location(
+    "check_ci_state_roles", pathlib.Path(__file__).with_name("check-ci-state-roles.py")
+)
+state_roles = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(state_roles)
 
 CLUSTER_PROVIDER = re.compile(r'^\s*provider\s+"(kubernetes|helm|kubectl)"', re.MULTILINE)
 EXEC_COMMAND = re.compile(r'\bexec\s*=?\s*\{[^}]*?\bcommand\s*=\s*"([^"]+)"', re.DOTALL)
@@ -288,26 +305,57 @@ def cluster_dependents(instances: dict, cluster: set[str]) -> dict[str, list[str
     return dependents
 
 
-def admin_role_errors(where: str, eks_instance: dict, arns: list[str], owned: dict) -> list[str]:
-    """Admin roles the stage write role of the backend owning the eks instance's state does not trust."""
+def admin_permission_sets(eks_instance: dict) -> list[str]:
+    """The eks instance's aws_sso_permission_sets_rbac sets that get cluster admin."""
+    return [
+        rbac.get("aws_sso_permission_set")
+        for rbac in (eks_instance.get("vars") or {}).get("aws_sso_permission_sets_rbac") or []
+        if "system:masters" in (rbac.get("groups") or [])
+    ]
+
+
+def admin_role_errors(where: str, eks_instance: dict, arns: list[str], sets: list[str], owned: dict,
+                      assigned: dict) -> list[str]:
+    """Admins (roles, permission sets) the stage write role of the backend owning the eks instance's state
+    does not trust, and admin permission sets aws-identity-center does not assign in the stack's account."""
     owner = backends.owner_of(owned, eks_instance)
     if owner is None:
         return [f"{where} state bucket {backends.bucket_of(eks_instance)!r} has no one owning backend instance, "
                 "so its cluster admin roles cannot be checked against the state write roles"]
-    stage = ((eks_instance.get("settings") or {}).get("context") or {}).get("stage")
+    settings = eks_instance.get("settings") or {}
+    stage = (settings.get("context") or {}).get("stage")
     key = "prod_write" if stage == "prod" else "write"
     trusted = (owner.access_roles.get(key) or {}).get("allowed_principal_arns") or []
-    return [
+    errors = [
         f"{where} admin role {arn} is not in {owner.where} access_roles.{key} allowed_principal_arns, "
         "so it cannot write this stack's state"
         for arn in arns if arn not in trusted
     ]
+    if stage == fixtures.FIXTURE_STAGE:
+        return errors
+    account = (settings.get("environment") or {}).get("account_id")
+    covered = {match.groups() for match in map(state_roles.SSO_ROLE_ARN.match, trusted) if match}
+    for permission_set in sets:
+        if (account, permission_set) not in covered:
+            errors.append(
+                f"{where} admin permission set {permission_set} has no Identity Center pattern for account "
+                f"{account} (arn:aws:iam::{account}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_"
+                f"{permission_set}_*) in {owner.where} access_roles.{key} allowed_principal_arns, so it cannot "
+                "write this stack's state"
+            )
+        if permission_set not in assigned.get(account, set()):
+            errors.append(
+                f"{where} admin permission set {permission_set} is not assigned in account {account} by "
+                f"{state_roles.IC_COMPONENT}'s account_assignments, so the eks plan finds no role for it"
+            )
+    return errors
 
 
 def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[str]]:
     """(errors, warnings) about who can apply the in-cluster components of private stacks."""
     errors, warnings = [], []
     owned, _ = backends.owned(stacks)  # owned()'s own errors are check-state-keys.py's to report
+    assigned = state_roles.identity_center(stacks)[0]
     for stack_name, stack in sorted(stacks.items()):
         instances = deployable_instances(stack)
         if not is_private(instances):
@@ -322,18 +370,18 @@ def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[st
         unmanaged = []
         for name, dependents in sorted(cluster_dependents(instances, cluster).items()):
             instance = instances[name]
-            arns = admin_role_arns(instance)
-            if not arns:
+            arns, sets = admin_role_arns(instance), admin_permission_sets(instance)
+            if not arns and not sets:
                 if dependents:
                     unmanaged.append(f"{name} ({', '.join(dependents)})")
                 continue
             if owned:
-                errors += admin_role_errors(f"{stack_name}: {name}", instance, arns, owned)
+                errors += admin_role_errors(f"{stack_name}: {name}", instance, arns, sets, owned, assigned)
         if unmanaged:
             warnings.append(
-                f"{stack_name}: no map_additional_iam_roles entry with system:masters on "
-                f"{'; '.join(unmanaged)}, so nobody can apply those in-cluster instances (set it "
-                "on eks/defaults in the stack file)"
+                f"{stack_name}: no map_additional_iam_roles or aws_sso_permission_sets_rbac entry with "
+                f"system:masters on {'; '.join(unmanaged)}, so nobody can apply those in-cluster instances "
+                "(stacks/catalog/eks/defaults.yaml names AdministratorAccess)"
             )
     return errors, warnings
 
@@ -437,7 +485,8 @@ def main() -> int:
     if errors:
         print(f"{len(errors)} in-cluster instance(s) still run on hosted runners")
     if operator_errors:
-        print(f"{len(operator_errors)} cluster admin role(s) cannot write their stack's state")
+        print(f"{len(operator_errors)} cluster admin role(s) or permission set(s) cannot write their stack's "
+              "state or are not assigned in its account")
     if network_errors:
         print(f"{len(network_errors)} private cluster path(s) missing: an operator's or the in-vpc runners'")
     if errors or operator_errors or network_errors:
