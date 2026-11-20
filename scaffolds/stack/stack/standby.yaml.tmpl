@@ -177,9 +177,10 @@ components:
     # Globals
     # ========================================================================
     # Human cluster admins of eks/main, as in [[ $primary ]]: the same
-    # operators fail the in-cluster services over. Each rolearn must also be in
-    # the state backend's access_roles.prod_write. Empty until the owner
-    # supplies the ARN.
+    # operators fail the in-cluster services over. The account's
+    # AdministratorAccess comes from stacks/catalog/eks/defaults.yaml; any
+    # other admin role goes here, and each rolearn must also be in the state
+    # backend's access_roles.prod_write.
     eks/defaults:
       vars:
         map_additional_iam_roles: []

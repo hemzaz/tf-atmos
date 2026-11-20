@@ -333,8 +333,10 @@ def admin_role_errors(where: str, eks_instance: dict, arns: list[str], sets: lis
     ]
     if stage == fixtures.FIXTURE_STAGE:
         return errors
+    # Per account. Vacuous while every account holds the placeholder ID 123456789012 (settings.account_map,
+    # until the first deploy): any account's pattern or assignment then matches every stack's.
     account = (settings.get("environment") or {}).get("account_id")
-    covered = {match.groups() for match in map(state_roles.SSO_ROLE_ARN.match, trusted) if match}
+    covered ={match.groups() for match in map(state_roles.SSO_ROLE_ARN.match, trusted) if match}
     for permission_set in sets:
         if (account, permission_set) not in covered:
             errors.append(
