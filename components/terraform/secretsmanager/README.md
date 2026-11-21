@@ -33,8 +33,9 @@ One Secrets Manager secret per `secrets` entry, with an optional value, resource
   section, not under `vars`: Terraform needs an ephemeral value set at plan again when a saved
   plan is applied, and `deploy --from-plan` applies the planfile without the varfile.
   - A real secret: `env: { TF_VAR_secret_data: !env FNX_<STACK>_<INSTANCE>_SECRET_DATA }`, the
-    variable holding the JSON map, set in the operator's shell or as a CI secret. Atmos 1.229
-    evaluates `!env` inside `env:` for terraform commands.
+    variable holding the JSON map, set in the operator's shell or as a CI secret. Atmos 1.229–1.233.2
+    evaluates `!env` inside `env:` for terraform commands. Since 1.233.0 an unset `!env` with no
+    default resolves to "" with only a WARN, so set the variable before running.
   - Never export a global `TF_VAR_secret_data`: the CD and drift loops would hand it to every
     secretsmanager instance, and an instance without those `static_value` keys rejects it. A
     stack's `env:` entry also overrides the process environment for its instance.

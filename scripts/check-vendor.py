@@ -17,7 +17,7 @@ whose file is missing (stale), that the pull now ships (rename it) or not named 
 .tf holds a moved/removed/import block, nor an allowlisted house file a provider block; each
 BYPASSED_READS override must keep `bypass = true` in its remote-state module, and no other
 *_override.tf may set that module's bypass to anything else (no live remote-state read).
-Atmos 1.229's receipt omits the version (`atmos vendor
+Atmos 1.229–1.233.2's receipt omits the version (`atmos vendor
 verify` passes a changed pin), so --repull pulls the manifest into a scratch dir and fails a file
 that differs from the receipt or a target the pull or the receipt lacks.
 Usage: check-vendor.py [--list | --repull]   (--list prints the vendored dirs). No vendor.yaml:
