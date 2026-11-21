@@ -109,7 +109,7 @@ jobs:
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+      image: ghcr.io/cloudposse/atmos:1.233.2@sha256:ceceb1b38d24bc94adff144ed37202b55d0c0f09259322c8328fed1672a1247b
     permissions:
       contents: read
     outputs:
@@ -209,7 +209,7 @@ jobs:
     if: needs.affected-stacks.outputs.any == 'true'
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+      image: ghcr.io/cloudposse/atmos:1.233.2@sha256:ceceb1b38d24bc94adff144ed37202b55d0c0f09259322c8328fed1672a1247b
     # No `environment:` - it would change the OIDC sub to
     # repo:<org>/<repo>:environment:<stack>, which the apply roles do not trust.
     permissions:
@@ -257,8 +257,8 @@ jobs:
       # (deploy-component.sh; the Allow-Destroy: trailers are read from
       # every commit in base..GITHUB_SHA, all of which this leg deploys).
       # Not `deploy --affected`: it cannot skip the actions_enabled: false
-      # instances nor leave the in-vpc ones to deploy-in-vpc (Atmos 1.229
-      # rejects --query with --affected). Cloud Posse's
+      # instances nor leave the in-vpc ones to deploy-in-vpc (Atmos 1.229 and
+      # 1.233.2 reject --query with --affected). Cloud Posse's
       # atmos-terraform-apply honours the same key per (stack, component)
       # matrix job, unordered; this loop keeps this repo's per-stack order and
       # marker. Absent actions_enabled means enabled here (Cloud Posse: opt-in).
@@ -368,7 +368,7 @@ jobs:
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+      image: ghcr.io/cloudposse/atmos:1.233.2@sha256:ceceb1b38d24bc94adff144ed37202b55d0c0f09259322c8328fed1672a1247b
     permissions:
       contents: read
       id-token: write

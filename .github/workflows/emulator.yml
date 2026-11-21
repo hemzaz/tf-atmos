@@ -82,7 +82,7 @@ jobs:
           # Same Atmos as the digest-pinned ghcr.io/cloudposse/atmos image in
           # terraform-ci.yml; scripts/sync-atmos-image.sh rewrites this tag when
           # Dependabot bumps .github/atmos-image/Dockerfile.
-          atmos-version: "1.229.0"
+          atmos-version: "1.233.2"
 
       - name: Apply and destroy against LocalEmu
         run: atmos workflow localemu -f localemu

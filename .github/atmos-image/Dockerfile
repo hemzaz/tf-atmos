@@ -7,4 +7,4 @@
 # and, running the new Atmos version, re-pin the manifest schema (lint step
 # manifest-schema):
 #   atmos stack schema schemas/atmos/atmos-manifest.json
-FROM ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+FROM ghcr.io/cloudposse/atmos:1.233.2@sha256:ceceb1b38d24bc94adff144ed37202b55d0c0f09259322c8328fed1672a1247b

@@ -74,7 +74,7 @@ An instance name need not match its module: `metadata.component` decides. `netwo
 
 ## Prerequisites
 
-- Atmos >= 1.229.0 (fatal constraint in `atmos.yaml`). Atmos installs Terraform and the lint/scan
+- Atmos >= 1.233.2 (fatal constraint in `atmos.yaml`). Atmos installs Terraform and the lint/scan
   tools from the `dependencies.tools` pins (`stacks/orgs/fnx/_defaults.yaml` and each workflow;
   [bumping them](./docs/OPERATIONS.md#pinned-versions-providers-the-atmos-image-actions-toolchain-tools)).
 - Emulator lanes: Docker for the sandbox (Floci); Python 3.13 exactly for LocalEmu (a pip

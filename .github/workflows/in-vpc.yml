@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
-      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+      image: ghcr.io/cloudposse/atmos:1.233.2@sha256:ceceb1b38d24bc94adff144ed37202b55d0c0f09259322c8328fed1672a1247b
     permissions:
       contents: read
       id-token: write
@@ -123,7 +123,7 @@ jobs:
     # taken the job, not while it is queued).
     timeout-minutes: 120
     container:
-      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+      image: ghcr.io/cloudposse/atmos:1.233.2@sha256:ceceb1b38d24bc94adff144ed37202b55d0c0f09259322c8328fed1672a1247b
     # No `environment:`: it would change the OIDC sub (see terraform-cd.yml).
     permissions:
       contents: read

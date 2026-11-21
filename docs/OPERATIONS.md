@@ -1486,7 +1486,7 @@ liveness endpoint by design.
 
 | Symptom | Fix |
 |---------|-----|
-| `This repository requires Atmos >= 1.229.0` | Upgrade Atmos |
+| `This repository requires Atmos >= 1.233.2` | Upgrade Atmos |
 | `init` cannot assume `<role_prefix>-*-role` (`fnx-terraform-backend-*-role`) | Run `backend-cold-start`, or add the caller's role ARN to that stage's `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU stacks: `root/eu-west-1.yaml`, roles `fnx-ew1-terraform-backend-*`) |
 | CI plan: AccessDenied on `PutObject` at `workspace new` | Read roles cannot create a workspace; the instance's first deploy does |
 | `Error acquiring the state lock` | Another run holds it; `list-locks`, then `force-unlock` if abandoned |
