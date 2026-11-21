@@ -152,6 +152,8 @@ atmos.lock
 backups/
 benchmarks/
 profiles/
+# ...but the Atmos role profiles (profiles/<role>/atmos.yaml) are committed.
+!/profiles/
 plans/
 manifests/
 

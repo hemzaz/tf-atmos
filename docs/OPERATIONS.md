@@ -118,14 +118,14 @@ the last step.
 5. **Backend access roles**: `atmos workflow backend-only -f bootstrap`, and again with
    `-s fnx-ew1-root`. Its preflight is fatal and finds the real IDs now; the access roles gain the
    principals `access_roles` lists.
-6. **Account stacks**, as each account's `OrganizationAccountAccessRole`, assumed from the
-   management account (a profile with `role_arn = arn:aws:iam::<account>:role/OrganizationAccountAccessRole`
-   and the management-account `source_profile`): every provider runs only in its stack's own
-   account (`allowed_account_ids`), and that role is the one principal of the account the state
-   backend trusts before CI exists (`core_write` for the core accounts, `write`/`prod_write` for
-   the workload accounts) until Identity Center is applied; the backends also trust each account's
-   Identity Center Terraform sets ([State backend](#state-backend)), and the PR enabling the
-   `aws-identity-center` instance removes the `OrganizationAccountAccessRole` entries. The core stacks
+6. **Account stacks**, after Identity Center is applied (step 3's second `deploy-accounts` run),
+   each as its account's auto-provisioned `AdministratorAccess` identity
+   ([Signing in](#signing-in)): `-i fnx-<account>/AdministratorAccess` on each terraform command, or a
+   profile's default (owner decision 2026-11-21; a workflow takes `--identity`). Every provider runs only in its stack's own
+   account (`allowed_account_ids`), and the state backend trusts that set there (`core_write` for
+   the core accounts, `write`/`prod_write` for the workload accounts; [State backend](#state-backend)).
+   Each account's `OrganizationAccountAccessRole` stays trusted beside it until `backend-only` is
+   re-run after the PR enabling `aws-identity-center` removes those entries. The core stacks
    (`atmos workflow deploy -f deploy-full-stack -s fnx-ue1-<core>`, whose preflight fails while a
    core account ID is a placeholder: their `aws-account-settings`, each account's trail and Config
    recorder, plus the log archive in `fnx-ue1-audit` and, with `-s fnx-ew1-audit`, the EU one;
@@ -388,10 +388,37 @@ prints the edit to make). Still by hand:
 - its CI roles are created by `atmos workflow full -f bootstrap` and its domain is delegated before
   `certificates`, both in [Deploying a stack](#deploying-a-stack).
 
+## Signing in
+
+Humans sign in through IAM Identity Center with Atmos auth (`atmos.yaml` `auth`, Cloud Posse's
+Evolution 4). CI never does: it uses its OIDC roles and never sets `ATMOS_PROFILE`.
+
+1. Once per machine, pick your group's profile (`profiles/<role>/atmos.yaml`: `managers`,
+   `devops` or `developers`; each sets only a default identity):
+   `export ATMOS_PROFILE=<role>` (in `~/.zshrc` or `~/.bashrc`).
+2. `atmos login`: the AWS access portal sign-in (device flow, in a browser), with
+   `ATMOS_PROFILE` cleared. It provisions one identity per permission set Identity Center assigns
+   you, named `<account>/<permission set>` (`fnx-dev/TerraformApplyAccess`,
+   `fnx-security/AdministratorAccess`), cached until the next login; `atmos auth list` shows them.
+   Run it first: until then the profile's default names an identity that does not exist, and
+   every auth and terraform command fails with `Identity "..." is not configured`
+   (`atmos auth login` too).
+3. `atmos terraform plan <component> -s <stack>` runs as the profile's default. Another account:
+   `-i <account>/<set>`, e.g. a core stack as `fnx-<core>/AdministratorAccess`:
+   `atmos terraform apply aws-account-settings -s fnx-ue1-security -i fnx-security/AdministratorAccess`.
+   No profile defaults to the management account: a root stack is always explicit,
+   `-i fnx-root/AdministratorAccess` (Managers). A workflow takes it as `--identity` (no `-i`): `atmos workflow deploy -f deploy-full-stack -s <stack> --identity <account>/<set>`. A stack in another
+   account fails closed under the default: its provider refuses the account (`allowed_account_ids`).
+   AWS CLI, kubectl: `atmos auth shell -i <account>/<set>`.
+
+When the access portal session expires (Identity Center's session duration), the next command
+fails to authenticate: run `atmos login` again. A permission set assigned since then appears only
+after a new `atmos login`.
+
 ## Deploying a stack
 
 After the backend: `atmos workflow full -f bootstrap -s <stack>` (IAM, including the CI roles, and
-VPCs) as the stack's account's `OrganizationAccountAccessRole` (see [Bootstrap order](#bootstrap-order)),
+VPCs) as the stack's account's `AdministratorAccess` ([Signing in](#signing-in), [Bootstrap order](#bootstrap-order)),
 since no CI role exists yet; no stack sets a provider role, so every component runs as the caller. Then
 `atmos workflow deploy -f deploy-full-stack -s <stack>`. It runs these layers in order, each
 planned, confirmed, then applied from the saved plan. Each layer is also its own workflow
@@ -749,8 +776,9 @@ GitHub OIDC on master):
    `eks/defaults` in the stack file and in that backend role. `check-cluster-api-ci.py` fails an
    admin role or set the backend role does not trust, and a set `account_assignments` does not
    assign in the stack's account.
-2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then
-   `export AWS_PROFILE=<profile>`), forward the endpoint through `ec2/bastion` (a private subnet of
+2. On the laptop, in a shell with that set's credentials
+   (`atmos auth shell -i fnx-<account>/AdministratorAccess`, e.g. `fnx-prod-eu` for `fnx-ew1-prod` and
+   `fnx-ec1-prod`; [Signing in](#signing-in)), forward the endpoint through `ec2/bastion` (a private subnet of
    `vpc/main`; SSM agent via `enable_ssm`, the default, reaching SSM through the NAT gateway). Every
    `eks` instance admits the bastion's security group on 443 (`allowed_security_group_ids` in the
    `stacks/catalog/eks/` files); `eks/data` in `vpc/services` is reached over

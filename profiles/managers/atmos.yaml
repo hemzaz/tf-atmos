@@ -1,0 +1,11 @@
+# Cloud Posse's `managers` profile (owner decision OQ7), for the Managers
+# group: `export ATMOS_PROFILE=managers`. Only a default, on an identity that
+# `atmos login` provisions (atmos.yaml `auth`): dev's AdministratorAccess, the
+# least blast radius (owner, 2026-11-22). The group has AdministratorAccess in
+# every account (stacks/catalog/aws-identity-center/defaults.yaml); the
+# management account (the root stacks) is always explicit:
+# `-i fnx-root/AdministratorAccess`. Another account: `-i <account>/<set>`.
+auth:
+  identities:
+    fnx-dev/AdministratorAccess:
+      default: true

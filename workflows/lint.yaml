@@ -58,9 +58,12 @@ workflows:
       # atmos.yaml's auth providers and identities (kinds, via, principal):
       # offline, no credentials, no SSO call (E4d0 spike). It does not read a
       # stack's auth section; check-auth-defaults (stack-checks) does.
+      # ATMOS_PROFILE unset here and in tflint: a role profile's default
+      # (profiles/<role>/atmos.yaml) fails every auth and terraform command
+      # before `atmos login`, and needs a live session after it.
       - name: auth-validate
         type: shell
-        command: atmos auth validate
+        command: env -u ATMOS_PROFILE atmos auth validate
       - type: parallel
         fail:
           mode: wait_all
@@ -176,10 +179,10 @@ workflows:
           broken=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("tflint")))')
           stacks=$(atmos list stacks | grep '^fnx-ue1-fixtures-' || true)
           [ -n "$stacks" ] || { echo "no fnx-ue1-fixtures-* stacks listed; refusing to skip them"; exit 1; }
-          ATMOS_STACKS_EXCLUDED_PATHS='**/_defaults.yaml,orgs/fnx/fixtures/**' atmos terraform lint
+          ATMOS_STACKS_EXCLUDED_PATHS='**/_defaults.yaml,orgs/fnx/fixtures/**' env -u ATMOS_PROFILE atmos terraform lint
           failed=""
           for stack in $stacks; do
-            if atmos terraform lint -s "$stack"; then continue; fi
+            if env -u ATMOS_PROFILE atmos terraform lint -s "$stack"; then continue; fi
             case " $broken " in
               *" $stack "*) echo "KNOWN-BROKEN $stack: tflint failures do not fail the run" ;;
               *) failed="$failed $stack" ;;
