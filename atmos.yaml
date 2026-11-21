@@ -40,12 +40,52 @@ stacks:
   # missingkey=error.
   name_template: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}{{ if hasKey .settings.context "name" }}-{{ .settings.context.name }}{{ end }}'
 
-# Local AWS sandbox (Floci). Binds ONLY the fnx-ue1-local-sandbox stack, via that
-# stack's `aws` emulator component — deliberately not `default: true`, so no
-# real environment can ever be silently redirected at the emulator once real
-# credentials exist. See stacks/catalog/emulator/aws.yaml.
+# Atmos auth (E4d1). Humans log in through IAM Identity Center, Cloud Posse's
+# Evolution 4 (docs/layers/identity/atmos-auth.mdx): one aws/iam-identity-center
+# provider and NO static identities. The permission sets and the accounts they
+# are assigned in live once, in stacks/catalog/aws-identity-center/defaults.yaml
+# (account_assignments). `atmos auth login` provisions an identity per set the
+# user is assigned, named `<account name>/<permission set>` (fnx-dev/
+# TerraformApplyAccess, fnx-security/AdministratorAccess), and caches them in
+# $XDG_CACHE_HOME/atmos/auth/fnx-sso/provisioned-identities.yaml, which every
+# later command imports (`atmos auth list` shows them offline).
+#
+# NO `default: true` (nor `required: true`) on any identity or provider, here
+# or in any stack's `auth` section, and no `profiles.default`: a default makes
+# every non-interactive `atmos terraform plan`/`deploy`/`lint` (CI) try an SSO
+# login and fail without a TTY, even with AWS env credentials (E4d0 spike,
+# 2026-10-31). Lint step stack-checks (check-auth-defaults.py) fails one. Only
+# a role profile (profiles/<role>/atmos.yaml, E4d2; CI never sets
+# ATMOS_PROFILE) sets a default, by a provisioned identity's name. That name
+# exists only after a first login, and a profile default naming a missing
+# identity fails every auth and terraform command, `atmos auth login` included:
+# log in once per machine without the profile (`ATMOS_PROFILE= atmos auth
+# login`; E4d2 wraps it as the `atmos login` custom command).
+# House deviation: Cloud Posse keeps the provider and static identities in each
+# profile; here the provider is shared and every identity is provisioned.
 auth:
+  providers:
+    fnx-sso:
+      kind: aws/iam-identity-center
+      # Identity Center's home region (owner decision OQ6): the region of the
+      # aws-identity-center instance's stack, fnx-gbl-root
+      # (stacks/mixins/region/global-region.yaml vars.region), the single
+      # source: check-auth-defaults.py (lint) fails when the two differ. Not
+      # `!include`d from there: atmos.yaml resolves an !include against the
+      # working directory, so every atmos command run outside the repo root
+      # would fail.
+      region: us-east-1
+      # Placeholder: the real AWS access portal URL
+      # (https://d-<directory id>.awsapps.com/start) is a first-deploy input,
+      # set here and nowhere else. `atmos auth validate` (lint) needs a URL,
+      # never a live one.
+      start_url: https://d-0000000000.awsapps.com/start
+      auto_provision_identities: true
   identities:
+    # Local AWS sandbox (Floci). Binds ONLY the fnx-ue1-local-sandbox stack, via
+    # that stack's `aws` emulator component — deliberately not `default: true`,
+    # so no real environment can ever be silently redirected at the emulator
+    # once real credentials exist. See stacks/catalog/emulator/aws.yaml.
     local-aws:
       kind: aws/emulator
       emulator: fnx-ue1-local-sandbox/aws

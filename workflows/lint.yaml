@@ -55,6 +55,12 @@ workflows:
         # step, and `atmos validate`/`list stacks` reject that flag.
         type: shell
         command: atmos validate config
+      # atmos.yaml's auth providers and identities (kinds, via, principal):
+      # offline, no credentials, no SSO call (E4d0 spike). It does not read a
+      # stack's auth section; check-auth-defaults (stack-checks) does.
+      - name: auth-validate
+        type: shell
+        command: atmos auth validate
       - type: parallel
         fail:
           mode: wait_all
@@ -292,6 +298,16 @@ workflows:
       # when an enabled lambda's s3_key is not a released
       # <function_name>/<version>.zip.
       #
+      # check-auth-defaults: No committed auth default: no identity with
+      # default: or required: true and no provider with default: true, in
+      # atmos.yaml (describe config) or any stack's auth section (each
+      # component's resolved auth), and no atmos.yaml profiles.default. Any of
+      # them breaks every non-interactive terraform plan/deploy/lint (E4d0
+      # spike). A role profile (profiles/<role>/atmos.yaml, E4d2) may set one:
+      # both describes run with ATMOS_PROFILE unset, so no profile is merged in.
+      # The Identity Center provider's region equals the aws-identity-center
+      # instance's resolved vars.region (its stack's region mixin).
+      #
       # first-deploy-inputs: First-deploy preflight, WARN-ONLY here: the repo
       # holds placeholders (account and organization IDs, example domains and
       # alert addresses, empty EKS admin roles...) until the first deploy, so
@@ -303,8 +319,10 @@ workflows:
         command: |
           set -eu
           stacks_json="$(mktemp)"
-          trap 'rm -f "$stacks_json"' EXIT
-          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          config_json="$(mktemp)"
+          trap 'rm -f "$stacks_json" "$config_json"' EXIT
+          env -u ATMOS_PROFILE atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          env -u ATMOS_PROFILE atmos describe config --format json > "$config_json"
           failed=""
           # check <name> <unit test file> <check command...>: the check reads the JSON on stdin.
           check() {
@@ -323,6 +341,7 @@ workflows:
           check check-dr-pairs test_dr_pair.py python3 workflows/scripts/common/dr-pair.py --lint
           check check-sqs-visibility test_check_sqs_visibility.py python3 workflows/scripts/common/check-sqs-visibility.py
           check check-lambda-packages test_check_lambda_packages.py python3 workflows/scripts/common/check-lambda-packages.py
+          check check-auth-defaults test_check_auth_defaults.py python3 workflows/scripts/common/check-auth-defaults.py --config "$config_json"
           check first-deploy-inputs test_check_first_deploy_inputs.py python3 workflows/scripts/common/check-first-deploy-inputs.py --warn
           if [ -n "$failed" ]; then
             echo "stack checks failed:$failed"
