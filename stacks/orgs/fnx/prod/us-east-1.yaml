@@ -170,20 +170,19 @@ components:
     # Globals
     # ========================================================================
     # Human cluster admins of every eks instance in this stack (eks/main and
-    # eks/data inherit eks/defaults): Cloud Posse's map_additional_iam_roles
-    # (components/terraform/eks/variables.tf); groups ["system:masters"] is a
-    # cluster-scoped AmazonEKSClusterAdminPolicy access entry. They apply the
-    # in-cluster components through the bastion's SSM port-forward
-    # (docs/OPERATIONS.md, "In-cluster components"), so
-    # each rolearn must also be in backend/main's
+    # eks/data inherit eks/defaults): the account's Identity Center
+    # AdministratorAccess, admitted by name in stacks/catalog/eks/defaults.yaml
+    # (aws_sso_permission_sets_rbac; no ARN to paste here). Any other admin
+    # role goes in Cloud Posse's map_additional_iam_roles
+    # (components/terraform/eks/variables.tf), the full role ARN WITH its
+    # path; groups ["system:masters"] is a cluster-scoped
+    # AmazonEKSClusterAdminPolicy access entry. They apply the in-cluster
+    # components through the bastion's SSM port-forward (docs/OPERATIONS.md,
+    # "In-cluster components"), so each rolearn must also be in backend/main's
     # access_roles.prod_write allowed_principal_arns
-    # (stacks/orgs/fnx/root/us-east-1.yaml). check-cluster-api-ci.py fails
-    # a role listed here but not there, and warns while this list is empty.
-    # The full role ARN WITH its path, e.g. IAM Identity Center's:
-    #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>"
-    #     groups: ["system:masters"]
-    # Empty until the owner supplies the real ARN: an access entry for a role
-    # that does not exist fails eks/main's apply.
+    # (stacks/orgs/fnx/root/us-east-1.yaml), as the set's pattern is.
+    # check-cluster-api-ci.py fails a role or set listed here but not there.
+    # An access entry for a role that does not exist fails eks/main's apply.
     eks/defaults:
       vars:
         map_additional_iam_roles: []
