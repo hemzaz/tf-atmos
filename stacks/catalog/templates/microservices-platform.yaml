@@ -256,8 +256,10 @@ components:
         # eks component installs the vpc-cni addon with its IRSA role
         # (vpc_cni_addon); every other addon is microservices/eks-addons'.
         # Kubernetes API access (API authentication mode, the CI roles' access
-        # entries) comes from eks/defaults; human admins are the stack's
-        # map_additional_iam_roles. IRSA (the OIDC provider) is always on.
+        # entries) comes from eks/defaults, as do the human admins (the
+        # account's Identity Center AdministratorAccess, by name; the stack's
+        # map_additional_iam_roles adds others). IRSA (the OIDC provider) is
+        # always on.
         name: microservices
         cluster_kubernetes_version: "1.36"
 

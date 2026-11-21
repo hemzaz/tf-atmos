@@ -28,17 +28,23 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   implicitly. Every principal is an access entry in the inputs.
 - `stacks/catalog/eks/defaults.yaml` grants the CI plan role `AmazonEKSViewPolicy` and the CI apply
   role `AmazonEKSClusterAdminPolicy`, both cluster-scoped.
-- Human admins (the operators of the in-cluster components): Cloud Posse's
-  `map_additional_iam_roles`, set per stack on `eks/defaults` in the stack file;
-  `groups: ["system:masters"]` becomes a cluster-scoped `AmazonEKSClusterAdminPolicy` entry. The
-  `rolearn` keeps its path (access entries need it, unlike `aws-auth`): an IAM Identity Center role is
-  `role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<set>_<hash>`, and a stripped one is
-  rejected. `check-cluster-api-ci.py` warns while a private stack has none. They reach the private
-  endpoint through `ec2/bastion`'s SSM port-forward (docs/OPERATIONS.md "In-cluster components"):
-  each instance sets `allowed_security_group_ids` to the bastion's security group, and `eks/data`
-  (in `vpc/services`) is reached over `network/vpc-peering`.
-- Or by permission set name: Cloud Posse's `aws_sso_permission_sets_rbac`
-  (`[{aws_sso_permission_set: AdministratorAccess, groups: ["system:masters"]}]`). The plan looks up
+- Human admins (the operators of the in-cluster components), by default each account's Identity
+  Center `AdministratorAccess`: `stacks/catalog/eks/defaults.yaml` sets Cloud Posse's
+  `aws_sso_permission_sets_rbac` to
+  `[{aws_sso_permission_set: AdministratorAccess, groups: ["system:masters"]}]`, and
+  `groups: ["system:masters"]` becomes a cluster-scoped `AmazonEKSClusterAdminPolicy` entry.
+  `check-cluster-api-ci.py` fails a set the stage's backend write role does not trust by its
+  Identity Center pattern for the stack's account, or that `aws-identity-center`'s
+  `account_assignments` do not assign there, and warns while a private stack has no admin. They
+  reach the private endpoint through `ec2/bastion`'s SSM port-forward (docs/OPERATIONS.md
+  "In-cluster components"): each instance sets `allowed_security_group_ids` to the bastion's
+  security group, and `eks/data` (in `vpc/services`) is reached over `network/vpc-peering`.
+- Any other admin role: Cloud Posse's `map_additional_iam_roles`, set per stack on `eks/defaults` in
+  the stack file and trusted by the same backend role (`check-cluster-api-ci.py` fails it
+  otherwise). The `rolearn` keeps its path (access entries need it, unlike `aws-auth`): an IAM
+  Identity Center role is `role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<set>_<hash>`,
+  and a stripped one is rejected.
+- How the permission set resolves (`aws_sso_permission_sets_rbac`). The plan looks up
   the set's `AWSReservedSSO_<set>_<hash>` role under `/aws-reserved/sso.amazonaws.com/` and fails,
   naming the set, unless exactly one role matches: the set must be assigned in the account first. A
   recreated or reassigned set has a new hash, so the plan destroys the old ARN's access entry and
@@ -46,7 +52,7 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   `Allow-Destroy: <component>/<stack>:<address>` trailer per destroyed address, entry and association
   (`check-plan-destroys.py`), e.g.
   `Allow-Destroy: eks/main/fnx-ue1-prod:aws_eks_access_entry.map["<old ARN>"]`. The resolved role is
-  an entry like `map_additional_iam_roles`, which wins on the same ARN. The default `[]` reads nothing;
+  an entry like `map_additional_iam_roles`, which wins on the same ARN. The variable's default `[]` reads nothing;
   a set needs `iam:ListRoles`, which the CI plan role's default `ReadOnlyAccess` grants.
 - `allowed_security_group_ids` / `allowed_cidr_blocks` (Cloud Posse's names; the aws-eks-cluster
   component calls the first `allowed_security_groups`) add ingress rules on the EKS-managed cluster

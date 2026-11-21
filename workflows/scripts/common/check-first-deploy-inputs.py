@@ -16,7 +16,12 @@ Errors (fatal unless --warn):
     instance's account_email
   - two aws-account instances with one account_email (disabled ones too: the
     address is each account's root user, unique across AWS), case-insensitive
-  - an enabled eks instance with no map_additional_iam_roles (EKS admin role)
+  - an enabled eks instance with no cluster admin: no map_additional_iam_roles
+    role and no aws_sso_permission_sets_rbac set with system:masters
+  - an enabled eks instance with such a set while no aws-identity-center
+    instance is enabled: the set must be assigned in its account (deploy-accounts'
+    identity-center phase) before any eks plan, which otherwise fails its role
+    lookup; no state read orders the two
   - a settings.environment.backend_service_images entry still on the release
     pipeline's placeholder (ghcr.io/fnx-platform/<service>:1.4.2)
   - a github-runners instance whose GitHub App ID or installation ID is the
@@ -64,7 +69,8 @@ error: the cold start applies with TFSTATE_COLD_START=true, so every access
 role trusts only the caller and those ARNs are not applied (the accounts they
 name do not exist yet); the re-apply after the accounts layer (backend-only)
 checks them fatally. The cold start applies backend/main alone, so only the
-stack's backend instances are checked then, and only they decide whether the
+stack's backend instances are checked then (the eks/Identity Center order
+too: no eks instance is applied), and only they decide whether the
 core accounts are needed: a root stack's other instances (the Config
 recorder, the org security services' delegations) wait for the accounts
 layer, and their own deploy (deploy-full-stack) checks them fatally. The
@@ -354,10 +360,11 @@ def stack_findings(name: str, config: dict, cold_start: bool = False) -> list:
                                   "the caller); fill in settings.account_map after the accounts layer and re-apply "
                                   "with backend-only", "Account IDs")
             add(finding)
-        if component == "eks" and not variables.get("map_additional_iam_roles"):
+        if component == "eks" and not admin_permission_sets(variables) and not variables.get(
+                "map_additional_iam_roles"):
             add(Finding("error", name, f"{instance_name} vars.map_additional_iam_roles",
-                        "empty: no EKS cluster admin role (an operator's full IAM role ARN, path included)",
-                        "EKS cluster admins"))
+                        "empty, and no aws_sso_permission_sets_rbac set with system:masters: no EKS cluster admin "
+                        "(stacks/catalog/eks/defaults.yaml names AdministratorAccess)", "EKS cluster admins"))
         if component == "security-monitoring" and not variables.get("security_email_subscriptions"):
             add(Finding("notice", name, f"{instance_name} vars.security_email_subscriptions",
                         "empty: GuardDuty, Security Hub and Inspector findings on its topic reach nobody until "
@@ -537,6 +544,36 @@ def core_account_findings(stacks: dict, targets: set, cold_start: bool = False) 
     return findings
 
 
+def admin_permission_sets(variables: dict) -> list:
+    """An eks instance's aws_sso_permission_sets_rbac sets with system:masters (its Identity Center admins)."""
+    return [rbac.get("aws_sso_permission_set") for rbac in variables.get("aws_sso_permission_sets_rbac") or []
+            if "system:masters" in (rbac.get("groups") or [])]
+
+
+def identity_center_order_findings(stacks: dict, targets: set) -> list:
+    """Target eks instances whose admin permission set no enabled aws-identity-center instance assigns yet.
+
+    The eks plan looks each set's role up in its account and fails unless Identity Center has assigned
+    the set there (deploy-accounts' identity-center phase, fnx-gbl-root). No state read links the two,
+    so check-deploy-layers.py cannot order them: while that instance is disabled, every eks plan with a
+    set would fail. check-cluster-api-ci.py checks which accounts the assignments name."""
+    if any(deployable(spec or {}) and component_of(spec or {}) == "aws-identity-center"
+           for config in stacks.values() for spec in instances(config).values()):
+        return []
+    findings = []
+    for name in sorted(targets):
+        for instance_name, spec in sorted(instances(stacks[name]).items()):
+            spec = spec or {}
+            sets = admin_permission_sets(spec.get("vars") or {})
+            if component_of(spec) == "eks" and deployable(spec) and sets:
+                findings.append(Finding(
+                    "error", name, f"{instance_name} vars.aws_sso_permission_sets_rbac",
+                    f"{', '.join(sets)} must be assigned in this account before eks plans, but no aws-identity-center "
+                    "instance is enabled: enable it and run deploy-accounts (phase identity-center) first",
+                    "EKS cluster admins"))
+    return findings
+
+
 def notices() -> list:
     return [
         Finding("notice", "repository", "", "every lambda/* instance stays metadata.enabled: false until the "
@@ -568,6 +605,8 @@ def check(stacks: dict, only=None, cold_start: bool = False) -> list:
     findings.extend(account_findings(deployable_stacks, targets))
     findings.extend(core_account_findings(deployable_stacks, targets, cold_start))
     findings.extend(account_email_findings(deployable_stacks))
+    if not cold_start:  # the cold start applies backend/main alone, never eks
+        findings.extend(identity_center_order_findings(deployable_stacks, targets))
     return findings + notices()
 
 
