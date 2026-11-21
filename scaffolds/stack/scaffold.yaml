@@ -22,7 +22,7 @@
 # Templates use the [[ ]] delimiters, so the {{ }} the stack itself needs
 # (`{{ .settings.prefix }}`, `{{ .settings.environment.account_id }}`) is
 # emitted verbatim; hook commands still use {{ .Answers.<field> }}. No computed
-# fields (Atmos 1.229 has none): the templates derive the rest.
+# fields (Atmos 1.230+ has `type: computed`), by choice: the templates derive the rest.
 apiVersion: atmos/v1
 kind: AtmosScaffoldConfig
 metadata:
