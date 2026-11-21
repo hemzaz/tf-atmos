@@ -26,6 +26,10 @@ Errors (fatal unless --warn):
     pipeline's placeholder (ghcr.io/fnx-platform/<service>:1.4.2)
   - a github-runners instance whose GitHub App ID or installation ID is the
     placeholder 0
+  - the placeholder Identity Center directory (d-0000000000) in an
+    aws/iam-identity-center provider's start_url (atmos.yaml `auth`, in each
+    instance's resolved `auth`), reported once, when a non-root stack is a
+    target: the root stacks deploy with management-account credentials
   - a workload account equal to the management account
   - two stages sharing an account (one account per stage)
   - a GDPR-scoped stack (check-data-residency.py's scope: gdpr-tagged or eu-
@@ -113,6 +117,9 @@ MANAGEMENT_STAGES = {"root"}
 COLD_START_COMPONENT = "backend"
 
 PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
+# atmos.yaml's placeholder Identity Center directory, in its provider's start_url (SSO start URL row).
+PLACEHOLDER_DIRECTORY = "d-0000000000"
+IDENTITY_CENTER_PROVIDER = "aws/iam-identity-center"
 # Cloud Posse's core accounts (owner decision Q1): settings.account_map keys. Every other key is a
 # workload account (a stage's, or prod-eu).
 CORE_ACCOUNTS = ("root", "audit", "security", "network", "identity", "artifacts")
@@ -574,6 +581,33 @@ def identity_center_order_findings(stacks: dict, targets: set) -> list:
     return findings
 
 
+def start_url_findings(stacks: dict, targets: set) -> list:
+    """The placeholder AWS access portal URL on an Identity Center provider, once per provider and URL.
+
+    Read from the resolved `auth` of the targets' deployable instances (atmos.yaml's, deep-merged with the
+    stack's own), so describe stacks is the one input. Only non-root targets: the root stacks deploy with
+    management-account administrator credentials (the cold start, the accounts layer, which come before
+    Identity Center exists); every other stack is bootstrapped through Atmos auth (`atmos login`)."""
+    found = {}
+    for name in sorted(targets):
+        if environment(stacks[name]).get("_stage") in MANAGEMENT_STAGES:
+            continue
+        for spec in instances(stacks[name]).values():
+            if not deployable(spec or {}):
+                continue
+            for provider, config in sorted((((spec or {}).get("auth") or {}).get("providers") or {}).items()):
+                config = config or {}
+                url = config.get("start_url") or ""
+                if config.get("kind") == IDENTITY_CENTER_PROVIDER and PLACEHOLDER_DIRECTORY in url:
+                    found.setdefault((provider, url), name)
+    return [
+        Finding("error", "atmos.yaml", f"auth.providers.{provider}.start_url",
+                f"placeholder AWS access portal URL {url!r} ({stack} is bootstrapped through it): set the URL Identity "
+                "Center shows once enabled (https://d-<directory id>.awsapps.com/start)", "SSO start URL")
+        for (provider, url), stack in sorted(found.items())
+    ]
+
+
 def notices() -> list:
     return [
         Finding("notice", "repository", "", "every lambda/* instance stays metadata.enabled: false until the "
@@ -607,6 +641,7 @@ def check(stacks: dict, only=None, cold_start: bool = False) -> list:
     findings.extend(account_email_findings(deployable_stacks))
     if not cold_start:  # the cold start applies backend/main alone, never eks
         findings.extend(identity_center_order_findings(deployable_stacks, targets))
+    findings.extend(start_url_findings(deployable_stacks, targets))
     return findings + notices()
 
 

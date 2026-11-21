@@ -124,16 +124,21 @@ def main(argv=None) -> int:
     with open(args.config) as handle:
         config = json.load(handle)
     stacks = json.load(sys.stdin)
-    errors, in_config = check_config(config)
-    errors += check_stacks(stacks, in_config)
-    errors += check_region(config, stacks)
+    defaults, in_config = check_config(config)
+    defaults += check_stacks(stacks, in_config)
+    region = check_region(config, stacks)
+    errors = defaults + region
     for error in errors:
         print(f"ERROR {error}")
     if errors:
-        print(
-            f"{len(errors)} auth problem(s): a committed default breaks CI, which cannot log in (only"
-            " profiles/<role>/atmos.yaml may set one, E4d0); the provider region must match Identity Center's"
-        )
+        why = []
+        if defaults:
+            why.append(
+                "a committed default breaks CI, which cannot log in (only profiles/<role>/atmos.yaml may set one, E4d0)"
+            )
+        if region:
+            why.append("the Identity Center provider's region must be the aws-identity-center stack's")
+        print(f"{len(errors)} auth problem(s): {'; '.join(why)}")
         return 1
     print(
         "no auth default or required identity outside profiles/, no profiles.default, and the"

@@ -304,6 +304,44 @@ class StackNoticeTest(unittest.TestCase):
         self.assertIn("counting only spend tagged Environment=ew1 or ec1;", found[0].detail)
 
 
+PLACEHOLDER_URL = "https://d-0000000000.awsapps.com/start"
+
+
+def with_auth(stacks, url=PLACEHOLDER_URL, kind="aws/iam-identity-center"):
+    """Every instance carries atmos.yaml's auth, as describe stacks resolves it."""
+    for config in stacks.values():
+        for spec in config["components"]["terraform"].values():
+            spec["auth"] = {"providers": {"fnx-sso": {"kind": kind, "region": "us-east-1", "start_url": url}}}
+    return stacks
+
+
+class StartUrlTest(unittest.TestCase):
+    def test_placeholder_is_one_error_naming_atmos_yaml_and_the_row(self):
+        found = errors(with_auth(clean()))
+        self.assertEqual(len(found), 1, [f.line(False) for f in found])
+        line = found[0].line(False)
+        self.assertTrue(line.startswith("ERROR atmos.yaml: auth.providers.fnx-sso.start_url: placeholder AWS access"
+                                        " portal URL 'https://d-0000000000.awsapps.com/start'"), line)
+        self.assertIn("https://d-<directory id>.awsapps.com/start", line)
+        self.assertTrue(line.endswith("(docs/OPERATIONS.md#first-deploy-inputs: SSO start URL)"), line)
+
+    def test_real_url_and_other_provider_kinds_pass(self):
+        self.assertEqual(errors(with_auth(clean(), "https://d-90671234ab.awsapps.com/start")), [])
+        self.assertEqual(errors(with_auth(clean(), kind="aws/saml")), [])
+
+    def test_root_targets_and_disabled_instances_are_skipped(self):
+        self.assertEqual(errors(with_auth(clean()), ["fnx-ue1-root"]), [])
+        stacks = with_auth(clean())
+        stacks["fnx-ue1-dev"]["components"]["terraform"]["vpc/main"]["metadata"]["enabled"] = False
+        self.assertEqual(errors(stacks, ["fnx-ue1-dev"]), [])
+        self.assertEqual(len(errors(stacks, ["fnx-ue1-staging"])), 1)
+
+    def test_cold_start_targets_pass(self):
+        stacks = with_auth(clean())
+        found = [f for f in preflight.check(stacks, ["fnx-ue1-root"], cold_start=True) if f.level == "error"]
+        self.assertEqual(found, [])
+
+
 class ExemptStagesTest(unittest.TestCase):
     def test_local_and_fixture_stacks_keep_their_placeholders(self):
         stacks = clean()
