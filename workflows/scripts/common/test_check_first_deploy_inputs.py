@@ -21,6 +21,10 @@ ACCOUNTS = {"root": MGMT, "audit": "777777777771", "security": "777777777772", "
             "staging": "333333333333", "prod": "444444444444", "prod-eu": "666666666666"}
 
 
+# stacks/catalog/eks/defaults.yaml's Identity Center cluster admins.
+ADMIN_SET = [{"aws_sso_permission_set": "AdministratorAccess", "groups": ["system:masters"]}]
+
+
 def env(stage, account, **extra):
     environment = {"account_id": account, "management_account_id": MGMT, "domain_name": f"{stage}.acme.io"}
     environment.update(extra)
@@ -174,6 +178,43 @@ class PlaceholderTest(unittest.TestCase):
         stacks["fnx-ue1-dev"] = stack("dev", "222222222222", eks_main={
             "component": "eks", "map_additional_iam_roles": [{"rolearn": "arn:aws:iam::222222222222:role/admin"}]})
         self.assertEqual(errors(stacks), [])
+
+    def test_eks_admin_permission_set_with_identity_center_enabled_passes(self):
+        stacks = clean()
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", eks_main={
+            "component": "eks", "map_additional_iam_roles": [], "aws_sso_permission_sets_rbac": ADMIN_SET})
+        stacks["fnx-gbl-root"] = stack("root", MGMT, ic={"component": "aws-identity-center", "region": "us-east-1"})
+        self.assertEqual(errors(stacks), [])
+
+    def test_eks_admin_permission_set_waits_for_identity_center(self):
+        stacks = clean()
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", eks_main={
+            "component": "eks", "aws_sso_permission_sets_rbac": ADMIN_SET})
+        for root in (None, stack("root", MGMT, ic={"component": "aws-identity-center", "enabled": False})):
+            with self.subTest(identity_center=root):
+                if root:
+                    stacks["fnx-gbl-root"] = root
+                found = errors(stacks)
+                self.assertEqual(len(found), 1, found)
+                self.assertEqual((found[0].stack, found[0].row),
+                                 ("fnx-ue1-dev", "EKS cluster admins"))
+                self.assertIn("aws_sso_permission_sets_rbac", found[0].key)
+                self.assertIn("AdministratorAccess must be assigned in this account before eks plans",
+                              found[0].detail)
+        # Only the target stacks' eks instances: a bootstrap of another stack is not held up.
+        self.assertEqual(errors(stacks, ["fnx-ue1-staging"]), [])
+        # The backend cold start applies backend/main alone, never eks.
+        cold = [f for f in preflight.check(stacks, ["fnx-ue1-dev"], cold_start=True) if f.row == "EKS cluster admins"]
+        self.assertEqual(cold, [])
+
+    def test_eks_non_admin_permission_set_is_no_admin(self):
+        stacks = clean()
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", eks_main={
+            "component": "eks", "aws_sso_permission_sets_rbac": [
+                {"aws_sso_permission_set": "ReadOnlyAccess", "groups": ["viewers"]}]})
+        found = errors(stacks)
+        self.assertEqual([(f.stack, f.row) for f in found], [("fnx-ue1-dev", "EKS cluster admins")])
+        self.assertIn("map_additional_iam_roles", found[0].key)
 
     def test_placeholder_github_app(self):
         stacks = clean()

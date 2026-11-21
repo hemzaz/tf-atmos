@@ -171,12 +171,13 @@ components:
     # Globals
     # ========================================================================
     # Human cluster admins of eks/main, as in fnx-ue1-prod
-    # (orgs/fnx/prod/us-east-1.yaml, which explains the format): each rolearn,
-    # an IAM role in the prod-eu account, must also be in the EU backend's
-    # access_roles.prod_write allowed_principal_arns
-    # (stacks/orgs/fnx/root/eu-west-1.yaml); check-cluster-api-ci.py fails one
-    # that is not, and warns while this is empty. Empty until the owner
-    # supplies the ARN (the preflight flags it, row "EKS cluster admins").
+    # (orgs/fnx/prod/us-east-1.yaml, which explains the format): the prod-eu
+    # account's Identity Center AdministratorAccess, admitted by name in
+    # stacks/catalog/eks/defaults.yaml (no ARN to paste here). Any other admin
+    # role goes in map_additional_iam_roles: each rolearn, an IAM role in the
+    # prod-eu account, must also be in the EU backend's access_roles.prod_write
+    # allowed_principal_arns (stacks/orgs/fnx/root/eu-west-1.yaml), as the
+    # set's pattern is; check-cluster-api-ci.py fails a role or set that is not.
     eks/defaults:
       vars:
         map_additional_iam_roles: []
