@@ -50,6 +50,28 @@ components:
             access_scope:
               type: cluster
 
+        # Human cluster admins (break-glass, docs/OPERATIONS.md "In-cluster
+        # components"): each account's Identity Center AdministratorAccess
+        # (Managers, DevOps; operator-access decision 2026-09-30), by name, as
+        # Cloud Posse's eks/cluster aws_sso_permission_sets_rbac; system:masters
+        # is a cluster-scoped AmazonEKSClusterAdminPolicy entry. The plan looks
+        # the set's role up in the stack's account and fails unless exactly one
+        # exists, so every eks instance (dev, staging, prod and its DR standby,
+        # prod-eu's two) plans only after aws-identity-center (fnx-gbl-root)
+        # has assigned AdministratorAccess there: its account_assignments do in
+        # dev, staging, prod and prod-eu. That is deploy-accounts' last phase
+        # (identity-center), which must run before any eks plan of a workload
+        # stack (docs/OPERATIONS.md, "In-cluster components"); no state read
+        # links the two, so check-dependencies/check-deploy-layers cannot
+        # enforce it. Each backend's write role trusts the set by its pattern
+        # (stacks/orgs/fnx/root/*.yaml); check-cluster-api-ci.py fails a stack
+        # whose set is not trusted there or not assigned in its account. A
+        # stack file may add roles in map_additional_iam_roles.
+        aws_sso_permission_sets_rbac:
+          - aws_sso_permission_set: AdministratorAccess
+            groups:
+              - "system:masters"
+
         tags:
           Component: "EKS"
       dependencies:

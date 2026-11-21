@@ -730,16 +730,22 @@ Break-glass, or before the runners exist: an operator applies them through the V
 role, a named cluster admin (the creator gets no implicit admin, and the CI apply role trusts only
 GitHub OIDC on master):
 
-1. Once per stack, the owner names the role (full ARN, path kept, e.g.
-   `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>`
-   (`<sso-region>` is the IAM Identity Center home region, not the stack's),
-   from `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`) in two places:
-   `map_additional_iam_roles` (`groups: ["system:masters"]`) on `eks/defaults` in the stack file,
-   which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
-   `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
-   `stacks/orgs/fnx/root/us-east-1.yaml` (EU stacks: `root/eu-west-1.yaml`), so it can write the stack's state. Apply `backend/main`
-   (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
-   backend and warns while a stack has none.
+1. The operator signs in with the stack account's Identity Center `AdministratorAccess` (groups
+   `Managers`, `DevOps`). Nothing to paste: `stacks/catalog/eks/defaults.yaml` admits that set by
+   name (`aws_sso_permission_sets_rbac`, `groups: ["system:masters"]`), so every `eks` instance's
+   plan looks up the account's `AWSReservedSSO_AdministratorAccess_<hash>` role and gives it an
+   `AmazonEKSClusterAdminPolicy` access entry; `backend/main`'s `access_roles.write` (dev/staging)
+   or `.prod_write` (prod) already trusts the set by its pattern in
+   `stacks/orgs/fnx/root/us-east-1.yaml` (EU stacks: `root/eu-west-1.yaml`), so it can write the
+   stack's state. **Order:** the set must be assigned in the account before any `eks` plan of the
+   stack, or that plan fails ("Could not find Role ARN for the AWS SSO permission set"): apply
+   `deploy-accounts`' `identity-center` phase (`aws-identity-center`, `fnx-gbl-root`, whose
+   `account_assignments` give `AdministratorAccess` in dev, staging, prod and prod-eu) before the
+   workload stacks' `eks` instances. No state read links them, so `check-deploy-layers.py` cannot
+   order them. Another admin role (full ARN, path kept) goes in `map_additional_iam_roles` on
+   `eks/defaults` in the stack file and in that backend role. `check-cluster-api-ci.py` fails an
+   admin role or set the backend role does not trust, and a set `account_assignments` does not
+   assign in the stack's account.
 2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then
    `export AWS_PROFILE=<profile>`), forward the endpoint through `ec2/bastion` (a private subnet of
    `vpc/main`; SSM agent via `enable_ssm`, the default, reaching SSM through the NAT gateway). Every
