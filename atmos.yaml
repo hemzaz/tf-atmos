@@ -55,12 +55,11 @@ stacks:
 # every non-interactive `atmos terraform plan`/`deploy`/`lint` (CI) try an SSO
 # login and fail without a TTY, even with AWS env credentials (E4d0 spike,
 # 2026-10-31). Lint step stack-checks (check-auth-defaults.py) fails one. Only
-# a role profile (profiles/<role>/atmos.yaml, E4d2; CI never sets
-# ATMOS_PROFILE) sets a default, by a provisioned identity's name. That name
-# exists only after a first login, and a profile default naming a missing
-# identity fails every auth and terraform command, `atmos auth login` included:
-# log in once per machine without the profile (`ATMOS_PROFILE= atmos auth
-# login`; E4d2 wraps it as the `atmos login` custom command).
+# a role profile (profiles/<role>/atmos.yaml; CI never sets ATMOS_PROFILE)
+# sets a default, by a provisioned identity's name. That name exists only
+# after a first login, and a profile default naming a missing identity fails
+# every auth and terraform command, `atmos auth login` included: log in with
+# the `atmos login` custom command (below), which clears the profile.
 # House deviation: Cloud Posse keeps the provider and static identities in each
 # profile; here the provider is shared and every identity is provisioned.
 auth:
@@ -135,6 +134,20 @@ vendor:
 # `terraform validate` never binds values, so it passes a component whose
 # variable validations all fail. CI's Plan sweep job runs `atmos sweep --all`.
 commands:
+  # First login (E4d2): the role profiles' default (profiles/<role>/atmos.yaml)
+  # names an identity that exists only after a login, and until then every
+  # auth and terraform command fails on it, `atmos auth login` included. This
+  # logs in with the profile cleared, through the provider (atmos.yaml `auth`),
+  # which provisions the identities. Extra `atmos auth login` flags go after
+  # `--`. Takes no identity, so it authenticates nothing itself; never run by CI.
+  - name: login
+    description: >-
+      Log in to IAM Identity Center and provision your <account>/<permission set>
+      identities, whatever ATMOS_PROFILE is set to. Run it first, and again when
+      the session expires.
+    steps:
+      - env -u ATMOS_PROFILE atmos auth login --provider fnx-sso {{ .TrailingArgs }}
+
   - name: sweep
     description: >-
       Plan stack/component pairs against their resolved variables, with no AWS

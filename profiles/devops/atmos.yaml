@@ -1,0 +1,10 @@
+# Cloud Posse's `devops` profile (owner decision OQ7), for the DevOps group:
+# `export ATMOS_PROFILE=devops`. Only a default, on an identity that
+# `atmos login` provisions (atmos.yaml `auth`): dev's AdministratorAccess, the
+# day-to-day account; the group has it in every account but the management
+# account (stacks/catalog/aws-identity-center/defaults.yaml).
+# Another account: `-i <account>/AdministratorAccess` (`atmos auth list`).
+auth:
+  identities:
+    fnx-dev/AdministratorAccess:
+      default: true

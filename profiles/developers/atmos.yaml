@@ -1,0 +1,9 @@
+# Cloud Posse's `developers` profile (owner decision OQ7), for the Developers
+# group: `export ATMOS_PROFILE=developers`. Only a default, on an identity that
+# `atmos login` provisions (atmos.yaml `auth`): dev's TerraformApplyAccess, the
+# group's one write set (stacks/catalog/aws-identity-center/defaults.yaml).
+# Another account: `-i <account>/<set>` (`atmos auth list`).
+auth:
+  identities:
+    fnx-dev/TerraformApplyAccess:
+      default: true

@@ -96,7 +96,6 @@ atmos sweep -s fnx-ue1-dev                          # plan with resolved variabl
 atmos workflow providers-lock -f providers          # after a required_providers change: rewrite the committed locks
 atmos workflow sandbox -f sandbox                   # apply against Floci, then destroy (Docker only)
 atmos workflow localemu -f localemu                 # the same against LocalEmu (Python 3.13)
-atmos terraform plan vpc/main -s fnx-ue1-dev # needs AWS credentials
 ```
 
 `terraform validate` never evaluates `variable` validation blocks; `atmos sweep` and the emulator
@@ -104,6 +103,17 @@ lanes do. Run the emulator lanes through their workflows: by hand, sandbox comma
 `--identity local-aws`, and LocalEmu commands need `--identity local-emu` plus
 `LOCALEMU_ACCESS_KEY_ID`, `LOCALEMU_SECRET_ACCESS_KEY` and `AWS_ENDPOINT_URL`, or the apply reaches
 real AWS (`workflows/localemu.yaml`).
+
+Against real accounts, sign in through IAM Identity Center
+([Signing in](./docs/OPERATIONS.md#signing-in)):
+
+```bash
+export ATMOS_PROFILE=developers                     # your group: managers, devops or developers
+atmos login                                         # first, and whenever the session expires
+atmos terraform plan vpc/main -s fnx-ue1-dev        # as the profile's default identity (dev, every role)
+atmos auth list                                     # your <account>/<set> identities
+atmos terraform plan vpc/main -s fnx-ue1-staging -i <account>/<set>   # another account
+```
 
 **Add a component:** `atmos scaffold generate component . --force` (run from the repo root; it
 also writes the catalog entry). `atmos scaffold generate catalog-entry . --force` adds catalog
