@@ -29,6 +29,10 @@
 # "Provider produced inconsistent result after apply" on aws_db_subnet_group.
 # That is why this workflow clears the lane's workspace state before applying.
 # In CI it is a non-issue - every run is a fresh machine.
+# The lane workflow sets ATMOS_PROFILE empty (Atmos treats it as unset) for
+# every step: a role profile's default (profiles/<role>/atmos.yaml) fails
+# auth init before `atmos login`, even with --identity local-aws/local-emu,
+# and these lanes need no SSO.
 workflows:
   localemu-up:
     description: Install (if needed) and start the LocalEmu emulator on :4566
@@ -105,6 +109,8 @@ workflows:
     dependencies:
       tools:
         terraform: "1.16.3"
+    env:
+      ATMOS_PROFILE: ""
     steps:
       - type: shell
         name: validate

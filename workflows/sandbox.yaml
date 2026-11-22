@@ -24,6 +24,10 @@
 # instance in dev, staging and prod was uncreatable, because none named a
 # deployment package and aws_lambda_function requires one at apply time. Six
 # green static gates had said otherwise. Coverage here is not a formality.
+# The lane workflow sets ATMOS_PROFILE empty (Atmos treats it as unset) for
+# every step: a role profile's default (profiles/<role>/atmos.yaml) fails
+# auth init before `atmos login`, even with --identity local-aws/local-emu,
+# and these lanes need no SSO.
 workflows:
   sandbox-up:
     description: Start (or reuse) the local AWS emulator
@@ -44,6 +48,8 @@ workflows:
     dependencies:
       tools:
         terraform: "1.16.3"
+    env:
+      ATMOS_PROFILE: ""
     steps:
       - type: shell
         name: validate
