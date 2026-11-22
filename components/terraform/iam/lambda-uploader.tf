@@ -18,6 +18,8 @@
 # workflows/scripts/common/check-lambda-packages.py fails lint when the
 # stack's s3/lambda-artifacts or kms/main instance stops matching it.
 
+data "aws_caller_identity" "current" {}
+
 data "aws_partition" "current" {}
 
 locals {

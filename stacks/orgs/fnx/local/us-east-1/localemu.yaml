@@ -230,38 +230,17 @@ components:
           Tenant: fnx
           ManagedBy: Terraform
 
-    # iam has a lifecycle.precondition that a naive instance trips, gated on
-    # create_cross_account_role (default true):
-    #
-    #   cross-account-roles.tf:83  trusting an account other than the caller
-    #     requires one of trusted_principal_org_id, external_id or require_mfa.
-    #
-    # It is satisfied here deliberately rather than sidestepped. The trusted
-    # account is NOT this lane's own 000000000000: trusting self would make
-    # local.trusts_other_accounts false and short-circuit the precondition,
-    # leaving the guard unexercised. A foreign account plus an external_id is
-    # what actually proves it. managed_s3_bucket_arns is optional; it is set so
-    # the S3 statements of the resource-management policy are exercised too.
-    #
-    # `environment` is validated against dev/development/staging/stage/prod/
-    # production, so it cannot be "localemu" the way the tags are.
+    # iam/main creates the account's Auto Scaling service-linked role, the one
+    # iam resource this lane can own: local stacks have no CI roles
+    # (check-ci-state-roles.py maps only dev/staging/prod to backend roles;
+    # orgs/fnx/local/_defaults.yaml). LocalEmu implements CreateServiceLinkedRole,
+    # DeleteServiceLinkedRole and GetServiceLinkedRoleDeletionStatus for
+    # autoscaling.amazonaws.com, so apply and destroy both run.
     iam/main:
       metadata:
         component: iam
       vars:
-        environment: dev
-        account_id: "000000000000"
-        cross_account_role_name: "localemu-cross-account"
-        policy_name: "localemu-resource-management"
-        trusted_account_ids:
-          - "111122223333"
-        # The other precondition: the trust is pinned to named principals
-        # (aws:PrincipalArn), which need not exist.
-        trusted_principal_arns:
-          - "arn:aws:iam::111122223333:role/localemu-hub-ci-plan"
-        external_id: "localemu-external-id"
-        managed_s3_bucket_arns:
-          - "arn:aws:s3:::localemu-managed-bucket"
+        enable_autoscaling_service_linked_role: true
         tags:
           Environment: localemu
           Tenant: fnx

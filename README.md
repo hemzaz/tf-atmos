@@ -20,7 +20,7 @@ stacks/mixins/           tenant, stage and region mixins
 workflows/               Atmos workflows (atmos list workflows); scripts/ holds the checks they run
 scripts/                 helpers: plan-sweep.sh (atmos sweep), lint checks, stack scaffold reader, certificates/
 scaffolds/               templates for `atmos scaffold generate`
-templates/, examples/    stack samples (templates/stacks), the OIDC hub/spoke example
+templates/               stack samples (templates/stacks)
 .github/workflows/       CI/CD (below)
 ```
 

@@ -13,24 +13,8 @@ components:
           description: "Manages IAM service-linked roles and the GitHub Actions CI roles"
           category: "security"
       vars:
-        # The lifecycle tier the component validates (dev/staging/prod).
-        # context.environment is the region code (`ue1`) and fails it.
-        environment: "{{ .settings.context.stage }}"
-        account_id: "{{ .settings.environment.account_id }}"
-        # No per-account cross-account operator role: human access is IAM
-        # Identity Center permission sets (catalog/aws-identity-center), Cloud
-        # Posse's model. An instance that needs a cross-account role uses the
-        # iam/oidc-spoke abstract (catalog/iam/oidc-spoke.yaml) instead.
-        create_cross_account_role: false
-        # Required by the component (no defaults) even while
-        # create_cross_account_role is false; unused then (catalog/iam/oidc-hub
-        # precedent). trusted_account_ids cannot be [] (variables.tf requires
-        # length > 0), so it names this account, which grants nothing.
-        cross_account_role_name: "{{ .atmos_stack }}-unused"
-        policy_name: "{{ .atmos_stack }}-unused"
-        trusted_account_ids:
-          - "{{ .settings.environment.account_id }}"
-
+        # No cross-account operator role: human access is IAM Identity Center
+        # permission sets (catalog/aws-identity-center), Cloud Posse's model.
         tags:
           Component: "IAM"
 

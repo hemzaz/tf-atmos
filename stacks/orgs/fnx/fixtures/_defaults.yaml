@@ -43,8 +43,6 @@ components:
         inherits:
           - iam
       vars:
-        environment: dev
-        create_cross_account_role: false
         github_oidc_enabled: true
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
@@ -65,8 +63,6 @@ components:
         inherits:
           - iam
       vars:
-        # The iam component validates a lifecycle tier (dev/staging/prod).
-        environment: dev
         enable_autoscaling_service_linked_role: true
 
     kms/main:

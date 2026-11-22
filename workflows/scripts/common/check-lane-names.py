@@ -16,12 +16,12 @@ Stacks are grouped by account (settings.environment.account) and region
 it cannot be checked. Within a group this fails:
   - two stacks whose deployable instances share a tags.Environment value;
   - two instances that create the same name from a key a component uses
-    VERBATIM (RAW_NAMES: kms alias_name, iam policy_name, ecs cluster_name,
-    dynamodb table_name, ...), whatever its prefix. Only creating keys count:
-    a key that names an existing resource (cluster_name in eks-addons, a
-    lane's reference to its stage's cluster) is not compared, and a gated key
-    counts only while its instance creates the resource (iam policy_name
-    with create_cross_account_role);
+    VERBATIM (RAW_NAMES: kms alias_name, iam ci_role_name_prefix, ecs
+    cluster_name, dynamodb table_name, ...), whatever its prefix. Only
+    creating keys count: a key that names an existing resource (cluster_name
+    in eks-addons, a lane's reference to its stage's cluster) is not
+    compared, and a gated key counts only while its instance creates the
+    resource (iam ci_role_name_prefix with github_oidc_enabled);
   - two instances that create the same account singleton (SINGLETONS: the
     GitHub OIDC provider, the Auto Scaling service-linked role, the
     multi-region CloudTrail trail, CloudTrail's global-service-event
@@ -139,8 +139,6 @@ RAW_NAMES = {
     ("kms", "name_prefix"): ("KMS key name prefix", None),
     ("cognito", "name_prefix"): ("Cognito user pool", None),
     ("network", "name_prefix"): ("network name prefix", None),
-    ("iam", "cross_account_role_name"): ("IAM role", ("create_cross_account_role", True)),
-    ("iam", "policy_name"): ("IAM policy", ("create_cross_account_role", True)),
     ("iam", "ci_role_name_prefix"): ("IAM CI role prefix", ("github_oidc_enabled", False)),
     ("dynamodb", "table_name"): ("DynamoDB table", None),
     ("ecs", "cluster_name"): ("ECS cluster", None),

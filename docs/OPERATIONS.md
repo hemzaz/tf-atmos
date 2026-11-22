@@ -356,8 +356,6 @@ for PR/master plans, drift and DR checks; `--kind apply` (default) for CD. This 
 per-account planner/terraform role pair (`github-oidc-role`). `settings.environment.account_id`
 already comes from the account map (Account IDs, above), so a new or changed account needs no
 script change. `AWS_PROD_PLAN_ROLE_ARN` is gone; delete it from the repository.
-For CI across several accounts from one OIDC provider, see
-[examples/github-oidc-hub-spoke](../examples/github-oidc-hub-spoke/README.md).
 
 ## Adding a stack
 
