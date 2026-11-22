@@ -51,6 +51,10 @@ ALLOWLIST = (
     # aws-iam-role (vendor.yaml): the network account's DNS delegation role (E6b).
     (r"/aws-iam-role/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-iam-role/main\.tf", "CKV_TF_1", TF_1),
+    # aws-github-oidc-provider (vendor.yaml): each account's GitHub OIDC provider (E6a).
+    (r"/aws-github-oidc-provider/context\.tf", "CKV_TF_1", TF_1),
+    # aws-iam-service-linked-roles (vendor.yaml): each account's service-linked roles (E6a).
+    (r"/aws-iam-service-linked-roles/context\.tf", "CKV_TF_1", TF_1),
     # aws-cloudtrail-bucket (vendor.yaml): the organization trail's log bucket (E5a3).
     (r"/aws-cloudtrail-bucket/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-cloudtrail-bucket/main\.tf", "CKV_TF_1", TF_1),
@@ -86,7 +90,7 @@ ALLOWLIST = (
     (r"/aws-inspector2/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-inspector2/remote-state\.tf", "CKV_TF_1", TF_1),
     # account-map's iam-roles module (vendor.yaml), reached through the account-map-bypass
-    # providers mixin of the dns components and aws-iam-role (bypassed, still expanded).
+    # providers mixin of the dns, IAM and trail components (bypassed, still expanded).
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),
     (r"/account-map/modules/iam-roles/main\.tf", "CKV_TF_1", TF_1),
     # aws-identity-center (vendor.yaml): permission sets and assignments (E4).

@@ -8,7 +8,6 @@ artifacts:
       declared: github.com/cloudposse-terraform-components/aws-security-hub.git//src
       resolved: github.com/cloudposse-terraform-components/aws-security-hub.git//src
       digest: sha256:527e4182a7c201d4a8d50a3a9351553fd0c03b97bc2e1f222e8c8d7f5f2abca3
-      query_digest: sha256:e5e9430327a786dc73555f634b5e82e28efe8dbc3c8d621318bb96ecd35926c9
     files:
       - path: README.md
         type: file
@@ -112,7 +111,6 @@ artifacts:
       declared: github.com/cloudposse-terraform-components/aws-inspector2.git//src
       resolved: github.com/cloudposse-terraform-components/aws-inspector2.git//src
       digest: sha256:b118188d48d9c3ddcc06eb01faeb111927aff0b4f2ada024e782496c17baf316
-      query_digest: sha256:8ab24fa512c0b7eaac2e3cc2ed468cfc856d2fac31a531b5629faad52e86ca33
     files:
       - path: README.md
         type: file
@@ -172,6 +170,66 @@ artifacts:
         mode: 420
         sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
     order: 16
+    included_paths:
+      - providers-account-map-bypass.depth-1.tf
+      - account-verification.mixin.tf
+  7df2d5b479f0e4ec2532610ef050bb83f2e4c1d0d1b0e9c5ce9b88638b7f2e6c:
+    name: aws-iam-service-linked-roles
+    kind: remote
+    target: components/terraform/aws-iam-service-linked-roles
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-iam-service-linked-roles.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-iam-service-linked-roles.git//src
+      digest: sha256:f8e7c31bce6b772b25a091ed63c6194b1adbd853d5bf9bb990358c50ab70ea87
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 1ca156b50565e6ebe731cd4abfc90781023bd003d4327cab86479c16b51c375f
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 70ad806264649dc3017b1a9e595155fec8825db1a1108c5f5ef94cd26970df3c
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 1c454bdc15cf9bae7ccd479897dc2ddc907b29a45c6dc99502d61cf25855d974
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 3188674a31e7fb2072bcd6a3dc642ece42f1ed140b7e7be5b5170dde648503d7
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 4c3417065868d7d273fc1fccf15b48cd12176fbb22756bdaf418281fa93da6db
+    order: 25
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+    excluded_paths:
+      - '**/providers.tf'
+  7fc0dcff75a54e3c52801566126c06f46ac23d7967e6c2c13be18dd5740fdcc9:
+    name: aws-iam-service-linked-roles-mixins
+    kind: remote
+    target: components/terraform/aws-iam-service-linked-roles
+    source:
+      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
+    files:
+      - path: account-verification.mixin.tf
+        type: file
+        mode: 420
+        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
+      - path: providers-account-map-bypass.depth-1.tf
+        type: file
+        mode: 420
+        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
+    order: 26
     included_paths:
       - providers-account-map-bypass.depth-1.tf
       - account-verification.mixin.tf
@@ -330,7 +388,6 @@ artifacts:
       declared: github.com/cloudposse-terraform-components/aws-guardduty.git//src
       resolved: github.com/cloudposse-terraform-components/aws-guardduty.git//src
       digest: sha256:d1ae6e0fd46300377bab4eb0475155e7826c48653d49ef30a432a19f53a68882
-      query_digest: sha256:fa8c610f8c176e80218b76926d957e7b73e9e6f9ba74fc66fa5f40f0939f234e
     files:
       - path: README.md
         type: file
@@ -730,6 +787,45 @@ artifacts:
       - '**/*.md'
     excluded_paths:
       - '**/providers.tf'
+  b5b9a8defd6879fe0b410a6e056ee45777c3f10dcabb149864274cfff8ca852a:
+    name: aws-github-oidc-provider
+    kind: remote
+    target: components/terraform/aws-github-oidc-provider
+    source:
+      declared: github.com/cloudposse-terraform-components/aws-github-oidc-provider.git//src
+      resolved: github.com/cloudposse-terraform-components/aws-github-oidc-provider.git//src
+      digest: sha256:e46e202ee4d6efd0e3f5341ba71b04ac45def5b2d04c9c007099e77e363d835e
+    files:
+      - path: README.md
+        type: file
+        mode: 420
+        sha256: 9833bacba8c90d6ce6fb882db300cee978fdddb7734a85e14e863e9ba41da409
+      - path: context.tf
+        type: file
+        mode: 420
+        sha256: bb629cc614bfc54d97dd66e9c76e882fb79829323899852293b76a8958359602
+      - path: main.tf
+        type: file
+        mode: 420
+        sha256: 7a173c4abf93ef1e25a2537d5c9c7d2b31b76525a8baf25bb901ad262dbc6373
+      - path: outputs.tf
+        type: file
+        mode: 420
+        sha256: 5116a2ecd3ad545082fc02d5f82e1aae00da61af333b15acfe5160b86814ff16
+      - path: variables.tf
+        type: file
+        mode: 420
+        sha256: 4a9caa4b746bee339ae3256cd262bd7d72cd5797e152a486589b2b2bda6bd416
+      - path: versions.tf
+        type: file
+        mode: 420
+        sha256: 5707f75f392813415b9ef8753e00e96ee873c3f963e156b5371990fcd17e47ca
+    order: 23
+    included_paths:
+      - '**/*.tf'
+      - '**/*.md'
+    excluded_paths:
+      - '**/providers.tf'
   d296b8afc0f9fe4b680c855754a11e5420b48ed303b24bca369dc0bfe8c3c5c4:
     name: aws-scp
     kind: remote
@@ -783,6 +879,27 @@ artifacts:
     included_paths:
       - '**/*.tf'
       - '**/*.md'
+  da2460e404e392cd8279b3ddb291eebf6399546c7602adb1698570933af766e6:
+    name: aws-github-oidc-provider-mixins
+    kind: remote
+    target: components/terraform/aws-github-oidc-provider
+    source:
+      declared: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      resolved: github.com/cloudposse-terraform-components/mixins.git//src/mixins
+      digest: sha256:0d4f83448d137879cf687f611bac187835c0a33d1dfbb0944683f81bea045736
+    files:
+      - path: account-verification.mixin.tf
+        type: file
+        mode: 420
+        sha256: 9479432717f28732e2c5a9ffc4383f707e90ee7f252e061c0c4c655b2e366574
+      - path: providers-account-map-bypass.depth-1.tf
+        type: file
+        mode: 420
+        sha256: 5e29a2fd8b8ee2d99db95d226b2c1ead966a0b46e7b09d4be07a08522f69f947
+    order: 24
+    included_paths:
+      - providers-account-map-bypass.depth-1.tf
+      - account-verification.mixin.tf
   dae3acd4066cbac5e333f7632372b8d5905d8b124f6d8a780852f06b183d3fce:
     name: aws-cloudtrail-bucket
     kind: remote
