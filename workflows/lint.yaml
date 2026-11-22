@@ -49,6 +49,12 @@ workflows:
         # scripts/check-stack-samples.sh (stack-samples) edits a scratch
         # manifest with it; the atmos image ships no yq.
         mikefarah/yq: "v4.53.6"
+    # ATMOS_PROFILE empty (Atmos treats it as unset) for every step: a role
+    # profile's default (profiles/<role>/atmos.yaml) fails every auth and
+    # terraform command before `atmos login` and needs a live session after
+    # it, and stack-checks' describes must not merge a profile in.
+    env:
+      ATMOS_PROFILE: ""
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
@@ -58,12 +64,9 @@ workflows:
       # atmos.yaml's auth providers and identities (kinds, via, principal):
       # offline, no credentials, no SSO call (E4d0 spike). It does not read a
       # stack's auth section; check-auth-defaults (stack-checks) does.
-      # ATMOS_PROFILE unset here and in tflint: a role profile's default
-      # (profiles/<role>/atmos.yaml) fails every auth and terraform command
-      # before `atmos login`, and needs a live session after it.
       - name: auth-validate
         type: shell
-        command: env -u ATMOS_PROFILE atmos auth validate
+        command: atmos auth validate
       - type: parallel
         fail:
           mode: wait_all
@@ -179,10 +182,10 @@ workflows:
           broken=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("tflint")))')
           stacks=$(atmos list stacks | grep '^fnx-ue1-fixtures-' || true)
           [ -n "$stacks" ] || { echo "no fnx-ue1-fixtures-* stacks listed; refusing to skip them"; exit 1; }
-          ATMOS_STACKS_EXCLUDED_PATHS='**/_defaults.yaml,orgs/fnx/fixtures/**' env -u ATMOS_PROFILE atmos terraform lint
+          ATMOS_STACKS_EXCLUDED_PATHS='**/_defaults.yaml,orgs/fnx/fixtures/**' atmos terraform lint
           failed=""
           for stack in $stacks; do
-            if env -u ATMOS_PROFILE atmos terraform lint -s "$stack"; then continue; fi
+            if atmos terraform lint -s "$stack"; then continue; fi
             case " $broken " in
               *" $stack "*) echo "KNOWN-BROKEN $stack: tflint failures do not fail the run" ;;
               *) failed="$failed $stack" ;;
@@ -307,7 +310,8 @@ workflows:
       # component's resolved auth), and no atmos.yaml profiles.default. Any of
       # them breaks every non-interactive terraform plan/deploy/lint (E4d0
       # spike). A role profile (profiles/<role>/atmos.yaml, E4d2) may set one:
-      # both describes run with ATMOS_PROFILE unset, so no profile is merged in.
+      # both describes run with ATMOS_PROFILE empty (the workflow env), so no
+      # profile is merged in.
       # The Identity Center provider's region equals the aws-identity-center
       # instance's resolved vars.region (its stack's region mixin).
       #
@@ -324,8 +328,8 @@ workflows:
           stacks_json="$(mktemp)"
           config_json="$(mktemp)"
           trap 'rm -f "$stacks_json" "$config_json"' EXIT
-          env -u ATMOS_PROFILE atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          env -u ATMOS_PROFILE atmos describe config --format json > "$config_json"
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          atmos describe config --format json > "$config_json"
           failed=""
           # check <name> <unit test file> <check command...>: the check reads the JSON on stdin.
           check() {
