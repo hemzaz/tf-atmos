@@ -137,18 +137,34 @@ class AuthDefaultsTest(unittest.TestCase):
         bad = flag(AUTH, "identities", "local-aws", "default")
         self.assertEqual(run(CONFIG, stacks(**{"vpc/defaults": component(bad, type="abstract")})), [])
 
+    def main(self, config, document):
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+            json.dump(config, handle)
+            handle.flush()
+            out = io.StringIO()
+            with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(document))), contextlib.redirect_stdout(out):
+                code = auth_defaults.main(["--config", handle.name])
+        return code, out.getvalue().splitlines()[-1]
+
     def test_main_exit_codes(self):
         for config, document, code in (
             (REGION_CONFIG, region_stacks("us-east-1"), 0),
             (REGION_CONFIG, region_stacks("eu-west-1"), 1),
             ({"profiles": {"default": "devops"}}, stacks(), 1),
         ):
-            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
-                json.dump(config, handle)
-                handle.flush()
-                out = io.StringIO()
-                with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(document))), contextlib.redirect_stdout(out):
-                    self.assertEqual(auth_defaults.main(["--config", handle.name]), code)
+            self.assertEqual(self.main(config, document)[0], code)
+
+    def test_summary_names_only_the_checks_that_fired(self):
+        _, region_only = self.main(REGION_CONFIG, region_stacks("eu-west-1"))
+        self.assertIn("region must be the aws-identity-center stack's", region_only)
+        self.assertNotIn("committed default", region_only)
+        _, default_only = self.main({"profiles": {"default": "devops"}}, stacks())
+        self.assertIn("a committed default breaks CI", default_only)
+        self.assertNotIn("region", default_only)
+        both = {**REGION_CONFIG, "profiles": {"default": "devops"}}
+        _, summary = self.main(both, region_stacks("eu-west-1"))
+        self.assertTrue(summary.startswith("2 auth problem(s): a committed default breaks CI"))
+        self.assertIn("; the Identity Center provider's region", summary)
 
 
 if __name__ == "__main__":
