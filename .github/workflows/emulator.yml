@@ -10,7 +10,7 @@
 #         RDS rejects that at CreateDBInstance.
 #   #144  monitoring interpolated a null api_gateway_name, so every instance in
 #         dev, staging and prod failed at PLAN time.
-#   #145  iam's external_id regex exceeded Go RE2's 1000-repetition cap, so the
+#   #145  an iam validation regex exceeded Go RE2's 1000-repetition cap, so its
 #         variable could never be set.
 #
 # Six green static gates said otherwise every time.

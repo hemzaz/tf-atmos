@@ -145,9 +145,10 @@ class PlaceholderTest(unittest.TestCase):
 
     def test_placeholder_org_id(self):
         stacks = clean()
-        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", iam_ci={
-            "component": "iam", "trusted_principal_org_id": "o-xxxxxxxxxx"})
-        self.assert_one(stacks, "fnx-ue1-dev", "trusted_principal_org_id", "AWS Organization ID")
+        stacks["fnx-ue1-dev"] = stack("dev", "222222222222", sns_alerts={
+            "component": "sns",
+            "sns_topic_policy_json": '{"Condition": {"StringEquals": {"aws:PrincipalOrgID": "o-xxxxxxxxxx"}}}'})
+        self.assert_one(stacks, "fnx-ue1-dev", "sns_topic_policy_json", "AWS Organization ID")
 
     def test_example_domain(self):
         stacks = clean()

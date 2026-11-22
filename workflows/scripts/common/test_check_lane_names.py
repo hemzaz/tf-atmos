@@ -73,27 +73,25 @@ class GroupTest(unittest.TestCase):
         }), [])
 
     def test_gated_name_counts_only_when_created(self):
-        # iam/ci sets policy_name from the catalog but creates no cross-account policy.
+        # iam/dev sets ci_role_name_prefix but creates no CI roles (github_oidc_enabled off).
         self.assertEqual(self.errors({"fnx-ue1-dev": stack(**{
-            "iam/dev": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy"),
-            "iam/ci": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy",
-                               create_cross_account_role=False, ci_role_name_prefix="fnx-ue1-dev-ci"),
+            "iam/dev": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci"),
+            "iam/ci": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci",
+                               github_oidc_enabled=True, ci_runner_pool_names=["ue1-github-runners"]),
         })}), [])
         errors = self.errors({"fnx-ue1-dev": stack(**{
-            "iam/dev": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy"),
-            "iam/other": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy",
-                                  resource_name_prefix="other"),
+            "iam/ci": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci", github_oidc_enabled=True),
+            "iam/other": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci",
+                                  github_oidc_enabled=True, ci_runner_pool_names=["ue1-other-runners"]),
         })})
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("both create the IAM policy 'fnx-ue1-dev-CrossAccountPolicy'", errors[0])
+        self.assertIn("both create the IAM CI role prefix 'fnx-ue1-dev-ci'", errors[0])
 
     def test_two_account_singletons_fail(self):
         errors = self.errors({
-            "fnx-ue1-dev": stack(**{"iam/ci": instance("ue1", component="iam", github_oidc_create_provider=True,
-                                                       create_cross_account_role=False)}),
+            "fnx-ue1-dev": stack(**{"iam/ci": instance("ue1", component="iam", github_oidc_create_provider=True)}),
             "fnx-ue1-dev-perf": stack(**{"iam/ci": instance("ue1-perf", "perf", component="iam",
-                                                            github_oidc_create_provider=True,
-                                                            create_cross_account_role=False)}),
+                                                            github_oidc_create_provider=True)}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("both create the GitHub OIDC provider", errors[0])
@@ -101,8 +99,7 @@ class GroupTest(unittest.TestCase):
     def test_fixture_singletons_are_exempt(self):
         self.assertEqual(self.errors({
             f"fnx-ue1-fixtures-{n}": stack(**{"iam/fixtures": instance(
-                f"ue1-{n}", n, component="iam", stage="fixtures", enable_autoscaling_service_linked_role=True,
-                create_cross_account_role=False)})
+                f"ue1-{n}", n, component="iam", stage="fixtures", enable_autoscaling_service_linked_role=True)})
             for n in ("a", "b")
         }), [])
 
@@ -129,19 +126,18 @@ class GroupTest(unittest.TestCase):
         self.assertEqual(self.errors({
             "fnx-ue1-prod": stack(**{"iam/ci": instance(
                 "ue1", component="iam", stage="prod", ci_role_name_prefix="fnx-ue1-prod-ci",
-                github_oidc_enabled=True, github_oidc_create_provider=True, create_cross_account_role=False)}),
+                github_oidc_enabled=True, github_oidc_create_provider=True)}),
             "fnx-ue2-prod": stack(**{"iam/ci": instance(
                 "ue2", component="iam", stage="prod", region="us-east-2", ci_role_name_prefix="fnx-ue2-prod-ci",
-                github_oidc_enabled=True, github_oidc_create_provider=False, create_cross_account_role=False)}),
+                github_oidc_enabled=True, github_oidc_create_provider=False)}),
         }), [])
 
     def test_dr_region_creating_the_account_singleton_again_fails(self):
         errors = self.errors({
             "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", github_oidc_create_provider=True, create_cross_account_role=False)}),
+                "ue1", component="iam", stage="prod", github_oidc_create_provider=True)}),
             "fnx-ue2-prod": stack(**{"iam/ci": instance(
-                "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_create_provider=True,
-                create_cross_account_role=False)}),
+                "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_create_provider=True)}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("both create the GitHub OIDC provider '(one per account)' in account prod", errors[0])
@@ -294,27 +290,25 @@ class GroupTest(unittest.TestCase):
         arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
         self.assertEqual(self.errors({
             "fnx-ue1-dev": stack(**{"iam/ci": instance(
-                "ue1", component="iam", github_oidc_create_provider=True, create_cross_account_role=False)}),
+                "ue1", component="iam", github_oidc_create_provider=True)}),
             "fnx-uw2-dev": stack(**{"iam/ci": instance(
                 "uw2", component="iam", region="us-west-2", github_oidc_create_provider=False,
-                github_oidc_provider_arn=arn, create_cross_account_role=False)}),
+                github_oidc_provider_arn=arn)}),
         }), [])
 
     def test_trusted_oidc_provider_without_a_creator_fails(self):
         # The account's creating stack was deleted: the second stack trusts a provider nobody creates.
         arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
         errors = self.errors({
-            "fnx-ue1-dev": stack(**{"iam/dev": instance("ue1", component="iam", create_cross_account_role=False)}),
+            "fnx-ue1-dev": stack(**{"iam/dev": instance("ue1", component="iam")}),
             "fnx-uw2-dev": stack(**{"iam/ci": instance(
                 "uw2", component="iam", region="us-west-2", github_oidc_create_provider=False,
-                github_oidc_provider_arn=arn, create_cross_account_role=False)}),
+                github_oidc_provider_arn=arn)}),
             # Another account's creator does not satisfy account dev.
             "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", github_oidc_create_provider=True,
-                create_cross_account_role=False)}),
+                "ue1", component="iam", stage="prod", github_oidc_create_provider=True)}),
             "fnx-ue1-fixtures-a": stack(**{"iam/ci": instance(
-                "ue1-a", "a", component="iam", stage="fixtures", account="dev", github_oidc_create_provider=True,
-                create_cross_account_role=False)}),
+                "ue1-a", "a", component="iam", stage="fixtures", account="dev", github_oidc_create_provider=True)}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("fnx-uw2-dev: iam/ci trusts the account's GitHub OIDC provider", errors[0])
@@ -323,11 +317,10 @@ class GroupTest(unittest.TestCase):
     def test_dr_region_reusing_an_iam_name_fails(self):
         errors = self.errors({
             "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", github_oidc_enabled=True, ci_role_name_prefix="shared-ci",
-                create_cross_account_role=False)}),
+                "ue1", component="iam", stage="prod", github_oidc_enabled=True, ci_role_name_prefix="shared-ci")}),
             "fnx-ue2-prod": stack(**{"iam/ci": instance(
                 "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_enabled=True,
-                ci_role_name_prefix="shared-ci", create_cross_account_role=False)}),
+                ci_role_name_prefix="shared-ci")}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("IAM CI role prefix 'shared-ci' in account prod", errors[0])
@@ -476,11 +469,10 @@ class InstanceTest(unittest.TestCase):
         self.assertIn('rds/data, rds/main (rds) set the same identifier "orders"', errors[0])
 
     def test_instances_without_primary_keys_compare_all_name_inputs(self):
-        # iam/ci and iam/dev share policy_name but differ in ci_role_name_prefix.
+        # iam/ci and iam/dev share ci_runner_pool_names but differ in ci_role_name_prefix.
         self.assertEqual(self.errors({"fnx-ue1-dev": stack(**{
-            "iam/ci": instance("ue1", component="iam", policy_name="p", ci_role_name_prefix="fnx-ue1-dev-ci",
-                               create_cross_account_role=False),
-            "iam/dev": instance("ue1", component="iam", policy_name="p"),
+            "iam/ci": instance("ue1", component="iam", ci_runner_pool_names=["p"], ci_role_name_prefix="fnx-ue1-dev-ci"),
+            "iam/dev": instance("ue1", component="iam", ci_runner_pool_names=["p"]),
         })}), [])
 
     def test_cluster_name_that_names_the_attached_cluster_is_not_primary(self):

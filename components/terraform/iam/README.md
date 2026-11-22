@@ -1,10 +1,9 @@
 # iam
 
-An optional cross-account role (trust pinned to named principals, and gated by org ID, external
-ID or MFA when another account is trusted) with a fixed
-cross-account policy and a resource-management policy scoped to caller-supplied ARNs, and
-optionally the GitHub Actions OIDC provider with separate CI plan and apply roles, and a Lambda
-package uploader role for an application repo's CI.
+The GitHub Actions OIDC provider with separate CI plan and apply roles, a Lambda package uploader
+role for an application repo's CI, and the account's Auto Scaling service-linked role. Human access
+is IAM Identity Center (`catalog/aws-identity-center`), Cloud Posse's model, so there is no
+cross-account operator role.
 
 ## Wiring
 
@@ -46,14 +45,3 @@ package uploader role for an application repo's CI.
   when the stack's bucket or `kms/main` alias stops matching. Puts are allowed only when
   conditional (`If-None-Match: *`, e.g. `aws s3api put-object --if-none-match '*'`), so
   re-uploading a released version fails by design: ship a new version instead.
-- Cross-account trust: the principals are the account roots of `trusted_account_ids`, narrowed by
-  an `aws:PrincipalArn` ArnEquals condition to `trusted_principal_arns` (the backend's
-  `access_roles` pattern), which is required, wildcard-free and must sit in those accounts. List
-  the full ARN, path included (SSO roles live under `aws-reserved/sso.amazonaws.com/<region>/`).
-  The workload instances (`catalog/iam/defaults.yaml`) create no cross-account role: human access
-  is IAM Identity Center. `catalog/iam/oidc-spoke.yaml` documents the pattern that creates one.
-- The role cannot write bucket policies or subscribe to SNS topics (`s3:PutBucketPolicy` and
-  `sns:Subscribe` would let it hand a bucket or a topic's messages to another account).
-- The `iam` abstract (`catalog/iam/defaults.yaml`) sets `create_cross_account_role: false`; only
-  the `iam/oidc-spoke` abstract and localemu's `iam/main` (which inherits nothing) create the role.
-  The managed ARN lists are optional.
