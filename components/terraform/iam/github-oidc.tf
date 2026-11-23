@@ -1,5 +1,5 @@
 # GitHub Actions OIDC CI roles. Everything here is inert unless
-# github_oidc_enabled is true, so iam/main instances are unaffected.
+# github_oidc_enabled is true.
 #
 # Two roles, because .github/workflows model two different trust surfaces:
 #   plan  - assumed by terraform-ci.yml (pull_request, i.e. PR-controlled code;

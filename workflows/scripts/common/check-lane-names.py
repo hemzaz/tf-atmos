@@ -23,7 +23,8 @@ it cannot be checked. Within a group this fails:
     compared, and a gated key counts only while its instance creates the
     resource (iam ci_role_name_prefix with github_oidc_enabled);
   - two instances that create the same account singleton (SINGLETONS: the
-    GitHub OIDC provider, the Auto Scaling service-linked role, the
+    GitHub OIDC provider, each service-linked role (MAP_SINGLETONS: one per
+    aws-iam-service-linked-roles service_linked_roles service name), the
     multi-region CloudTrail trail, CloudTrail's global-service-event
     recording, AWS Config's global-resource recording, the IAM account alias
     and the S3 account public access block), whichever instance creates it:
@@ -148,7 +149,6 @@ RAW_NAMES = {
 # (component, gate var, default) -> account singleton it creates when true.
 SINGLETONS = {
     ("iam", "github_oidc_create_provider", False): "GitHub OIDC provider",
-    ("iam", "enable_autoscaling_service_linked_role", False): "Auto Scaling service-linked role",
     # The vendored Cloud Posse trail defaults both to true (variables.tf). A
     # second trail recording IAM/STS events would duplicate (and bill) the
     # account's global-service events: a regional trail sets it false.
@@ -159,6 +159,13 @@ SINGLETONS = {
     # (main-standby).
     ("aws-account-settings", "account_alias_enabled", True): "IAM account alias",
     ("aws-account-settings", "s3_block_public_access_enabled", True): "S3 account public access block",
+}
+# (component, var) -> account singleton kind: the vendored
+# aws-iam-service-linked-roles creates one role per vars.service_linked_roles
+# entry, an account singleton per aws_service_name (one instance per account:
+# catalog/aws-iam-service-linked-roles).
+MAP_SINGLETONS = {
+    ("aws-iam-service-linked-roles", "service_linked_roles"): "service-linked role",
 }
 # (component, var) -> account singleton it creates when var is its stack's
 # vars.region (or unset): the vendored aws-config records global resource types
@@ -175,7 +182,10 @@ REGION_SINGLETON_ALLOWANCES = {
 }
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
 # region (IAM is global within an account).
-ACCOUNT_WIDE = {"IAM role", "IAM policy", "IAM CI role prefix", *SINGLETONS.values(), *REGION_SINGLETONS.values()}
+ACCOUNT_WIDE = {
+    "IAM role", "IAM policy", "IAM CI role prefix",
+    *SINGLETONS.values(), *MAP_SINGLETONS.values(), *REGION_SINGLETONS.values(),
+}
 # vars keys whose values are names global across accounts and regions.
 GLOBAL_KEYS = {"bucket_name", "assets_bucket_name", "domain_prefix"}
 
@@ -234,6 +244,12 @@ def created(instance: dict, stage) -> list[tuple]:
         for (comp, gate, default), resource in SINGLETONS.items():
             if comp == component and variables.get(gate, default) is True:
                 out.append((resource, "(one per account)", f"vars.{gate}"))
+        for (comp, key), resource in MAP_SINGLETONS.items():
+            entries = variables.get(key) if comp == component else None
+            for entry_key, entry in sorted((entries or {}).items()):
+                service = entry.get("aws_service_name") if isinstance(entry, dict) else None
+                if service:
+                    out.append((resource, service, f"vars.{key}.{entry_key}"))
         for (comp, key), resource in REGION_SINGLETONS.items():
             if comp == component and variables.get(key, variables.get("region")) == variables.get("region"):
                 out.append((resource, "(one per account)", f"vars.{key}"))

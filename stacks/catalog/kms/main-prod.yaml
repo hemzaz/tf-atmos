@@ -9,8 +9,9 @@
 # (replica_alias_names, keyed by that region: the DR standby stack's prefix,
 # which settings.dr.region does not give; the DR standby reads the replica
 # cross-stack and reaches it by that alias) and any extra grant
-# (allow_billing_notifications). The key depends on iam/main, which
-# provisions the Auto Scaling service-linked role its key policy names.
+# (allow_billing_notifications). The key depends on
+# aws-iam-service-linked-roles, which provisions the Auto Scaling
+# service-linked role its key policy names.
 # =============================================================================
 
 import:
@@ -72,7 +73,7 @@ components:
       dependencies:
         components:
           # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
-          # service-linked role directly as a principal; iam/main provisions
-          # it (enable_autoscaling_service_linked_role) so KMS does not
+          # service-linked role directly as a principal;
+          # aws-iam-service-linked-roles provisions it so KMS does not
           # reject the key policy.
-          - component: iam/main
+          - component: aws-iam-service-linked-roles

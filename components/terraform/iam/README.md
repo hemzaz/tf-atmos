@@ -1,17 +1,16 @@
 # iam
 
-The GitHub Actions OIDC provider with separate CI plan and apply roles, a Lambda package uploader
-role for an application repo's CI, and the account's Auto Scaling service-linked role. Human access
+The GitHub Actions OIDC provider with separate CI plan and apply roles, and a Lambda package
+uploader role for an application repo's CI. The account's Auto Scaling service-linked role is the
+vendored `aws-iam-service-linked-roles` (`catalog/aws-iam-service-linked-roles`, E6a2). Human access
 is IAM Identity Center (`catalog/aws-identity-center`), Cloud Posse's model, so there is no
 cross-account operator role.
 
 ## Wiring
 
-- Instances: `iam/ci` in the three AWS stacks (OIDC roles only); `iam/dev` in dev; `iam/main` in
-  staging, prod and `fnx-ue1-local-localemu`. The AWS-stack instances depend on `backend/main` in
-  `fnx-ue1-root` for ordering only (localemu's does not).
-- Used by: `eks` (`iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` as access entries), `kms/main`
-  (dependency on the instance that creates the Auto Scaling service-linked role). The backend
+- Instances: `iam/ci` in the AWS stacks (OIDC roles only). It depends on `backend/main` in
+  `fnx-ue1-root` for ordering only.
+- Used by: `eks` (`iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` as access entries). The backend
   trusts the CI roles by name (`<ci_role_name_prefix>-plan` / `-apply`), not by reading state.
 
 ## Notes
@@ -32,10 +31,6 @@ cross-account operator role.
   run with `-lock=false`.
 - `ci_apply_kms_key_aliases` takes `alias/...` names, never a key ARN: `iam/ci` applies before
   `kms/main`, and reading its state would create a cycle `check-deploy-layers.py` rejects.
-- `enable_autoscaling_service_linked_role` is `true` on exactly one instance per account
-  (`iam/dev`, `iam/main`). If `AWSServiceRoleForAutoScaling` already exists
-  (`aws iam get-role --role-name AWSServiceRoleForAutoScaling`), the create fails: set the flag
-  `false`, or import it at `'aws_iam_service_linked_role.autoscaling[0]'` and never flip it back.
 - Lambda uploader (`lambda-uploader.tf`): `<ci_role_name_prefix>-lambda-uploader`, created only
   when `lambda_uploader_trusted_github_repos` names an app repo (`<org>/<repo>:<branch>`, same
   validation as the apply role's). It may put/get objects in, and list, the stage's

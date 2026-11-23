@@ -21,7 +21,8 @@
 # bootstrap.yaml full applies only iam and vpc (vpc creates no volume or bucket) and leaves
 # aws-account-settings to this workflow's iam layer, its next step. The vendored aws-iam-role
 # (the network account's dns-delegation role that aws-dns-delegated's aws.primary provider
-# assumes) shares the iam layer too.
+# assumes) shares the iam layer too, as does the vendored aws-iam-service-linked-roles (the
+# Auto Scaling service-linked role kms/main's key policy names, so before the kms layer).
 # Connectivity follows networking, security-monitoring
 # follows security (it reads cloudtrail state; its GuardDuty, Security Hub and Inspector
 # routes are flags, the member detector and hub the security stack's delegated
@@ -170,7 +171,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
-          or .metadata.component == "aws-iam-role"'
+          or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"'
       - name: confirm_iam
         type: confirm
         prompt: Apply the iam layer plan above?
@@ -182,7 +183,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
-          or .metadata.component == "aws-iam-role"'
+          or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"'
       - name: kms_instances
         type: atmos
         command: >-
@@ -533,7 +534,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
 
   deploy-iam:
-    description: "Deploy the iam layer: IAM roles, the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack), the account settings and the vendored aws-iam-role (the network account's dns-delegation role)"
+    description: "Deploy the iam layer: IAM roles, the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack), the account settings, the vendored aws-iam-role (the network account's dns-delegation role) and the vendored aws-iam-service-linked-roles"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -541,7 +542,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
-          or .metadata.component == "aws-iam-role"'
+          or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"'
       - name: confirm
         type: confirm
         prompt: Deploy the iam layer?
@@ -553,7 +554,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
-          or .metadata.component == "aws-iam-role"'
+          or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"'
 
   deploy-kms:
     description: "Deploy the kms layer: customer-managed KMS keys (only stacks that define kms)"

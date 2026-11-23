@@ -32,8 +32,3 @@ output "lambda_artifacts_bucket_name" {
   description = "The s3/lambda-artifacts bucket the uploader role may write (<Environment>-lambda-artifacts-<account id>), or null when the role is not created"
   value       = local.create_lambda_uploader_role ? local.lambda_artifacts_bucket_name : null
 }
-
-output "autoscaling_service_linked_role_arn" {
-  description = "ARN of the AWS Auto Scaling service-linked role created by this instance, or null when enable_autoscaling_service_linked_role is false"
-  value       = one(aws_iam_service_linked_role.autoscaling[*].arn)
-}

@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# aws-iam-service-linked-roles - each account's IAM service-linked roles
+# =============================================================================
+# Vendored Cloud Posse aws-iam-service-linked-roles v1.536.0 (vendor.yaml), its
+# README's catalog entry (CP instance iam-service-linked-roles, "Stack Level:
+# Global") run per account, without account-map: it inherits vendored and
+# account-map-bypass, the providers mixins' inputs. One instance per account
+# (main.yaml), in the account's first stack; a service-linked role is an
+# account singleton (check-lane-names.py SINGLETONS), so a DR standby or an
+# account's other region imports none.
+#
+# The one role today is AWS Auto Scaling's
+# (aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling):
+# kms/main's allow_autoscaling_ebs grant (catalog/kms/defaults.yaml) names it
+# directly as a key-policy principal, and KMS rejects a key policy naming a
+# principal that does not exist yet (MalformedPolicyDocumentException), while
+# AWS creates the role only on the account's first Auto Scaling use. So
+# kms/main lists this instance in dependencies.components and the iam layer
+# (workflows/deploy-full-stack.yaml) applies it before the kms layer.
+#
+# Gotcha (CP README): CreateServiceLinkedRole fails "has been taken in this
+# account" when the role already exists (aws iam get-role --role-name
+# AWSServiceRoleForAutoScaling); import it at
+# 'aws_iam_service_linked_role.default["autoscaling"]' instead.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-iam-service-linked-roles/defaults:
+      metadata:
+        component: aws-iam-service-linked-roles
+        type: abstract
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: iam-service-linked-roles
+        service_linked_roles:
+          autoscaling:
+            aws_service_name: autoscaling.amazonaws.com
+            description: "Grants Auto Scaling permission to launch, terminate and describe EC2 instances on this account's behalf. Provisioned before kms/main so its allow_autoscaling_ebs key-policy grant names a principal that exists."
+        tags:
+          Component: "IAM"

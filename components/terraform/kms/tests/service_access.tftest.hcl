@@ -57,8 +57,8 @@ run "autoscaling_ebs_grants_the_service_linked_role" {
       # lets the account delegate access through IAM identity policies, and
       # this role's AWS-managed policy carries no customer-managed-key
       # permissions), so an aws:PrincipalArn condition narrowing a root
-      # principal back down to this role's ARN would be a no-op grant. `iam`
-      # provisions the role first (enable_autoscaling_service_linked_role)
+      # principal back down to this role's ARN would be a no-op grant. The
+      # vendored aws-iam-service-linked-roles provisions the role first
       # so KMS's principal-existence check at CreateKey/PutKeyPolicy time
       # passes.
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Principal.AWS == "arn:aws:iam::123456789012:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"

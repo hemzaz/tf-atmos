@@ -61,9 +61,9 @@ components:
         # role that launches their EBS volumes needs kms:CreateGrant plus
         # Encrypt/Decrypt/DescribeKey to do so, or new instances fail to
         # launch. The key policy statement names that role directly (see
-        # components/terraform/kms/README.md); each stack's iam instance
-        # provisions the role (enable_autoscaling_service_linked_role, see
-        # components/terraform/iam/README.md) and kms/main declares a
+        # components/terraform/kms/README.md); each account's
+        # aws-iam-service-linked-roles instance provisions the role
+        # (catalog/aws-iam-service-linked-roles) and kms/main declares a
         # dependencies.components edge to it so the role exists before
         # kms/main's first apply. The sandbox lane
         # (stacks/orgs/fnx/local/us-east-1/sandbox.yaml) overrides this to

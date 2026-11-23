@@ -98,8 +98,12 @@ class GroupTest(unittest.TestCase):
 
     def test_fixture_singletons_are_exempt(self):
         self.assertEqual(self.errors({
-            f"fnx-ue1-fixtures-{n}": stack(**{"iam/fixtures": instance(
-                f"ue1-{n}", n, component="iam", stage="fixtures", enable_autoscaling_service_linked_role=True)})
+            f"fnx-ue1-fixtures-{n}": stack(**{
+                "iam/ci": instance(f"ue1-{n}", n, component="iam", stage="fixtures", github_oidc_create_provider=True),
+                "aws-iam-service-linked-roles": instance(
+                    f"ue1-{n}", n, component="aws-iam-service-linked-roles", stage="fixtures",
+                    service_linked_roles={"autoscaling": {"aws_service_name": "autoscaling.amazonaws.com"}}),
+            })
             for n in ("a", "b")
         }), [])
 
@@ -285,6 +289,50 @@ class GroupTest(unittest.TestCase):
         self.assertIn("both create the IAM account alias '(one per account)' in account prod", errors[0])
         self.assertIn("both create the S3 account public access block '(one per account)' in account prod",
                       errors[1])
+
+    def test_service_linked_roles_once_per_account_pass(self):
+        # catalog/aws-iam-service-linked-roles/main in the primary only; the DR standby imports none.
+        slr = {"autoscaling": {"aws_service_name": "autoscaling.amazonaws.com", "description": "d"}}
+        self.assertEqual(self.errors({
+            "fnx-ue1-prod": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue1", component="aws-iam-service-linked-roles", stage="prod", service_linked_roles=slr)}),
+            "fnx-ue2-prod": stack(**{"kms/main": instance("ue2", stage="prod", region="us-east-2")}),
+            "fnx-ue1-dev": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue1", component="aws-iam-service-linked-roles", service_linked_roles=slr)}),
+        }), [])
+
+    def test_a_standby_taking_a_second_service_linked_role_fails(self):
+        slr = {"autoscaling": {"aws_service_name": "autoscaling.amazonaws.com", "description": "d"}}
+        errors = self.errors({
+            "fnx-ue1-prod": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue1", component="aws-iam-service-linked-roles", stage="prod", service_linked_roles=slr)}),
+            "fnx-ue2-prod": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue2", component="aws-iam-service-linked-roles", stage="prod", region="us-east-2",
+                service_linked_roles=slr)}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both create the service-linked role 'autoscaling.amazonaws.com' in account prod", errors[0])
+
+    def test_a_lane_taking_a_second_service_linked_role_fails_and_disabled_or_empty_pass(self):
+        slr = {"autoscaling": {"aws_service_name": "autoscaling.amazonaws.com", "description": "d"}}
+        errors = self.errors({
+            "fnx-ue1-dev": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue1", component="aws-iam-service-linked-roles", service_linked_roles=slr)}),
+            "fnx-ue1-dev-perf": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue1-perf", "perf", component="aws-iam-service-linked-roles", service_linked_roles=slr)}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both create the service-linked role 'autoscaling.amazonaws.com' in account dev, us-east-1",
+                      errors[0])
+        self.assertEqual(self.errors({
+            "fnx-ue1-dev": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue1", component="aws-iam-service-linked-roles", service_linked_roles=slr)}),
+            "fnx-uw2-dev": stack(**{"aws-iam-service-linked-roles": instance(
+                "uw2", component="aws-iam-service-linked-roles", region="us-west-2", service_linked_roles={})}),
+            "fnx-ue1-dev-perf": stack(**{"aws-iam-service-linked-roles": instance(
+                "ue1-perf", "perf", component="aws-iam-service-linked-roles", enabled=False,
+                service_linked_roles=slr)}),
+        }), [])
 
     def test_trusted_oidc_provider_with_a_creator_passes(self):
         arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
