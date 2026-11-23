@@ -15,6 +15,13 @@ components:
       vars:
         # No cross-account operator role: human access is IAM Identity Center
         # permission sets (catalog/aws-identity-center), Cloud Posse's model.
+        # The account's GitHub OIDC provider, which the CI roles trust: the
+        # vendored aws-github-oidc-provider in the account's first stack
+        # (catalog/aws-github-oidc-provider) creates it, and AWS fixes its ARN
+        # (oidc-provider/<url host>), so it is derived here, the one place,
+        # rather than read from state (each CI-role instance depends on the
+        # provider instance for ordering).
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
         tags:
           Component: "IAM"
 

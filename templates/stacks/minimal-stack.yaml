@@ -36,9 +36,9 @@ components:
   terraform:
     # The lane's own CI roles (<full id>-ci-plan/-apply): CI plans and deploys
     # this lane with them (terraform-ci.yml resolves them per stack). The
-    # GitHub OIDC provider is an account singleton that fnx-ue1-dev's iam/ci
-    # creates, so this instance trusts it by ARN instead of creating a second
-    # one.
+    # GitHub OIDC provider is an account singleton that fnx-ue1-dev's
+    # aws-github-oidc-provider creates; this instance trusts it by the ARN
+    # catalog/iam/defaults derives and depends on it there.
     # Deploying the lane needs one manual step: these roles' ARNs on
     # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
     # A state pattern pair of its own is optional: the stage stack's
@@ -52,8 +52,6 @@ components:
         github_oidc_enabled: true
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
-        github_oidc_create_provider: false
-        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
         ci_apply_role_enabled: true
         ci_apply_role_trusted_github_repos:
@@ -71,7 +69,7 @@ components:
         components:
           - component: backend/main
             stack: "{{ .settings.tfstate.stack }}"
-          - component: iam/ci
+          - component: aws-github-oidc-provider
             stack: fnx-ue1-dev
 
     # Core networking. Other components read its outputs through

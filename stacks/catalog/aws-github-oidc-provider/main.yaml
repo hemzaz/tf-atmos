@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# aws-github-oidc-provider in an account's first stack
+# =============================================================================
+# The catalog defaults as they are: the account's GitHub OIDC provider.
+# Imported by the stack that owns its account's singletons (fnx-ue1-dev,
+# fnx-ue1-staging, the prod primaries); a DR standby or an account's other
+# region imports none (check-lane-names.py allows one per account) and its
+# iam/ci depends on the first stack's instance. Until E6a6 the stacks reach it
+# through catalog/iam/{ci,ci-prod}.
+# =============================================================================
+
+import:
+  - catalog/aws-github-oidc-provider/defaults
+
+components:
+  terraform:
+    aws-github-oidc-provider:
+      metadata:
+        component: aws-github-oidc-provider
+        inherits:
+          - aws-github-oidc-provider/defaults

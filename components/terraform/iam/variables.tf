@@ -49,15 +49,9 @@ variable "github_oidc_default_branch" {
   }
 }
 
-variable "github_oidc_create_provider" {
-  type        = bool
-  description = "Create the token.actions.githubusercontent.com OIDC provider. Leave false when the account already has one and set github_oidc_provider_arn instead."
-  default     = false
-}
-
 variable "github_oidc_provider_arn" {
   type        = string
-  description = "ARN of an existing GitHub Actions OIDC provider to trust"
+  description = "ARN of the account's GitHub Actions OIDC provider (the vendored aws-github-oidc-provider's) that the CI roles trust"
   default     = null
 
   validation {
@@ -66,12 +60,8 @@ variable "github_oidc_provider_arn" {
   }
 
   validation {
-    condition = !var.github_oidc_enabled || (
-      var.github_oidc_create_provider && var.github_oidc_provider_arn == null
-      ) || (
-      !var.github_oidc_create_provider && var.github_oidc_provider_arn != null
-    )
-    error_message = "Set exactly one of github_oidc_create_provider = true or github_oidc_provider_arn when github_oidc_enabled is true."
+    condition     = !var.github_oidc_enabled || var.github_oidc_provider_arn != null
+    error_message = "github_oidc_provider_arn is required when github_oidc_enabled is true: the CI roles trust the account's aws-github-oidc-provider."
   }
 }
 

@@ -542,3 +542,17 @@ run "runner_pool_names_reject_a_wildcard" {
 
   expect_failures = [var.ci_runner_pool_names]
 }
+
+# The account's GitHub OIDC provider is the vendored aws-github-oidc-provider's (E6a3): iam creates
+# none, so CI roles without its ARN would trust nothing.
+run "ci_roles_require_the_provider_arn" {
+  command = plan
+
+  variables {
+    github_oidc_enabled    = true
+    github_oidc_repository = "hemzaz/tf-atmos"
+    ci_role_name_prefix    = "test-ci"
+  }
+
+  expect_failures = [var.github_oidc_provider_arn]
+}

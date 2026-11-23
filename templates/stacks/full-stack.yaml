@@ -85,8 +85,9 @@ components:
 
     # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
     # entries read them, and CI deploys this lane with them. The GitHub OIDC
-    # provider is an account singleton that fnx-ue1-prod's iam/ci creates,
-    # so this instance trusts it by ARN instead of creating a second one.
+    # provider is an account singleton that fnx-ue1-prod's
+    # aws-github-oidc-provider creates; this instance trusts it by the ARN
+    # catalog/iam/defaults derives and depends on it there.
     # Deploying the lane needs one manual step: these roles' ARNs on
     # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
     # A state pattern pair of its own is optional: the stage stack's
@@ -100,8 +101,6 @@ components:
         github_oidc_enabled: true
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
-        github_oidc_create_provider: false
-        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
         # This stack's runner pools (github-runners' <Environment>-<name>):
         # only the apply role may execute their +1 start policies, nothing else
@@ -130,7 +129,7 @@ components:
         components:
           - component: backend/main
             stack: "{{ .settings.tfstate.stack }}"
-          - component: iam/ci
+          - component: aws-github-oidc-provider
             stack: fnx-ue1-prod
 
     # The lane's own in-VPC CI runners (catalog/github-runners/defaults:

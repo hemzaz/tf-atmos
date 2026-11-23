@@ -1,8 +1,3 @@
-output "github_oidc_provider_arn" {
-  description = "ARN of the GitHub Actions OIDC provider the CI roles trust"
-  value       = var.github_oidc_enabled ? local.github_oidc_provider_arn : null
-}
-
 output "ci_plan_role_arn" {
   description = "ARN of the read-only GitHub Actions plan role (CI derives the same ARN per stack with ci-apply-role-arn.py --kind plan; no repository variable holds it)"
   value       = one(aws_iam_role.ci_plan[*].arn)

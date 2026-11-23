@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# aws-github-oidc-provider - each account's GitHub Actions OIDC provider
+# =============================================================================
+# Vendored Cloud Posse aws-github-oidc-provider v1.535.1 (vendor.yaml), its
+# README's catalog entry (CP instance github-oidc-provider, "Stack Level:
+# Global") run per account, without account-map: it inherits vendored and
+# account-map-bypass, the providers mixins' inputs. One instance per account
+# (main.yaml), in the account's first stack; an IAM OIDC provider is an
+# account singleton (check-lane-names.py SINGLETONS), so a DR standby or an
+# account's other region imports none.
+#
+# The CI roles (iam/ci, catalog/iam/ci*.yaml) federate through it. They take
+# its ARN as github_oidc_provider_arn, derived once from the account ID in
+# catalog/iam/defaults.yaml (an IAM OIDC provider's ARN is
+# arn:aws:iam::<account>:oidc-provider/<url host>, fixed by AWS), not read from
+# this instance's state, and list this instance in dependencies.components so
+# the iam layer (workflows/deploy-full-stack.yaml, bootstrap.yaml full)
+# applies it first.
+#
+# Gotcha: CreateOpenIDConnectProvider fails EntityAlreadyExists when the
+# account already has the provider (aws iam list-open-id-connect-providers);
+# import it at 'aws_iam_openid_connect_provider.oidc["github"]' instead.
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-github-oidc-provider/defaults:
+      metadata:
+        component: aws-github-oidc-provider
+        type: abstract
+        inherits:
+          - vendored
+          - account-map-bypass
+      vars:
+        enabled: true
+        name: github-oidc-provider
+        tags:
+          Component: "IAM"

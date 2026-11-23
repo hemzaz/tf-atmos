@@ -169,9 +169,19 @@ workflows:
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
           atmos terraform apply aws-iam-service-linked-roles -s fnx-ue1-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: apply-oidc-provider
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform apply aws-github-oidc-provider -s fnx-ue1-local-localemu --identity local-emu -auto-approve
 
       # Destroy proves teardown works and is where rds's deletion_protection
       # footgun would surface. Reverse order.
+      - type: shell
+        name: destroy-oidc-provider
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform destroy aws-github-oidc-provider -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: destroy-service-linked-roles
         command: |
