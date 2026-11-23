@@ -294,20 +294,20 @@ components:
     # ========================================================================
 [[- if eq .Config.account_singletons "no" ]]
     # The account's singletons belong to its other stack (the guard checked
-    # there is one): this stack's iam/ci trusts that stack's GitHub OIDC
-    # provider instead of creating one, and its aws-iam-service-linked-roles
-    # is off (null-label enabled: false, so it creates no role; the prod
-    # standbys import none), the instance kept so kms/main's dependency on it
-    # still resolves in this stack. It has no trail: the account's one trail, that stack's cloudtrail,
+    # there is one): this stack's aws-github-oidc-provider and
+    # aws-iam-service-linked-roles are off (null-label enabled: false, so they
+    # create nothing; the prod standbys import neither), the instances kept so
+    # iam/ci's and kms/main's dependencies on them still resolve in this
+    # stack; iam/ci trusts that stack's provider by the ARN catalog/iam/defaults
+    # derives. It has no trail: the account's one trail, that stack's cloudtrail,
     # is multi-region and records this region too (E5b OQ-A), so its CIS
     # metric filters run there, beside the trail's log group
     # (catalog/security-monitoring/main-region), and aws-config below records
     # no global resources (IAM).
     # check-lane-names.py allows each singleton once per account.
-    iam/ci:
+    aws-github-oidc-provider:
       vars:
-        github_oidc_create_provider: false
-        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        enabled: false
     aws-iam-service-linked-roles:
       vars:
         enabled: false

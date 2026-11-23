@@ -23,7 +23,9 @@ locals {
   # repository whenever github_oidc_enabled is true.
   github_repository = var.github_oidc_repository == null ? "" : var.github_oidc_repository
 
-  github_oidc_provider_arn = var.github_oidc_create_provider ? one(aws_iam_openid_connect_provider.github[*].arn) : var.github_oidc_provider_arn
+  # The account's provider is the vendored aws-github-oidc-provider's (E6a3);
+  # its ARN is derived in the catalog (stacks/catalog/iam/defaults.yaml).
+  github_oidc_provider_arn = var.github_oidc_provider_arn
 
   # Exact subject claims. Anything wildcarded here would let another repository
   # assume the role, so the defaults spell out the three workflow triggers and
@@ -45,13 +47,6 @@ locals {
   create_ci_apply_role  = var.github_oidc_enabled && var.ci_apply_role_enabled
   ci_plan_state_policy  = var.github_oidc_enabled && length(var.ci_backend_read_role_arns) > 0
   ci_apply_state_policy = local.create_ci_apply_role && var.ci_backend_write_role_arn != null
-}
-
-resource "aws_iam_openid_connect_provider" "github" {
-  count = var.github_oidc_enabled && var.github_oidc_create_provider ? 1 : 0
-
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
 }
 
 # ---------------------------------------------------------------------------

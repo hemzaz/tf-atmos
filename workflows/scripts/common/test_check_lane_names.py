@@ -89,9 +89,8 @@ class GroupTest(unittest.TestCase):
 
     def test_two_account_singletons_fail(self):
         errors = self.errors({
-            "fnx-ue1-dev": stack(**{"iam/ci": instance("ue1", component="iam", github_oidc_create_provider=True)}),
-            "fnx-ue1-dev-perf": stack(**{"iam/ci": instance("ue1-perf", "perf", component="iam",
-                                                            github_oidc_create_provider=True)}),
+            "fnx-ue1-dev": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider")}),
+            "fnx-ue1-dev-perf": stack(**{"aws-github-oidc-provider": instance("ue1-perf", "perf", component="aws-github-oidc-provider")}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("both create the GitHub OIDC provider", errors[0])
@@ -99,7 +98,7 @@ class GroupTest(unittest.TestCase):
     def test_fixture_singletons_are_exempt(self):
         self.assertEqual(self.errors({
             f"fnx-ue1-fixtures-{n}": stack(**{
-                "iam/ci": instance(f"ue1-{n}", n, component="iam", stage="fixtures", github_oidc_create_provider=True),
+                "aws-github-oidc-provider": instance(f"ue1-{n}", n, component="aws-github-oidc-provider", stage="fixtures"),
                 "aws-iam-service-linked-roles": instance(
                     f"ue1-{n}", n, component="aws-iam-service-linked-roles", stage="fixtures",
                     service_linked_roles={"autoscaling": {"aws_service_name": "autoscaling.amazonaws.com"}}),
@@ -127,21 +126,24 @@ class GroupTest(unittest.TestCase):
 
     def test_dr_region_with_its_own_iam_names_passes(self):
         # fnx-ue1-prod and its DR stack fnx-ue2-prod share the prod account.
+        arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
         self.assertEqual(self.errors({
-            "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", ci_role_name_prefix="fnx-ue1-prod-ci",
-                github_oidc_enabled=True, github_oidc_create_provider=True)}),
+            "fnx-ue1-prod": stack(**{
+                "aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider", stage="prod"),
+                "iam/ci": instance(
+                    "ue1", component="iam", stage="prod", ci_role_name_prefix="fnx-ue1-prod-ci",
+                    github_oidc_enabled=True, github_oidc_provider_arn=arn),
+            }),
             "fnx-ue2-prod": stack(**{"iam/ci": instance(
                 "ue2", component="iam", stage="prod", region="us-east-2", ci_role_name_prefix="fnx-ue2-prod-ci",
-                github_oidc_enabled=True, github_oidc_create_provider=False)}),
+                github_oidc_enabled=True, github_oidc_provider_arn=arn)}),
         }), [])
 
     def test_dr_region_creating_the_account_singleton_again_fails(self):
         errors = self.errors({
-            "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", github_oidc_create_provider=True)}),
-            "fnx-ue2-prod": stack(**{"iam/ci": instance(
-                "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_create_provider=True)}),
+            "fnx-ue1-prod": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider", stage="prod")}),
+            "fnx-ue2-prod": stack(**{"aws-github-oidc-provider": instance(
+                "ue2", component="aws-github-oidc-provider", stage="prod", region="us-east-2")}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("both create the GitHub OIDC provider '(one per account)' in account prod", errors[0])
@@ -337,26 +339,28 @@ class GroupTest(unittest.TestCase):
     def test_trusted_oidc_provider_with_a_creator_passes(self):
         arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
         self.assertEqual(self.errors({
-            "fnx-ue1-dev": stack(**{"iam/ci": instance(
-                "ue1", component="iam", github_oidc_create_provider=True)}),
-            "fnx-uw2-dev": stack(**{"iam/ci": instance(
-                "uw2", component="iam", region="us-west-2", github_oidc_create_provider=False,
-                github_oidc_provider_arn=arn)}),
+            "fnx-ue1-dev": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider")}),
+            "fnx-uw2-dev": stack(**{
+                "aws-github-oidc-provider": instance("uw2", component="aws-github-oidc-provider", region="us-west-2", enabled=False),
+                "iam/ci": instance(
+                    "uw2", component="iam", region="us-west-2", github_oidc_enabled=True,
+                    github_oidc_provider_arn=arn),
+            }),
         }), [])
 
     def test_trusted_oidc_provider_without_a_creator_fails(self):
         # The account's creating stack was deleted: the second stack trusts a provider nobody creates.
         arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
         errors = self.errors({
-            "fnx-ue1-dev": stack(**{"iam/dev": instance("ue1", component="iam")}),
+            # A disabled provider (the scaffold's account_singletons=no branch) creates nothing.
+            "fnx-ue1-dev": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider", enabled=False)}),
             "fnx-uw2-dev": stack(**{"iam/ci": instance(
-                "uw2", component="iam", region="us-west-2", github_oidc_create_provider=False,
+                "uw2", component="iam", region="us-west-2", github_oidc_enabled=True,
                 github_oidc_provider_arn=arn)}),
             # Another account's creator does not satisfy account dev.
-            "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", github_oidc_create_provider=True)}),
-            "fnx-ue1-fixtures-a": stack(**{"iam/ci": instance(
-                "ue1-a", "a", component="iam", stage="fixtures", account="dev", github_oidc_create_provider=True)}),
+            "fnx-ue1-prod": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider", stage="prod")}),
+            "fnx-ue1-fixtures-a": stack(**{"aws-github-oidc-provider": instance(
+                "ue1-a", "a", component="aws-github-oidc-provider", stage="fixtures", account="dev")}),
         })
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("fnx-uw2-dev: iam/ci trusts the account's GitHub OIDC provider", errors[0])

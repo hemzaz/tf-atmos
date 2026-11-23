@@ -6,7 +6,8 @@
 # primary stack it stands by for (settings.dr.standby_of), whose iam/ci
 # explains each input. Prod trust: master only, for both roles. The roles
 # trust the account's one GitHub OIDC provider, created by the primary's
-# iam/ci (IAM OIDC providers are per account; a second create fails).
+# aws-github-oidc-provider (IAM OIDC providers are per account; a second
+# create fails).
 # =============================================================================
 
 import:
@@ -23,8 +24,6 @@ components:
         github_oidc_enabled: true
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
-        github_oidc_create_provider: false
-        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
         # This stack's runner pools (github-runners' <Environment>-<name>):
         # only the apply role may execute their +1 start policies, nothing else
@@ -51,6 +50,8 @@ components:
         components:
           - component: backend/main
             stack: "{{ .settings.tfstate.stack }}"
-          # The OIDC provider this stack's roles trust.
-          - component: iam/ci
+          # The account's GitHub OIDC provider this stack's roles trust
+          # (github_oidc_provider_arn in catalog/iam/defaults), created by
+          # the primary's aws-github-oidc-provider.
+          - component: aws-github-oidc-provider
             stack: "{{ .settings.dr.standby_of }}"

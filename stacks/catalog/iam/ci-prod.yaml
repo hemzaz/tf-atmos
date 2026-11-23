@@ -6,14 +6,15 @@
 # settings.tfstate), so the instance is the same in each prod primary stack.
 # Prod trust (owner decision D3): master only, for both roles, and the stage's
 # PROD backend roles (check-prod-protection.py and check-ci-state-roles.py
-# check both); ci.yaml is the nonprod instance. Each primary creates its
-# account's one GitHub OIDC provider, which its DR standby's roles trust
-# (ci-standby.yaml). A stack with a Lambda bucket adds the lambda uploader
+# check both); ci.yaml is the nonprod instance. Each primary imports its
+# account's one GitHub OIDC provider (catalog/aws-github-oidc-provider/main),
+# which its DR standby's roles trust too (ci-standby.yaml). A stack with a Lambda bucket adds the lambda uploader
 # inputs (lambda_uploader_*) in its own iam/ci vars.
 # =============================================================================
 
 import:
   - catalog/iam/defaults
+  - catalog/aws-github-oidc-provider/main
 
 components:
   terraform:
@@ -32,8 +33,6 @@ components:
         github_oidc_enabled: true
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
-        # The account's one provider (IAM OIDC providers are per account).
-        github_oidc_create_provider: true
         # Roles become <prefix>-plan and <prefix>-apply.
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
         # This stack's runner pools (github-runners' <Environment>-<name>):
@@ -95,3 +94,10 @@ components:
         # "alias/".
         ci_apply_kms_key_aliases:
           - "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: "{{ .settings.tfstate.stack }}"
+          # The account's GitHub OIDC provider these roles trust (imported
+          # above; github_oidc_provider_arn in catalog/iam/defaults).
+          - component: aws-github-oidc-provider

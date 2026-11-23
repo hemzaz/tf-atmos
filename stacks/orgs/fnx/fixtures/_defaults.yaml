@@ -16,6 +16,7 @@ import:
   - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/aws-iam-service-linked-roles/main
+  - catalog/aws-github-oidc-provider/main
 
 vars:
   region: us-east-1
@@ -35,8 +36,9 @@ settings:
 # instance (catalog/aws-iam-service-linked-roles/main) that provisions the Auto
 # Scaling service-linked role kms/main's key policy names, and iam/ci (eks
 # access entries read its CI role ARNs).
-# aws-iam-service-linked-roles (the Auto Scaling SLR) and iam/ci (the GitHub
-# OIDC provider) are account-global singletons: fixture-only, never applied.
+# aws-iam-service-linked-roles (the Auto Scaling SLR) and
+# aws-github-oidc-provider (the GitHub OIDC provider iam/ci trusts) are
+# account-global singletons: fixture-only, never applied.
 components:
   terraform:
     iam/ci:
@@ -48,7 +50,6 @@ components:
         github_oidc_enabled: true
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
-        github_oidc_create_provider: true
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
         # Every pool a fixture can hold: a stack's own, and the
         # microservices-platform template's (iam ci-runner-pools.tf).
@@ -57,6 +58,11 @@ components:
           - "{{ .settings.prefix }}-microservices-runners"
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-read-role"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: "{{ .settings.tfstate.stack }}"
+          - component: aws-github-oidc-provider
 
     kms/main:
       metadata:

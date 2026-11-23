@@ -1,15 +1,18 @@
 # iam
 
-The GitHub Actions OIDC provider with separate CI plan and apply roles, and a Lambda package
-uploader role for an application repo's CI. The account's Auto Scaling service-linked role is the
-vendored `aws-iam-service-linked-roles` (`catalog/aws-iam-service-linked-roles`, E6a2). Human access
+Separate GitHub Actions OIDC CI plan and apply roles, and a Lambda package uploader role for an
+application repo's CI. They trust the account's GitHub OIDC provider, the vendored
+`aws-github-oidc-provider` (`catalog/aws-github-oidc-provider`, E6a3), by the ARN that
+`catalog/iam/defaults.yaml` derives from the account ID. The account's Auto Scaling service-linked
+role is the vendored `aws-iam-service-linked-roles` (`catalog/aws-iam-service-linked-roles`, E6a2). Human access
 is IAM Identity Center (`catalog/aws-identity-center`), Cloud Posse's model, so there is no
 cross-account operator role.
 
 ## Wiring
 
 - Instances: `iam/ci` in the AWS stacks (OIDC roles only). It depends on `backend/main` in
-  `fnx-ue1-root` for ordering only.
+  `fnx-ue1-root` and on its account's `aws-github-oidc-provider` (a DR standby on its primary's,
+  `settings.dr.standby_of`), for ordering only; the iam layer applies both.
 - Used by: `eks` (`iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` as access entries). The backend
   trusts the CI roles by name (`<ci_role_name_prefix>-plan` / `-apply`), not by reading state.
 

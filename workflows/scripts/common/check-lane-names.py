@@ -23,7 +23,8 @@ it cannot be checked. Within a group this fails:
     compared, and a gated key counts only while its instance creates the
     resource (iam ci_role_name_prefix with github_oidc_enabled);
   - two instances that create the same account singleton (SINGLETONS: the
-    GitHub OIDC provider, each service-linked role (MAP_SINGLETONS: one per
+    GitHub OIDC provider (the vendored aws-github-oidc-provider), each
+    service-linked role (MAP_SINGLETONS: one per
     aws-iam-service-linked-roles service_linked_roles service name), the
     multi-region CloudTrail trail, CloudTrail's global-service-event
     recording, AWS Config's global-resource recording, the IAM account alias
@@ -70,9 +71,9 @@ does not separate them. Instances sharing no primary key compare all their
 name inputs (NAME_INPUT: *_name, *_prefix, domains, zones, ...) instead.
 Across every stack (any account or region): an S3 bucket name or Cognito
 domain prefix (GLOBAL_KEYS, at any depth of vars) set twice. Per account: an
-iam instance that trusts the GitHub OIDC provider (github_oidc_provider_arn,
-not creating it) while no stack of the account creates one, which deleting the
-creating stack would leave.
+iam instance whose CI roles trust the GitHub OIDC provider (github_oidc_enabled,
+github_oidc_provider_arn) while no stack of the account has an aws-github-oidc-provider instance, which
+deleting the creating stack would leave.
 Exits 1 on any collision.
 """
 import collections
@@ -148,7 +149,9 @@ RAW_NAMES = {
 }
 # (component, gate var, default) -> account singleton it creates when true.
 SINGLETONS = {
-    ("iam", "github_oidc_create_provider", False): "GitHub OIDC provider",
+    # The vendored provider (null-label enabled, which is_deployable already
+    # reads): one per account (catalog/aws-github-oidc-provider/main).
+    ("aws-github-oidc-provider", "enabled", True): "GitHub OIDC provider",
     # The vendored Cloud Posse trail defaults both to true (variables.tf). A
     # second trail recording IAM/STS events would duplicate (and bill) the
     # account's global-service events: a regional trail sets it false.
@@ -410,23 +413,27 @@ def check_global(stacks: dict) -> list[str]:
 
 
 def check_trusted_providers(stacks: dict) -> list[str]:
-    """iam instances that trust an existing GitHub OIDC provider (github_oidc_provider_arn,
-    github_oidc_create_provider false) in an account where no stack creates one."""
+    """iam instances whose CI roles trust the account's GitHub OIDC provider (github_oidc_enabled,
+    github_oidc_provider_arn) in an account where no stack has an aws-github-oidc-provider instance to create it."""
     creators, trusting = set(), []
     for stack_name in sorted(stacks):
         for name, instance in instances_of(stacks[stack_name]):
             settings, variables = instance.get("settings") or {}, instance.get("vars") or {}
             account = (settings.get("environment") or {}).get("account")
             stage = (settings.get("context") or {}).get("stage")
-            if instance.get("component") != "iam" or not account or stage == fixtures.FIXTURE_STAGE:
+            if not account or stage == fixtures.FIXTURE_STAGE:
                 continue
-            if variables.get("github_oidc_create_provider", False) is True:
+            if instance.get("component") == "aws-github-oidc-provider":
                 creators.add(account)
-            elif variables.get("github_oidc_provider_arn"):
+            elif (
+                instance.get("component") == "iam"
+                and variables.get("github_oidc_enabled", False) is True
+                and variables.get("github_oidc_provider_arn")
+            ):
                 trusting.append((account, f"{stack_name}: {name}"))
     return [
         f"{where} trusts the account's GitHub OIDC provider (github_oidc_provider_arn) but no stack of account "
-        f"{account} creates it: one stack per account sets github_oidc_create_provider: true"
+        f"{account} creates it: the account's first stack imports catalog/aws-github-oidc-provider/main"
         for account, where in trusting
         if account not in creators
     ]
