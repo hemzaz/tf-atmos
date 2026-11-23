@@ -1,25 +1,13 @@
 ---
 # =============================================================================
-# iam/main in the prod primary stacks: the account IAM instance
+# The account's service-linked roles, for the prod primary stacks
 # =============================================================================
-# The account's one Auto Scaling service-linked role, which kms/main's key policy
-# names (catalog/kms/main-prod.yaml depends on this instance). A DR standby
-# stack has no iam/main: its primary's is the account's.
+# The house iam no longer creates the Auto Scaling service-linked role: the
+# vendored aws-iam-service-linked-roles does (E6a2). A DR standby stack imports
+# none: its primary's is the account's. This file stays only as the stacks'
+# import path until E6a6 moves each stack's import to
+# catalog/aws-iam-service-linked-roles/main and deletes catalog/iam.
 # =============================================================================
 
 import:
-  - catalog/iam/defaults
-
-components:
-  terraform:
-    iam/main:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-      vars:
-        # kms/main's allow_autoscaling_ebs grant (catalog/kms/defaults.yaml)
-        # names the Auto Scaling service-linked role directly as a
-        # key-policy principal; this is the one iam instance per account
-        # that provisions it.
-        enable_autoscaling_service_linked_role: true
+  - catalog/aws-iam-service-linked-roles/main

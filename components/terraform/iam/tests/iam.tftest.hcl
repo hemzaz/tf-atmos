@@ -1,8 +1,5 @@
-# service-linked-roles.tf's aws_iam_service_linked_role.autoscaling. The real
-# AWS provider is used, not a mock: every other data/resource in this
-# component is exercised elsewhere without a tests/ dir, so this file stays
-# scoped to the new resource. Credentials are dummies and every data source
-# that would call AWS is overridden.
+# House tests of the GitHub OIDC CI roles. The real AWS provider is used, not a mock:
+# credentials are dummies and every data source that would call AWS is overridden.
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
@@ -31,33 +28,6 @@ override_data {
 
 variables {
   region = "us-east-1"
-}
-
-run "disabled_by_default_never_creates_the_role" {
-  command = plan
-
-  assert {
-    condition     = length(aws_iam_service_linked_role.autoscaling) == 0
-    error_message = "enable_autoscaling_service_linked_role defaults to false, so no instance creates the role unless it opts in."
-  }
-
-  assert {
-    condition     = output.autoscaling_service_linked_role_arn == null
-    error_message = "The ARN output must be null when this instance does not create the role."
-  }
-}
-
-run "enabled_creates_the_service_linked_role" {
-  command = plan
-
-  variables {
-    enable_autoscaling_service_linked_role = true
-  }
-
-  assert {
-    condition     = length(aws_iam_service_linked_role.autoscaling) == 1
-    error_message = "enable_autoscaling_service_linked_role = true must create exactly one service-linked role, unconditionally (no data-source gate: see service-linked-roles.tf for why a create-if-absent lookup of this same resource would flip-flop on every later plan)."
-  }
 }
 
 # ci_apply_kms_key_aliases: least-privilege access to customer-managed key(s)

@@ -135,7 +135,7 @@ spec:
         - "components/terraform/aws-iam-role"
       included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
     # Each account's GitHub Actions OIDC provider, which the CI aws-iam-role
-    # instances federate through, and its service-linked roles (E6a, in place
+    # instances will federate through (E6a3), and its service-linked roles (E6a, in place
     # of the house iam). Upstream providers.tf (account-map iam-roles)
     # excluded; each gets Cloud Posse's account-map-bypass mixins instead.
     - component: aws-github-oidc-provider

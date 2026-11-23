@@ -90,7 +90,7 @@ ALLOWLIST = (
     (r"/aws-inspector2/context\.tf", "CKV_TF_1", TF_1),
     (r"/aws-inspector2/remote-state\.tf", "CKV_TF_1", TF_1),
     # account-map's iam-roles module (vendor.yaml), reached through the account-map-bypass
-    # providers mixin of the dns, IAM and trail components (bypassed, still expanded).
+    # providers mixin of every component that has it (bypassed, still expanded).
     (r"/account-map/modules/iam-roles/context\.tf", "CKV_TF_1", TF_1),
     (r"/account-map/modules/iam-roles/main\.tf", "CKV_TF_1", TF_1),
     # aws-identity-center (vendor.yaml): permission sets and assignments (E4).

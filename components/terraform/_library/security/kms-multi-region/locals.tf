@@ -756,10 +756,10 @@ data "aws_iam_policy_document" "default" {
   # principal named in a key policy at CreateKey/PutKeyPolicy time and
   # rejects the policy (MalformedPolicyDocumentException, "invalid
   # principals") if this role does not exist yet - which it may not, in an
-  # account that has never used Auto Scaling. That is why `iam` provisions
-  # this role (`enable_autoscaling_service_linked_role`,
-  # `components/terraform/iam/service-linked-roles.tf`) and every stack's
-  # `kms/main` declares a `dependencies.components` edge to that iam
+  # account that has never used Auto Scaling. That is why the vendored
+  # `aws-iam-service-linked-roles` provisions this role
+  # (`stacks/catalog/aws-iam-service-linked-roles`) and every stack's
+  # `kms/main` declares a `dependencies.components` edge to that
   # instance (see `../kms/README.md`), so the role exists before this policy
   # is first applied. kms:ViaService is scoped to this document's region: EC2
   # calls KMS through ec2.<region>.amazonaws.com, so a replica's statement

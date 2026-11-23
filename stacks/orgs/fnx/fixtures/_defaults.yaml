@@ -15,6 +15,7 @@ import:
   - mixins/region/us-east-1
   - catalog/iam/defaults
   - catalog/kms/defaults
+  - catalog/aws-iam-service-linked-roles/main
 
 vars:
   region: us-east-1
@@ -30,11 +31,12 @@ settings:
     actions_enabled: false
 
 # What every template expects its importing stack to provide (each template's
-# REQUIREMENTS header): the stack's kms/main, the iam instance that provisions
-# the Auto Scaling service-linked role kms/main's key policy names, and iam/ci
-# (eks access entries read its CI role ARNs).
-# iam/fixtures (the Auto Scaling SLR) and iam/ci (the GitHub OIDC provider) are
-# account-global singletons: fixture-only, never applied.
+# REQUIREMENTS header): the stack's kms/main, the aws-iam-service-linked-roles
+# instance (catalog/aws-iam-service-linked-roles/main) that provisions the Auto
+# Scaling service-linked role kms/main's key policy names, and iam/ci (eks
+# access entries read its CI role ARNs).
+# aws-iam-service-linked-roles (the Auto Scaling SLR) and iam/ci (the GitHub
+# OIDC provider) are account-global singletons: fixture-only, never applied.
 components:
   terraform:
     iam/ci:
@@ -56,15 +58,6 @@ components:
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-read-role"
 
-
-    iam/fixtures:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-      vars:
-        enable_autoscaling_service_linked_role: true
-
     kms/main:
       metadata:
         component: kms
@@ -76,4 +69,4 @@ components:
         deletion_window_in_days: 7
       dependencies:
         components:
-          - component: iam/fixtures
+          - component: aws-iam-service-linked-roles

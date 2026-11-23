@@ -2,9 +2,8 @@
 # =============================================================================
 # kms/main in a nonprod stack: the account's customer-managed key
 # =============================================================================
-# The key depends on iam/main, which provisions the Auto Scaling
-# service-linked role its key policy names; main-dev.yaml is the same key for
-# a stack whose account IAM instance is iam/dev. Each stack keeps its key's
+# The key depends on aws-iam-service-linked-roles, which provisions the Auto
+# Scaling service-linked role its key policy names. Each stack keeps its key's
 # description.
 # =============================================================================
 
@@ -27,7 +26,7 @@ components:
       dependencies:
         components:
           # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
-          # service-linked role directly as a principal; iam/main provisions
-          # it (enable_autoscaling_service_linked_role) so KMS does not
+          # service-linked role directly as a principal;
+          # aws-iam-service-linked-roles provisions it so KMS does not
           # reject the key policy.
-          - component: iam/main
+          - component: aws-iam-service-linked-roles

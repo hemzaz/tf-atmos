@@ -295,9 +295,10 @@ components:
 [[- if eq .Config.account_singletons "no" ]]
     # The account's singletons belong to its other stack (the guard checked
     # there is one): this stack's iam/ci trusts that stack's GitHub OIDC
-    # provider instead of creating one, and its iam instance leaves the Auto
-    # Scaling service-linked role alone, as the prod standbys' -standby files
-    # do. It has no trail: the account's one trail, that stack's cloudtrail,
+    # provider instead of creating one, and its aws-iam-service-linked-roles
+    # is off (null-label enabled: false, so it creates no role; the prod
+    # standbys import none), the instance kept so kms/main's dependency on it
+    # still resolves in this stack. It has no trail: the account's one trail, that stack's cloudtrail,
     # is multi-region and records this region too (E5b OQ-A), so its CIS
     # metric filters run there, beside the trail's log group
     # (catalog/security-monitoring/main-region), and aws-config below records
@@ -307,9 +308,9 @@ components:
       vars:
         github_oidc_create_provider: false
         github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
-    iam/[[ if eq $flavor "dev" ]]dev[[ else ]]main[[ end ]]:
+    aws-iam-service-linked-roles:
       vars:
-        enable_autoscaling_service_linked_role: false
+        enabled: false
 [[- end ]]
 [[- if eq .Config.account_singletons "no" ]]
     # AWS Config: this region's recorder (Cloud Posse's instance name; the

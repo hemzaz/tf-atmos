@@ -86,6 +86,7 @@ import:
   - mixins/region/us-east-1
   - orgs/fnx/local/_defaults  # also the tenant mixin
   - catalog/vpc/defaults
+  - catalog/aws-iam-service-linked-roles/main
 
 vars:
   region: us-east-1
@@ -230,18 +231,12 @@ components:
           Tenant: fnx
           ManagedBy: Terraform
 
-    # iam/main creates the account's Auto Scaling service-linked role, the one
-    # iam resource this lane can own: local stacks have no CI roles
-    # (check-ci-state-roles.py maps only dev/staging/prod to backend roles;
-    # orgs/fnx/local/_defaults.yaml). LocalEmu implements CreateServiceLinkedRole,
-    # DeleteServiceLinkedRole and GetServiceLinkedRoleDeletionStatus for
-    # autoscaling.amazonaws.com, so apply and destroy both run.
-    iam/main:
-      metadata:
-        component: iam
-      vars:
-        enable_autoscaling_service_linked_role: true
-        tags:
-          Environment: localemu
-          Tenant: fnx
-          ManagedBy: Terraform
+    # aws-iam-service-linked-roles (imported above, the vendored component as
+    # every account has it) creates the account's Auto Scaling service-linked
+    # role, the one IAM resource this lane can own: local stacks have no CI
+    # roles (check-ci-state-roles.py maps only dev/staging/prod to backend
+    # roles; orgs/fnx/local/_defaults.yaml). LocalEmu implements
+    # CreateServiceLinkedRole, TagRole, DeleteServiceLinkedRole and
+    # GetServiceLinkedRoleDeletionStatus for autoscaling.amazonaws.com, so
+    # apply and destroy both run. Its account-verification mixin is a no-op
+    # here: the account map has no <tenant>-local account.

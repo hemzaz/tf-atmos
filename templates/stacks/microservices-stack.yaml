@@ -118,7 +118,7 @@ components:
 
     # The lane's own customer-managed key (EKS secrets, node EBS volumes). Its
     # key policy names the Auto Scaling service-linked role, an account
-    # singleton that fnx-ue1-dev's iam/dev provisions.
+    # singleton that fnx-ue1-dev's aws-iam-service-linked-roles provisions.
     kms/main:
       metadata:
         component: kms
@@ -130,7 +130,7 @@ components:
         deletion_window_in_days: 7
       dependencies:
         components:
-          - component: iam/dev
+          - component: aws-iam-service-linked-roles
             stack: fnx-ue1-dev
 
     # The lane's own in-VPC CI runners (catalog/github-runners/defaults:

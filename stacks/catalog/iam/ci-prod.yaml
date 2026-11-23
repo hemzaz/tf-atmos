@@ -89,7 +89,7 @@ components:
         # deploy-full-stack "iam" layer, BEFORE the "kms" layer
         # (workflows/deploy-full-stack.yaml), so the key's ARN does not exist
         # yet on a first deploy, and reading it here would make iam/ci depend
-        # on kms/main while kms/main already depends on iam/main (a
+        # on kms/main while kms/main depends on the iam layer (a
         # layer-order cycle check-deploy-layers.py rejects). Must match
         # kms/main's alias_name (catalog/kms/main-prod.yaml), prefixed with
         # "alias/".
