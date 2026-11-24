@@ -337,8 +337,37 @@ class CiTrustTest(unittest.TestCase):
         self.assert_one(self.found_as({"aws-iam-role/dns": dns}), "over IAM's 64")
         short = dict(context, environment="ue1-perf")
         self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=short)}), [])
-        limited = dict(context, id_length_limit=64)
-        self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=limited)}), [])
+
+    def test_id_length_limit_exempts_only_a_truncating_limit_off_the_ci_instances(self):
+        # Re-review MEDIUM-3: only 0 < limit <= 64 truncates the id under IAM's cap.
+        long_name = "dns-delegation-" + "y" * 60  # 75 characters
+        cases = {
+            "limit 100 (var)": ({"id_length_limit": 100}, "over IAM's 64"),
+            "limit '0' (rendered string: unlimited)": ({"id_length_limit": "0"}, "over IAM's 64"),
+            "limit 100 (context)": ({"context": {"id_length_limit": 100}}, "over IAM's 64"),
+            "limit 'x' (not a number)": ({"id_length_limit": "x"}, "over IAM's 64"),
+        }
+        for case, (variables, fragment) in cases.items():
+            with self.subTest(case=case):
+                self.assert_one(self.found_as({"aws-iam-role/dns": instance("aws-iam-role", name=long_name, **variables)}),
+                                fragment)
+        for variables in ({"id_length_limit": 64}, {"id_length_limit": "64"}, {"context": {"id_length_limit": 32}}):
+            with self.subTest(truncating=variables):
+                self.assertEqual(self.found_as({"aws-iam-role/dns": instance("aws-iam-role", name=long_name, **variables)}),
+                                 [])
+
+    def test_id_length_limit_on_a_ci_instance_fails(self):
+        # A truncated, hashed id is no longer the ARN ci-apply-role-arn.py derives.
+        for instance_name, role in (("aws-iam-role/lambda-uploader", self.uploader(id_length_limit=64)),
+                                    ("aws-iam-role/ci-plan", self.plan(id_length_limit="64")),
+                                    ("aws-iam-role/ci-apply", self.role("apply", context={"id_length_limit": 64}))):
+            with self.subTest(instance=instance_name):
+                self.assert_one(self.found_as({instance_name: role}, stage="prod" if "apply" in instance_name else "dev"),
+                                f"remove id_length_limit from {instance_name}")
+        for unlimited in (0, "0", None):
+            with self.subTest(unlimited=unlimited):
+                self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(id_length_limit=unlimited)}),
+                                 [])
 
     def test_uploader_kms_via_another_region_fails(self):
         # Review LOW-1: kms:ViaService pinned to the role's own region.

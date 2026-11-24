@@ -211,7 +211,7 @@ def check_ci_trust(stacks: dict) -> list[str]:
                     or normalize(variables.get("enabled")) is False):
                 continue
             where = f"{stack_name}: {name} ({CI_ROLE_COMPONENT})"
-            errors += role_name_errors(where, instance)
+            errors += role_name_errors(where, name, instance)
             # The CI instances are checked by their instance name, whatever their vars say (an
             # override of name or github_oidc_provider_enabled must not drop them out of the rules).
             if name not in CI_INSTANCES and normalize(variables.get("github_oidc_provider_enabled")) is not True:
@@ -221,15 +221,39 @@ def check_ci_trust(stacks: dict) -> list[str]:
     return errors
 
 
-def role_name_errors(where: str, instance: dict) -> list[str]:
-    """IAM caps a role name at 64 characters; the house iam checked it at plan, the vendored role fails at apply."""
-    if ci_apply_role_arn.label(instance, "id_length_limit") not in (None, 0):
-        return []  # null-label truncates the id itself
+def id_length_limit(instance: dict) -> Optional[int]:
+    """null-label's effective id_length_limit (the var over vars.context; Atmos may render it as a string):
+    None or 0 means unlimited; a non-numeric value is returned as -1, which never counts as truncating."""
+    value = normalize(ci_apply_role_arn.label(instance, "id_length_limit"))
+    if value is None:
+        return None
+    return value if isinstance(value, int) and not isinstance(value, bool) else -1
+
+
+def role_name_errors(where: str, name: str, instance: dict) -> list[str]:
+    """IAM caps a role name at 64 characters; the house iam checked it at plan, the vendored role fails at apply.
+
+    A CI instance's ARN is derived from the untruncated id (ci-apply-role-arn.py), so it may set no
+    id_length_limit at all; any other role is exempt only when null-label truncates its id to 64 or less.
+    """
+    errors = []
+    variables = instance.get("vars") or {}
+    if name in CI_INSTANCES:
+        for source, value in (("vars", variables.get("id_length_limit")),
+                              ("vars.context", (variables.get("context") or {}).get("id_length_limit"))):
+            if normalize(value) not in (None, 0):
+                errors.append(f"{where} sets {source}.id_length_limit {value!r}: null-label would truncate and hash "
+                              "the role name, so it would no longer be the ARN CI and the state backend derive "
+                              f"(ci-apply-role-arn.py); remove id_length_limit from {name}")
+    limit = id_length_limit(instance)
+    if name not in CI_INSTANCES and limit is not None and 0 < limit <= MAX_ROLE_NAME:
+        return errors  # null-label truncates the id itself
     role = ci_apply_role_arn.role_name(instance)
-    if len(role) <= MAX_ROLE_NAME:
-        return []
-    return [f"{where} resolves the role name {role!r} ({len(role)} characters), over IAM's {MAX_ROLE_NAME}: the "
-            "apply would fail; shorten the lane name (settings.prefix) or the instance's vars.name"]
+    if len(role) > MAX_ROLE_NAME:
+        errors.append(f"{where} resolves the role name {role!r} ({len(role)} characters), over IAM's "
+                      f"{MAX_ROLE_NAME}: the apply would fail; shorten the lane name (settings.prefix) or the "
+                      "instance's vars.name")
+    return errors
 
 
 def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance: str = "") -> list[str]:
