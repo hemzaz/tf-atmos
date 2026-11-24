@@ -12,12 +12,12 @@
 # route left on in an account the region's org-settings does not enroll.
 # kms/main (the topic's key), cloudtrail (the account's vendored
 # aws-cloudtrail trail, catalog/aws-cloudtrail/defaults: the CIS filters' log
-# group) and iam/ci (the CI apply role excluded from security group change
+# group) and aws-iam-role/ci-apply (the CI apply role excluded from security group change
 # alerts) are declared in dependencies.components so they deploy first;
 # workflows/scripts/common/check-dependencies.py enforces that.
 #
 # Only main.yaml imports this file, and every stack that imports main.yaml
-# (the 4 workload primaries) runs kms/main, cloudtrail and iam/ci, so the
+# (the 4 workload primaries) runs kms/main, cloudtrail and aws-iam-role/ci-apply, so the
 # references resolve in all of them. The DR standbys (main-standby.yaml) have
 # no kms/main or cloudtrail and neither import nor inherit it; nor does
 # main-region.yaml (a nonprod account's second region). Keep both in sync
@@ -33,7 +33,7 @@ components:
         components:
           - component: kms/main
           - component: cloudtrail
-          - component: iam/ci
+          - component: aws-iam-role/ci-apply
       vars:
         enable_guardduty_route: true
         enable_securityhub_route: true
@@ -67,10 +67,10 @@ components:
         #   role) added here, or its changes alert.
         #   - the EKS service-linked roles (cluster security group, managed
         #     node group remote-access groups)
-        # iam/ci deploys earlier, so the CI apply role (terraform-cd.yml) is
-        # read from its state; it is null while the apply role is disabled and
-        # the component drops nulls. To exclude another role, add its ARN here
-        # (or replace the list in a stack: list_merge_strategy is replace).
+        # aws-iam-role/ci-apply deploys earlier (the iam layer), so the CI apply
+        # role (terraform-cd.yml) is read from its state. To exclude another
+        # role, add its ARN here (or replace the list in a stack:
+        # list_merge_strategy is replace).
         security_group_change_excluded_role_arns:
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-cluster-role"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-aws-load-balancer-controller-role"
@@ -78,7 +78,7 @@ components:
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-data-aws-load-balancer-controller-role"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
-          - !terraform.state iam/ci .ci_apply_role_arn
+          - !terraform.state aws-iam-role/ci-apply .role.arn
         # The alert topic is encrypted with the stack's CMK. kms/defaults sets
         # allow_eventbridge and allow_cloudwatch_alarms so EventBridge and CloudWatch
         # can publish to it.

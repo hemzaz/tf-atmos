@@ -28,8 +28,9 @@ starts: an ERROR otherwise. Every runner pool must
 set allowed_refs: every in-VPC job runs on the default branch (owner
 decision), so its runners refuse any other ref's job that asks for its
 label: an ERROR otherwise. Each deployable runner pool's
-Auto Scaling group (<tags.Environment>-<vars.name>) must be in its stack's
-iam/ci ci_runner_pool_names, or CI cannot start its runners: an ERROR.
+Auto Scaling group (<tags.Environment>-<vars.name>) must be a StartRunners resource of the
+stack's aws-iam-role/ci-apply (policy_statements, catalog/aws-iam-role/ci.yaml), in the pool's
+region, or CI cannot start its runners: an ERROR.
 
 A provider exec plugin (`exec { command = "aws" }`) runs a binary the atmos
 image may lack: every deployable instance of a component whose providers exec
@@ -228,26 +229,44 @@ def check_exec_tools(stacks: dict, commands: dict[str, set[str]]) -> list[str]:
     return errors
 
 
+# The stack's CI apply role (catalog/aws-iam-role/ci.yaml) and its runner-start statement.
+CI_APPLY_ROLE = "aws-iam-role/ci-apply"
+START_RUNNERS = "StartRunners"
+POOL_ARN = re.compile(r"arn:aws[a-z-]*:autoscaling:([a-z0-9-]+):[0-9]{12}:autoScalingGroup:\*:autoScalingGroupName/(.+)")
+
+
 def pool_group_name(instance: dict) -> str:
     """A github-runners instance's Auto Scaling group: <tags.Environment>-<vars.name>."""
     variables = instance.get("vars") or {}
     return f"{(variables.get('tags') or {}).get('Environment')}-{variables.get('name') or RUNNER_POOL_DEFAULT_NAME}"
 
 
+def granted_pools(apply_role: dict) -> set:
+    """(region, Auto Scaling group) pairs the CI apply role may start: its StartRunners resources."""
+    statement = (((apply_role.get("vars") or {}).get("policy_statements") or {}).get(START_RUNNERS) or {})
+    resources = statement.get("resources")
+    granted = set()
+    for arn in resources if isinstance(resources, list) else [resources]:
+        match = POOL_ARN.fullmatch(str(arn))
+        if match:
+            granted.add(match.groups())
+    return granted
+
+
 def check_pool_start_grants(stacks: dict) -> list[str]:
-    """Runner pools missing from their stack's iam/ci ci_runner_pool_names."""
+    """Runner pools missing from their stack's CI apply role's StartRunners resources."""
     errors = []
     for stack_name, stack in sorted(stacks.items()):
         instances = deployable_instances(stack)
-        granted = set(((instances.get("iam/ci") or {}).get("vars") or {}).get("ci_runner_pool_names") or [])
+        granted = granted_pools(instances.get(CI_APPLY_ROLE) or {})
         for name, instance in sorted(instances.items()):
             if instance.get("component") != RUNNER_COMPONENT:
                 continue
             group = pool_group_name(instance)
-            if group not in granted:
+            if ((instance.get("vars") or {}).get("region"), group) not in granted:
                 errors.append(
-                    f"{stack_name}: {name} ({group}) is not in iam/ci ci_runner_pool_names, so CI cannot start "
-                    "its runners"
+                    f"{stack_name}: {name} ({group}) is not in {CI_APPLY_ROLE} policy_statements.{START_RUNNERS} "
+                    "in its region, so CI cannot start its runners"
                 )
     return errors
 

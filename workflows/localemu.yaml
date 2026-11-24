@@ -174,9 +174,22 @@ workflows:
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
           atmos terraform apply aws-github-oidc-provider -s fnx-ue1-local-localemu --identity local-emu -auto-approve
+      # The CI roles trust the provider above (catalog/aws-iam-role/ci).
+      - type: shell
+        name: apply-ci-roles
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform apply aws-iam-role/ci-plan -s fnx-ue1-local-localemu --identity local-emu -auto-approve
+          atmos terraform apply aws-iam-role/ci-apply -s fnx-ue1-local-localemu --identity local-emu -auto-approve
 
       # Destroy proves teardown works and is where rds's deletion_protection
       # footgun would surface. Reverse order.
+      - type: shell
+        name: destroy-ci-roles
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform destroy aws-iam-role/ci-apply -s fnx-ue1-local-localemu --identity local-emu -auto-approve
+          atmos terraform destroy aws-iam-role/ci-plan -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: destroy-oidc-provider
         command: |

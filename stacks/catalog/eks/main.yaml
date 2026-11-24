@@ -55,6 +55,7 @@ components:
         components:
           - component: vpc/main
           - component: kms/main
-          - component: iam/ci
+          - component: aws-iam-role/ci-plan
+          - component: aws-iam-role/ci-apply
           - component: ec2/bastion
           - component: github-runners/main

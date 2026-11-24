@@ -36,7 +36,7 @@ components:
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-data-aws-load-balancer-controller-role"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
-          - !terraform.state iam/ci .ci_apply_role_arn
+          - !terraform.state aws-iam-role/ci-apply .role.arn
         kms_key_id: !terraform.state kms/main .key_arn
         enable_inspector2_route: true
         enable_alert_enrichment: false
@@ -46,4 +46,4 @@ components:
       dependencies:
         components:
           - component: kms/main
-          - component: iam/ci
+          - component: aws-iam-role/ci-apply

@@ -13,10 +13,10 @@ import:
   - orgs/fnx/_defaults
   - mixins/tenant/fnx
   - mixins/region/us-east-1
-  - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/aws-iam-service-linked-roles/main
   - catalog/aws-github-oidc-provider/main
+  - catalog/aws-iam-role/ci
 
 vars:
   region: us-east-1
@@ -34,35 +34,23 @@ settings:
 # What every template expects its importing stack to provide (each template's
 # REQUIREMENTS header): the stack's kms/main, the aws-iam-service-linked-roles
 # instance (catalog/aws-iam-service-linked-roles/main) that provisions the Auto
-# Scaling service-linked role kms/main's key policy names, and iam/ci (eks
-# access entries read its CI role ARNs).
+# Scaling service-linked role kms/main's key policy names, and the CI roles
+# (catalog/aws-iam-role/ci: eks access entries read both roles' ARNs, so the
+# apply role is on here too; check-ci-state-roles.py skips stage fixtures).
 # aws-iam-service-linked-roles (the Auto Scaling SLR) and
-# aws-github-oidc-provider (the GitHub OIDC provider iam/ci trusts) are
+# aws-github-oidc-provider (the GitHub OIDC provider the CI roles trust) are
 # account-global singletons: fixture-only, never applied.
 components:
   terraform:
-    iam/ci:
-      metadata:
-        component: iam
-        inherits:
-          - iam
+    aws-iam-role/ci-apply:
       vars:
-        github_oidc_enabled: true
-        github_oidc_repository: "hemzaz/tf-atmos"
-        github_oidc_default_branch: "master"
-        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
-        # Every pool a fixture can hold: a stack's own, and the
-        # microservices-platform template's (iam ci-runner-pools.tf).
-        ci_runner_pool_names:
-          - "{{ .settings.prefix }}-github-runners"
-          - "{{ .settings.prefix }}-microservices-runners"
-        ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-read-role"
-      dependencies:
-        components:
-          - component: backend/main
-            stack: "{{ .settings.tfstate.stack }}"
-          - component: aws-github-oidc-provider
+        policy_statements:
+          # Every pool a fixture can hold: a stack's own, and the
+          # microservices-platform template's.
+          StartRunners:
+            resources:
+              - "arn:aws:autoscaling:{{ .vars.region }}:{{ .settings.environment.account_id }}:autoScalingGroup:*:autoScalingGroupName/{{ .settings.prefix }}-github-runners"
+              - "arn:aws:autoscaling:{{ .vars.region }}:{{ .settings.environment.account_id }}:autoScalingGroup:*:autoScalingGroupName/{{ .settings.prefix }}-microservices-runners"
 
     kms/main:
       metadata:

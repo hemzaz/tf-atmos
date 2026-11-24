@@ -215,16 +215,23 @@ workflows:
         type: shell
         command: atmos validate stacks
       # Every workload stack's state lives in the backend, reached through its
-      # stage's access role, so backend-cold-start must have run. iam/ci names
-      # those roles by convention (it does not read its backend root stack's state).
-      # Its CI roles federate through the account's GitHub OIDC provider, the
-      # vendored aws-github-oidc-provider, so that applies here too (iam/ci
-      # depends on it: Atmos applies it first within the deploy-iam step).
+      # stage's access role, so backend-cold-start must have run. The CI roles,
+      # the vendored aws-iam-role's aws-iam-role/ci-plan and ci-apply (E6a4),
+      # name those roles by convention (they do not read the backend root
+      # stack's state), so the first CD run finds its apply role. They federate
+      # through the account's GitHub OIDC provider, the vendored
+      # aws-github-oidc-provider, so that applies here too (each CI role and
+      # iam/ci depend on it: Atmos applies it first within the deploy-iam step).
+      # aws-iam-service-linked-roles is not needed here: nothing in this
+      # workflow reads or depends on the Auto Scaling service-linked role; its
+      # one dependent, kms/main, deploys in deploy-full-stack's kms layer,
+      # after that workflow's iam layer creates it.
       - name: plan-foundation
         type: atmos
         command: >-
           terraform plan --log-order grouped --query '.metadata.component == "iam"
-          or .metadata.component == "aws-github-oidc-provider" or .metadata.component == "vpc"'
+          or .metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"
+          or .metadata.component == "vpc"'
       - name: confirm_foundation
         type: confirm
         prompt: Apply the IAM and VPC plans above?
@@ -236,7 +243,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "iam"
-          or .metadata.component == "aws-github-oidc-provider"'
+          or .metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"'
       - name: deploy-vpc
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "vpc"'

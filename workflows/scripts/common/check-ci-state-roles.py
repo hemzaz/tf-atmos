@@ -2,36 +2,37 @@
 """Check that every stack's CI roles are trusted by its stage's state access roles.
 
 Reads `atmos describe stacks --process-functions=false --format json` on stdin.
-Each deployable iam/ci instance creates <ci_role_name_prefix>-plan (github_oidc_enabled)
-and <ci_role_name_prefix>-apply (also ci_apply_role_enabled) in its stack's account;
-ci-apply-role-arn.py derives the ARNs CI assumes the same way. The backend
-instance owning the iam/ci instance's state bucket (backends.owner_of: backend/main
-for fnx-terraform-state, its EU twin for the EU bucket) trusts them in its
-access_roles as literal ARNs (stacks/orgs/fnx/root/us-east-1.yaml, an
-aws:PrincipalArn condition), so nothing else ties the two together: the plan
-role must be in that backend's stage read role's allowed_principal_arns (read for
-dev/staging, prod_read for prod) and the apply role in its write role's (write /
-prod_write). Another backend's roles do not count. A renamed ci_role_name_prefix
-or a new stack missing there leaves its CI unable to assume a state role. An
-iam/ci instance whose bucket has no one owning backend is an error. Stage
-fixtures is skipped: never deployed.
+Each stack's deployable aws-iam-role/ci-plan and aws-iam-role/ci-apply instances (the
+vendored aws-iam-role, stacks/catalog/aws-iam-role/ci.yaml) create its CI roles in the
+stack's account, named by the null-label id; ci-apply-role-arn.py derives the ARNs CI
+assumes, and this check derives them with the same module. The backend instance owning
+the instances' state bucket (backends.owner_of: backend/main for fnx-terraform-state, its
+EU twin for the EU bucket) trusts them in its access_roles as literal ARNs
+(stacks/orgs/fnx/root/us-east-1.yaml, an aws:PrincipalArn condition), so nothing else ties
+the two together: the plan role must be in that backend's stage read role's
+allowed_principal_arns (read for dev/staging, prod_read for prod) and the apply role in its
+write role's (write / prod_write). Another backend's roles do not count. A renamed role or
+a new stack missing there leaves its CI unable to assume a state role. A CI role whose
+bucket has no one owning backend is an error. Stage fixtures (never deployed) and a stack
+CI never runs (settings.github.actions_enabled: false, the LocalEmu lane) are skipped: CI
+never assumes their roles.
 
 The stages' roles are the explicit STAGE_ROLES map: a stage missing from it is an
-error, so a new tier never falls into the non-prod roles silently. Each CI
-instance's own backend must assume one of its stage's two roles of that owner
+error, so a new tier never falls into the non-prod roles silently. Each stack's CI
+instances' own backend must assume one of its stage's two roles of that owner
 (backend.assume_role.role_arn, the role_arn template in stacks/orgs/fnx/_defaults.yaml).
 The other side of the trust: the plan role may assume only that owner's stage read
-role (every ci_backend_read_role_arns entry names it, at least one) and the apply
-role only its write role (ci_backend_write_role_arn), each in the partition and
-account of the role its backend assumes (the management account), so an EU CI role
-pointed at the US backend's roles, or at a same-named role elsewhere, fails.
+role (every resource of its policy_statements.AssumeStateReadRoles names it, at least one)
+and the apply role only its write role (policy_statements.AssumeStateWriteRole), each in
+the partition and account of the role its backend assumes (the management account), so an
+EU CI role pointed at the US backend's roles, or at a same-named role elsewhere, fails.
 
 The reverse holds too, per backend: an allowed_principal_arns entry shaped like a
-CI role (":role/...-ci-plan" / "-ci-apply") must be the plan or apply ARN of an
-iam/ci instance whose state that backend owns, in a stage that access role
-serves, of the matching kind. That fails a dev apply role trusted on prod_write,
-a stale ARN left behind by a rename, and a US CI role trusted by the EU backend.
-OPERATOR_ROLE_ARNS lists any non-CI role that happens to have that shape.
+CI role (":role/...-ci-plan" / "-ci-apply") must be the plan or apply ARN of a CI role
+instance whose state that backend owns, in a stage that access role serves, of the
+matching kind. That fails a dev apply role trusted on prod_write, a stale ARN left behind
+by a rename, and a US CI role trusted by the EU backend. OPERATOR_ROLE_ARNS lists any
+non-CI role that happens to have that shape.
 
 An Identity Center role (":role/aws-reserved/sso.amazonaws.com/...AWSReservedSSO_<set>_...",
 the backend's reserved-path pattern) is a human, never a CI role. On each backend role it
@@ -71,7 +72,7 @@ _spec = importlib.util.spec_from_file_location(
 ci_apply_role_arn = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci_apply_role_arn)
 
-CI_COMPONENT = "iam"
+CI_COMPONENT = "aws-iam-role"
 # stage -> (plan role's access_roles key, apply role's). Explicit on purpose.
 STAGE_ROLES = {
     "dev": ("read", "write"),
@@ -79,8 +80,9 @@ STAGE_ROLES = {
     "prod": ("prod_read", "prod_write"),
 }
 KINDS = ("plan", "apply")
-# The iam/ci variables naming the state roles each CI role may assume (sts:AssumeRole).
-GRANT_VARS = {"plan": "ci_backend_read_role_arns", "apply": "ci_backend_write_role_arn"}
+# The policy_statements entry (catalog/aws-iam-role/ci.yaml) naming the state roles each CI
+# role may assume (sts:AssumeRole): its resources.
+GRANT_STATEMENTS = {"plan": "AssumeStateReadRoles", "apply": "AssumeStateWriteRole"}
 CI_ROLE_ARN = re.compile(r"^arn:aws:iam::[^:]*:role/(?:.*/)?[^/]+-ci-(plan|apply)$")
 # Non-CI principals with a CI-role-shaped name, exempt from the reverse check. None today.
 OPERATOR_ROLE_ARNS: frozenset = frozenset()
@@ -122,16 +124,16 @@ def stage_kind(key: str) -> str:
 
 
 def check_grant(where: str, instance: dict, kind: str, owner: backends.Backend, key: str) -> list[str]:
-    """The state roles the CI role may assume (GRANT_VARS[kind]) must be exactly the owner's access_roles.key."""
-    variable = GRANT_VARS[kind]
-    value = (instance.get("vars") or {}).get(variable)
-    granted = (value or []) if kind == "plan" else ([value] if value else [])
+    """The state roles the CI role may assume (GRANT_STATEMENTS[kind]) must be exactly the owner's access_roles.key."""
+    statement = GRANT_STATEMENTS[kind]
+    value = (((instance.get("vars") or {}).get("policy_statements") or {}).get(statement) or {}).get("resources")
+    granted = value if isinstance(value, list) else ([value] if value else [])
     want = (owner.access_roles.get(key) or {}).get("role_name")
     # The state roles live in the account of the role the instance's own backend assumes (management).
     home = partition_account(((instance.get("backend") or {}).get("assume_role") or {}).get("role_arn"))
     if granted and all(backends.role_name_of(arn) == want and partition_account(arn) == home for arn in granted):
         return []
-    return [f"{where} {kind} role may assume {granted} ({variable}), not {owner.where} access_roles.{key} "
+    return [f"{where} may assume {granted} (policy_statements.{statement}), not {owner.where} access_roles.{key} "
             f"({want}) in {':'.join(home or ('?', '?'))} (the partition:account of backend.assume_role.role_arn), "
             "so its CI cannot assume the state role of the backend owning its state"]
 
@@ -142,33 +144,45 @@ def partition_account(arn) -> "tuple[str, str] | None":
     return (parts[1], parts[4]) if len(parts) == 6 and parts[0] == "arn" and parts[5].startswith("role/") else None
 
 
-def check_ci(where: str, instance: dict, stage: str, owner: backends.Backend, expected: dict) -> list[str]:
-    """One iam/ci instance against the access_roles of the backend owning its state; records the
-    ARNs each (bucket, key) must trust in expected."""
+def check_ci(stack_name: str, roles: dict, stage: str, owner: backends.Backend, expected: dict) -> list[str]:
+    """One stack's CI role instances ({kind: instance}) against the access_roles of the backend owning
+    their state; records the ARNs each (bucket, key) must trust in expected."""
     errors = []
-    assumed = backends.assumed_role_key(instance, owner)
-    if assumed not in STAGE_ROLES[stage]:
-        errors.append(
-            f"{where} backend assumes access_roles.{assumed} (backend.assume_role.role_arn), "
-            f"not one of stage {stage!r}'s {list(STAGE_ROLES[stage])} of {owner.where}"
-        )
-    kinds = ["plan"] + (["apply"] if (instance.get("vars") or {}).get("ci_apply_role_enabled") else [])
-    for kind in kinds:
+    for kind, instance in roles.items():
+        where = f"{stack_name}: {ci_apply_role_arn.INSTANCES[kind]}"
+        assumed = backends.assumed_role_key(instance, owner)
+        if assumed not in STAGE_ROLES[stage]:
+            errors.append(
+                f"{where} backend assumes access_roles.{assumed} (backend.assume_role.role_arn), "
+                f"not one of stage {stage!r}'s {list(STAGE_ROLES[stage])} of {owner.where}"
+            )
         try:
             arn = ci_apply_role_arn.role_arn(instance, kind)
         except (KeyError, ValueError) as error:
-            errors.append(f"{where} {kind} role: {error}")
+            errors.append(f"{where} role: {error}")
             continue
         key = STAGE_ROLES[stage][KINDS.index(kind)]
         expected.setdefault((owner.bucket, key), {})[arn] = kind
-        errors += check_grant(where, instance, kind, owner, key)
+        errors += check_grant(f"{where} role", instance, kind, owner, key)
         trusted = (owner.access_roles.get(key) or {}).get("allowed_principal_arns") or []
         if arn not in trusted:
             errors.append(
-                f"{where} {kind} role {arn} is not in backend access_roles.{key} allowed_principal_arns "
+                f"{where} role {arn} is not in backend access_roles.{key} allowed_principal_arns "
                 f"of {owner.where}, so its CI cannot assume a state role"
             )
     return errors
+
+
+def ci_roles(stack: dict) -> dict:
+    """{kind: instance} of the stack's deployable CI role instances that create a GitHub-trusted role."""
+    found = backends.instances(stack)
+    roles = {}
+    for kind, name in ci_apply_role_arn.INSTANCES.items():
+        instance = found.get(name)
+        if (instance and instance.get("component") == CI_COMPONENT and backends.is_deployable(instance)
+                and (instance.get("vars") or {}).get("github_oidc_provider_enabled") is True):
+            roles[kind] = instance
+    return roles
 
 
 def served_accounts(stacks: dict, owned: dict) -> dict:
@@ -263,22 +277,26 @@ def check(stacks: dict) -> list[str]:
         return [f"no state bucket has one deployable '{backends.BACKEND_COMPONENT}' instance owning it"]
     errors = []
     expected: dict = {}  # (bucket, access_roles key) -> {CI role ARN: kind} it must trust
-    for stack_name, name, instance in instances(stacks):
-        if instance.get("component") != CI_COMPONENT or not (instance.get("vars") or {}).get("github_oidc_enabled"):
+    for stack_name, stack in sorted(stacks.items()):
+        roles = ci_roles(stack)
+        if not roles:
             continue
-        stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
-        if stage == fixtures.FIXTURE_STAGE:
+        first = next(iter(roles.values()))
+        settings = first.get("settings") or {}
+        stage = (settings.get("context") or {}).get("stage")
+        # Never assumed by CI: fixtures, and stacks CI never runs (the LocalEmu lane's roles).
+        if stage == fixtures.FIXTURE_STAGE or (settings.get("github") or {}).get("actions_enabled") is False:
             continue
-        where = f"{stack_name}: {name}"
+        where = f"{stack_name}: {ci_apply_role_arn.INSTANCES[next(iter(roles))]}"
         if stage not in STAGE_ROLES:
             errors.append(f"{where} is in stage {stage!r}, which STAGE_ROLES does not map to backend roles")
             continue
-        owner = backends.owner_of(owned, instance)
+        owner = backends.owner_of(owned, first)
         if owner is None:
-            errors.append(f"{where} state bucket {backends.bucket_of(instance)!r} has no one owning "
+            errors.append(f"{where} state bucket {backends.bucket_of(first)!r} has no one owning "
                           f"'{backends.BACKEND_COMPONENT}' instance, so its CI roles cannot be checked")
             continue
-        errors += check_ci(where, instance, stage, owner, expected)
+        errors += check_ci(stack_name, roles, stage, owner, expected)
     accounts = served_accounts(stacks, owned)
     ic = identity_center(stacks)
     for bucket, owner in sorted(owned.items()):
@@ -298,7 +316,7 @@ def check(stacks: dict) -> list[str]:
                 if arn not in expected.get((bucket, key), {}):
                     errors.append(
                         f"{owner.where}: backend access_roles.{key} trusts {arn}, which is no {stage_kind(key)} "
-                        "role of an iam/ci instance in a stage this role serves whose state this backend owns "
+                        "role of a CI role instance in a stage this role serves whose state this backend owns "
                         "(stale, or another stage's or backend's)"
                     )
     return errors
@@ -311,7 +329,7 @@ def main() -> int:
     if errors:
         print(f"{len(errors)} CI state role problem(s)")
         return 1
-    print("every iam/ci plan and apply role is trusted by its stage's read and write role of the backend "
+    print("every CI plan and apply role is trusted by its stage's read and write role of the backend "
           "owning its state, every CI-shaped trusted ARN is one of them, and every Identity Center role is "
           "trusted in an account the role serves, Plan sets on read roles only")
     return 0

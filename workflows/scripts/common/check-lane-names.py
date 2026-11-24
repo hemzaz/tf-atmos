@@ -21,7 +21,8 @@ it cannot be checked. Within a group this fails:
     creating keys count: a key that names an existing resource (cluster_name
     in eks-addons, a lane's reference to its stage's cluster) is not
     compared, and a gated key counts only while its instance creates the
-    resource (iam ci_role_name_prefix with github_oidc_enabled);
+    resource (iam ci_role_name_prefix, the Lambda uploader's, with github_oidc_enabled;
+    the CI roles are the vendored aws-iam-role's, named by the lane-aware null-label id);
   - two instances that create the same account singleton (SINGLETONS: the
     GitHub OIDC provider (the vendored aws-github-oidc-provider), each
     service-linked role (MAP_SINGLETONS: one per
@@ -141,7 +142,7 @@ RAW_NAMES = {
     ("kms", "name_prefix"): ("KMS key name prefix", None),
     ("cognito", "name_prefix"): ("Cognito user pool", None),
     ("network", "name_prefix"): ("network name prefix", None),
-    ("iam", "ci_role_name_prefix"): ("IAM CI role prefix", ("github_oidc_enabled", False)),
+    ("iam", "ci_role_name_prefix"): ("IAM Lambda uploader role prefix", ("github_oidc_enabled", False)),
     ("dynamodb", "table_name"): ("DynamoDB table", None),
     ("ecs", "cluster_name"): ("ECS cluster", None),
     ("waf", "metric_name"): ("WAF metric", None),
@@ -186,7 +187,7 @@ REGION_SINGLETON_ALLOWANCES = {
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
 # region (IAM is global within an account).
 ACCOUNT_WIDE = {
-    "IAM role", "IAM policy", "IAM CI role prefix",
+    "IAM role", "IAM policy", "IAM Lambda uploader role prefix",
     *SINGLETONS.values(), *MAP_SINGLETONS.values(), *REGION_SINGLETONS.values(),
 }
 # vars keys whose values are names global across accounts and regions.
