@@ -110,7 +110,9 @@ class CiTrustTest(unittest.TestCase):
     ADMIN = "arn:aws:iam::aws:policy/AdministratorAccess"
 
     def role(self, kind="plan", stage="prod", repos=None, **variables):
-        return instance("aws-iam-role", stage=stage, name=f"ci-{kind}", github_oidc_provider_enabled=True,
+        variables.setdefault("name", f"ci-{kind}")
+        variables.setdefault("github_oidc_provider_enabled", True)
+        return instance("aws-iam-role", stage=stage,
                         trusted_github_repos=[f"{self.REPO}:master"] if repos is None else repos, **variables)
 
     def found(self, *roles, stage="prod"):
@@ -247,6 +249,7 @@ class CiTrustTest(unittest.TestCase):
                                "Statement": self.uploader_statements() if statements is None else statements})
         variables.setdefault("policy_documents", [document])
         variables.setdefault("enabled", True)
+        variables.setdefault("region", "us-east-1")
         return self.role("lambda-uploader", stage=stage,
                          repos=[f"{self.APP}:main"] if repos is None else repos, **variables)
 
@@ -279,6 +282,69 @@ class CiTrustTest(unittest.TestCase):
                         "attaches no managed policy")
         self.assert_one(self.found(self.uploader(policy_statements=copy.deepcopy(self.STATE_READ)), stage="dev"),
                         "the uploader's policy is its one policy_documents entry")
+
+    def found_as(self, instances, stage="dev"):
+        """check_ci_trust over instances under their real names (aws-iam-role/lambda-uploader, ...)."""
+        return check_prod_protection.check_ci_trust({f"fnx-ue1-{stage}": {"components": {"terraform": instances}}})
+
+    EXTRA = {"Sid": "X", "Effect": "Allow", "Action": "s3:*", "Resource": "*"}
+
+    def test_renamed_uploader_keeps_its_rules(self):
+        # Review MEDIUM-1: a vars.name override plus s3:* on * must not escape the allow-list.
+        renamed = self.uploader(self.uploader_statements() + [self.EXTRA], name="ci-pkg-uploader")
+        found = self.found_as({"aws-iam-role/lambda-uploader": renamed})
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("sets vars.name 'ci-pkg-uploader': it must stay 'ci-lambda-uploader'", found[0])
+        self.assertIn("outside the uploader's allow-list", found[1])
+
+    def test_renamed_plan_role_keeps_its_rules(self):
+        # The same bypass on ci-plan (E6a4): a renamed plan role with write access.
+        renamed = self.plan(name="ci-read", managed_policy_arns=[self.ADMIN])
+        found = self.found_as({"aws-iam-role/ci-plan": renamed})
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("it must stay 'ci-plan'", found[0])
+        self.assertIn("managed_policy_arns attaches", found[1])
+
+    def test_uploader_without_github_trust_keeps_its_rules(self):
+        # Review MEDIUM-2: OIDC flag off plus a hand-written trust or principals and an extra statement.
+        for trust in ({"assume_role_policy": '{"Statement": []}'}, {"principals": {"AWS": ["*"]}}):
+            with self.subTest(trust=trust):
+                role = self.uploader(self.uploader_statements() + [self.EXTRA],
+                                     github_oidc_provider_enabled=False, **trust)
+                found = self.found_as({"aws-iam-role/lambda-uploader": role})
+                self.assertEqual(len(found), 3, found)
+                self.assertIn("sets github_oidc_provider_enabled False", found[0])
+                self.assertTrue(any("merges an assume_role_policy" in e or "sets principals" in e for e in found), found)
+                self.assertIn("outside the uploader's allow-list", found[-1])
+
+    def test_principals_on_a_github_role_fail(self):
+        self.assert_one(self.found(self.role("apply", principals={"AWS": ["*"]}), stage="prod"), "sets principals")
+
+    def test_off_ci_instances_are_skipped(self):
+        off = self.uploader(repos=[], enabled=False, name="other", github_oidc_provider_enabled=False)
+        self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": off}), [])
+
+    def test_role_name_over_64_characters_fails(self):
+        # Review MEDIUM-3: the house iam's precondition, for every enabled aws-iam-role.
+        context = {"tenant": "fnx", "environment": "ue1-" + "x" * 40, "stage": "dev",
+                   "label_order": ["tenant", "environment", "stage", "name", "attributes"]}
+        long_lane = self.uploader(context=context)
+        found = self.found_as({"aws-iam-role/lambda-uploader": long_lane})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("characters), over IAM's 64: the apply would fail; shorten the lane name (settings.prefix)",
+                      found[0])
+        dns = instance("aws-iam-role", name="dns-delegation-" + "y" * 60)
+        self.assert_one(self.found_as({"aws-iam-role/dns": dns}), "over IAM's 64")
+        short = dict(context, environment="ue1-perf")
+        self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=short)}), [])
+        limited = dict(context, id_length_limit=64)
+        self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=limited)}), [])
+
+    def test_uploader_kms_via_another_region_fails(self):
+        # Review LOW-1: kms:ViaService pinned to the role's own region.
+        statements = self.uploader_statements()
+        statements[3]["Condition"]["StringEquals"]["kms:ViaService"] = ["s3.eu-west-1.amazonaws.com"]
+        self.assert_one(self.found(self.uploader(statements), stage="dev"), "via s3.us-east-1.amazonaws.com only")
 
     def test_uploader_policy_is_an_allow_list(self):
         # The deliberately bad cases: each widens or drops one guard of the catalog's policy.
