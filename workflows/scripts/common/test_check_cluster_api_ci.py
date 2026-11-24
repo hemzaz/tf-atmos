@@ -485,24 +485,34 @@ class CheckClusterApiCiTest(unittest.TestCase):
         errors = check_cluster_api_ci.check_pool_sizes(self.sized_pool(max_size="{{ .x }}"))
         self.assertIn("is not a number", errors[0])
 
-    def pool_stack(self, granted, name=None):
+    def pool_stack(self, granted, name=None, region="us-east-1"):
         pool = instance("github-runners")
         pool["vars"]["tags"] = {"Environment": "ue1"}
+        pool["vars"]["region"] = "us-east-1"
         if name:
             pool["vars"]["name"] = name
-        ci = instance("iam")
-        ci["vars"]["ci_runner_pool_names"] = granted
-        return stacks_with(**{"github-runners/main": pool, "iam/ci": ci})
+        ci = instance("aws-iam-role")
+        ci["vars"]["policy_statements"] = {"StartRunners": {"effect": "Allow", "resources": [
+            f"arn:aws:autoscaling:{region}:123456789012:autoScalingGroup:*:autoScalingGroupName/{group}"
+            for group in granted]}}
+        return stacks_with(**{"github-runners/main": pool, "aws-iam-role/ci-apply": ci})
 
     def test_runner_pool_granted_to_its_stack_ci_roles_passes(self):
         self.assertEqual(check_cluster_api_ci.check_pool_start_grants(self.pool_stack(["ue1-github-runners"])), [])
         stacks = self.pool_stack(["ue1-microservices-runners"], name="microservices-runners")
         self.assertEqual(check_cluster_api_ci.check_pool_start_grants(stacks), [])
 
-    def test_runner_pool_missing_from_ci_runner_pool_names_fails(self):
+    def test_runner_pool_missing_from_start_runners_fails(self):
         errors = check_cluster_api_ci.check_pool_start_grants(self.pool_stack(["ue1-other"]))
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("github-runners/main (ue1-github-runners) is not in iam/ci ci_runner_pool_names", errors[0])
+        self.assertIn("github-runners/main (ue1-github-runners) is not in aws-iam-role/ci-apply "
+                      "policy_statements.StartRunners in its region", errors[0])
+
+    def test_runner_pool_granted_in_another_region_fails(self):
+        stacks = self.pool_stack(["ue1-github-runners"], region="us-east-2")
+        errors = check_cluster_api_ci.check_pool_start_grants(stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("StartRunners in its region", errors[0])
 
     def test_exec_commands_reads_both_exec_block_forms(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,4 +1,5 @@
-# House tests of the GitHub OIDC CI roles. The real AWS provider is used, not a mock:
+# House tests of the GitHub OIDC Lambda uploader role (the CI plan and apply roles are the vendored
+# aws-iam-role's, tested in ../../aws-iam-role/tests/ci_roles.tftest.hcl, E6a4). The real AWS provider is used, not a mock:
 # credentials are dummies and every data source that would call AWS is overridden.
 # Run: terraform init -backend=false && terraform test
 
@@ -30,237 +31,6 @@ variables {
   region = "us-east-1"
 }
 
-# ci_apply_kms_key_aliases: least-privilege access to customer-managed key(s)
-# the apply role deploys resources against (kms/main), scoped by alias via a
-# kms:ResourceAliases condition rather than a key ARN -- a consumer's own IAM
-# policy, never a kms key-policy key_users entry (see ../../kms/README.md).
-# Alias-scoped, not ARN-scoped, because iam/ci plans and applies in the
-# deploy-full-stack layer BEFORE kms/main (../../../../workflows/deploy-full-stack.yaml),
-# so a !terraform.state read of the key's ARN would create a layer-order
-# cycle (kms/main already depends on iam).
-run "ci_apply_kms_policy_is_inert_without_the_apply_role" {
-  command = plan
-
-  variables {
-    github_oidc_enabled      = true
-    github_oidc_repository   = "hemzaz/tf-atmos"
-    github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix      = "test-ci"
-    ci_apply_role_enabled    = false
-    ci_apply_kms_key_aliases = ["alias/test-main"]
-  }
-
-  assert {
-    condition     = length(aws_iam_role_policy.ci_apply_kms) == 0
-    error_message = "ci_apply_kms_key_aliases must not create a policy when ci_apply_role_enabled is false: there is no ci_apply role to attach it to."
-  }
-}
-
-run "ci_apply_kms_policy_scoped_to_the_key_aliases" {
-  command = plan
-
-  variables {
-    github_oidc_enabled                = true
-    github_oidc_repository             = "hemzaz/tf-atmos"
-    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix                = "test-ci"
-    ci_apply_role_enabled              = true
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
-    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-    ci_apply_kms_key_aliases           = ["alias/ue1-main"]
-  }
-
-  assert {
-    condition     = length(aws_iam_role_policy.ci_apply_kms) == 1
-    error_message = "ci_apply_kms_key_aliases must create exactly one policy when set together with the apply role."
-  }
-
-  assert {
-    condition = (
-      length(jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement) == 2
-      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[0].Resource == "*"
-      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Resource == "*"
-    )
-    error_message = "ci_apply_kms_key_aliases must never scope to resources = [\"*\"] without a kms:ResourceAliases condition narrowing it (checked below); the key ARN is unknown when this component plans, since iam/ci deploys before kms/main."
-  }
-
-  # A single-element condition value list serializes as a bare string in the
-  # generated policy JSON (aws_iam_policy_document / AWS IAM convention), not
-  # a one-element array -- hence the scalar comparison below.
-  assert {
-    condition = (
-      toset(jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[0].Action) == toset(["kms:DescribeKey", "kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*"])
-      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[0].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/ue1-main"
-    )
-    error_message = "The key-use statement must grant DescribeKey (required by eks:CreateCluster/UpdateClusterConfig on the calling principal) plus Encrypt/Decrypt/GenerateDataKey* for the other kms/main consumers this role deploys, scoped to exactly the configured alias(es) via kms:ResourceAliases."
-  }
-
-  assert {
-    condition = (
-      toset(jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Action) == toset(["kms:CreateGrant", "kms:ListGrants", "kms:RevokeGrant"])
-      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/ue1-main"
-      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Condition["Bool"]["kms:GrantIsForAWSResource"] == "true"
-    )
-    error_message = "CreateGrant/ListGrants/RevokeGrant must be split into their own statement, scoped to the configured alias(es) AND kms:GrantIsForAWSResource = true (AWS's documented pattern for AWS-service-managed grants, e.g. the EKS cluster secrets grant this role deploys)."
-  }
-}
-
-run "no_ci_apply_kms_policy_without_the_key_aliases" {
-  command = plan
-
-  variables {
-    github_oidc_enabled                = true
-    github_oidc_repository             = "hemzaz/tf-atmos"
-    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix                = "test-ci"
-    ci_apply_role_enabled              = true
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
-    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-  }
-
-  assert {
-    condition     = length(aws_iam_role_policy.ci_apply_kms) == 0
-    error_message = "ci_apply_kms_key_aliases defaults to null, so no policy should be created without it."
-  }
-}
-
-# State access: the CI roles reach the single state backend (backend/main in
-# fnx-ue1-root) only through its stage-split access roles -- prod's plan role
-# may assume only the prod READ-only role, prod's apply role only the prod
-# WRITE role -- and hold no S3/KMS grant on the state bucket themselves (so no
-# lock-object writes from plans either). The values are catalog/iam/ci-prod.yaml's.
-run "ci_state_access_is_sts_assume_role_on_the_stage_backend_roles_only" {
-  command = plan
-
-  variables {
-    github_oidc_enabled                = true
-    github_oidc_repository             = "hemzaz/tf-atmos"
-    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix                = "test-ci"
-    ci_apply_role_enabled              = true
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
-    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-    ci_backend_read_role_arns          = ["arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role"]
-    ci_backend_write_role_arn          = "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-role"
-  }
-
-  assert {
-    condition = (
-      length(jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement) == 1
-      && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Action == "sts:AssumeRole"
-      && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role"
-    )
-    error_message = "The prod plan role's only state grant is sts:AssumeRole on the prod read-only role: no non-prod read role, no s3:PutObject/DeleteObject (lock files), no KMS."
-  }
-
-  assert {
-    condition = (
-      length(jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement) == 1
-      && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Action == "sts:AssumeRole"
-      && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-role"
-    )
-    error_message = "The prod apply role's only state grant is sts:AssumeRole on the prod write role (never the non-prod or root one)."
-  }
-}
-
-# Apply-role trust: Cloud Posse's branch-pinned trusted_github_repos
-# (github-assume-role-policy.mixin.tf). "<org>/<repo>:<branch>" becomes exactly
-# one sub, repo:<org>/<repo>:ref:refs/heads/<branch>, matched with StringEquals.
-run "ci_apply_role_trusts_only_the_pinned_branch" {
-  command = plan
-
-  variables {
-    github_oidc_enabled                = true
-    github_oidc_repository             = "hemzaz/tf-atmos"
-    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix                = "test-ci"
-    ci_apply_role_enabled              = true
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
-    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/AdministratorAccess"]
-  }
-
-  assert {
-    condition = (
-      length(jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement) == 1
-      && jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Action == "sts:AssumeRoleWithWebIdentity"
-      && jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Principal.Federated == "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-      && keys(jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Condition) == ["StringEquals"]
-      && jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Condition.StringEquals == {
-        "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        "token.actions.githubusercontent.com:sub" = "repo:hemzaz/tf-atmos:ref:refs/heads/master"
-      }
-    )
-    error_message = "The apply role must trust exactly sub = repo:hemzaz/tf-atmos:ref:refs/heads/master and aud = sts.amazonaws.com (StringEquals), nothing else."
-  }
-}
-
-run "ci_apply_role_rejects_pull_request_subject" {
-  command = plan
-
-  variables {
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:pull_request"]
-  }
-
-  expect_failures = [var.ci_apply_role_trusted_github_repos]
-}
-
-run "ci_apply_role_rejects_environment_subject" {
-  command = plan
-
-  variables {
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:environment:fnx-ue1-prod"]
-  }
-
-  expect_failures = [var.ci_apply_role_trusted_github_repos]
-}
-
-run "ci_apply_role_rejects_wildcards" {
-  command = plan
-
-  variables {
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:*", "hemzaz/*:master", "hemzaz/tf-atmos:release/*"]
-  }
-
-  expect_failures = [var.ci_apply_role_trusted_github_repos]
-}
-
-run "ci_apply_role_rejects_a_repo_without_a_pinned_branch" {
-  command = plan
-
-  variables {
-    # Upstream would render repo:hemzaz/tf-atmos:* for this
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos"]
-  }
-
-  expect_failures = [var.ci_apply_role_trusted_github_repos]
-}
-
-run "no_ci_state_policies_without_the_backend_role_arns" {
-  command = plan
-
-  variables {
-    github_oidc_enabled      = true
-    github_oidc_repository   = "hemzaz/tf-atmos"
-    github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix      = "test-ci"
-  }
-
-  assert {
-    condition     = length(aws_iam_role_policy.ci_plan_state) == 0 && length(aws_iam_role_policy.ci_apply_state) == 0
-    error_message = "ci_backend_read_role_arns/ci_backend_write_role_arn default to empty/null, so no state policy is created without them."
-  }
-}
-
-run "ci_backend_role_arn_must_be_a_role_arn" {
-  command = plan
-
-  variables {
-    ci_backend_read_role_arns = ["arn:aws:s3:::fnx-terraform-state"]
-  }
-
-  expect_failures = [var.ci_backend_read_role_arns]
-}
-
 # Lambda package uploader (lambda-uploader.tf): an application repo's CI
 # uploads zips to this stage's s3/lambda-artifacts bucket, nothing else. The
 # bucket is named by the s3 component's convention, <Environment>-lambda-
@@ -270,7 +40,6 @@ run "lambda_uploader_absent_without_trusted_repos" {
 
   variables {
     github_oidc_enabled           = true
-    github_oidc_repository        = "hemzaz/tf-atmos"
     github_oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix           = "test-ci"
     lambda_uploader_kms_key_alias = "alias/ue1-main"
@@ -293,7 +62,6 @@ run "lambda_uploader_trusts_only_the_pinned_app_branch" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "fnx-ue1-dev-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
@@ -326,7 +94,6 @@ run "lambda_uploader_writes_only_the_stage_bucket" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
@@ -382,7 +149,6 @@ run "lambda_uploader_rejects_a_wildcard_org" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["*/data-app:main"]
@@ -397,7 +163,6 @@ run "lambda_uploader_rejects_a_wildcard_repo" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/*:main"]
@@ -412,7 +177,6 @@ run "lambda_uploader_rejects_a_wildcard_branch" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:*"]
@@ -427,7 +191,6 @@ run "lambda_uploader_rejects_pull_request_subject" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:pull_request"]
@@ -442,7 +205,6 @@ run "lambda_uploader_rejects_a_repo_without_a_pinned_branch" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app"]
@@ -457,7 +219,6 @@ run "lambda_uploader_requires_the_kms_alias" {
 
   variables {
     github_oidc_enabled                  = true
-    github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
     ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
@@ -477,81 +238,14 @@ run "lambda_uploader_requires_github_oidc" {
   expect_failures = [var.lambda_uploader_trusted_github_repos]
 }
 
-# Only the apply role starts in-VPC runners: ExecutePolicy on this stack's
-# named runner pools only (never SetDesiredCapacity, never another group); the
-# plan role, which trusts pull requests, gets nothing.
-run "apply_role_may_only_execute_its_runner_pools_policies" {
-  command = plan
-
-  variables {
-    github_oidc_enabled                = true
-    github_oidc_repository             = "hemzaz/tf-atmos"
-    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix                = "test-ci"
-    ci_apply_role_enabled              = true
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
-    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-    ci_runner_pool_names               = ["ue1-github-runners"]
-  }
-
-  assert {
-    condition     = length(aws_iam_role_policy.ci_runner_pools) == 1 && aws_iam_role_policy.ci_runner_pools[0].role == "test-ci-apply"
-    error_message = "Only the apply role gets the runner-pool policy."
-  }
-
-  assert {
-    condition = (
-      [for s in jsondecode(aws_iam_role_policy.ci_runner_pools[0].policy).Statement : s.Action]
-      == ["autoscaling:DescribeAutoScalingGroups", "autoscaling:ExecutePolicy"]
-    )
-    error_message = "The apply role may describe the groups (read-only) and execute the pools' start policies, nothing else."
-  }
-
-  assert {
-    condition = alltrue([
-      for s in jsondecode(aws_iam_role_policy.ci_runner_pools[0].policy).Statement :
-      s.Action != "autoscaling:ExecutePolicy" || (length(s.Resource) == 1
-      && endswith(s.Resource[0], ":autoScalingGroupName/ue1-github-runners"))
-    ])
-    error_message = "ExecutePolicy on the named runner pool only."
-  }
-}
-
-run "no_runner_pool_policy_without_pools" {
-  command = plan
-
-  variables {
-    github_oidc_enabled      = true
-    github_oidc_repository   = "hemzaz/tf-atmos"
-    github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix      = "test-ci"
-  }
-
-  assert {
-    condition     = length(aws_iam_role_policy.ci_runner_pools) == 0
-    error_message = "No ci_runner_pool_names grants nothing."
-  }
-}
-
-run "runner_pool_names_reject_a_wildcard" {
-  command = plan
-
-  variables {
-    ci_runner_pool_names = ["ue1-*"]
-  }
-
-  expect_failures = [var.ci_runner_pool_names]
-}
-
 # The account's GitHub OIDC provider is the vendored aws-github-oidc-provider's (E6a3): iam creates
-# none, so CI roles without its ARN would trust nothing.
-run "ci_roles_require_the_provider_arn" {
+# none, so an uploader without its ARN would trust nothing.
+run "uploader_requires_the_provider_arn" {
   command = plan
 
   variables {
-    github_oidc_enabled    = true
-    github_oidc_repository = "hemzaz/tf-atmos"
-    ci_role_name_prefix    = "test-ci"
+    github_oidc_enabled = true
+    ci_role_name_prefix = "test-ci"
   }
 
   expect_failures = [var.github_oidc_provider_arn]

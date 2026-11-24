@@ -22,6 +22,7 @@ import:
   - mixins/region/us-east-1
   - catalog/_base/defaults
   - catalog/iam/defaults
+  - catalog/aws-iam-role/ci
   - catalog/kms/defaults
   - catalog/vpc/defaults
   - catalog/github-runners/defaults
@@ -83,15 +84,34 @@ components:
         vpc_flow_logs_enabled: true
         flow_logs_retention_days: 90
 
-    # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
-    # entries read them, and CI deploys this lane with them. The GitHub OIDC
-    # provider is an account singleton that fnx-ue1-prod's
-    # aws-github-oidc-provider creates; this instance trusts it by the ARN
-    # catalog/iam/defaults derives and depends on it there.
+    # The lane's own CI roles (catalog/aws-iam-role/ci, imported above): CI
+    # plans and deploys this lane with them (terraform-ci.yml resolves them per
+    # stack); eks/main's access entries read them. Named <tenant>-<settings.prefix>-<stage>-ci-plan/-apply,
+    # the lane in settings.prefix. The GitHub OIDC provider is an account
+    # singleton that fnx-ue1-prod's aws-github-oidc-provider creates; the roles
+    # trust it by the ARN the catalog derives and depend on it there.
     # Deploying the lane needs one manual step: these roles' ARNs on
     # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
     # A state pattern pair of its own is optional: the stage stack's
     # "*/<stage stack>-*" pattern already covers the lane's state keys.
+    aws-iam-role/ci-plan:
+      dependencies:
+        components:
+          - component: backend/main
+            stack: "{{ .settings.tfstate.stack }}"
+          - component: aws-github-oidc-provider
+            stack: fnx-ue1-prod
+
+    aws-iam-role/ci-apply:
+      dependencies:
+        components:
+          - component: backend/main
+            stack: "{{ .settings.tfstate.stack }}"
+          - component: aws-github-oidc-provider
+            stack: fnx-ue1-prod
+
+    # The lane's Lambda package uploader (iam/ci, until E6a5 moves it): no
+    # role until an application repo is named here.
     iam/ci:
       metadata:
         component: iam
@@ -99,30 +119,7 @@ components:
           - iam
       vars:
         github_oidc_enabled: true
-        github_oidc_repository: "hemzaz/tf-atmos"
-        github_oidc_default_branch: "master"
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
-        # This stack's runner pools (github-runners' <Environment>-<name>):
-        # only the apply role may execute their +1 start policies, nothing else
-        # (iam ci-runner-pools.tf; check-cluster-api-ci.py checks the list).
-        ci_runner_pool_names:
-          - "{{ .settings.prefix }}-github-runners"
-        ci_apply_role_enabled: true
-        ci_apply_role_trusted_github_repos:
-          - "hemzaz/tf-atmos:master"
-        ci_apply_policy_arns:
-          - "arn:aws:iam::aws:policy/AdministratorAccess"
-        # Prod plan role: the master ref only, never pull_request (owner
-        # decision D3, as fnx-ue1-prod's iam/ci): it reads every prod state
-        # object through backend/main's prod_read role, so PR code must never
-        # assume it. check-prod-protection.py fails a prod iam/ci without this.
-        ci_plan_role_subjects:
-          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
-        ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-read-role"
-        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}-prod-role"
-        ci_apply_kms_key_aliases:
-          - "alias/{{ .settings.prefix }}-main"
         lambda_uploader_trusted_github_repos: []
         lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
       dependencies:
@@ -177,7 +174,8 @@ components:
         components:
           - component: vpc/main
           - component: kms/main
-          - component: iam/ci
+          - component: aws-iam-role/ci-plan
+          - component: aws-iam-role/ci-apply
           - component: github-runners/main
 
     # EKS add-ons, wired to the cluster outputs

@@ -10,11 +10,11 @@ check_ci_state_roles = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_ci_state_roles)
 
 ACCOUNTS = {"dev": "222222222222", "staging": "333333333333", "prod": "444444444444"}
-PREFIXES = {"dev": "fnx-ue1-dev-ci", "staging": "fnx-ue1-staging-ci", "prod": "fnx-ue1-prod-ci"}
+ENVIRONMENTS = {"dev": "ue1", "staging": "ue1", "prod": "ue1"}
 
 
-def arn(stage, kind):
-    return f"arn:aws:iam::{ACCOUNTS[stage]}:role/{PREFIXES[stage]}-{kind}"
+def arn(stage, kind, environment=None):
+    return f"arn:aws:iam::{ACCOUNTS[stage]}:role/fnx-{environment or ENVIRONMENTS[stage]}-{stage}-ci-{kind}"
 
 
 def access_roles(**overrides):
@@ -46,19 +46,37 @@ def role_arn(name):
     return f"arn:aws:iam::111111111111:role/{name}"
 
 
-def ci(stage, prefix=None, apply=True, oidc=True, assumes=None, bucket=US_BUCKET, role=None, grants=None, **metadata):
+def ci(stage, environment="ue1", apply=True, oidc=True, assumes=None, bucket=US_BUCKET, role=None, grants=None,
+       **metadata):
+    """The stack's two CI role instances (catalog/aws-iam-role/ci.yaml), {instance name: instance}."""
     role = role or ROLE_NAMES[assumes or ASSUMED.get(stage, "write")]
-    # (ci_backend_read_role_arns role, ci_backend_write_role_arn role): the stage's own by default
+    # (AssumeStateReadRoles role, AssumeStateWriteRole role): the stage's own by default
     read, write = grants or [ROLE_NAMES[k] for k in check_ci_state_roles.STAGE_ROLES.get(stage, ("read", "write"))]
-    return {
-        "component": "iam",
-        "metadata": metadata,
-        "backend": {"bucket": bucket, "assume_role": {"role_arn": role_arn(role)}},
-        "vars": {"github_oidc_enabled": oidc, "ci_apply_role_enabled": apply,
-                 "ci_role_name_prefix": prefix or PREFIXES[stage],
-                 "ci_backend_read_role_arns": [role_arn(read)], "ci_backend_write_role_arn": role_arn(write)},
-        "settings": {"context": {"stage": stage}, "environment": {"account_id": ACCOUNTS.get(stage, "555555555555")}},
-    }
+    statements = {"plan": {"AssumeStateReadRoles": {"effect": "Allow", "resources": [role_arn(read)]}},
+                  "apply": {"AssumeStateWriteRole": {"effect": "Allow", "resources": [role_arn(write)]}}}
+    roles = {}
+    for kind in ("plan", "apply") if apply else ("plan",):
+        roles[f"aws-iam-role/ci-{kind}"] = {
+            "component": "aws-iam-role",
+            "metadata": dict(metadata),
+            "backend": {"bucket": bucket, "assume_role": {"role_arn": role_arn(role)}},
+            "vars": {"enabled": True, "github_oidc_provider_enabled": oidc,
+                     "trusted_github_repos": ["hemzaz/tf-atmos:master"],
+                     "tenant": "fnx", "environment": environment, "stage": stage, "name": f"ci-{kind}",
+                     "context": {"label_order": ["tenant", "environment", "stage", "name", "attributes"]},
+                     "policy_statements": statements[kind]},
+            "settings": {"context": {"stage": stage},
+                         "environment": {"account_id": ACCOUNTS.get(stage, "555555555555")}},
+        }
+    return roles
+
+
+def plan_of(roles):
+    return roles["aws-iam-role/ci-plan"]
+
+
+def apply_of(roles):
+    return roles["aws-iam-role/ci-apply"]
 
 
 def backend(roles, bucket=US_BUCKET, region="us-east-1"):
@@ -67,20 +85,19 @@ def backend(roles, bucket=US_BUCKET, region="us-east-1"):
 
 def stacks(roles=None, **cis):
     result = {"fnx-ue1-root": {"components": {"terraform": {"backend/main": backend(roles or access_roles())}}}}
-    for stack, instance in cis.items():
-        result[stack] = {"components": {"terraform": {"iam/ci": instance}}}
+    for stack, roles in cis.items():
+        result[stack] = {"components": {"terraform": dict(roles)}}
     return result
 
 
 # The EU backend (fnx-ew1-root) and its prod stack's CI roles.
-EU_PREFIX = "fnx-ew1-prod-ci"
 EU_ROLE_NAMES = {"prod_read": "fnx-ew1-terraform-backend-prod-read-role",
                  "prod_write": "fnx-ew1-terraform-backend-prod-role",
                  "root_write": "fnx-ew1-terraform-backend-root-role"}
 
 
 def eu_arn(kind):
-    return f"arn:aws:iam::{ACCOUNTS['prod']}:role/{EU_PREFIX}-{kind}"
+    return arn("prod", kind, "ew1")
 
 
 def eu_roles(**overrides):
@@ -92,7 +109,7 @@ def eu_roles(**overrides):
 def eu_ci(**kwargs):
     kwargs.setdefault("role", EU_ROLE_NAMES["prod_write"])
     kwargs.setdefault("grants", (EU_ROLE_NAMES["prod_read"], EU_ROLE_NAMES["prod_write"]))
-    return ci("prod", prefix=EU_PREFIX, bucket=EU_BUCKET, **kwargs)
+    return ci("prod", environment="ew1", bucket=EU_BUCKET, **kwargs)
 
 
 def two_backends(us=None, eu=None, eu_instance=None):
@@ -128,8 +145,8 @@ class CheckCiStateRolesTest(unittest.TestCase):
         # A prefix rendered from the old names no longer matches the trusted ARNs,
         # and the trusted ARNs no longer match a CI role (both directions fail)
         self.assert_errors(
-            stacks(**today(**{"fnx-ue1-prod": ci("prod", prefix="fnx-production-prod-ci")})),
-            "fnx-ue1-prod: iam/ci plan role arn:aws:iam::444444444444:role/fnx-production-prod-ci-plan "
+            stacks(**today(**{"fnx-ue1-prod": ci("prod", environment="production")})),
+            "fnx-ue1-prod: aws-iam-role/ci-plan role arn:aws:iam::444444444444:role/fnx-production-prod-ci-plan "
             "is not in backend access_roles.prod_read",
             "apply role arn:aws:iam::444444444444:role/fnx-production-prod-ci-apply is not in backend "
             "access_roles.prod_write",
@@ -141,8 +158,8 @@ class CheckCiStateRolesTest(unittest.TestCase):
         roles = access_roles(prod_write=[arn("prod", "apply"), arn("dev", "apply")])
         self.assert_errors(
             stacks(roles=roles, **today()),
-            f"backend access_roles.prod_write trusts {arn('dev', 'apply')}, which is no apply role of an "
-            "iam/ci instance in a stage this role serves",
+            f"backend access_roles.prod_write trusts {arn('dev', 'apply')}, which is no apply role of a "
+            "CI role instance in a stage this role serves",
         )
 
     def test_stale_ci_role_arn_fails(self):
@@ -173,14 +190,15 @@ class CheckCiStateRolesTest(unittest.TestCase):
     def test_unmapped_stage_fails(self):
         # A new tier must not fall into the non-prod roles silently
         self.assert_errors(
-            stacks(**today(**{"fnx-ue1-qa": ci("qa", prefix="fnx-ue1-qa-ci")})),
-            "fnx-ue1-qa: iam/ci is in stage 'qa', which STAGE_ROLES does not map to backend roles",
+            stacks(**today(**{"fnx-ue1-qa": ci("qa")})),
+            "fnx-ue1-qa: aws-iam-role/ci-plan is in stage 'qa', which STAGE_ROLES does not map to backend roles",
         )
 
     def test_backend_assuming_another_stages_role_fails(self):
         self.assert_errors(
             stacks(**today(**{"fnx-ue1-prod": ci("prod", assumes="write")})),
-            "backend assumes access_roles.write (backend.assume_role.role_arn), not one of stage 'prod'",
+            "ci-plan backend assumes access_roles.write (backend.assume_role.role_arn), not one of stage 'prod'",
+            "ci-apply backend assumes access_roles.write (backend.assume_role.role_arn), not one of stage 'prod'",
         )
 
     def test_read_access_assumes_the_read_role(self):
@@ -190,7 +208,7 @@ class CheckCiStateRolesTest(unittest.TestCase):
     def test_plan_role_in_the_write_role_only_fails(self):
         roles = access_roles(read=[arn("dev", "plan")], write=[arn("dev", "apply"), arn("staging", "apply"),
                                                                arn("staging", "plan")])
-        self.assert_errors(stacks(roles=roles, **today()), "fnx-ue1-staging: iam/ci plan role",
+        self.assert_errors(stacks(roles=roles, **today()), "fnx-ue1-staging: aws-iam-role/ci-plan role",
                            f"backend access_roles.write trusts {arn('staging', 'plan')}, which is no apply role")
 
     def test_prod_role_in_the_non_prod_role_fails(self):
@@ -211,9 +229,19 @@ class CheckCiStateRolesTest(unittest.TestCase):
 
     def test_oidc_disabled_disabled_and_fixtures_are_skipped(self):
         self.assert_errors(stacks(**today(
-            **{"fnx-x": ci("dev", prefix="other", oidc=False), "fnx-y": ci("dev", prefix="other", enabled=False),
-               "fnx-ue1-fixtures-webapp": ci("fixtures", prefix="fnx-webapp-fixtures-ci")},
+            **{"fnx-x": ci("dev", environment="other", oidc=False), "fnx-y": ci("dev", environment="other", enabled=False),
+               "fnx-ue1-fixtures-webapp": ci("fixtures", environment="ue1-webapp")},
         )))
+
+    def test_stack_ci_never_runs_is_skipped(self):
+        # The LocalEmu lane's roles: stage local, settings.github.actions_enabled false.
+        local = ci("local", environment="ue1-localemu")
+        for role in local.values():
+            role["settings"]["github"] = {"actions_enabled": False}
+        self.assert_errors(stacks(**today(**{"fnx-ue1-local-localemu": local})))
+        local = ci("local", environment="ue1-localemu")
+        self.assert_errors(stacks(**today(**{"fnx-ue1-local-localemu": local})),
+                           "fnx-ue1-local-localemu: aws-iam-role/ci-plan is in stage 'local'")
 
     def test_missing_backend_fails(self):
         described = stacks(**today())
@@ -223,7 +251,7 @@ class CheckCiStateRolesTest(unittest.TestCase):
     def test_bucket_without_one_owner_fails(self):
         # Another bucket's backend does not stand in; a bucket created twice has no owner
         self.assert_errors(stacks(**today(**{"fnx-ue1-dev": ci("dev", bucket="fnx-other-state")})),
-                           "fnx-ue1-dev: iam/ci state bucket 'fnx-other-state' has no one owning 'backend' instance",
+                           "fnx-ue1-dev: aws-iam-role/ci-plan state bucket 'fnx-other-state' has no one owning 'backend' instance",
                            f"backend access_roles.read trusts {arn('dev', 'plan')}",
                            f"backend access_roles.write trusts {arn('dev', 'apply')}")
         described = stacks(**today())
@@ -239,78 +267,81 @@ class CheckCiStateRolesTest(unittest.TestCase):
                           prod_write=[arn("prod", "apply"), eu_arn("apply")])
         self.assert_errors(
             two_backends(us=us, eu=eu_roles(prod_read=[], prod_write=[])),
-            f"fnx-ew1-prod: iam/ci plan role {eu_arn('plan')} is not in backend access_roles.prod_read "
+            f"fnx-ew1-prod: aws-iam-role/ci-plan role {eu_arn('plan')} is not in backend access_roles.prod_read "
             "allowed_principal_arns of fnx-ew1-root: backend/main",
-            f"fnx-ew1-prod: iam/ci apply role {eu_arn('apply')} is not in backend access_roles.prod_write",
+            f"fnx-ew1-prod: aws-iam-role/ci-apply role {eu_arn('apply')} is not in backend access_roles.prod_write",
             "fnx-ew1-root: backend/main: " + "backend access_roles.prod_write trusts no assigned Identity Center set",
             f"fnx-ue1-root: backend/main: backend access_roles.prod_read trusts {eu_arn('plan')}",
             f"fnx-ue1-root: backend/main: backend access_roles.prod_write trusts {eu_arn('apply')}",
         )
 
     def test_eu_ci_granted_the_us_roles_fails(self):
-        # ci_backend_*_role_arn pointed at the US backend's prod roles: not the roles of the backend owning its state
+        # The AssumeState* statements pointed at the US backend's prod roles: not the roles of the backend owning its state
         us = (ROLE_NAMES["prod_read"], ROLE_NAMES["prod_write"])
         self.assert_errors(
             two_backends(eu_instance=eu_ci(grants=us)),
-            f"fnx-ew1-prod: iam/ci plan role may assume ['{role_arn(us[0])}'] (ci_backend_read_role_arns), "
+            f"fnx-ew1-prod: aws-iam-role/ci-plan role may assume ['{role_arn(us[0])}'] (policy_statements.AssumeStateReadRoles), "
             f"not fnx-ew1-root: backend/main access_roles.prod_read ({EU_ROLE_NAMES['prod_read']})",
-            f"fnx-ew1-prod: iam/ci apply role may assume ['{role_arn(us[1])}'] (ci_backend_write_role_arn), "
+            f"fnx-ew1-prod: aws-iam-role/ci-apply role may assume ['{role_arn(us[1])}'] (policy_statements.AssumeStateWriteRole), "
             "not fnx-ew1-root: backend/main access_roles.prod_write",
         )
 
     def test_grant_of_another_stage_or_none_fails(self):
         non_prod = ci("prod", grants=(ROLE_NAMES["read"], ROLE_NAMES["write"]))
         self.assert_errors(stacks(**today(**{"fnx-ue1-prod": non_prod})),
-                           "fnx-ue1-prod: iam/ci plan role may assume", "fnx-ue1-prod: iam/ci apply role may assume")
+                           "fnx-ue1-prod: aws-iam-role/ci-plan role may assume", "fnx-ue1-prod: aws-iam-role/ci-apply role may assume")
         unset = ci("dev")
-        unset["vars"]["ci_backend_read_role_arns"] = []
-        unset["vars"]["ci_backend_write_role_arn"] = None
+        plan_of(unset)["vars"]["policy_statements"]["AssumeStateReadRoles"]["resources"] = []
+        apply_of(unset)["vars"]["policy_statements"]["AssumeStateWriteRole"]["resources"] = None
         self.assert_errors(stacks(**today(**{"fnx-ue1-dev": unset})),
-                           "plan role may assume [] (ci_backend_read_role_arns)",
-                           "apply role may assume [] (ci_backend_write_role_arn)")
+                           "plan role may assume [] (policy_statements.AssumeStateReadRoles)",
+                           "apply role may assume [] (policy_statements.AssumeStateWriteRole)")
 
     def test_grant_of_the_right_role_in_another_account_fails(self):
         prod = ci("prod")
-        prod["vars"]["ci_backend_read_role_arns"] = [
+        plan_of(prod)["vars"]["policy_statements"]["AssumeStateReadRoles"]["resources"] = [
             "arn:aws:iam::999999999999:role/fnx-terraform-backend-prod-read-role"]
         self.assert_errors(stacks(**today(**{"fnx-ue1-prod": prod})),
-                           "fnx-ue1-prod: iam/ci plan role may assume ['arn:aws:iam::999999999999:role/"
-                           "fnx-terraform-backend-prod-read-role'] (ci_backend_read_role_arns), not fnx-ue1-root: "
+                           "fnx-ue1-prod: aws-iam-role/ci-plan role may assume ['arn:aws:iam::999999999999:role/"
+                           "fnx-terraform-backend-prod-read-role'] (policy_statements.AssumeStateReadRoles), not fnx-ue1-root: "
                            "backend/main access_roles.prod_read (fnx-terraform-backend-prod-read-role) in "
                            "aws:111111111111")
-        prod["vars"]["ci_backend_read_role_arns"] = [
+        plan_of(prod)["vars"]["policy_statements"]["AssumeStateReadRoles"]["resources"] = [
             "arn:aws-us-gov:iam::111111111111:role/fnx-terraform-backend-prod-read-role"]
-        self.assert_errors(stacks(**today(**{"fnx-ue1-prod": prod})), "fnx-ue1-prod: iam/ci plan role may assume")
+        self.assert_errors(stacks(**today(**{"fnx-ue1-prod": prod})), "fnx-ue1-prod: aws-iam-role/ci-plan role may assume")
 
     def test_grant_with_a_role_path_passes(self):
         prod = ci("prod")
-        prod["vars"]["ci_backend_read_role_arns"] = [role_arn("path/x/fnx-terraform-backend-prod-read-role")]
+        plan_of(prod)["vars"]["policy_statements"]["AssumeStateReadRoles"]["resources"] = [role_arn("path/x/fnx-terraform-backend-prod-read-role")]
         self.assert_errors(stacks(**today(**{"fnx-ue1-prod": prod})))
 
     def test_write_grant_is_not_checked_without_the_apply_role(self):
         roles = access_roles(prod_write=[oaar("prod")])
         for wrong in (None, role_arn(ROLE_NAMES["write"]), "arn:aws:iam::999999999999:role/x"):
-            prod = ci("prod", apply=False)
-            prod["vars"]["ci_backend_write_role_arn"] = wrong
+            prod = ci("prod")
+            apply_of(prod)["vars"]["policy_statements"]["AssumeStateWriteRole"]["resources"] = [wrong]
+            del prod["aws-iam-role/ci-apply"]
             self.assert_errors(stacks(roles=roles, **today(**{"fnx-ue1-prod": prod})))
 
     def test_eu_ci_assuming_a_us_role_fails(self):
         # backend.assume_role.role_arn rendered from the US backend: not a role of the backend owning its state
         self.assert_errors(
             two_backends(eu_instance=eu_ci(role=ROLE_NAMES["prod_write"])),
-            "fnx-ew1-prod: iam/ci backend assumes access_roles.None (backend.assume_role.role_arn), "
+            "fnx-ew1-prod: aws-iam-role/ci-plan backend assumes access_roles.None (backend.assume_role.role_arn), "
             "not one of stage 'prod''s ['prod_read', 'prod_write'] of fnx-ew1-root: backend/main",
+            "fnx-ew1-prod: aws-iam-role/ci-apply backend assumes access_roles.None",
         )
 
     def test_eu_ci_assuming_a_role_of_another_stage_fails(self):
         self.assert_errors(
             two_backends(eu_instance=eu_ci(role=EU_ROLE_NAMES["root_write"])),
-            "fnx-ew1-prod: iam/ci backend assumes access_roles.root_write (backend.assume_role.role_arn)",
+            "fnx-ew1-prod: aws-iam-role/ci-plan backend assumes access_roles.root_write (backend.assume_role.role_arn)",
+            "fnx-ew1-prod: aws-iam-role/ci-apply backend assumes access_roles.root_write",
         )
 
     def test_unresolvable_arn_fails(self):
-        self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", prefix="bad name", apply=False)})),
-                        "plan role: resolved an invalid role ARN")
+        self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", environment="bad name", apply=False)})),
+                        "ci-plan role: resolved an invalid role ARN")
 
 
 def sso(stage, permission_set):

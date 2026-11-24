@@ -104,11 +104,14 @@ SYNTH = [
     (r'^(client_)?security_group_id$', 'sg-0123456789abcdef0'),
     (r'^oidc_provider_url$',          'oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
-    # The backend's access role outputs (no stack reads them today: iam/ci
-    # names the roles by convention; kept for any cross-stack consumer).
+    # The backend's access role outputs (no stack reads them today: the CI
+    # roles are named by convention; kept for any cross-stack consumer).
     (r'^backend(_prod|_root)?(_read)?_role_arn$','arn:aws:iam::123456789012:role/example-terraform-backend-role'),
-    # iam/ci's CI roles, read by eks/defaults' access_entries (principal_arn).
-    (r'^ci_(plan|apply)_role_arn$',   'arn:aws:iam::123456789012:role/example-ci-role'),
+    # The vendored aws-iam-role's `role` output (OUTPUT_SHAPES): the CI roles,
+    # read by eks/defaults' access_entries (principal_arn) and
+    # security-monitoring's excluded roles as `.role.arn`.
+    (r'^role_arn$',                   'arn:aws:iam::123456789012:role/example-ci-role'),
+    (r'^role_name$',                  'example-ci-role'),
     (r'route_table_ids$',             ['rtb-0123456789abcdef0']),
     # apigateway's api_integrations[] carries the Lambda wiring. Without these
     # two the whole integration object was dropped, which tripped the
@@ -259,6 +262,10 @@ OUTPUT_SHAPES = {
     ('aws-dns-primary', 'zones'): MAP(ZONE),
     ('aws-dns-delegated', 'zones'): MAP(ZONE),
     ('aws-dns-delegated', 'default_dns_zone_id'): SCALAR,
+    # E6a4: the vendored aws-iam-role returns its cloudposse/iam-role module
+    # whole; the readers use its arn (leaf role_arn: an object's attribute is
+    # looked up as <output>_<attribute> first) and name.
+    ('aws-iam-role', 'role'): OBJ({'arn': SCALAR, 'name': SCALAR}),
 }
 
 # Only offered when the caller actually managed to generate one. An empty entry
@@ -710,7 +717,9 @@ def synth_value(shape, names, keys=()):
     if shape[0] == 'object':
         out = {}
         for attr, s in shape[1].items():
-            v = synth_value(s, [attr, singular(attr)] + list(names))
+            # <output>_<attribute> first: a generic attribute name (`arn`)
+            # alone would match another component's rule (waf's ^arn$).
+            v = synth_value(s, ['%s_%s' % (names[0], attr), attr, singular(attr)] + list(names))
             if v is None:
                 return None
             out[attr] = v
@@ -1206,6 +1215,8 @@ def self_test(components_dir, tmp):
         'acm/delegated': {'component': 'acm', 'vars': {
             'a': '!terraform.state dns-delegated/main .zones.dev.zone_id',
             'b': '!terraform.state dns-primary/main .zones["svc.example.net"].name_servers'}},
+        # E6a4: a CI role, the vendored aws-iam-role (OUTPUT_SHAPES).
+        'aws-iam-role/ci-plan': {'component': 'aws-iam-role', 'vars': {}},
     }}}}
     os.makedirs(os.path.join(tmp, 'fake'), exist_ok=True)
     with open(os.path.join(tmp, 'fake', 'main.tf'), 'w') as fh:
@@ -1364,6 +1375,10 @@ def self_test(components_dir, tmp):
         ('primary zones other attribute', 'dns-primary/main .zones["svc.example.net"].arn', 'x', None),
     ]:
         check('E6b %s' % what, resolve_ref('!terraform.state ' + ref_, var, res), ('shaped', want))
+    # E6a4: the CI role's `role` output: an IAM role ARN (role_arn), not waf's ^arn$.
+    check('E6a4 aws-iam-role role.arn',
+          resolve_ref('!terraform.state aws-iam-role/ci-plan .role.arn', 'principal_arn', res),
+          ('shaped', 'arn:aws:iam::123456789012:role/example-ci-role'))
     # L3'. Keys read through a pipe or a select() anywhere in the stack are
     # in the synthetic map, so those reads get a value, not null.
     check('keys collected', res.keys(stack, 'acm/main', 'certificate_arns'),

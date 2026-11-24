@@ -21,15 +21,22 @@ the component's variables.tf) must be safe:
   cognito:      deletion_protection true (a deleted user pool loses every user,
                 including those fnx-ue2-prod's DR pool migrated in)
 
-And every deployable iam instance in a stack of stage prod that creates the
-GitHub OIDC CI roles (github_oidc_enabled) must set ci_plan_role_subjects
-explicitly, to exactly repo:<github_oidc_repository>:ref:refs/heads/master
-(the repository resolved as the component does, var or default), and set
-github_oidc_default_branch to master: owner decision D3 pins prod plans to the
-master branch, so no pull_request, environment, other branch or wildcard
-subject, and no other default branch even with a matching subject. The plan role reads
-every prod state object through backend/main's prod_read role, and the
-component's default trusts repo:<repo>:pull_request, i.e. code from any PR.
+And every deployable aws-iam-role instance with GitHub OIDC trust
+(github_oidc_provider_enabled; the CI roles, stacks/catalog/aws-iam-role/ci.yaml), in any
+stage, carries the trust the house iam's variable validations used to enforce (E6a4: the
+vendored component validates none; gap G3): every trusted_github_repos entry is
+"<org>/<repo>:<constraint>" with an explicit org and a constraint (upstream turns a
+constraint-less entry into the wildcard subject repo:<org>/<repo>:*) and no * or ? anywhere
+(the sub is matched with StringLike); a role other than ci-plan (apply, an uploader) trusts
+branches only (no pull_request, environment:, ref: or other claim); ci-plan trusts a
+branch, pull_request (github-assume-role-policy_override.tf) or an environment, and in
+stage prod the master branch only (owner decision D3: no pull_request, so PR-controlled
+code never reads prod state); no role sets eks_oidc_provider_enabled (an EKS IRSA trust
+merged into the GitHub one); ci-plan's permissions are an allow-list (pull-request code
+assumes it): managed_policy_arns only ReadOnlyAccess, policy_statements only
+AssumeStateReadRoles (Allow sts:AssumeRole on the stage's ...-read-role ARNs, nothing else),
+no policy_documents; the trust list is not empty and no assume_role_policy is merged into it
+(a hand-written trust would bypass these rules).
 
 And every deployable aws-cloudtrail instance, in any stage (OQ-F, E5b4b), keeps
 its trail and the trail's KMS key: Cloud Posse's component always creates the
@@ -57,6 +64,19 @@ from typing import Any, Callable, Optional
 PROD_STAGE = "prod"
 # Owner decision D3: a prod plan role trusts the master branch's ref, nothing else.
 PROD_PLAN_BRANCH = "master"
+# The CI roles (stacks/catalog/aws-iam-role/ci.yaml): the vendored aws-iam-role with GitHub OIDC trust.
+CI_ROLE_COMPONENT = "aws-iam-role"
+CI_PLAN_NAME = "ci-plan"
+# "<org>/<repo>:<constraint>": an explicit org (upstream's unqualified form takes trusted_github_org).
+TRUSTED_REPO = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:(.+)")
+# A bare branch name: no ':' (so no ref:, environment: or other claim), no wildcard.
+BRANCH = re.compile(r"[A-Za-z0-9._/-]+")
+# The plan role's whole permission set, an allow-list (catalog/aws-iam-role/ci.yaml): pull-request code
+# assumes it, so anything beyond read-only plus its state read role is a write it must never hold.
+PLAN_READ_ONLY_POLICY = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+PLAN_STATE_STATEMENT = "AssumeStateReadRoles"
+# A state backend read role (<role_prefix>[-prod]-read-role); check-ci-state-roles.py pins the exact one.
+STATE_READ_ROLE = re.compile(r"arn:aws[a-z-]*:iam::[0-9]{12}:role/(?:[\w+=,.@-]+/)*[\w+=,.@-]+-read-role")
 MIN_RETENTION_DAYS = 7
 # OQ-F: the vendored trail component and its sticky label name (fnx-ue1-<stage>-cloudtrail).
 TRAIL_COMPONENT, TRAIL_NAME = "aws-cloudtrail", "cloudtrail"
@@ -151,46 +171,86 @@ def check(stacks: dict, components_dir: pathlib.Path) -> list[str]:
     return errors
 
 
-def check_ci_plan_trust(stacks: dict, components_dir: pathlib.Path) -> list[str]:
-    """Prod CI plan roles trusting anything but their repository's default-branch ref."""
+def check_ci_trust(stacks: dict) -> list[str]:
+    """GitHub-trusted aws-iam-role instances whose trust or plan permissions break the CI rules."""
     errors = []
     for stack_name, stack in sorted(stacks.items()):
         for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
-            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
             variables = instance.get("vars") or {}
-            if (instance.get("component") != "iam" or stage != PROD_STAGE or not is_deployable(instance)
-                    or normalize(variables.get("github_oidc_enabled")) is not True):
+            if (instance.get("component") != CI_ROLE_COMPONENT or not is_deployable(instance)
+                    or normalize(variables.get("github_oidc_provider_enabled")) is not True):
                 continue
-
-            def effective(var: str) -> Any:
-                value = variables.get(var)
-                return value if value is not None else variable_default(components_dir, "iam", var)
-
-            repository, branch = effective("github_oidc_repository"), effective("github_oidc_default_branch")
-            # Pinned, not the instance's own branch: setting github_oidc_default_branch
-            # and the subject to feature-x together must not pass.
-            allowed = f"repo:{repository}:ref:refs/heads/{PROD_PLAN_BRANCH}"
-            subjects = variables.get("ci_plan_role_subjects")
-            if branch != PROD_PLAN_BRANCH:
-                errors.append(
-                    f"{stack_name}: {name} (iam) github_oidc_default_branch is {branch!r}: a prod plan role "
-                    f"trusts {PROD_PLAN_BRANCH!r} only (D3)"
-                )
-            if not repository:
-                errors.append(f"{stack_name}: {name} (iam) sets no github_oidc_repository")
-            elif not subjects:
-                errors.append(
-                    f"{stack_name}: {name} (iam) leaves ci_plan_role_subjects unset, so its prod plan role "
-                    f"trusts repo:{repository}:pull_request (the default): list {allowed!r} only"
-                )
-            else:
-                for subject in subjects:
-                    if subject != allowed:
-                        errors.append(
-                            f"{stack_name}: {name} (iam) ci_plan_role_subjects trusts {subject!r}: a prod plan "
-                            f"role trusts the {PROD_PLAN_BRANCH} ref only, {allowed!r} (D3)"
-                        )
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            errors += ci_trust_errors(f"{stack_name}: {name} ({CI_ROLE_COMPONENT})", variables, stage)
     return errors
+
+
+def ci_trust_errors(where: str, variables: dict, stage: Optional[str]) -> list[str]:
+    """One GitHub-trusted role's findings."""
+    plan = variables.get("name") == CI_PLAN_NAME
+    repos = variables.get("trusted_github_repos") or []
+    errors = []
+    if not repos:
+        errors.append(f"{where} enables GitHub OIDC trust with no trusted_github_repos entry")
+    if variables.get("assume_role_policy"):
+        errors.append(f"{where} merges an assume_role_policy into its GitHub OIDC trust; the trust must come "
+                      "from trusted_github_repos alone")
+    for entry in repos:
+        match = TRUSTED_REPO.fullmatch(str(entry))
+        constraint = match.group(1) if match else None
+        if not match or "*" in str(entry) or "?" in str(entry):
+            errors.append(f"{where} trusts {entry!r}: an entry must be \"<org>/<repo>:<constraint>\" with no * "
+                          "or ? (a constraint-less entry becomes repo:<org>/<repo>:*, StringLike)")
+        elif plan and stage == PROD_STAGE and constraint != PROD_PLAN_BRANCH:
+            errors.append(f"{where} trusts {entry!r}: a prod plan role trusts the {PROD_PLAN_BRANCH} branch only "
+                          "(D3; settings.github.pull_request_plans_enabled false)")
+        elif plan and not (BRANCH.fullmatch(constraint) or constraint == "pull_request"
+                           or constraint.startswith("environment:")):
+            errors.append(f"{where} trusts {entry!r}: a plan role trusts a branch, pull_request or an environment")
+        elif not plan and (not BRANCH.fullmatch(constraint) or constraint == "pull_request"):
+            errors.append(f"{where} trusts {entry!r}: a role other than {CI_PLAN_NAME} (apply, uploader) trusts "
+                          "a pinned branch only, never pull_request, an environment or another claim")
+    if normalize(variables.get("eks_oidc_provider_enabled")) is True:
+        errors.append(f"{where} sets eks_oidc_provider_enabled: true, which merges an EKS IRSA trust into its "
+                      "GitHub OIDC trust (a Kubernetes service account could assume it); remove it from the "
+                      "role's vars (stacks/catalog/aws-iam-role/ci.yaml)")
+    if plan:
+        errors += plan_permission_errors(where, variables)
+    return errors
+
+
+def plan_permission_errors(where: str, variables: dict) -> list[str]:
+    """ci-plan holds only the allow-list: ReadOnlyAccess and the sts:AssumeRole on its stage read role."""
+    errors = []
+    fix = "stacks/catalog/aws-iam-role/ci.yaml renders exactly that; drop the override"
+    extra = sorted(str(arn) for arn in variables.get("managed_policy_arns") or [] if arn != PLAN_READ_ONLY_POLICY)
+    if extra:
+        errors.append(f"{where} managed_policy_arns attaches {extra}: the plan role, which pull-request code "
+                      f"assumes, may attach only {PLAN_READ_ONLY_POLICY} ({fix})")
+    statements = variables.get("policy_statements") or {}
+    for sid in sorted(set(statements) - {PLAN_STATE_STATEMENT}):
+        errors.append(f"{where} policy_statements.{sid} is not allowed: the plan role's own policy holds only "
+                      f"{PLAN_STATE_STATEMENT} ({fix})")
+    if PLAN_STATE_STATEMENT in statements:
+        errors += state_statement_errors(f"{where} policy_statements.{PLAN_STATE_STATEMENT}",
+                                         statements[PLAN_STATE_STATEMENT] or {}, fix)
+    if variables.get("policy_documents"):
+        errors.append(f"{where} sets policy_documents: the plan role's own policy holds only policy_statements."
+                      f"{PLAN_STATE_STATEMENT} ({fix})")
+    return errors
+
+
+def state_statement_errors(where: str, statement: dict, fix: str) -> list[str]:
+    """The state read statement as the catalog renders it: Allow sts:AssumeRole on read roles, nothing more."""
+    resources = statement.get("resources")
+    resources = resources if isinstance(resources, list) else [resources]
+    shape = {key: value for key, value in statement.items() if value is not None}
+    if (set(shape) == {"effect", "actions", "resources"} and statement.get("effect") == "Allow"
+            and statement.get("actions") == ["sts:AssumeRole"] and resources
+            and all(STATE_READ_ROLE.fullmatch(str(arn)) for arn in resources)):
+        return []
+    return [f"{where} is {json.dumps(statement, sort_keys=True)}: it must be exactly effect Allow, actions "
+            f"[\"sts:AssumeRole\"] and resources of the stage's state read role(s) (...-read-role) ({fix})"]
 
 
 def check_trails(stacks: dict) -> list[str]:
@@ -248,7 +308,7 @@ def main() -> int:
         print(__doc__.splitlines()[2], file=sys.stderr)
         return 2
     described = json.load(sys.stdin)
-    errors = (check(described, pathlib.Path(sys.argv[1])) + check_ci_plan_trust(described, pathlib.Path(sys.argv[1]))
+    errors = (check(described, pathlib.Path(sys.argv[1])) + check_ci_trust(described)
               + check_trails(described))
     for error in errors:
         print(f"ERROR {error}")
@@ -259,8 +319,10 @@ def main() -> int:
         "every prod rds instance is environment prod, Multi-AZ, deletion-protected, keeps a final "
         f"snapshot and {MIN_RETENTION_DAYS}+ days of backups; every prod elasticache instance fails over "
         f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots; every prod cognito pool is "
-        "deletion-protected; every prod CI plan role trusts its "
-        "repository's master ref only; every trail keeps its key and its label"
+        "deletion-protected; every GitHub-trusted role trusts exact, constrained subjects (apply roles a "
+        "pinned branch, prod plan roles master only) with no EKS trust, and every plan role holds only "
+        "ReadOnlyAccess and its state read role; every trail keeps its key "
+        "and its label"
     )
     return 0
 

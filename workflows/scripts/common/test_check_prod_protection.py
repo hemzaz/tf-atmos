@@ -1,4 +1,5 @@
 """Tests for check-prod-protection.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import copy
 import importlib.util
 import pathlib
 import unittest
@@ -102,63 +103,126 @@ class CheckProdProtectionTest(unittest.TestCase):
 
 
 
-class CiPlanTrustTest(unittest.TestCase):
-    MASTER = ["repo:hemzaz/tf-atmos:ref:refs/heads/master"]
-    REPO = {"github_oidc_repository": "hemzaz/tf-atmos", "github_oidc_default_branch": "master"}
+class CiTrustTest(unittest.TestCase):
+    """E6a4: the house iam's trust validations, on the vendored aws-iam-role CI roles (any stage)."""
+    REPO = "hemzaz/tf-atmos"
+    ADMIN = "arn:aws:iam::aws:policy/AdministratorAccess"
 
-    def found(self, **variables):
-        return check_prod_protection.check_ci_plan_trust(stacks(**{"iam/ci": instance(
-            "iam", github_oidc_enabled=True, **{**self.REPO, **variables})}), COMPONENTS)
+    def role(self, kind="plan", stage="prod", repos=None, **variables):
+        return instance("aws-iam-role", stage=stage, name=f"ci-{kind}", github_oidc_provider_enabled=True,
+                        trusted_github_repos=[f"{self.REPO}:master"] if repos is None else repos, **variables)
 
-    def test_default_branch_ref_only_passes(self):
-        self.assertEqual(self.found(ci_plan_role_subjects=self.MASTER), [])
+    def found(self, *roles, stage="prod"):
+        described = {f"fnx-ue1-{stage}": {"components": {"terraform": {
+            f"aws-iam-role/x{i}": role for i, role in enumerate(roles)}}}}
+        return check_prod_protection.check_ci_trust(described)
 
-    def test_default_trusting_pull_requests_fails(self):
-        found = self.found()
+    def assert_one(self, found, fragment):
         self.assertEqual(len(found), 1, found)
-        self.assertIn("leaves ci_plan_role_subjects unset", found[0])
+        self.assertIn(fragment, found[0])
 
-    def test_pull_request_subject_fails(self):
-        found = self.found(ci_plan_role_subjects=self.MASTER + ["repo:hemzaz/tf-atmos:pull_request"])
-        self.assertEqual(len(found), 1, found)
-        self.assertIn("trusts 'repo:hemzaz/tf-atmos:pull_request'", found[0])
+    def test_catalog_roles_pass(self):
+        # catalog/aws-iam-role/ci.yaml as rendered: prod's pull_request entry collapses onto master.
+        self.assertEqual(self.found(self.role(repos=[f"{self.REPO}:master", f"{self.REPO}:master"],
+                                              managed_policy_arns=["arn:aws:iam::aws:policy/ReadOnlyAccess"],
+                                              policy_statements=copy.deepcopy(self.STATE_READ)),
+                                    self.role("apply", managed_policy_arns=[self.ADMIN])), [])
+        self.assertEqual(self.found(self.role(stage="dev", repos=[f"{self.REPO}:master", f"{self.REPO}:pull_request"]),
+                                    self.role("apply", stage="dev"), stage="dev"), [])
 
-    def test_other_branch_ref_fails(self):
-        found = self.found(ci_plan_role_subjects=["repo:hemzaz/tf-atmos:ref:refs/heads/feature-x"])
-        self.assertEqual(len(found), 1, found)
-        self.assertIn("refs/heads/feature-x", found[0])
+    def test_wildcard_fails_in_any_stage(self):
+        # The deliberately bad case: a wildcard branch or repo, or a constraint-less entry (repo:<org>/<repo>:*).
+        for stage in ("dev", "prod"):
+            for bad in (f"{self.REPO}:*", "hemzaz/*:master", f"{self.REPO}:feature-?", self.REPO, "tf-atmos:master"):
+                for kind in ("plan", "apply"):
+                    with self.subTest(stage=stage, bad=bad, kind=kind):
+                        self.assert_one(self.found(self.role(kind, stage=stage, repos=[bad]), stage=stage),
+                                        "with no * or ?")
 
-    def test_environment_subject_fails(self):
-        found = self.found(ci_plan_role_subjects=["repo:hemzaz/tf-atmos:environment:x"])
-        self.assertEqual(len(found), 1, found)
-        self.assertIn("environment:x", found[0])
+    # The plan role's state read statement as catalog/aws-iam-role/ci.yaml renders it.
+    STATE_READ = {"AssumeStateReadRoles": {"effect": "Allow", "actions": ["sts:AssumeRole"], "resources": [
+        "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role"]}}
 
-    def test_wildcard_and_other_repository_fail(self):
-        self.assertEqual(len(self.found(ci_plan_role_subjects=["repo:hemzaz/tf-atmos:*"])), 1)
-        self.assertEqual(len(self.found(ci_plan_role_subjects=["repo:other/repo:ref:refs/heads/master"])), 1)
+    def plan(self, stage="dev", **variables):
+        variables.setdefault("managed_policy_arns", [check_prod_protection.PLAN_READ_ONLY_POLICY])
+        variables.setdefault("policy_statements", copy.deepcopy(self.STATE_READ))
+        return self.role(stage=stage, repos=[f"{self.REPO}:master"], **variables)
 
-    def test_branch_default_is_resolved_from_variables_tf(self):
-        # github_oidc_default_branch's default is "main", not master.
-        found = check_prod_protection.check_ci_plan_trust(stacks(**{"iam/ci": instance(
-            "iam", github_oidc_enabled=True, github_oidc_repository="hemzaz/tf-atmos",
-            ci_plan_role_subjects=self.MASTER)}), COMPONENTS)
-        self.assertEqual(len(found), 1, found)
-        self.assertIn("github_oidc_default_branch is 'main'", found[0])
+    def test_catalog_plan_permissions_pass(self):
+        self.assertEqual(self.found(self.plan(), stage="dev"), [])
+        self.assertEqual(self.found(self.plan(managed_policy_arns=[], policy_statements={}), stage="dev"), [])
 
-    def test_coordinated_branch_and_subject_edit_fails(self):
-        # Moving both the default branch and the subject to feature-x still fails (D3).
-        found = self.found(github_oidc_default_branch="feature-x",
-                           ci_plan_role_subjects=["repo:hemzaz/tf-atmos:ref:refs/heads/feature-x"])
-        self.assertEqual(len(found), 2, found)
-        self.assertIn("github_oidc_default_branch is 'feature-x'", found[0])
-        self.assertIn("trusts the master ref only", found[1])
+    def test_plan_managed_policies_are_an_allow_list(self):
+        # The deliberately bad cases: any write-capable attachment, not only Admin/PowerUser.
+        for policy in (self.ADMIN, "arn:aws:iam::aws:policy/PowerUserAccess",
+                       "arn:aws:iam::aws:policy/IAMFullAccess", "arn:aws:iam::123456789012:policy/custom"):
+            for stage in ("dev", "prod"):
+                with self.subTest(policy=policy, stage=stage):
+                    self.assert_one(self.found(self.plan(stage, managed_policy_arns=[
+                        check_prod_protection.PLAN_READ_ONLY_POLICY, policy]), stage=stage),
+                                    f"managed_policy_arns attaches ['{policy}']")
 
-    def test_non_prod_and_roleless_iam_are_skipped(self):
-        dev = {"fnx-ue1-dev": {"components": {"terraform": {"iam/ci": instance(
-            "iam", stage="dev", github_oidc_enabled=True)}}}}
-        self.assertEqual(check_prod_protection.check_ci_plan_trust(dev, COMPONENTS), [])
-        self.assertEqual(check_prod_protection.check_ci_plan_trust(
-            stacks(**{"iam/main": instance("iam")}), COMPONENTS), [])
+    def test_plan_policy_statements_are_an_allow_list(self):
+        # The reviewer's case: s3:* on * passed the deny-list.
+        statements = dict(self.STATE_READ, S3={"effect": "Allow", "actions": ["s3:*"], "resources": ["*"]})
+        found = self.found(self.plan(policy_statements=statements), stage="dev")
+        self.assert_one(found, "fnx-ue1-dev: aws-iam-role/x0 (aws-iam-role) policy_statements.S3 is not allowed")
+
+    def test_plan_state_statement_must_be_the_catalogs(self):
+        for change in ({"actions": ["sts:AssumeRole", "s3:PutObject"]}, {"resources": ["*"]},
+                       {"resources": ["arn:aws:iam::111111111111:role/fnx-terraform-backend-role"]},
+                       {"effect": "Deny"}, {"condition": {"Bool": {"aws:SecureTransport": "true"}}},
+                       {"not_resources": ["*"]}):
+            with self.subTest(change=change):
+                statements = copy.deepcopy(self.STATE_READ)
+                statements["AssumeStateReadRoles"].update(change)
+                self.assert_one(self.found(self.plan(policy_statements=statements), stage="dev"),
+                                "policy_statements.AssumeStateReadRoles is")
+
+    def test_plan_policy_documents_fail(self):
+        document = '{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]}'
+        self.assert_one(self.found(self.plan(policy_documents=[document]), stage="dev"), "sets policy_documents")
+
+    def test_eks_oidc_trust_on_a_ci_role_fails(self):
+        for kind in ("plan", "apply"):
+            with self.subTest(kind=kind):
+                self.assert_one(self.found(self.role(kind, stage="dev", eks_oidc_provider_enabled=True), stage="dev"),
+                                "sets eks_oidc_provider_enabled: true")
+
+    def test_admin_on_apply_passes(self):
+        self.assertEqual(self.found(self.role("apply", managed_policy_arns=[self.ADMIN])), [])
+
+    def test_prod_plan_trusts_master_only(self):
+        for bad in ("pull_request", "feature-x", "environment:prod", "ref:refs/heads/master"):
+            with self.subTest(bad=bad):
+                self.assert_one(self.found(self.role(repos=[f"{self.REPO}:master", f"{self.REPO}:{bad}"])),
+                                "trusts the master branch only")
+
+    def test_nonprod_plan_may_trust_pull_requests_and_environments(self):
+        repos = [f"{self.REPO}:master", f"{self.REPO}:pull_request", f"{self.REPO}:environment:dev"]
+        self.assertEqual(self.found(self.role(stage="dev", repos=repos), stage="dev"), [])
+        self.assert_one(self.found(self.role(stage="dev", repos=[f"{self.REPO}:ref:refs/tags/v1"]), stage="dev"),
+                        "a plan role trusts a branch, pull_request or an environment")
+
+    def test_apply_trusts_a_pinned_branch_only(self):
+        for bad in ("pull_request", "environment:prod", "ref:refs/heads/master"):
+            for stage in ("dev", "prod"):
+                with self.subTest(bad=bad, stage=stage):
+                    self.assert_one(self.found(self.role("apply", stage=stage, repos=[f"{self.REPO}:{bad}"]),
+                                               stage=stage), "trusts a pinned branch only")
+
+    def test_empty_trust_and_merged_trust_fail(self):
+        self.assert_one(self.found(self.role(repos=[])), "with no trusted_github_repos entry")
+        self.assert_one(self.found(self.role(assume_role_policy='{"Statement": []}')), "merges an assume_role_policy")
+
+    def test_roles_without_github_trust_and_undeployed_are_skipped(self):
+        dns = instance("aws-iam-role", name="dns-delegation-dev", managed_policy_arns=[self.ADMIN])
+        off = self.role(repos=["*"])
+        off["metadata"] = {"enabled": False}
+        disabled_trust = self.role(repos=["*"])
+        disabled_trust["vars"]["github_oidc_provider_enabled"] = False
+        iam = instance("iam", github_oidc_enabled=True)
+        self.assertEqual(self.found(dns, off, disabled_trust, iam), [])
 
 
 class TrailProtectionTest(unittest.TestCase):

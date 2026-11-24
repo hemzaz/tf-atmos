@@ -1,0 +1,168 @@
+---
+# =============================================================================
+# aws-iam-role/ci-plan and aws-iam-role/ci-apply - each stack's GitHub Actions CI roles
+# =============================================================================
+# Vendored Cloud Posse aws-iam-role v1.539.0 (vendor.yaml) with its GitHub OIDC
+# trust: Cloud Posse's Evolution 4 machine roles (iam-role/planner and
+# iam-role/terraform, one pair per account, no account-map), here one pair per
+# stack. The same file serves every stage: what differs is derived from the
+# stack (settings.context.stage, settings.prefix, settings.tfstate,
+# settings.github.pull_request_plans_enabled), so nonprod, prod and the DR
+# standbys share it (a standby overrides only the provider dependency,
+# catalog/iam/ci-standby.yaml).
+#
+# - Names: the null-label id <tenant>-<settings.prefix>-<stage>-ci-<kind>, the
+#   stack name plus -ci-plan / -ci-apply on a stage stack (a lane carries its
+#   name in settings.prefix). The state backend trusts them by those literal
+#   ARNs (stacks/orgs/fnx/root/*.yaml, owner OQ3 a), the SCP baseline and the
+#   dns-delegation roles by <tenant>-*-ci-apply. CI derives the ARNs from these
+#   instances (workflows/scripts/common/ci-apply-role-arn.py), the one copy of
+#   the name rule; check-ci-state-roles.py holds the backend to it both ways.
+# - Trust: the account's GitHub OIDC provider (aws-github-oidc-provider, the
+#   ARN derived once from the account ID below), audience sts.amazonaws.com and
+#   exact subjects. The plan role (terraform-ci.yml plans, drift-detection,
+#   disaster-recovery) trusts master, plus pull_request where the stage plans
+#   pull requests (settings.github.pull_request_plans_enabled, false for prod:
+#   owner decision D3), so one flag drives both the PR plans and the trust. The
+#   apply role (terraform-cd.yml, the in-VPC runners) trusts master only: no
+#   GitHub Environment, every merge applies (owner decision).
+# - House deviation (G2): upstream maps "<org>/<repo>:pull_request" to
+#   repo:<org>/<repo>:ref:refs/heads/pull_request, so the pull_request subject
+#   cannot be expressed; github-assume-role-policy_override.tf (owner OQ2 i)
+#   maps that one constraint to repo:<org>/<repo>:pull_request and leaves every
+#   other entry upstream's. Upstream matches the sub with StringLike: no entry
+#   here has a * or ?, so it matches exactly. check-prod-protection.py (lint)
+#   carries the house iam's validations: no entry without a constraint (upstream
+#   would emit repo:<org>/<repo>:*) or with a wildcard, the apply role pinned
+#   to a branch, a prod plan role on master only, and no AdministratorAccess or
+#   PowerUserAccess on ci-plan. The trust and policies are tested by
+#   components/terraform/aws-iam-role/tests/ci_roles.tftest.hcl.
+# - Permissions: plan ReadOnlyAccess, apply AdministratorAccess (Cloud Posse's
+#   terraform role, which their GitOps applies assume: anything narrower that
+#   can still manage IAM is admin with extra steps). Each may assume only its
+#   stage's state access role of the backend owning its state: the read role
+#   for plan (CI plans run with -lock=false), the write role for apply, named
+#   by the convention of the stack's own backend role_arn
+#   (stacks/orgs/fnx/_defaults.yaml), never read from the root stack's state.
+#   The apply role also starts this stack's self-hosted runners (the +1 start
+#   policy of <settings.prefix>-github-runners only; check-cluster-api-ci.py
+#   checks the list) and uses kms/main's key by alias (a key ARN does not exist
+#   when the iam layer applies, before the kms layer).
+# =============================================================================
+
+import:
+  - catalog/_base/vendored
+  - catalog/_base/account-map-bypass
+
+components:
+  terraform:
+    aws-iam-role/ci:
+      metadata:
+        type: abstract
+        component: aws-iam-role
+        inherits:
+          - vendored
+          - account-map-bypass
+      settings:
+        # The repository whose OIDC tokens the CI roles trust and its default
+        # branch: the one place the trusted_github_repos entries read them.
+        ci_roles:
+          repository: "hemzaz/tf-atmos"
+          branch: "master"
+      vars:
+        enabled: true
+        github_oidc_provider_enabled: true
+        # The account's GitHub OIDC provider (catalog/aws-github-oidc-provider):
+        # AWS fixes its ARN (oidc-provider/<url host>), so it is derived here
+        # rather than read from state; each instance depends on the provider
+        # instance for ordering.
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        tags:
+          Component: "IAM"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: "{{ .settings.tfstate.stack }}"
+          - component: aws-github-oidc-provider
+
+    aws-iam-role/ci-plan:
+      metadata:
+        component: aws-iam-role
+        inherits:
+          - aws-iam-role/ci
+      vars:
+        name: ci-plan
+        role_description: "GitHub Actions OIDC role for terraform plan (read-only)"
+        policy_description: "Assume this stage's read-only state access role"
+        # master, and pull_request where the stage plans pull requests (prod:
+        # the second entry collapses onto master, which the override's
+        # distinct() keeps once).
+        trusted_github_repos:
+          - "{{ .settings.ci_roles.repository }}:{{ .settings.ci_roles.branch }}"
+          - "{{ .settings.ci_roles.repository }}:{{ if dig `github` `pull_request_plans_enabled` true .settings }}pull_request{{ else }}{{ .settings.ci_roles.branch }}{{ end }}"
+        managed_policy_arns:
+          - "arn:aws:iam::aws:policy/ReadOnlyAccess"
+        policy_statements:
+          AssumeStateReadRoles:
+            effect: Allow
+            actions:
+              - sts:AssumeRole
+            resources:
+              - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}{{ if eq .settings.context.stage `prod` }}-prod{{ end }}-read-role"
+
+    aws-iam-role/ci-apply:
+      metadata:
+        component: aws-iam-role
+        inherits:
+          - aws-iam-role/ci
+      vars:
+        name: ci-apply
+        role_description: "GitHub Actions OIDC role for terraform apply (pinned branch only)"
+        policy_description: "Assume this stage's state access role, start this stack's CI runners"
+        trusted_github_repos:
+          - "{{ .settings.ci_roles.repository }}:{{ .settings.ci_roles.branch }}"
+        managed_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        policy_statements:
+          AssumeStateWriteRole:
+            effect: Allow
+            actions:
+              - sts:AssumeRole
+            resources:
+              - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.tfstate.role_prefix }}{{ if eq .settings.context.stage `prod` }}-prod{{ end }}-role"
+          # CI starts an ephemeral in-VPC runner per in-cluster job through its
+          # pool's +1 start policy (workflows/scripts/common/start-runner.sh):
+          # ExecutePolicy on this stack's pools by name only, so CI cannot set
+          # a capacity or touch another group. DescribeAutoScalingGroups has no
+          # resource-level permissions; it lets start-runner.sh fail a full pool.
+          SeeRunnerPools:
+            effect: Allow
+            actions:
+              - autoscaling:DescribeAutoScalingGroups
+            resources:
+              - "*"
+          StartRunners:
+            effect: Allow
+            actions:
+              - autoscaling:ExecutePolicy
+            resources:
+              - "arn:aws:autoscaling:{{ .vars.region }}:{{ .settings.environment.account_id }}:autoScalingGroup:*:autoScalingGroupName/{{ .settings.prefix }}-github-runners"
+        # kms/main's key, by alias: eks/main's cluster encryption key, whose
+        # caller must hold DescribeKey/CreateGrant/Encrypt on it (AWS EKS
+        # "Encrypting Kubernetes secrets"). AWS derives kms:ResourceAliases from
+        # the key an operation acts on, so resources "*" plus the condition is
+        # an exact grant. A policy_documents entry: policy_statements is a
+        # map(object) whose `any` condition must have one type in every
+        # statement, so conditioned statements cannot sit beside the others.
+        policy_documents:
+          - >-
+            {"Version": "2012-10-17", "Statement": [
+            {"Sid": "DeployKmsKeyUse", "Effect": "Allow",
+            "Action": ["kms:DescribeKey", "kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*"],
+            "Resource": "*",
+            "Condition": {"ForAnyValue:StringEquals": {"kms:ResourceAliases": ["alias/{{ .settings.prefix }}-main"]}}},
+            {"Sid": "DeployKmsGrants", "Effect": "Allow",
+            "Action": ["kms:CreateGrant", "kms:ListGrants", "kms:RevokeGrant"],
+            "Resource": "*",
+            "Condition": {"ForAnyValue:StringEquals": {"kms:ResourceAliases": ["alias/{{ .settings.prefix }}-main"]},
+            "Bool": {"kms:GrantIsForAWSResource": "true"}}}]}

@@ -97,6 +97,7 @@ components:
           - component: vpc/main
           - component: kms/main
             stack: "{{ .settings.dr.standby_of }}"
-          - component: iam/ci
+          - component: aws-iam-role/ci-plan
+          - component: aws-iam-role/ci-apply
           - component: ec2/bastion
           - component: github-runners/main

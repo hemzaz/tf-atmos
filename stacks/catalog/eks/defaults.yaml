@@ -34,18 +34,20 @@ components:
         # components"). Cloud Posse's list form
         # (access_entries + access_policy_associations), not access_entry_map:
         # the role ARNs come from !terraform.state, and an Atmos YAML function
-        # cannot produce a map key. iam/ci returns a null ci_apply_role_arn
-        # while its apply role is disabled; the component skips null
-        # principals. Every instance also lists iam/ci in dependencies.components.
+        # cannot produce a map key. The roles are the vendored aws-iam-role's
+        # aws-iam-role/ci-plan and /ci-apply (catalog/aws-iam-role/ci), whose
+        # `role` output carries the ARN; every stack with an eks instance has
+        # both enabled, and every instance also lists them in
+        # dependencies.components.
         access_entries:
-          - principal_arn: !terraform.state iam/ci .ci_plan_role_arn
-          - principal_arn: !terraform.state iam/ci .ci_apply_role_arn
+          - principal_arn: !terraform.state aws-iam-role/ci-plan .role.arn
+          - principal_arn: !terraform.state aws-iam-role/ci-apply .role.arn
         access_policy_associations:
-          - principal_arn: !terraform.state iam/ci .ci_plan_role_arn
+          - principal_arn: !terraform.state aws-iam-role/ci-plan .role.arn
             policy_arn: AmazonEKSViewPolicy
             access_scope:
               type: cluster
-          - principal_arn: !terraform.state iam/ci .ci_apply_role_arn
+          - principal_arn: !terraform.state aws-iam-role/ci-apply .role.arn
             policy_arn: AmazonEKSClusterAdminPolicy
             access_scope:
               type: cluster
@@ -76,4 +78,5 @@ components:
           Component: "EKS"
       dependencies:
         components:
-          - component: iam/ci
+          - component: aws-iam-role/ci-plan
+          - component: aws-iam-role/ci-apply

@@ -85,7 +85,7 @@ class GroupTest(unittest.TestCase):
                                   github_oidc_enabled=True, ci_runner_pool_names=["ue1-other-runners"]),
         })})
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("both create the IAM CI role prefix 'fnx-ue1-dev-ci'", errors[0])
+        self.assertIn("both create the IAM Lambda uploader role prefix 'fnx-ue1-dev-ci'", errors[0])
 
     def test_two_account_singletons_fail(self):
         errors = self.errors({
@@ -375,7 +375,7 @@ class GroupTest(unittest.TestCase):
                 ci_role_name_prefix="shared-ci")}),
         })
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("IAM CI role prefix 'shared-ci' in account prod", errors[0])
+        self.assertIn("IAM Lambda uploader role prefix 'shared-ci' in account prod", errors[0])
 
     def test_regional_names_in_another_region_of_the_account_pass(self):
         # A KMS alias is regional: the same alias in us-east-2 is another alias.

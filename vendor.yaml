@@ -100,9 +100,11 @@ spec:
         - "components/terraform/aws-dns-delegated"
       included_paths: ["**/*.tf", "**/*.md"]
       excluded_paths: ["**/providers.tf"]
-    # One IAM role per instance: the network account's DNS delegation role,
-    # which each stage's aws-dns-delegated assumes as aws.primary
-    # (stacks/catalog/aws-iam-role). Upstream providers.tf excluded, as above.
+    # One IAM role per instance: the network account's DNS delegation roles,
+    # which each stage's aws-dns-delegated assumes as aws.primary, and each
+    # stack's GitHub Actions CI plan and apply roles (stacks/catalog/aws-iam-role;
+    # github-assume-role-policy_override.tf adds the pull_request subject).
+    # Upstream providers.tf excluded, as above.
     - component: aws-iam-role
       source: "github.com/cloudposse-terraform-components/aws-iam-role.git//src?ref={{ .Version }}"
       version: "v1.539.0"
@@ -134,9 +136,10 @@ spec:
       targets:
         - "components/terraform/aws-iam-role"
       included_paths: ["providers-account-map-bypass.depth-1.tf", "account-verification.mixin.tf"]
-    # Each account's GitHub Actions OIDC provider, which the CI aws-iam-role
-    # instances will federate through (E6a3), and its service-linked roles (E6a, in place
-    # of the house iam). Upstream providers.tf (account-map iam-roles)
+    # Each account's GitHub Actions OIDC provider (E6a3), which the CI
+    # aws-iam-role instances (aws-iam-role/ci-plan and ci-apply,
+    # stacks/catalog/aws-iam-role/ci.yaml, E6a4) federate through, and its
+    # service-linked roles (E6a2), in place of the house iam. Upstream providers.tf (account-map iam-roles)
     # excluded; each gets Cloud Posse's account-map-bypass mixins instead.
     - component: aws-github-oidc-provider
       source: "github.com/cloudposse-terraform-components/aws-github-oidc-provider.git//src?ref={{ .Version }}"

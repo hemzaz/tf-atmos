@@ -58,8 +58,8 @@
 # =============================================================================
 # REQUIREMENTS FOR THE IMPORTING STACK
 # =============================================================================
-# 1. vpc/main (private and public subnets), kms/main and iam/ci instances, as
-#    the nonprod and prod primary fnx stacks import (a DR standby has no
+# 1. vpc/main (private and public subnets), kms/main and the CI role
+#    instances (aws-iam-role/ci-plan, aws-iam-role/ci-apply), as the nonprod and prod primary fnx stacks import (a DR standby has no
 #    kms/main). The platform deploys into that VPC, as the idp-platform
 #    component did. kms/main keeps the grants catalog/kms/defaults turns on:
 #    allow_cloudwatch_logs (the Redis slow-log group) and
@@ -314,7 +314,8 @@ components:
         components:
           - component: vpc/main
           - component: kms/main
-          - component: iam/ci
+          - component: aws-iam-role/ci-plan
+          - component: aws-iam-role/ci-apply
 
     # =========================================================================
     # DATA (data layer)

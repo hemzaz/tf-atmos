@@ -88,6 +88,7 @@ import:
   - catalog/vpc/defaults
   - catalog/aws-iam-service-linked-roles/main
   - catalog/aws-github-oidc-provider/main
+  - catalog/aws-iam-role/ci
 
 vars:
   region: us-east-1
@@ -234,18 +235,24 @@ components:
 
     # aws-iam-service-linked-roles (imported above, the vendored component as
     # every account has it) creates the account's Auto Scaling service-linked
-    # role, one of the two IAM resources this lane can own (with the GitHub
-    # OIDC provider below): local stacks have no CI
-    # roles (check-ci-state-roles.py maps only dev/staging/prod to backend
-    # roles; orgs/fnx/local/_defaults.yaml). LocalEmu implements
+    # role. LocalEmu implements
     # CreateServiceLinkedRole, TagRole, DeleteServiceLinkedRole and
     # GetServiceLinkedRoleDeletionStatus for autoscaling.amazonaws.com, so
     # apply and destroy both run. Its account-verification mixin is a no-op
     # here: the account map has no <tenant>-local account.
     #
     # aws-github-oidc-provider (imported above, as every account has it)
-    # creates the account's GitHub Actions OIDC provider, which the CI roles
-    # trust elsewhere (this lane has none). LocalEmu implements
+    # creates the account's GitHub Actions OIDC provider. LocalEmu implements
     # CreateOpenIDConnectProvider, GetOpenIDConnectProvider, its tagging and
     # DeleteOpenIDConnectProvider, so apply and destroy both run; the
     # account-verification mixin is a no-op here too.
+    #
+    # aws-iam-role/ci-plan and aws-iam-role/ci-apply (catalog/aws-iam-role/ci,
+    # imported above, the stage stacks' CI roles as they are) federate through
+    # that provider: the lane proves the vendored role, its GitHub OIDC trust
+    # (github-assume-role-policy_override.tf's pull_request subject included),
+    # its managed policy attachments and its merged policy create and destroy.
+    # CI never assumes them (settings.github.actions_enabled false), so the
+    # state backend does not trust them (check-ci-state-roles.py skips the
+    # lane); their state-role and runner grants name roles and groups this
+    # lane has, which IAM does not check on create.
