@@ -22,7 +22,7 @@ import:
   - mixins/region/us-east-1
   - catalog/_base/defaults
   - catalog/iam/defaults
-  - catalog/aws-iam-role/ci
+  - catalog/aws-iam-role/lambda-uploader
   - catalog/kms/defaults
   - catalog/vpc/defaults
   - catalog/github-runners/defaults
@@ -110,18 +110,10 @@ components:
           - component: aws-github-oidc-provider
             stack: fnx-ue1-prod
 
-    # The lane's Lambda package uploader (iam/ci, until E6a5 moves it): no
-    # role until an application repo is named here.
-    iam/ci:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-      vars:
-        github_oidc_enabled: true
-        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
-        lambda_uploader_trusted_github_repos: []
-        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
+    # The lane's Lambda package uploader (catalog/aws-iam-role/lambda-uploader,
+    # imported above): off until the lane names an application repo (enabled
+    # and trusted_github_repos). It trusts the same provider as the CI roles.
+    aws-iam-role/lambda-uploader:
       dependencies:
         components:
           - component: backend/main

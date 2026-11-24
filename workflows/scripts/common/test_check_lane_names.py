@@ -72,21 +72,6 @@ class GroupTest(unittest.TestCase):
                 "ue1-perf", "perf", component="eks-addons", cluster_name="ue1-main")}),
         }), [])
 
-    def test_gated_name_counts_only_when_created(self):
-        # iam/dev sets ci_role_name_prefix but creates no CI roles (github_oidc_enabled off).
-        self.assertEqual(self.errors({"fnx-ue1-dev": stack(**{
-            "iam/dev": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci"),
-            "iam/ci": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci",
-                               github_oidc_enabled=True, ci_runner_pool_names=["ue1-github-runners"]),
-        })}), [])
-        errors = self.errors({"fnx-ue1-dev": stack(**{
-            "iam/ci": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci", github_oidc_enabled=True),
-            "iam/other": instance("ue1", component="iam", ci_role_name_prefix="fnx-ue1-dev-ci",
-                                  github_oidc_enabled=True, ci_runner_pool_names=["ue1-other-runners"]),
-        })})
-        self.assertEqual(len(errors), 1, errors)
-        self.assertIn("both create the IAM Lambda uploader role prefix 'fnx-ue1-dev-ci'", errors[0])
-
     def test_two_account_singletons_fail(self):
         errors = self.errors({
             "fnx-ue1-dev": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider")}),
@@ -130,13 +115,13 @@ class GroupTest(unittest.TestCase):
         self.assertEqual(self.errors({
             "fnx-ue1-prod": stack(**{
                 "aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider", stage="prod"),
-                "iam/ci": instance(
-                    "ue1", component="iam", stage="prod", ci_role_name_prefix="fnx-ue1-prod-ci",
-                    github_oidc_enabled=True, github_oidc_provider_arn=arn),
+                "aws-iam-role/ci-plan": instance(
+                    "ue1", component="aws-iam-role", stage="prod", enabled=True, name="ci-plan",
+                    github_oidc_provider_enabled=True, github_oidc_provider_arn=arn),
             }),
-            "fnx-ue2-prod": stack(**{"iam/ci": instance(
-                "ue2", component="iam", stage="prod", region="us-east-2", ci_role_name_prefix="fnx-ue2-prod-ci",
-                github_oidc_enabled=True, github_oidc_provider_arn=arn)}),
+            "fnx-ue2-prod": stack(**{"aws-iam-role/ci-plan": instance(
+                "ue2", component="aws-iam-role", stage="prod", region="us-east-2", enabled=True, name="ci-plan",
+                github_oidc_provider_enabled=True, github_oidc_provider_arn=arn)}),
         }), [])
 
     def test_dr_region_creating_the_account_singleton_again_fails(self):
@@ -342,11 +327,20 @@ class GroupTest(unittest.TestCase):
             "fnx-ue1-dev": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider")}),
             "fnx-uw2-dev": stack(**{
                 "aws-github-oidc-provider": instance("uw2", component="aws-github-oidc-provider", region="us-west-2", enabled=False),
-                "iam/ci": instance(
-                    "uw2", component="iam", region="us-west-2", github_oidc_enabled=True,
-                    github_oidc_provider_arn=arn),
+                "aws-iam-role/ci-plan": instance(
+                    "uw2", component="aws-iam-role", region="us-west-2", enabled=True,
+                    github_oidc_provider_enabled=True, github_oidc_provider_arn=arn),
             }),
         }), [])
+
+    def test_off_role_trusting_a_missing_provider_passes(self):
+        # The Lambda uploader's catalog default (enabled false) creates no role, so it trusts nothing yet.
+        arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+        for off in (False, "false"):
+            with self.subTest(enabled=off):
+                self.assertEqual(self.errors({"fnx-uw2-dev": stack(**{"aws-iam-role/lambda-uploader": instance(
+                    "uw2", component="aws-iam-role", region="us-west-2", enabled=off,
+                    github_oidc_provider_enabled=True, github_oidc_provider_arn=arn)})}), [])
 
     def test_trusted_oidc_provider_without_a_creator_fails(self):
         # The account's creating stack was deleted: the second stack trusts a provider nobody creates.
@@ -354,28 +348,17 @@ class GroupTest(unittest.TestCase):
         errors = self.errors({
             # A disabled provider (the scaffold's account_singletons=no branch) creates nothing.
             "fnx-ue1-dev": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider", enabled=False)}),
-            "fnx-uw2-dev": stack(**{"iam/ci": instance(
-                "uw2", component="iam", region="us-west-2", github_oidc_enabled=True,
-                github_oidc_provider_arn=arn)}),
+            "fnx-uw2-dev": stack(**{"aws-iam-role/lambda-uploader": instance(
+                "uw2", component="aws-iam-role", region="us-west-2", enabled=True,
+                github_oidc_provider_enabled=True, github_oidc_provider_arn=arn)}),
             # Another account's creator does not satisfy account dev.
             "fnx-ue1-prod": stack(**{"aws-github-oidc-provider": instance("ue1", component="aws-github-oidc-provider", stage="prod")}),
             "fnx-ue1-fixtures-a": stack(**{"aws-github-oidc-provider": instance(
                 "ue1-a", "a", component="aws-github-oidc-provider", stage="fixtures", account="dev")}),
         })
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("fnx-uw2-dev: iam/ci trusts the account's GitHub OIDC provider", errors[0])
+        self.assertIn("fnx-uw2-dev: aws-iam-role/lambda-uploader trusts the account's GitHub OIDC provider", errors[0])
         self.assertIn("no stack of account dev creates it", errors[0])
-
-    def test_dr_region_reusing_an_iam_name_fails(self):
-        errors = self.errors({
-            "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", github_oidc_enabled=True, ci_role_name_prefix="shared-ci")}),
-            "fnx-ue2-prod": stack(**{"iam/ci": instance(
-                "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_enabled=True,
-                ci_role_name_prefix="shared-ci")}),
-        })
-        self.assertEqual(len(errors), 1, errors)
-        self.assertIn("IAM Lambda uploader role prefix 'shared-ci' in account prod", errors[0])
 
     def test_regional_names_in_another_region_of_the_account_pass(self):
         # A KMS alias is regional: the same alias in us-east-2 is another alias.

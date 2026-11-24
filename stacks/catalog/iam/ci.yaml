@@ -4,17 +4,18 @@
 # =============================================================================
 # The GitHub Actions OIDC plan and apply roles are the vendored aws-iam-role's
 # aws-iam-role/ci-plan and aws-iam-role/ci-apply (catalog/aws-iam-role/ci,
-# E6a4), imported here with the account's GitHub OIDC provider. iam/ci keeps
-# only the Lambda package uploader until E6a5 moves it, and this file stays
-# the stacks' import path until E6a6 moves their imports and deletes
-# catalog/iam. Every name is derived from the stack, so the instances are the
-# same in each nonprod stack.
+# E6a4), and the application repo's Lambda package uploader is
+# aws-iam-role/lambda-uploader (catalog/aws-iam-role/lambda-uploader, E6a5,
+# off until a stack names the repo), imported here with the account's GitHub
+# OIDC provider. iam/ci creates nothing; this file stays the stacks' import
+# path until E6a6 moves their imports and deletes catalog/iam. Every name is
+# derived from the stack, so the instances are the same in each nonprod stack.
 # =============================================================================
 
 import:
   - catalog/iam/defaults
   - catalog/aws-github-oidc-provider/main
-  - catalog/aws-iam-role/ci
+  - catalog/aws-iam-role/lambda-uploader
 
 components:
   terraform:
@@ -23,23 +24,8 @@ components:
         component: iam
         inherits:
           - iam
-      vars:
-        github_oidc_enabled: true
-        # The uploader role is <prefix>-lambda-uploader.
-        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
-        # Lambda package uploader (the iam component's lambda-uploader.tf): the
-        # application repo's CI uploads each function's zip to this stage's
-        # s3/lambda-artifacts bucket with it (docs/OPERATIONS.md, "Lambda
-        # packages"). No role until the app repo is named here as
-        # "<org>/<repo>:<branch>" - an owner input. The alias is kms/main's,
-        # the bucket's key; check-lambda-packages.py keeps it and the bucket
-        # name in step with the storage instances.
-        lambda_uploader_trusted_github_repos: []
-        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
       dependencies:
         components:
           - component: backend/main
             stack: "{{ .settings.tfstate.stack }}"
-          # The account's GitHub OIDC provider the uploader trusts (imported
-          # above; github_oidc_provider_arn in catalog/iam/defaults).
           - component: aws-github-oidc-provider

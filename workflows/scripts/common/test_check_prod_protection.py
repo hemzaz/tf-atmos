@@ -1,6 +1,7 @@
 """Tests for check-prod-protection.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
 import copy
 import importlib.util
+import json
 import pathlib
 import unittest
 
@@ -223,6 +224,99 @@ class CiTrustTest(unittest.TestCase):
         disabled_trust["vars"]["github_oidc_provider_enabled"] = False
         iam = instance("iam", github_oidc_enabled=True)
         self.assertEqual(self.found(dns, off, disabled_trust, iam), [])
+
+    # E6a5: the Lambda package uploader as catalog/aws-iam-role/lambda-uploader.yaml renders it.
+    BUCKET = "arn:aws:s3:::ue1-lambda-artifacts-123456789012"
+    APP = "hemzaz/app"
+
+    def uploader_statements(self):
+        return [
+            {"Sid": "PutLambdaPackages", "Effect": "Allow", "Action": ["s3:PutObject"],
+             "Resource": [f"{self.BUCKET}/*"], "Condition": {"Null": {"s3:if-none-match": "false"}}},
+            {"Sid": "ReadLambdaPackages", "Effect": "Allow", "Action": ["s3:GetObject"],
+             "Resource": [f"{self.BUCKET}/*"]},
+            {"Sid": "ListLambdaPackages", "Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": [self.BUCKET]},
+            {"Sid": "LambdaPackageEncryption", "Effect": "Allow",
+             "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"], "Resource": "*",
+             "Condition": {"ForAnyValue:StringEquals": {"kms:ResourceAliases": ["alias/ue1-main"]},
+                           "StringEquals": {"kms:ViaService": ["s3.us-east-1.amazonaws.com"]}}},
+        ]
+
+    def uploader(self, statements=None, stage="dev", repos=None, **variables):
+        document = json.dumps({"Version": "2012-10-17",
+                               "Statement": self.uploader_statements() if statements is None else statements})
+        variables.setdefault("policy_documents", [document])
+        variables.setdefault("enabled", True)
+        return self.role("lambda-uploader", stage=stage,
+                         repos=[f"{self.APP}:main"] if repos is None else repos, **variables)
+
+    def test_catalog_uploader_passes(self):
+        for stage in ("dev", "prod"):
+            with self.subTest(stage=stage):
+                self.assertEqual(self.found(self.uploader(stage=stage), stage=stage), [])
+
+    def test_off_uploader_is_skipped(self):
+        # The catalog default: enabled false and no repos (check-lambda-packages.py pairs the two).
+        for off in (False, "false"):
+            with self.subTest(enabled=off):
+                self.assertEqual(self.found(self.uploader(repos=[], enabled=off), stage="dev"), [])
+
+    def test_enabled_uploader_without_a_repo_fails(self):
+        self.assert_one(self.found(self.uploader(repos=[]), stage="dev"),
+                        "with no trusted_github_repos entry: add the")
+
+    def test_uploader_trusts_a_pinned_branch_only(self):
+        for bad in ("pull_request", "environment:prod", "ref:refs/heads/main", "*", "main*"):
+            with self.subTest(bad=bad):
+                self.assertEqual(len(self.found(self.uploader(repos=[f"{self.APP}:{bad}"]), stage="dev")), 1)
+
+    def test_eks_oidc_trust_on_the_uploader_fails(self):
+        self.assert_one(self.found(self.uploader(eks_oidc_provider_enabled=True), stage="dev"),
+                        "sets eks_oidc_provider_enabled: true")
+
+    def test_uploader_managed_policies_and_statements_fail(self):
+        self.assert_one(self.found(self.uploader(managed_policy_arns=[self.ADMIN]), stage="dev"),
+                        "attaches no managed policy")
+        self.assert_one(self.found(self.uploader(policy_statements=copy.deepcopy(self.STATE_READ)), stage="dev"),
+                        "the uploader's policy is its one policy_documents entry")
+
+    def test_uploader_policy_is_an_allow_list(self):
+        # The deliberately bad cases: each widens or drops one guard of the catalog's policy.
+        def changed(index, **change):
+            statements = self.uploader_statements()
+            statements[index].update(change)
+            return statements
+
+        other = "arn:aws:s3:::ue1-other-123456789012"
+        cases = {
+            "unconditional put": changed(0, Condition=None),
+            "put on another bucket": changed(0, Resource=[f"{other}/*"]),
+            "s3 wildcard action": changed(1, Action=["s3:*"]),
+            "read on every bucket": changed(1, Resource=["*"]),
+            "list on a non-lambda bucket": [dict(s, Resource=[s["Resource"][0].replace(
+                "lambda-artifacts", "data")]) if s["Sid"] != "LambdaPackageEncryption" else s
+                for s in self.uploader_statements()],
+            "kms without the alias": changed(3, Condition={"StringEquals": {
+                "kms:ViaService": ["s3.us-east-1.amazonaws.com"]}}),
+            "kms not via s3": changed(3, Condition={"ForAnyValue:StringEquals": {
+                "kms:ResourceAliases": ["alias/ue1-main"]}}),
+            "kms extra action": changed(3, Action=["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt",
+                                                   "kms:ScheduleKeyDeletion"]),
+            "deny swapped in": changed(2, Effect="Deny"),
+            "extra statement": self.uploader_statements() + [
+                {"Sid": "Extra", "Effect": "Allow", "Action": ["iam:PassRole"], "Resource": "*"}],
+            "missing statement": self.uploader_statements()[:3],
+        }
+        for case, statements in cases.items():
+            with self.subTest(case=case):
+                statements = [{k: v for k, v in s.items() if v is not None} for s in statements]
+                self.assert_one(self.found(self.uploader(statements), stage="dev"),
+                                "outside the uploader's allow-list")
+        self.assert_one(self.found(self.uploader(policy_documents=["{not json"]), stage="dev"),
+                        "is not a JSON policy")
+        two = [json.dumps({"Statement": self.uploader_statements()})] * 2
+        self.assert_one(self.found(self.uploader(policy_documents=two), stage="dev"),
+                        "outside the uploader's allow-list")
 
 
 class TrailProtectionTest(unittest.TestCase):

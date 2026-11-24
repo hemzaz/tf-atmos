@@ -35,8 +35,14 @@ code never reads prod state); no role sets eks_oidc_provider_enabled (an EKS IRS
 merged into the GitHub one); ci-plan's permissions are an allow-list (pull-request code
 assumes it): managed_policy_arns only ReadOnlyAccess, policy_statements only
 AssumeStateReadRoles (Allow sts:AssumeRole on the stage's ...-read-role ARNs, nothing else),
-no policy_documents; the trust list is not empty and no assume_role_policy is merged into it
-(a hand-written trust would bypass these rules).
+no policy_documents; the Lambda package uploader's (ci-lambda-uploader,
+stacks/catalog/aws-iam-role/lambda-uploader.yaml, E6a5) are one too: no managed_policy_arns or
+policy_statements, one policy_documents entry of exactly its four statements (conditional
+PutObject, GetObject and ListBucket on one <...>-lambda-artifacts-<account id> bucket, and
+GenerateDataKey/Encrypt/Decrypt by one KMS alias via S3 in one region; check-lambda-packages.py
+pins the bucket and alias to the stack's); the trust list is not empty and no assume_role_policy
+is merged into it (a hand-written trust would bypass these rules). A role with enabled false
+creates nothing and is skipped (the uploader's catalog default).
 
 And every deployable aws-cloudtrail instance, in any stage (OQ-F, E5b4b), keeps
 its trail and the trail's KMS key: Cloud Posse's component always creates the
@@ -77,6 +83,14 @@ PLAN_READ_ONLY_POLICY = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 PLAN_STATE_STATEMENT = "AssumeStateReadRoles"
 # A state backend read role (<role_prefix>[-prod]-read-role); check-ci-state-roles.py pins the exact one.
 STATE_READ_ROLE = re.compile(r"arn:aws[a-z-]*:iam::[0-9]{12}:role/(?:[\w+=,.@-]+/)*[\w+=,.@-]+-read-role")
+# The Lambda package uploader (stacks/catalog/aws-iam-role/lambda-uploader.yaml): an application repo's
+# CI assumes it, so its whole permission set is an allow-list too. check-lambda-packages.py pins the
+# bucket and alias to the stack's s3/lambda-artifacts and kms/main; this pins the statements' shape.
+UPLOADER_NAME = "ci-lambda-uploader"
+UPLOADER_FIX = "stacks/catalog/aws-iam-role/lambda-uploader.yaml renders exactly that; drop the override"
+LAMBDA_BUCKET = re.compile(r"arn:aws:s3:::[a-z0-9.-]+-lambda-artifacts-[0-9]{12}")
+KMS_ALIAS = re.compile(r"alias/[A-Za-z0-9/_-]+")
+VIA_S3 = re.compile(r"s3\.[a-z]{2}(-[a-z]+)+-[0-9]+\.amazonaws\.com")
 MIN_RETENTION_DAYS = 7
 # OQ-F: the vendored trail component and its sticky label name (fnx-ue1-<stage>-cloudtrail).
 TRAIL_COMPONENT, TRAIL_NAME = "aws-cloudtrail", "cloudtrail"
@@ -177,7 +191,9 @@ def check_ci_trust(stacks: dict) -> list[str]:
     for stack_name, stack in sorted(stacks.items()):
         for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
             variables = instance.get("vars") or {}
+            # enabled false (the Cloud Posse switch; the uploader's catalog default) creates no role.
             if (instance.get("component") != CI_ROLE_COMPONENT or not is_deployable(instance)
+                    or normalize(variables.get("enabled")) is False
                     or normalize(variables.get("github_oidc_provider_enabled")) is not True):
                 continue
             stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
@@ -188,10 +204,13 @@ def check_ci_trust(stacks: dict) -> list[str]:
 def ci_trust_errors(where: str, variables: dict, stage: Optional[str]) -> list[str]:
     """One GitHub-trusted role's findings."""
     plan = variables.get("name") == CI_PLAN_NAME
+    uploader = variables.get("name") == UPLOADER_NAME
     repos = variables.get("trusted_github_repos") or []
     errors = []
     if not repos:
-        errors.append(f"{where} enables GitHub OIDC trust with no trusted_github_repos entry")
+        errors.append(f"{where} enables GitHub OIDC trust with no trusted_github_repos entry: add the "
+                      "\"<org>/<repo>:<branch>\" it trusts to the instance's vars.trusted_github_repos, or set "
+                      "vars.enabled: false")
     if variables.get("assume_role_policy"):
         errors.append(f"{where} merges an assume_role_policy into its GitHub OIDC trust; the trust must come "
                       "from trusted_github_repos alone")
@@ -213,10 +232,73 @@ def ci_trust_errors(where: str, variables: dict, stage: Optional[str]) -> list[s
     if normalize(variables.get("eks_oidc_provider_enabled")) is True:
         errors.append(f"{where} sets eks_oidc_provider_enabled: true, which merges an EKS IRSA trust into its "
                       "GitHub OIDC trust (a Kubernetes service account could assume it); remove it from the "
-                      "role's vars (stacks/catalog/aws-iam-role/ci.yaml)")
+                      "role's vars (stacks/catalog/aws-iam-role/"
+                      f"{'lambda-uploader' if uploader else 'ci'}.yaml)")
     if plan:
         errors += plan_permission_errors(where, variables)
+    if uploader:
+        errors += uploader_permission_errors(where, variables)
     return errors
+
+
+def uploader_permission_errors(where: str, variables: dict) -> list[str]:
+    """The uploader holds only its four package statements, in one policy_documents entry."""
+    errors = []
+    if variables.get("managed_policy_arns"):
+        errors.append(f"{where} managed_policy_arns attaches {sorted(variables['managed_policy_arns'])}: the "
+                      f"uploader, which an application repo's CI assumes, attaches no managed policy ({UPLOADER_FIX})")
+    if variables.get("policy_statements"):
+        errors.append(f"{where} sets policy_statements {sorted(variables['policy_statements'])}: the uploader's "
+                      f"policy is its one policy_documents entry ({UPLOADER_FIX})")
+    documents = variables.get("policy_documents") or []
+    try:
+        statements = [json.loads(document).get("Statement") for document in documents]
+    except (TypeError, ValueError, AttributeError) as error:
+        return errors + [f"{where} policy_documents is not a JSON policy ({error}) ({UPLOADER_FIX})"]
+    if len(statements) != 1 or not uploader_statements_ok(statements[0]):
+        errors.append(f"{where} policy_documents is outside the uploader's allow-list: it must be exactly one document with "
+                      "PutLambdaPackages (s3:PutObject on <bucket>/* only with s3:if-none-match), ReadLambdaPackages "
+                      "(s3:GetObject on <bucket>/*), ListLambdaPackages (s3:ListBucket on <bucket>) and "
+                      "LambdaPackageEncryption (kms:GenerateDataKey/Encrypt/Decrypt on * by one alias, via S3 "
+                      f"in one region), one <...-lambda-artifacts-<account id>> bucket throughout ({UPLOADER_FIX})")
+    return errors
+
+
+def uploader_statements_ok(statements: Any) -> bool:
+    """The four statements the catalog renders, with one bucket ARN, one alias and one S3 endpoint."""
+    if not isinstance(statements, list):
+        return False
+    by_sid = {s.get("Sid"): s for s in statements if isinstance(s, dict)}
+    if len(by_sid) != 4 or len(statements) != 4:
+        return False
+    put, read, listing, kms = (by_sid.get(sid) or {} for sid in (
+        "PutLambdaPackages", "ReadLambdaPackages", "ListLambdaPackages", "LambdaPackageEncryption"))
+    bucket = (listing.get("Resource") or [None])[0] if isinstance(listing.get("Resource"), list) else None
+    if not isinstance(bucket, str) or not LAMBDA_BUCKET.fullmatch(bucket):
+        return False
+    shape = (
+        (put, ["s3:PutObject"], [f"{bucket}/*"], {"Null": {"s3:if-none-match": "false"}}),
+        (read, ["s3:GetObject"], [f"{bucket}/*"], None),
+        (listing, ["s3:ListBucket"], [bucket], None),
+    )
+    for statement, actions, resources, condition in shape:
+        expected = {"Sid": statement.get("Sid"), "Effect": "Allow", "Action": actions, "Resource": resources}
+        if condition:
+            expected["Condition"] = condition
+        if statement != expected:
+            return False
+    condition = kms.get("Condition") or {}
+    aliases = (condition.get("ForAnyValue:StringEquals") or {}).get("kms:ResourceAliases")
+    via = (condition.get("StringEquals") or {}).get("kms:ViaService")
+    return (
+        set(kms) == {"Sid", "Effect", "Action", "Resource", "Condition"} and kms.get("Effect") == "Allow"
+        and kms.get("Action") == ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"] and kms.get("Resource") == "*"
+        and set(condition) == {"ForAnyValue:StringEquals", "StringEquals"}
+        and set(condition["ForAnyValue:StringEquals"]) == {"kms:ResourceAliases"}
+        and set(condition["StringEquals"]) == {"kms:ViaService"}
+        and isinstance(aliases, list) and len(aliases) == 1 and KMS_ALIAS.fullmatch(str(aliases[0])) is not None
+        and isinstance(via, list) and len(via) == 1 and VIA_S3.fullmatch(str(via[0])) is not None
+    )
 
 
 def plan_permission_errors(where: str, variables: dict) -> list[str]:

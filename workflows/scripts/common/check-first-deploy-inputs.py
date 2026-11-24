@@ -611,7 +611,8 @@ def start_url_findings(stacks: dict, targets: set) -> list:
 def notices() -> list:
     return [
         Finding("notice", "repository", "", "every lambda/* instance stays metadata.enabled: false until the "
-                "application repo is in lambda_uploader_trusted_github_repos and each function is uploaded",
+                "application repo is in aws-iam-role/lambda-uploader's trusted_github_repos (enabled: true) "
+                "and each function is uploaded",
                 "Lambda packages"),
         Finding("notice", "repository", "", "default-branch protection with the required check `CI gate`",
                 "GitHub"),

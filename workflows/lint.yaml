@@ -298,9 +298,10 @@ workflows:
       # visibility_timeout_seconds below the function timeout fails (AWS
       # rejects the mapping); below 6 x timeout + 5 warns.
       #
-      # check-lambda-packages: iam/ci's lambda uploader role names its stage's
+      # check-lambda-packages: aws-iam-role/lambda-uploader names its stage's
       # s3/lambda-artifacts bucket and kms/main alias instead of reading their
-      # state (it applies first); this fails when either stops matching, and
+      # state (it applies first); this fails when either stops matching, when
+      # it is enabled without a trusted repo or names one while off, and
       # when an enabled lambda's s3_key is not a released
       # <function_name>/<version>.zip.
       #

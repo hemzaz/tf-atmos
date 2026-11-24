@@ -37,8 +37,9 @@ rotation configuration.
 - A Zip package needs exactly one of `filename`, `s3_bucket` + `s3_key`, or `source_dir` (a
   directory under this component, zipped to `.archives/<function_name>.zip`). There is no
   `image_uri` variable, so `package_type = "Image"` cannot be used.
-- The S3 packages are built and uploaded by the application repo's CI with `iam/ci`'s
-  `lambda_uploader_role_arn`; their sources are not here. Each key is immutable, one per
+- The S3 packages are built and uploaded by the application repo's CI with the
+  `aws-iam-role/lambda-uploader` role (`catalog/aws-iam-role/lambda-uploader.yaml`); their sources
+  are not here. Each key is immutable, one per
   release: a new `s3_key` is what redeploys the function (overwriting an object does not,
   without `source_code_hash` or `s3_object_version`). The principal creating the function needs
   `s3:GetObject` on it and `kms:Decrypt` on `kms/main` (the bucket's key); the CI apply role has

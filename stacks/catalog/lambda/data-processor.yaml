@@ -12,7 +12,7 @@
 #
 # The application repo's CI builds the package and uploads it as
 # <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
-# with iam/ci's lambda-uploader role; a PR here then sets
+# with the aws-iam-role/lambda-uploader role; a PR here then sets
 # settings.package_version, and the changed s3_key redeploys the code
 # (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
 # package exists: upload it, set package_version, set enabled: true, and

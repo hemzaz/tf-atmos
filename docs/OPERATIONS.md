@@ -21,7 +21,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in each stack's file (`settings.environment.monitoring`, which `backup/main`'s `notification_emails`, `cost-optimization/main`'s budget and anomaly emails read; `fnx-ew1-prod`'s and `fnx-ec1-prod`'s are copies of `fnx-ue1-prod`'s `example.com` placeholders); each address must confirm its SNS subscription. GuardDuty, Security Hub and Inspector findings reach people only through each stack's `security-monitoring/main` topic, whose `security_email_subscriptions` is empty everywhere (a preflight notice per stack) |
 | Budgets | `monthly_budget_limit` on each stack's `cost-optimization/main`, read from `settings.environment.monitoring.budget_monthly_limit` in the stack file (USD: dev 500, staging 2000, `fnx-ue1-prod` 10000; `fnx-ew1-prod` 10000, a placeholder copy of `fnx-ue1-prod`'s). Each budget counts the spend tagged with its stack's `Environment`; a prod primary's also counts its DR standby's (`budget_additional_environment_tags`: `fnx-ue1-prod` ue1+ue2, `fnx-ew1-prod` ew1+ec1, owner decision; lint `check-dr-pairs` fails a standby missing there), so the owner may raise those amounts |
 | Cost-allocation tags | the `Environment` tag activated as a user-defined cost-allocation tag in the payer (management) account's Billing console (Cost allocation tags); until then every budget's `user:Environment$<tag>` filter matches no spend and no budget alerts |
-| Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on `iam/ci`, set per stack in the stack file (the `[]` placeholder is in `stacks/catalog/iam/ci.yaml` for dev and staging and in `fnx-ue1-prod`'s stack file), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
+| Lambda packages | the application repo that builds them, as `trusted_github_repos` plus `enabled: true` on `aws-iam-role/lambda-uploader`, set per stack in the stack file (off by default in `stacks/catalog/aws-iam-role/lambda-uploader.yaml`, imported by every nonprod and prod primary stack), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
 | GitHub App | the self-hosted CI runners' just-in-time registration: a GitHub App installed on this repository (Administration read/write); its IDs in `settings.github_app` (`app_id`, `installation_id`; `0` until set) in `stacks/orgs/fnx/_defaults.yaml`; and, after each runner pool's first apply, its private key in that account's SSM, in the pool's region (`fnx-ew1-prod`'s: `prod-eu`, eu-west-1; `fnx-ec1-prod`'s: `prod-eu`, eu-central-1), at the pool's `.app_private_key_parameter_name`, encrypted with the pool's own key (`.app_key_kms_key_alias`): see `components/terraform/github-runners/README.md`. The repository is public: turn on Settings → Actions → General → "Require approval for all outside collaborators" |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
@@ -863,11 +863,13 @@ least 2 nodes) or with under 7 days of snapshots, and a prod cognito pool withou
 Function code lives in an application repo, not here (the Cloud Posse aws-lambda model). The
 contract:
 
-1. Set `lambda_uploader_trusted_github_repos: ["<org>/<app-repo>:<branch>"]` on the stack's `iam/ci`
-   and apply it. Its output `lambda_uploader_role_arn` (`<prefix>-lambda-uploader`) is the role
-   the app's workflow assumes with GitHub OIDC from that branch only; output
-   `lambda_artifacts_bucket_name` is the bucket, `<Environment>-lambda-artifacts-<account id>`.
-   The role may put and read objects in that bucket and use `kms/main` through S3, nothing else.
+1. In the stack's file, turn on `aws-iam-role/lambda-uploader` with the app repo
+   (`vars: {enabled: true, trusted_github_repos: ["<org>/<app-repo>:<branch>"]}`; lint fails one
+   without the other) and apply it. Its output `role.arn` (`<stack>-ci-lambda-uploader`) is the
+   role the app's workflow assumes with GitHub OIDC from that branch only; the bucket is
+   `<Environment>-lambda-artifacts-<account id>`. The role may put and read objects in that
+   bucket and use `kms/main` through S3, nothing else (`check-prod-protection.py` holds it to
+   that allow-list).
 2. The app CI uploads each build to `<function_name>/<version>.zip` (`function_name` as in the
    instance's vars) as a conditional write: `aws s3api put-object --if-none-match '*'`, or the
    same header on `complete-multipart-upload` for a multipart upload. The role allows

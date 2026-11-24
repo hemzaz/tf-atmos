@@ -1,6 +1,7 @@
 """Tests for check-lambda-packages.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
 import copy
 import importlib.util
+import json
 import pathlib
 import unittest
 
@@ -10,17 +11,37 @@ _spec = importlib.util.spec_from_file_location(
 check_lambda_packages = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_lambda_packages)
 
-IAM = {
-    "metadata": {"component": "iam"},
+BUCKET_ARN = "arn:aws:s3:::ue1-lambda-artifacts-123456789012"
+
+
+def uploader_policy(bucket=BUCKET_ARN, alias="alias/ue1-main"):
+    """The policy catalog/aws-iam-role/lambda-uploader.yaml renders for fnx-ue1-dev."""
+    return json.dumps({"Version": "2012-10-17", "Statement": [
+        {"Sid": "PutLambdaPackages", "Effect": "Allow", "Action": ["s3:PutObject"], "Resource": [f"{bucket}/*"],
+         "Condition": {"Null": {"s3:if-none-match": "false"}}},
+        {"Sid": "ReadLambdaPackages", "Effect": "Allow", "Action": ["s3:GetObject"], "Resource": [f"{bucket}/*"]},
+        {"Sid": "ListLambdaPackages", "Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": [bucket]},
+        {"Sid": "LambdaPackageEncryption", "Effect": "Allow",
+         "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"], "Resource": "*",
+         "Condition": {"ForAnyValue:StringEquals": {"kms:ResourceAliases": [alias]},
+                       "StringEquals": {"kms:ViaService": ["s3.us-east-1.amazonaws.com"]}}},
+    ]})
+
+
+# An enabled uploader (the catalog's off default plus the stack file's two inputs).
+UPLOADER = {
+    "component": "aws-iam-role",
+    "metadata": {"component": "aws-iam-role"},
     "vars": {
-        "github_oidc_enabled": True,
-        "lambda_uploader_trusted_github_repos": [],
-        "lambda_uploader_kms_key_alias": "alias/ue1-main",
-        "tags": {"Environment": "ue1"},
+        "enabled": True,
+        "name": "ci-lambda-uploader",
+        "trusted_github_repos": ["hemzaz/app:main"],
+        "policy_documents": [uploader_policy()],
     },
 }
 BUCKET = {
     "metadata": {"component": "s3"},
+    "settings": {"environment": {"account_id": "123456789012"}},
     "vars": {
         "name": "lambda-artifacts",
         "kms_key_arn": "!terraform.state kms/main .key_arn",
@@ -40,7 +61,7 @@ LAMBDA = {
 
 def stack(**overrides):
     components = {
-        "iam/ci": copy.deepcopy(IAM),
+        "aws-iam-role/lambda-uploader": copy.deepcopy(UPLOADER),
         "s3/lambda-artifacts": copy.deepcopy(BUCKET),
         "kms/main": copy.deepcopy(KMS),
         "lambda/data-processor": copy.deepcopy(LAMBDA),
@@ -72,11 +93,50 @@ class CheckLambdaPackagesTest(unittest.TestCase):
     def test_matching_stack_passes(self):
         self.assert_errors(stack())
 
-    def test_iam_without_uploader_settings_is_not_checked(self):
-        def strip(instance):
-            del instance["vars"]["lambda_uploader_kms_key_alias"]
+    def test_the_catalog_default_off_uploader_is_not_checked(self):
+        def off(instance):
+            instance["vars"]["enabled"] = False
+            instance["vars"]["trusted_github_repos"] = []
 
-        self.assert_errors(stack(iam__ci=strip, s3__lambda_artifacts=None))
+        self.assert_errors(stack(aws_iam_role__lambda_uploader=off, s3__lambda_artifacts=None))
+
+    def test_enabled_uploader_without_a_repo_fails(self):
+        self.assert_errors(
+            stack(aws_iam_role__lambda_uploader=set_var("trusted_github_repos", [])),
+            "is enabled with no trusted_github_repos entry",
+        )
+
+    def test_repos_on_an_off_uploader_fail(self):
+        for off in (False, "false", None):
+            with self.subTest(enabled=off):
+                self.assert_errors(
+                    stack(aws_iam_role__lambda_uploader=set_var("enabled", off)), "but is off, so no role is created"
+                )
+
+    def test_templated_true_counts_as_enabled(self):
+        self.assert_errors(
+            stack(aws_iam_role__lambda_uploader=set_var("enabled", "true"), s3__lambda_artifacts=None),
+            "has no enabled s3/lambda-artifacts",
+        )
+
+    def test_policy_on_another_bucket_fails(self):
+        self.assert_errors(
+            stack(aws_iam_role__lambda_uploader=set_var(
+                "policy_documents", [uploader_policy(bucket="arn:aws:s3:::ue1-lambda-artifacts-999999999999")])),
+            "so the uploader role writes another bucket",
+        )
+
+    def test_bucket_in_another_account_fails(self):
+        def other_account(instance):
+            instance["settings"]["environment"]["account_id"] = "999999999999"
+
+        self.assert_errors(stack(s3__lambda_artifacts=other_account), "so the uploader role writes another bucket")
+
+    def test_policy_that_is_not_json_fails(self):
+        self.assert_errors(
+            stack(aws_iam_role__lambda_uploader=set_var("policy_documents", ["{not json"])),
+            "is not a JSON policy",
+        )
 
     def test_missing_or_disabled_bucket_fails(self):
         self.assert_errors(stack(s3__lambda_artifacts=None), "has no enabled s3/lambda-artifacts")
@@ -90,13 +150,14 @@ class CheckLambdaPackagesTest(unittest.TestCase):
 
     def test_environment_tag_mismatch_fails(self):
         self.assert_errors(
-            stack(s3__lambda_artifacts=set_var("tags", {"Environment": "other"})), "differs from s3/lambda-artifacts"
+            stack(s3__lambda_artifacts=set_var("tags", {"Environment": "other"})),
+            "so the uploader role writes another bucket",
         )
 
     def test_alias_mismatch_fails(self):
         self.assert_errors(
-            stack(iam__ci=set_var("lambda_uploader_kms_key_alias", "alias/other")),
-            "is not kms/main's 'alias/ue1-main'",
+            stack(aws_iam_role__lambda_uploader=set_var("policy_documents", [uploader_policy(alias="alias/other")])),
+            "are not kms/main's 'alias/ue1-main'",
         )
 
     def test_bucket_with_another_key_fails(self):
@@ -105,8 +166,8 @@ class CheckLambdaPackagesTest(unittest.TestCase):
             "is not encrypted with kms/main",
         )
 
-    def test_disabled_iam_is_skipped(self):
-        self.assert_errors(stack(iam__ci=disable, s3__lambda_artifacts=None))
+    def test_metadata_disabled_uploader_is_skipped(self):
+        self.assert_errors(stack(aws_iam_role__lambda_uploader=disable, s3__lambda_artifacts=None))
 
     def test_placeholder_version_fails_only_when_enabled(self):
         unreleased = set_var("s3_key", "data-processor/unreleased.zip")
