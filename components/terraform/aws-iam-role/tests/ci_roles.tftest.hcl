@@ -1,4 +1,5 @@
-# House tests of the CI roles (stacks/catalog/aws-iam-role/ci.yaml, E6a4; a vendored target
+# House tests of the CI roles (stacks/catalog/aws-iam-role/ci.yaml, E6a4) and the Lambda package
+# uploader (catalog/aws-iam-role/lambda-uploader.yaml, E6a5, at the end; a vendored target
 # admits tests/*.tftest.hcl: scripts/check-vendor.py TESTS) and of
 # github-assume-role-policy_override.tf: the exact GitHub OIDC subjects each role trusts
 # (master; pull_request on the plan role only where the stage plans pull requests, never in
@@ -266,4 +267,105 @@ run "another_account_is_refused" {
   }
 
   expect_failures = [terraform_data.account_verification]
+}
+
+# The Lambda package uploader (stacks/catalog/aws-iam-role/lambda-uploader.yaml, E6a5) as an
+# enabled stack renders it: an application repo's pinned branch, and the catalog's one policy
+# document for fnx-ue1-dev's s3/lambda-artifacts bucket and kms/main alias.
+run "lambda_uploader_trusts_the_app_branch_and_writes_only_its_bucket" {
+  command = plan
+
+  variables {
+    name                 = "ci-lambda-uploader"
+    trusted_github_repos = ["hemzaz/app:main"]
+    role_description     = "GitHub Actions OIDC role that uploads Lambda packages to this stage's s3/lambda-artifacts bucket"
+    managed_policy_arns  = []
+    policy_statements    = {}
+    policy_documents = [jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid       = "PutLambdaPackages"
+          Effect    = "Allow"
+          Action    = ["s3:PutObject"]
+          Resource  = ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]
+          Condition = { Null = { "s3:if-none-match" = "false" } }
+        },
+        {
+          Sid      = "ReadLambdaPackages"
+          Effect   = "Allow"
+          Action   = ["s3:GetObject"]
+          Resource = ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]
+        },
+        {
+          Sid      = "ListLambdaPackages"
+          Effect   = "Allow"
+          Action   = ["s3:ListBucket"]
+          Resource = ["arn:aws:s3:::ue1-lambda-artifacts-222222222222"]
+        },
+        {
+          Sid      = "LambdaPackageEncryption"
+          Effect   = "Allow"
+          Action   = ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"]
+          Resource = "*"
+          Condition = {
+            "ForAnyValue:StringEquals" = { "kms:ResourceAliases" = ["alias/ue1-main"] }
+            StringEquals               = { "kms:ViaService" = ["s3.us-east-1.amazonaws.com"] }
+          }
+        },
+      ]
+    })]
+  }
+
+  assert {
+    condition     = flatten([jsondecode(data.aws_iam_policy_document.assume_role_policy[0].json).Statement[0].Condition.StringLike["token.actions.githubusercontent.com:sub"]]) == ["repo:hemzaz/app:ref:refs/heads/main"]
+    error_message = "The uploader trusts only the app repo's pinned branch (upstream's <org>/<repo>:<branch> mapping, kept by the override)."
+  }
+
+  assert {
+    condition     = jsondecode(data.aws_iam_policy_document.assume_role_policy[0].json).Statement[0].Principal.Federated == "arn:aws:iam::222222222222:oidc-provider/token.actions.githubusercontent.com"
+    error_message = "The uploader trusts the account's GitHub OIDC provider only."
+  }
+
+  assert {
+    condition     = output.role.name == "fnx-ue1-dev-ci-lambda-uploader"
+    error_message = "The uploader keeps the house role's name, <stack>-ci-lambda-uploader."
+  }
+
+  assert {
+    condition = [for s in jsondecode(output.role.policy).Statement : [s.Sid, flatten([s.Action]), flatten([s.Resource])]] == [
+      ["PutLambdaPackages", ["s3:PutObject"], ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]],
+      ["ReadLambdaPackages", ["s3:GetObject"], ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]],
+      ["ListLambdaPackages", ["s3:ListBucket"], ["arn:aws:s3:::ue1-lambda-artifacts-222222222222"]],
+      ["LambdaPackageEncryption", ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"], ["*"]],
+    ]
+    error_message = "The uploader may put, get and list its stage's package bucket and use its key, nothing else."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(output.role.policy).Statement : s.Condition.Null["s3:if-none-match"] if s.Sid == "PutLambdaPackages"]) == "false"
+    error_message = "PutObject is allowed only as a conditional write (If-None-Match), so released keys are immutable."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(output.role.policy).Statement : s.Condition.StringEquals["kms:ViaService"] if s.Sid == "LambdaPackageEncryption"]) == "s3.us-east-1.amazonaws.com"
+    error_message = "The uploader uses the key only through S3 in its region."
+  }
+}
+
+run "lambda_uploader_off_creates_nothing" {
+  command = plan
+
+  variables {
+    enabled              = false
+    name                 = "ci-lambda-uploader"
+    trusted_github_repos = []
+    managed_policy_arns  = []
+    policy_statements    = {}
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.assume_role_policy) == 0
+    error_message = "The catalog default (enabled false) creates no trust and no role."
+  }
 }

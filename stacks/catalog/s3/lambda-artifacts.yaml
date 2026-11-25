@@ -11,9 +11,10 @@
 # deployed in the deploy-full-stack storage layer, before compute. The bucket is
 # <Environment>-lambda-artifacts-<account id>; encryption (kms/main),
 # versioning, public access block and the TLS-only policy come from
-# s3/defaults and the component. Application CI writes it through iam/ci's
-# lambda-uploader role, which names this bucket by that convention instead of
-# reading its state (check-lambda-packages.py keeps the two in step); keys
+# s3/defaults and the component. Application CI writes it through the
+# aws-iam-role/lambda-uploader role (catalog/aws-iam-role/lambda-uploader),
+# which names this bucket by that convention instead of reading its state
+# (check-lambda-packages.py keeps the two in step); keys
 # are <function_name>/<version>.zip (docs/OPERATIONS.md, "Lambda packages").
 
 import:

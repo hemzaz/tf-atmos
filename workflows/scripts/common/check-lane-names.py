@@ -16,13 +16,12 @@ Stacks are grouped by account (settings.environment.account) and region
 it cannot be checked. Within a group this fails:
   - two stacks whose deployable instances share a tags.Environment value;
   - two instances that create the same name from a key a component uses
-    VERBATIM (RAW_NAMES: kms alias_name, iam ci_role_name_prefix, ecs
-    cluster_name, dynamodb table_name, ...), whatever its prefix. Only
-    creating keys count: a key that names an existing resource (cluster_name
-    in eks-addons, a lane's reference to its stage's cluster) is not
-    compared, and a gated key counts only while its instance creates the
-    resource (iam ci_role_name_prefix, the Lambda uploader's, with github_oidc_enabled;
-    the CI roles are the vendored aws-iam-role's, named by the lane-aware null-label id);
+    VERBATIM (RAW_NAMES: kms alias_name, ecs cluster_name, dynamodb
+    table_name, ...), whatever its prefix. Only creating keys count: a key
+    that names an existing resource (cluster_name in eks-addons, a lane's
+    reference to its stage's cluster) is not compared (the CI roles and the
+    Lambda uploader are the vendored aws-iam-role's, named by the lane-aware
+    null-label id);
   - two instances that create the same account singleton (SINGLETONS: the
     GitHub OIDC provider (the vendored aws-github-oidc-provider), each
     service-linked role (MAP_SINGLETONS: one per
@@ -72,9 +71,10 @@ does not separate them. Instances sharing no primary key compare all their
 name inputs (NAME_INPUT: *_name, *_prefix, domains, zones, ...) instead.
 Across every stack (any account or region): an S3 bucket name or Cognito
 domain prefix (GLOBAL_KEYS, at any depth of vars) set twice. Per account: an
-iam instance whose CI roles trust the GitHub OIDC provider (github_oidc_enabled,
-github_oidc_provider_arn) while no stack of the account has an aws-github-oidc-provider instance, which
-deleting the creating stack would leave.
+enabled aws-iam-role instance that trusts the GitHub OIDC provider (the CI roles and
+the Lambda uploader: github_oidc_provider_enabled, github_oidc_provider_arn) while no
+stack of the account has an aws-github-oidc-provider instance, which deleting the
+creating stack would leave.
 Exits 1 on any collision.
 """
 import collections
@@ -124,7 +124,7 @@ PRIMARY_NAMES = (
 NOT_PRIMARY = {("alb-controller-ingress-group", "cluster_name"), ("lambda", "alias_name")}
 # Components whose IAM role or policy names, or S3 bucket names, are built from
 # tags.Environment (or a name built from it): both are account-wide (S3 names
-# are global and carry no region). Not iam (its names are RAW_NAMES), backend
+# are global and carry no region). Not iam (it creates nothing; E6a6 deletes it), backend
 # (built from its bucket name) or apigateway-account (its role name carries the
 # region). Nor the vendored aws-cloudtrail and aws-config: they name their IAM
 # roles from the null-label id (vars.context), whose environment is the region
@@ -134,19 +134,17 @@ ACCOUNT_WIDE_COMPONENTS = frozenset({
     "eks-addons", "external-secrets", "firehose", "github-runners", "glue", "lambda", "monitoring", "rds",
     "s3", "security-monitoring", "stepfunctions", "vpc",
 })
-# (component, key) -> (resource, gate): keys the component uses verbatim in an
-# account- or region-unique name. A gate (var, default) must be true for the
-# instance to create it.
+# (component, key) -> resource: keys the component uses verbatim in an
+# account- or region-unique name.
 RAW_NAMES = {
-    ("kms", "alias_name"): ("KMS alias", None),
-    ("kms", "name_prefix"): ("KMS key name prefix", None),
-    ("cognito", "name_prefix"): ("Cognito user pool", None),
-    ("network", "name_prefix"): ("network name prefix", None),
-    ("iam", "ci_role_name_prefix"): ("IAM Lambda uploader role prefix", ("github_oidc_enabled", False)),
-    ("dynamodb", "table_name"): ("DynamoDB table", None),
-    ("ecs", "cluster_name"): ("ECS cluster", None),
-    ("waf", "metric_name"): ("WAF metric", None),
-    ("apigateway", "domain_name"): ("API Gateway custom domain", None),
+    ("kms", "alias_name"): "KMS alias",
+    ("kms", "name_prefix"): "KMS key name prefix",
+    ("cognito", "name_prefix"): "Cognito user pool",
+    ("network", "name_prefix"): "network name prefix",
+    ("dynamodb", "table_name"): "DynamoDB table",
+    ("ecs", "cluster_name"): "ECS cluster",
+    ("waf", "metric_name"): "WAF metric",
+    ("apigateway", "domain_name"): "API Gateway custom domain",
 }
 # (component, gate var, default) -> account singleton it creates when true.
 SINGLETONS = {
@@ -187,7 +185,7 @@ REGION_SINGLETON_ALLOWANCES = {
 # Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
 # region (IAM is global within an account).
 ACCOUNT_WIDE = {
-    "IAM role", "IAM policy", "IAM Lambda uploader role prefix",
+    "IAM role", "IAM policy",
     *SINGLETONS.values(), *MAP_SINGLETONS.values(), *REGION_SINGLETONS.values(),
 }
 # vars keys whose values are names global across accounts and regions.
@@ -237,11 +235,9 @@ def created(instance: dict, stage) -> list[tuple]:
     """(kind, value, where) for the account- and region-unique names an instance creates."""
     component, variables = instance.get("component"), instance.get("vars") or {}
     out = []
-    for (comp, key), (resource, gate) in RAW_NAMES.items():
+    for (comp, key), resource in RAW_NAMES.items():
         value = variables.get(key)
         if comp != component or not isinstance(value, str) or not value:
-            continue
-        if gate and variables.get(gate[0], gate[1]) is not True:
             continue
         out.append((resource, value, f"vars.{key}"))
     if stage != fixtures.FIXTURE_STAGE:
@@ -414,7 +410,7 @@ def check_global(stacks: dict) -> list[str]:
 
 
 def check_trusted_providers(stacks: dict) -> list[str]:
-    """iam instances whose CI roles trust the account's GitHub OIDC provider (github_oidc_enabled,
+    """Enabled aws-iam-role instances that trust the account's GitHub OIDC provider (github_oidc_provider_enabled,
     github_oidc_provider_arn) in an account where no stack has an aws-github-oidc-provider instance to create it."""
     creators, trusting = set(), []
     for stack_name in sorted(stacks):
@@ -427,8 +423,9 @@ def check_trusted_providers(stacks: dict) -> list[str]:
             if instance.get("component") == "aws-github-oidc-provider":
                 creators.add(account)
             elif (
-                instance.get("component") == "iam"
-                and variables.get("github_oidc_enabled", False) is True
+                instance.get("component") == "aws-iam-role"
+                and residency.flag_on(variables.get("github_oidc_provider_enabled"))
+                and residency.flag_on(variables.get("enabled", True))
                 and variables.get("github_oidc_provider_arn")
             ):
                 trusting.append((account, f"{stack_name}: {name}"))

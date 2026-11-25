@@ -387,22 +387,10 @@ components:
     # aggregation, no GuardDuty export, no enrichment Lambda
     # (check-data-residency.py).
 [[- end ]]
-    # This file keeps aws-config's instance, kms/main's description and replica alias[[ if $data_plane ]], iam/ci's
-    # Lambda package uploader and acm/services' SAN[[ end ]][[ if ne $account .Config.stage ]] and
+    # This file keeps aws-config's instance, kms/main's description and replica alias[[ if $data_plane ]]
+    # and acm/services' SAN[[ end ]][[ if ne $account .Config.stage ]] and
     # cloudtrail's account name and aws-config's account verification[[ end ]].
     # ========================================================================
-[[- if $data_plane ]]
-    iam/ci:
-      vars:
-        # Lambda package uploader (<prefix>-lambda-uploader): the application
-        # repo's CI uploads each function's zip to this stage's
-        # s3/lambda-artifacts bucket with it (docs/OPERATIONS.md, "Lambda
-        # packages"). No role until the app repo is named here as
-        # "<org>/<repo>:<branch>" - an owner input. The alias is kms/main's,
-        # the bucket's key (check-lambda-packages.py).
-        lambda_uploader_trusted_github_repos: []
-        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
-[[- end ]]
     kms/main:
       vars:
 [[- if $data_plane ]]

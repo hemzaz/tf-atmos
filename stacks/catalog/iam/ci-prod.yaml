@@ -9,15 +9,16 @@
 # check-prod-protection.py and check-ci-state-roles.py check both). Each
 # primary imports its account's one GitHub OIDC provider
 # (catalog/aws-github-oidc-provider/main), which its DR standby's roles trust
-# too (ci-standby.yaml). iam/ci keeps only the Lambda package uploader until
-# E6a5 (a stack with a Lambda bucket sets its lambda_uploader_* inputs), and
-# this file stays the stacks' import path until E6a6.
+# too (ci-standby.yaml). The Lambda package uploader is
+# aws-iam-role/lambda-uploader (catalog/aws-iam-role/lambda-uploader, E6a5),
+# off until the stack's file names the application repo. iam/ci creates
+# nothing; this file stays the stacks' import path until E6a6.
 # =============================================================================
 
 import:
   - catalog/iam/defaults
   - catalog/aws-github-oidc-provider/main
-  - catalog/aws-iam-role/ci
+  - catalog/aws-iam-role/lambda-uploader
 
 components:
   terraform:
@@ -26,14 +27,8 @@ components:
         component: iam
         inherits:
           - iam
-      vars:
-        github_oidc_enabled: true
-        # The uploader role is <prefix>-lambda-uploader.
-        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
       dependencies:
         components:
           - component: backend/main
             stack: "{{ .settings.tfstate.stack }}"
-          # The account's GitHub OIDC provider the uploader trusts (imported
-          # above; github_oidc_provider_arn in catalog/iam/defaults).
           - component: aws-github-oidc-provider

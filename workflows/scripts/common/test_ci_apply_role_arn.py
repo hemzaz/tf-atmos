@@ -83,6 +83,12 @@ class RoleNameTest(unittest.TestCase):
         self.assertEqual(ci_apply_role_arn.role_name(role), "FNX_UE1_PROD_CI-APPLY_X_Y")
         self.assertEqual(ci_apply_role_arn.role_name(ci(use_fullname=False)), "ci-apply")
 
+    def test_use_fullname_defaults_true_and_reads_string_forms(self):
+        for value, expected in ((None, True), (True, True), ("true", True), (False, False), ("false", False),
+                                (" False ", False)):
+            with self.subTest(value=value):
+                self.assertIs(ci_apply_role_arn.uses_fullname(ci(use_fullname=value)), expected)
+
     def test_null_label_default_order_without_a_context_order(self):
         role = ci()
         del role["vars"]["context"]["label_order"]

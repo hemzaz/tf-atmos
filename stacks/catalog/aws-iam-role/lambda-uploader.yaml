@@ -1,0 +1,79 @@
+---
+# =============================================================================
+# aws-iam-role/lambda-uploader - an application repo's Lambda package uploader
+# =============================================================================
+# The vendored Cloud Posse aws-iam-role with GitHub OIDC trust (E6a5, in place
+# of the house iam's lambda-uploader.tf): the role an APPLICATION repository's
+# CI assumes to put each function's zip into this stage's s3/lambda-artifacts
+# bucket (the Cloud Posse aws-lambda model: the app builds the package,
+# tf-atmos deploys it; docs/OPERATIONS.md, "Lambda packages"). It cannot touch
+# the functions: a new upload deploys nothing until a tf-atmos PR bumps the
+# instance's settings.package_version.
+#
+# Off (vars.enabled: false, the Cloud Posse switch) until a stack names the app
+# repo, an owner input. Turn it on in the stack's file:
+#
+#   aws-iam-role/lambda-uploader:
+#     vars:
+#       enabled: true
+#       trusted_github_repos:
+#         - "<org>/<app-repo>:<branch>"
+#
+# check-lambda-packages.py (lint) fails one half without the other, and
+# check-prod-protection.py holds the trust to branch-pinned entries (upstream
+# maps "<org>/<repo>:<branch>" to repo:<org>/<repo>:ref:refs/heads/<branch>;
+# no wildcard, pull_request or environment) and the policy to the allow-list
+# below. github-assume-role-policy_override.tf leaves branch entries upstream's.
+#
+# - Name: the null-label id <tenant>-<settings.prefix>-<stage>-ci-lambda-uploader,
+#   the house role's <stack>-ci-lambda-uploader on every deployable stack.
+# - Trust, provider and ordering: the aws-iam-role/ci abstract's (the account's
+#   GitHub OIDC provider by its derived ARN; backend/main and
+#   aws-github-oidc-provider dependencies).
+# - Bucket and key: named, not read. The iam layer applies before kms and
+#   storage (workflows/deploy-full-stack.yaml), so the bucket is the s3
+#   component's own name for catalog/s3/lambda-artifacts
+#   (<Environment>-lambda-artifacts-<account id>, Environment being
+#   settings.prefix) and the key is kms/main's alias (alias/<settings.prefix>-main,
+#   used only through S3 in this region). check-lambda-packages.py fails lint
+#   when the stack's s3/lambda-artifacts or kms/main stops matching them.
+# - Permissions (one policy_documents entry: conditioned statements cannot sit
+#   in policy_statements, catalog/aws-iam-role/ci.yaml): PutObject only as a
+#   conditional write (If-None-Match: *, s3:if-none-match), so a released key
+#   is never overwritten; GetObject and ListBucket so the app CI can tell
+#   whether a version exists (without ListBucket a missing key is 403, not
+#   404); the bucket's key through S3 only.
+# =============================================================================
+
+import:
+  - catalog/aws-iam-role/ci
+
+components:
+  terraform:
+    aws-iam-role/lambda-uploader:
+      metadata:
+        component: aws-iam-role
+        inherits:
+          - aws-iam-role/ci
+      vars:
+        enabled: false
+        name: ci-lambda-uploader
+        role_description: "GitHub Actions OIDC role that uploads Lambda packages to this stage's s3/lambda-artifacts bucket"
+        policy_description: "Put (conditionally) and read Lambda packages in s3/lambda-artifacts, with its key via S3"
+        trusted_github_repos: []
+        policy_documents:
+          - >-
+            {{- $bucket := printf "arn:aws:s3:::%s-lambda-artifacts-%s" .settings.prefix .settings.environment.account_id -}}
+            {"Version": "2012-10-17", "Statement": [
+            {"Sid": "PutLambdaPackages", "Effect": "Allow", "Action": ["s3:PutObject"],
+            "Resource": ["{{ $bucket }}/*"],
+            "Condition": {"Null": {"s3:if-none-match": "false"}}},
+            {"Sid": "ReadLambdaPackages", "Effect": "Allow", "Action": ["s3:GetObject"],
+            "Resource": ["{{ $bucket }}/*"]},
+            {"Sid": "ListLambdaPackages", "Effect": "Allow", "Action": ["s3:ListBucket"],
+            "Resource": ["{{ $bucket }}"]},
+            {"Sid": "LambdaPackageEncryption", "Effect": "Allow",
+            "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"],
+            "Resource": "*",
+            "Condition": {"ForAnyValue:StringEquals": {"kms:ResourceAliases": ["alias/{{ .settings.prefix }}-main"]},
+            "StringEquals": {"kms:ViaService": ["s3.{{ .vars.region }}.amazonaws.com"]}}}]}

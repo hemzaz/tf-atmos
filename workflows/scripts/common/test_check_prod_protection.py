@@ -1,6 +1,7 @@
 """Tests for check-prod-protection.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
 import copy
 import importlib.util
+import json
 import pathlib
 import unittest
 
@@ -109,7 +110,9 @@ class CiTrustTest(unittest.TestCase):
     ADMIN = "arn:aws:iam::aws:policy/AdministratorAccess"
 
     def role(self, kind="plan", stage="prod", repos=None, **variables):
-        return instance("aws-iam-role", stage=stage, name=f"ci-{kind}", github_oidc_provider_enabled=True,
+        variables.setdefault("name", f"ci-{kind}")
+        variables.setdefault("github_oidc_provider_enabled", True)
+        return instance("aws-iam-role", stage=stage,
                         trusted_github_repos=[f"{self.REPO}:master"] if repos is None else repos, **variables)
 
     def found(self, *roles, stage="prod"):
@@ -223,6 +226,200 @@ class CiTrustTest(unittest.TestCase):
         disabled_trust["vars"]["github_oidc_provider_enabled"] = False
         iam = instance("iam", github_oidc_enabled=True)
         self.assertEqual(self.found(dns, off, disabled_trust, iam), [])
+
+    # E6a5: the Lambda package uploader as catalog/aws-iam-role/lambda-uploader.yaml renders it.
+    BUCKET = "arn:aws:s3:::ue1-lambda-artifacts-123456789012"
+    APP = "hemzaz/app"
+
+    def uploader_statements(self):
+        return [
+            {"Sid": "PutLambdaPackages", "Effect": "Allow", "Action": ["s3:PutObject"],
+             "Resource": [f"{self.BUCKET}/*"], "Condition": {"Null": {"s3:if-none-match": "false"}}},
+            {"Sid": "ReadLambdaPackages", "Effect": "Allow", "Action": ["s3:GetObject"],
+             "Resource": [f"{self.BUCKET}/*"]},
+            {"Sid": "ListLambdaPackages", "Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": [self.BUCKET]},
+            {"Sid": "LambdaPackageEncryption", "Effect": "Allow",
+             "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"], "Resource": "*",
+             "Condition": {"ForAnyValue:StringEquals": {"kms:ResourceAliases": ["alias/ue1-main"]},
+                           "StringEquals": {"kms:ViaService": ["s3.us-east-1.amazonaws.com"]}}},
+        ]
+
+    def uploader(self, statements=None, stage="dev", repos=None, **variables):
+        document = json.dumps({"Version": "2012-10-17",
+                               "Statement": self.uploader_statements() if statements is None else statements})
+        variables.setdefault("policy_documents", [document])
+        variables.setdefault("enabled", True)
+        variables.setdefault("region", "us-east-1")
+        return self.role("lambda-uploader", stage=stage,
+                         repos=[f"{self.APP}:main"] if repos is None else repos, **variables)
+
+    def test_catalog_uploader_passes(self):
+        for stage in ("dev", "prod"):
+            with self.subTest(stage=stage):
+                self.assertEqual(self.found(self.uploader(stage=stage), stage=stage), [])
+
+    def test_off_uploader_is_skipped(self):
+        # The catalog default: enabled false and no repos (check-lambda-packages.py pairs the two).
+        for off in (False, "false"):
+            with self.subTest(enabled=off):
+                self.assertEqual(self.found(self.uploader(repos=[], enabled=off), stage="dev"), [])
+
+    def test_enabled_uploader_without_a_repo_fails(self):
+        self.assert_one(self.found(self.uploader(repos=[]), stage="dev"),
+                        "with no trusted_github_repos entry: add the")
+
+    def test_uploader_trusts_a_pinned_branch_only(self):
+        for bad in ("pull_request", "environment:prod", "ref:refs/heads/main", "*", "main*"):
+            with self.subTest(bad=bad):
+                self.assertEqual(len(self.found(self.uploader(repos=[f"{self.APP}:{bad}"]), stage="dev")), 1)
+
+    def test_eks_oidc_trust_on_the_uploader_fails(self):
+        self.assert_one(self.found(self.uploader(eks_oidc_provider_enabled=True), stage="dev"),
+                        "sets eks_oidc_provider_enabled: true")
+
+    def test_uploader_managed_policies_and_statements_fail(self):
+        self.assert_one(self.found(self.uploader(managed_policy_arns=[self.ADMIN]), stage="dev"),
+                        "attaches no managed policy")
+        self.assert_one(self.found(self.uploader(policy_statements=copy.deepcopy(self.STATE_READ)), stage="dev"),
+                        "the uploader's policy is its one policy_documents entry")
+
+    def found_as(self, instances, stage="dev"):
+        """check_ci_trust over instances under their real names (aws-iam-role/lambda-uploader, ...)."""
+        return check_prod_protection.check_ci_trust({f"fnx-ue1-{stage}": {"components": {"terraform": instances}}})
+
+    EXTRA = {"Sid": "X", "Effect": "Allow", "Action": "s3:*", "Resource": "*"}
+
+    def test_renamed_uploader_keeps_its_rules(self):
+        # Review MEDIUM-1: a vars.name override plus s3:* on * must not escape the allow-list.
+        renamed = self.uploader(self.uploader_statements() + [self.EXTRA], name="ci-pkg-uploader")
+        found = self.found_as({"aws-iam-role/lambda-uploader": renamed})
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("sets vars.name 'ci-pkg-uploader': it must stay 'ci-lambda-uploader'", found[0])
+        self.assertIn("outside the uploader's allow-list", found[1])
+
+    def test_renamed_plan_role_keeps_its_rules(self):
+        # The same bypass on ci-plan (E6a4): a renamed plan role with write access.
+        renamed = self.plan(name="ci-read", managed_policy_arns=[self.ADMIN])
+        found = self.found_as({"aws-iam-role/ci-plan": renamed})
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("it must stay 'ci-plan'", found[0])
+        self.assertIn("managed_policy_arns attaches", found[1])
+
+    def test_uploader_without_github_trust_keeps_its_rules(self):
+        # Review MEDIUM-2: OIDC flag off plus a hand-written trust or principals and an extra statement.
+        for trust in ({"assume_role_policy": '{"Statement": []}'}, {"principals": {"AWS": ["*"]}}):
+            with self.subTest(trust=trust):
+                role = self.uploader(self.uploader_statements() + [self.EXTRA],
+                                     github_oidc_provider_enabled=False, **trust)
+                found = self.found_as({"aws-iam-role/lambda-uploader": role})
+                self.assertEqual(len(found), 3, found)
+                self.assertIn("sets github_oidc_provider_enabled False", found[0])
+                self.assertTrue(any("merges an assume_role_policy" in e or "sets principals" in e for e in found), found)
+                self.assertIn("outside the uploader's allow-list", found[-1])
+
+    def test_principals_on_a_github_role_fail(self):
+        self.assert_one(self.found(self.role("apply", principals={"AWS": ["*"]}), stage="prod"), "sets principals")
+
+    def test_off_ci_instances_are_skipped(self):
+        off = self.uploader(repos=[], enabled=False, name="other", github_oidc_provider_enabled=False)
+        self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": off}), [])
+
+    def test_role_name_over_64_characters_fails(self):
+        # Review MEDIUM-3: the house iam's precondition, for every enabled aws-iam-role.
+        context = {"tenant": "fnx", "environment": "ue1-" + "x" * 40, "stage": "dev",
+                   "label_order": ["tenant", "environment", "stage", "name", "attributes"]}
+        long_lane = self.uploader(context=context)
+        found = self.found_as({"aws-iam-role/lambda-uploader": long_lane})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("characters), over IAM's 64: the module would truncate it and append a hash, so it would no "
+                      "longer be the ARN CI and the state backend derive", found[0])
+        self.assertIn("shorten the lane name (settings.prefix)", found[0])
+        dns = instance("aws-iam-role", name="dns-delegation-" + "y" * 60)
+        self.assert_one(self.found_as({"aws-iam-role/dns": dns}), "the module would silently truncate it and append a hash")
+        short = dict(context, environment="ue1-perf")
+        self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=short)}), [])
+
+    def test_use_fullname_false_judges_vars_name_whatever_id_length_limit_says(self):
+        # E6a5 review: the module never truncates var.name, so no id_length_limit exempts a long one.
+        long_name = "dns-delegation-" + "y" * 60  # 75 characters
+        for limit in ({}, {"id_length_limit": 32}, {"context": {"id_length_limit": 32}}, {"id_length_limit": "64"}):
+            for flag in (False, "false", " False "):
+                with self.subTest(limit=limit, use_fullname=flag):
+                    found = self.found_as({"aws-iam-role/dns": instance(
+                        "aws-iam-role", name=long_name, use_fullname=flag, **limit)})
+                    self.assert_one(found, "sets use_fullname false, so the role is named by vars.name")
+                    self.assertIn("(75 characters), over IAM's 64 (id_length_limit does not shorten it): the apply "
+                                  "would fail; shorten vars.name", found[0])
+        ok = instance("aws-iam-role", name="dns-delegation-dev", use_fullname=False, id_length_limit=100)
+        self.assertEqual(self.found_as({"aws-iam-role/dns": ok}), [])
+
+    def test_use_fullname_true_over_64_is_hashed_whatever_id_length_limit_says(self):
+        # The null-label inside the module hard-codes 64, so a stack's id_length_limit changes nothing.
+        long_name = "dns-delegation-" + "y" * 60
+        for limit in ({}, {"id_length_limit": 100}, {"id_length_limit": 32}, {"context": {"id_length_limit": 0}}):
+            for flag in ({}, {"use_fullname": True}, {"use_fullname": "true"}):
+                with self.subTest(limit=limit, flag=flag):
+                    found = self.found_as({"aws-iam-role/dns": instance("aws-iam-role", name=long_name, **limit, **flag)})
+                    self.assert_one(found, "the module would silently truncate it and append a hash")
+                    self.assertIn("(id_length_limit has no effect on it)", found[0])
+
+    def test_id_length_limit_alone_is_not_a_finding(self):
+        for limit in (64, "64", 32, 0, "0", None):
+            with self.subTest(limit=limit):
+                self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(id_length_limit=limit)}), [])
+
+    def test_ci_instance_with_a_long_id_fails(self):
+        # A hashed id is no longer the ARN ci-apply-role-arn.py derives, with or without a limit.
+        long_context = {"tenant": "fnx", "environment": "ue1-" + "x" * 40, "stage": "dev",
+                        "label_order": ["tenant", "environment", "stage", "name", "attributes"]}
+        for limit in ({}, {"id_length_limit": 64}, {"id_length_limit": "32"}):
+            with self.subTest(limit=limit):
+                found = self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=long_context, **limit)})
+                self.assert_one(found, "no longer be the ARN CI and the state backend derive")
+
+    def test_uploader_kms_via_another_region_fails(self):
+        # Review LOW-1: kms:ViaService pinned to the role's own region.
+        statements = self.uploader_statements()
+        statements[3]["Condition"]["StringEquals"]["kms:ViaService"] = ["s3.eu-west-1.amazonaws.com"]
+        self.assert_one(self.found(self.uploader(statements), stage="dev"), "via s3.us-east-1.amazonaws.com only")
+
+    def test_uploader_policy_is_an_allow_list(self):
+        # The deliberately bad cases: each widens or drops one guard of the catalog's policy.
+        def changed(index, **change):
+            statements = self.uploader_statements()
+            statements[index].update(change)
+            return statements
+
+        other = "arn:aws:s3:::ue1-other-123456789012"
+        cases = {
+            "unconditional put": changed(0, Condition=None),
+            "put on another bucket": changed(0, Resource=[f"{other}/*"]),
+            "s3 wildcard action": changed(1, Action=["s3:*"]),
+            "read on every bucket": changed(1, Resource=["*"]),
+            "list on a non-lambda bucket": [dict(s, Resource=[s["Resource"][0].replace(
+                "lambda-artifacts", "data")]) if s["Sid"] != "LambdaPackageEncryption" else s
+                for s in self.uploader_statements()],
+            "kms without the alias": changed(3, Condition={"StringEquals": {
+                "kms:ViaService": ["s3.us-east-1.amazonaws.com"]}}),
+            "kms not via s3": changed(3, Condition={"ForAnyValue:StringEquals": {
+                "kms:ResourceAliases": ["alias/ue1-main"]}}),
+            "kms extra action": changed(3, Action=["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt",
+                                                   "kms:ScheduleKeyDeletion"]),
+            "deny swapped in": changed(2, Effect="Deny"),
+            "extra statement": self.uploader_statements() + [
+                {"Sid": "Extra", "Effect": "Allow", "Action": ["iam:PassRole"], "Resource": "*"}],
+            "missing statement": self.uploader_statements()[:3],
+        }
+        for case, statements in cases.items():
+            with self.subTest(case=case):
+                statements = [{k: v for k, v in s.items() if v is not None} for s in statements]
+                self.assert_one(self.found(self.uploader(statements), stage="dev"),
+                                "outside the uploader's allow-list")
+        self.assert_one(self.found(self.uploader(policy_documents=["{not json"]), stage="dev"),
+                        "is not a JSON policy")
+        two = [json.dumps({"Statement": self.uploader_statements()})] * 2
+        self.assert_one(self.found(self.uploader(policy_documents=two), stage="dev"),
+                        "outside the uploader's allow-list")
 
 
 class TrailProtectionTest(unittest.TestCase):

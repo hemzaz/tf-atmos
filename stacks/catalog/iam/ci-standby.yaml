@@ -9,8 +9,8 @@
 # account's one GitHub OIDC provider, created by the primary's
 # aws-github-oidc-provider (IAM OIDC providers are per account; a second
 # create fails), so each depends on that instance cross-stack: the one value
-# this file overrides. iam/ci keeps only the (unused here) Lambda uploader
-# inputs until E6a5.
+# this file overrides. A standby has no Lambda package uploader, and iam/ci
+# creates nothing (E6a6 deletes it).
 # =============================================================================
 
 import:
@@ -40,9 +40,6 @@ components:
         component: iam
         inherits:
           - iam
-      vars:
-        github_oidc_enabled: true
-        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
       dependencies:
         components:
           - component: backend/main
