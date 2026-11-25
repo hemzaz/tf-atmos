@@ -24,6 +24,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The toolchain verifies the trivy release with `gh attestation verify`,
+      # which needs a token (exit 4 without one). Install in its own step so the
+      # read-only token never reaches the scan step, which runs PR code; that
+      # step reuses the install (same pattern as tflint in the lint job).
+      - name: Install scanners
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: atmos workflow scanner-init -f lint
       # The workspace is owned by the runner's user and the container runs as
       # root, so upload-sarif's internal `git rev-parse` (for the commit oid
       # and ref) hits "dubious ownership" without this -- same cause as the
