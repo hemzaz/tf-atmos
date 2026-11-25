@@ -24,8 +24,8 @@
 # installed by the toolchain). Keep checkov in .pre-commit-config.yaml on the
 # same version.
 #
-# tflint and trivy publish GitHub release tags with a `v` prefix (v0.64.0,
-# v0.75.0) and sign each release with a GitHub Attestation tied to that exact
+# tflint and trivy publish GitHub release tags with a `v` prefix (v<x.y.z>)
+# and sign each release with a GitHub Attestation tied to that exact
 # tag ref. The toolchain's cosign verification compares the pin here against
 # `refs/tags/<pin>`, so an unprefixed pin ("0.64.0") never matches the
 # certificate's workflow ref and install fails with "expected GitHub Workflow

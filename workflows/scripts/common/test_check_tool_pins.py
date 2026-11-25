@@ -118,6 +118,22 @@ class CheckToolPinsTest(unittest.TestCase):
         files[".pre-commit-config.yaml"] = "additional_dependencies: ['yamllint==1.38.0']\n"
         self.assertEqual(self.run_check(files), (0, ""))
 
+    def test_alias_without_a_dependencies_anchor_fails(self):
+        for name, text in {
+            "top-level anchor": "x-pins: &pins\n  tools:\n    terraform: \"1.16.3\"\nworkflows:\n  lint:\n    dependencies: *pins\n",
+            "anchor inside a workflow key": "workflows:\n  a:\n    pins: &pins\n      tools:\n        terraform: \"1.16.3\"\n  b:\n    dependencies: *pins\n",
+        }.items():
+            with self.subTest(name=name):
+                rc, err = self.run_check({"workflows/lint.yaml": text})
+                self.assertEqual(rc, 1)
+                self.assertIn("dependencies alias *pins does not point at a `dependencies: &pins` block", err)
+
+    def test_flow_mapping_on_the_dependencies_line_fails(self):
+        text = 'workflows:\n  lint:\n    dependencies: &d {tools: {terraform: "1.16.3"}}\n'
+        rc, err = self.run_check({"workflows/lint.yaml": text})
+        self.assertEqual(rc, 1)
+        self.assertIn("unreadable dependencies line", err)
+
     def test_no_declarations_fails(self):
         rc, err = self.run_check({"README.md": "nothing\n"})
         self.assertEqual(rc, 1)

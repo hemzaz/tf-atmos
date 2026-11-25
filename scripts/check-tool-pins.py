@@ -4,7 +4,8 @@
 Atmos (1.229, 1.233) gives each workflow and custom command only its own
 `dependencies.tools` (no atmos.yaml-wide default; `.tool-versions` is not committed),
 so a pin repeats in every workflow that needs the tool (or is shared through a YAML anchor
-`dependencies: &name`, read here; the `*name` alias lines declare nothing).
+`dependencies: &name`, read here; a `dependencies: *name` alias must point at one, and
+any other text after `dependencies:` fails rather than being skipped).
 
 Each `dependencies.tools` entry under atmos.yaml, workflows/ and stacks/ declares a
 tool (block or flow style; anything but an exact `x.y.z` pin fails). Every mention of
@@ -37,7 +38,8 @@ ALIASES = {"yamllint": "go-yamllint", "tf": "terraform"}
 
 VERSION = r"v?\d+\.\d+\.\d+"
 Q = "[\"']?"
-DEPS_LINE = re.compile(r"^(\s*)dependencies:\s*(?:&[\w-]+\s*)?(?:#.*)?$")  # optional YAML anchor; an `*alias` line declares nothing
+DEPS_LINE = re.compile(r"^(\s*)dependencies:(.*)$")
+DEPS_TAIL = re.compile(r"^\s*(?:([&*])([\w-]+))?\s*(?:#.*)?$")
 TOOLS_LINE = re.compile(r"^(\s*)tools:\s*(#.*)?$")
 FLOW_LINE = re.compile(r"^(\s*)tools:\s*\{(.*)\}\s*(#.*)?$")
 ENTRY_LINE = re.compile(rf"^(\s*)([\w./-]+):\s*{Q}({VERSION}){Q}\s*(#.*)?$")
@@ -65,6 +67,7 @@ def declarations(lines):
 
     Raises PinError on an entry that is not an exact x.y.z pin."""
     deps_indent = tools_indent = None
+    anchors = set()
     for number, line in enumerate(lines, 1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -81,6 +84,19 @@ def declarations(lines):
             deps_indent = None
         match = DEPS_LINE.match(line)
         if match:
+            tail = DEPS_TAIL.match(match.group(2))
+            if not tail:
+                raise PinError(f"{number}: unreadable dependencies line {line.strip()!r}")
+            sigil, name = tail.groups()
+            if sigil == "&":
+                anchors.add(name)
+            elif sigil == "*":
+                if name not in anchors:
+                    raise PinError(
+                        f"{number}: dependencies alias *{name} does not point at a `dependencies: &{name}` block"
+                    )
+                deps_indent = None
+                continue
             deps_indent = len(match.group(1))
             continue
         if deps_indent is None or indent <= deps_indent or not line.lstrip().startswith("tools:"):
