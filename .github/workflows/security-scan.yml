@@ -25,9 +25,9 @@ jobs:
         with:
           persist-credentials: false
       # The toolchain verifies the trivy release with `gh attestation verify`,
-      # which needs a token (exit 4 without one). Install in its own step so the
-      # read-only token never reaches the scan step, which runs PR code; that
-      # step reuses the install (same pattern as tflint in the lint job).
+      # which needs a token (exit 4 without one). Same split as the PR gate in
+      # terraform-ci.yml: install in its own step so the scanners, which parse
+      # the repo's files, never hold the token; the Scan step reuses the install.
       - name: Install scanners
         env:
           GH_TOKEN: ${{ github.token }}

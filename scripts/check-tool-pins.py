@@ -3,7 +3,8 @@
 
 Atmos (1.229, 1.233) gives each workflow and custom command only its own
 `dependencies.tools` (no atmos.yaml-wide default; `.tool-versions` is not committed),
-so a pin repeats in every workflow that needs the tool.
+so a pin repeats in every workflow that needs the tool (or is shared through a YAML anchor
+`dependencies: &name`, read here; the `*name` alias lines declare nothing).
 
 Each `dependencies.tools` entry under atmos.yaml, workflows/ and stacks/ declares a
 tool (block or flow style; anything but an exact `x.y.z` pin fails). Every mention of
@@ -36,7 +37,7 @@ ALIASES = {"yamllint": "go-yamllint", "tf": "terraform"}
 
 VERSION = r"v?\d+\.\d+\.\d+"
 Q = "[\"']?"
-DEPS_LINE = re.compile(r"^(\s*)dependencies:\s*$")
+DEPS_LINE = re.compile(r"^(\s*)dependencies:\s*(?:&[\w-]+\s*)?(?:#.*)?$")  # optional YAML anchor; an `*alias` line declares nothing
 TOOLS_LINE = re.compile(r"^(\s*)tools:\s*(#.*)?$")
 FLOW_LINE = re.compile(r"^(\s*)tools:\s*\{(.*)\}\s*(#.*)?$")
 ENTRY_LINE = re.compile(rf"^(\s*)([\w./-]+):\s*{Q}({VERSION}){Q}\s*(#.*)?$")

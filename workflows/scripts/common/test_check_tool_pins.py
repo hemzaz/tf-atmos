@@ -108,6 +108,16 @@ class CheckToolPinsTest(unittest.TestCase):
         rc, err = self.run_check({"workflows/lint.yaml": WORKFLOW, "Makefile": text})
         self.assertEqual((rc, err), (0, ""))
 
+    def test_anchored_dependencies_block_is_read_and_alias_is_ignored(self):
+        anchored = WORKFLOW.replace("dependencies:", "dependencies: &deps  # shared", 1)
+        aliased = "workflows:\n  other:\n    dependencies: *deps\n    steps: []\n"
+        files = {"workflows/lint.yaml": anchored + aliased, ".pre-commit-config.yaml": "additional_dependencies: ['yamllint==1.38.1']\n"}
+        rc, err = self.run_check(files)
+        self.assertEqual(rc, 1)
+        self.assertIn("go-yamllint is pinned to 2 versions", err)
+        files[".pre-commit-config.yaml"] = "additional_dependencies: ['yamllint==1.38.0']\n"
+        self.assertEqual(self.run_check(files), (0, ""))
+
     def test_no_declarations_fails(self):
         rc, err = self.run_check({"README.md": "nothing\n"})
         self.assertEqual(rc, 1)

@@ -943,7 +943,7 @@ requires code-owner review).
 - **Toolchain tools** (terraform, tflint, trivy, checkov, yq, aws-cli, jq, ...). Atmos gives each
   workflow and custom command only its own `dependencies.tools` (no repo-wide default it inherits;
   `.tool-versions` is a regenerated dev-shell file, not committed), so a pin repeats in every
-  workflow, stack default, `terraform-ci.yml` install, `.pre-commit-config.yaml` and doc that names
+  workflow (or a YAML anchor, as for the scanners), stack default, `terraform-ci.yml` install, `.pre-commit-config.yaml` and doc that names
   it. To bump one, change any copy and run `python3 scripts/check-tool-pins.py`: it lists every copy
   still on the old version (lint step `tool-pins`), then run lint and validate-all. Neither
   Dependabot nor Renovate (not configured) reads `dependencies.tools`, so bumps are by hand.

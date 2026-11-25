@@ -18,10 +18,11 @@
 # holds the checkov gate and writes the reports. lint used to run the identical
 # trivy command a second time.
 #
-# Scanner pins: checkov 3.3.21 (3.3.22 has no GitHub release, so the toolchain
-# cannot install it) and trivy v0.75.0, written once in scanner-init and shared
-# by security-scan and security-scan-report through a YAML anchor. Keep
-# .pre-commit-config.yaml on the same versions.
+# Scanner pins (trivy, checkov): written once in scanner-init and shared by
+# security-scan and security-scan-report through a YAML anchor. Bump checkov
+# only to a version with a GitHub release (a newer PyPI-only one cannot be
+# installed by the toolchain). Keep checkov in .pre-commit-config.yaml on the
+# same version.
 #
 # tflint and trivy publish GitHub release tags with a `v` prefix (v0.64.0,
 # v0.75.0) and sign each release with a GitHub Attestation tied to that exact
