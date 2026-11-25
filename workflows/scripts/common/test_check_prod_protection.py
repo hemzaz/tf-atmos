@@ -331,43 +331,51 @@ class CiTrustTest(unittest.TestCase):
         long_lane = self.uploader(context=context)
         found = self.found_as({"aws-iam-role/lambda-uploader": long_lane})
         self.assertEqual(len(found), 1, found)
-        self.assertIn("characters), over IAM's 64: the apply would fail; shorten the lane name (settings.prefix)",
-                      found[0])
+        self.assertIn("characters), over IAM's 64: the module would truncate it and append a hash, so it would no "
+                      "longer be the ARN CI and the state backend derive", found[0])
+        self.assertIn("shorten the lane name (settings.prefix)", found[0])
         dns = instance("aws-iam-role", name="dns-delegation-" + "y" * 60)
-        self.assert_one(self.found_as({"aws-iam-role/dns": dns}), "over IAM's 64")
+        self.assert_one(self.found_as({"aws-iam-role/dns": dns}), "the module would silently truncate it and append a hash")
         short = dict(context, environment="ue1-perf")
         self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=short)}), [])
 
-    def test_id_length_limit_exempts_only_a_truncating_limit_off_the_ci_instances(self):
-        # Re-review MEDIUM-3: only 0 < limit <= 64 truncates the id under IAM's cap.
+    def test_use_fullname_false_judges_vars_name_whatever_id_length_limit_says(self):
+        # E6a5 review: the module never truncates var.name, so no id_length_limit exempts a long one.
         long_name = "dns-delegation-" + "y" * 60  # 75 characters
-        cases = {
-            "limit 100 (var)": ({"id_length_limit": 100}, "over IAM's 64"),
-            "limit '0' (rendered string: unlimited)": ({"id_length_limit": "0"}, "over IAM's 64"),
-            "limit 100 (context)": ({"context": {"id_length_limit": 100}}, "over IAM's 64"),
-            "limit 'x' (not a number)": ({"id_length_limit": "x"}, "over IAM's 64"),
-        }
-        for case, (variables, fragment) in cases.items():
-            with self.subTest(case=case):
-                self.assert_one(self.found_as({"aws-iam-role/dns": instance("aws-iam-role", name=long_name, **variables)}),
-                                fragment)
-        for variables in ({"id_length_limit": 64}, {"id_length_limit": "64"}, {"context": {"id_length_limit": 32}}):
-            with self.subTest(truncating=variables):
-                self.assertEqual(self.found_as({"aws-iam-role/dns": instance("aws-iam-role", name=long_name, **variables)}),
-                                 [])
+        for limit in ({}, {"id_length_limit": 32}, {"context": {"id_length_limit": 32}}, {"id_length_limit": "64"}):
+            for flag in (False, "false", " False "):
+                with self.subTest(limit=limit, use_fullname=flag):
+                    found = self.found_as({"aws-iam-role/dns": instance(
+                        "aws-iam-role", name=long_name, use_fullname=flag, **limit)})
+                    self.assert_one(found, "sets use_fullname false, so the role is named by vars.name")
+                    self.assertIn("(75 characters), over IAM's 64 (id_length_limit does not shorten it): the apply "
+                                  "would fail; shorten vars.name", found[0])
+        ok = instance("aws-iam-role", name="dns-delegation-dev", use_fullname=False, id_length_limit=100)
+        self.assertEqual(self.found_as({"aws-iam-role/dns": ok}), [])
 
-    def test_id_length_limit_on_a_ci_instance_fails(self):
-        # A truncated, hashed id is no longer the ARN ci-apply-role-arn.py derives.
-        for instance_name, role in (("aws-iam-role/lambda-uploader", self.uploader(id_length_limit=64)),
-                                    ("aws-iam-role/ci-plan", self.plan(id_length_limit="64")),
-                                    ("aws-iam-role/ci-apply", self.role("apply", context={"id_length_limit": 64}))):
-            with self.subTest(instance=instance_name):
-                self.assert_one(self.found_as({instance_name: role}, stage="prod" if "apply" in instance_name else "dev"),
-                                f"remove id_length_limit from {instance_name}")
-        for unlimited in (0, "0", None):
-            with self.subTest(unlimited=unlimited):
-                self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(id_length_limit=unlimited)}),
-                                 [])
+    def test_use_fullname_true_over_64_is_hashed_whatever_id_length_limit_says(self):
+        # The null-label inside the module hard-codes 64, so a stack's id_length_limit changes nothing.
+        long_name = "dns-delegation-" + "y" * 60
+        for limit in ({}, {"id_length_limit": 100}, {"id_length_limit": 32}, {"context": {"id_length_limit": 0}}):
+            for flag in ({}, {"use_fullname": True}, {"use_fullname": "true"}):
+                with self.subTest(limit=limit, flag=flag):
+                    found = self.found_as({"aws-iam-role/dns": instance("aws-iam-role", name=long_name, **limit, **flag)})
+                    self.assert_one(found, "the module would silently truncate it and append a hash")
+                    self.assertIn("(id_length_limit has no effect on it)", found[0])
+
+    def test_id_length_limit_alone_is_not_a_finding(self):
+        for limit in (64, "64", 32, 0, "0", None):
+            with self.subTest(limit=limit):
+                self.assertEqual(self.found_as({"aws-iam-role/lambda-uploader": self.uploader(id_length_limit=limit)}), [])
+
+    def test_ci_instance_with_a_long_id_fails(self):
+        # A hashed id is no longer the ARN ci-apply-role-arn.py derives, with or without a limit.
+        long_context = {"tenant": "fnx", "environment": "ue1-" + "x" * 40, "stage": "dev",
+                        "label_order": ["tenant", "environment", "stage", "name", "attributes"]}
+        for limit in ({}, {"id_length_limit": 64}, {"id_length_limit": "32"}):
+            with self.subTest(limit=limit):
+                found = self.found_as({"aws-iam-role/lambda-uploader": self.uploader(context=long_context, **limit)})
+                self.assert_one(found, "no longer be the ARN CI and the state backend derive")
 
     def test_uploader_kms_via_another_region_fails(self):
         # Review LOW-1: kms:ViaService pinned to the role's own region.

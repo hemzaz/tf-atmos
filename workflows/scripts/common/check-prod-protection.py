@@ -46,7 +46,9 @@ enabled false creates nothing and is skipped (the uploader's catalog default). T
 (aws-iam-role/ci-plan, ci-apply, lambda-uploader) are recognised by instance name, so an override
 cannot slip them out of these rules: each must keep its vars.name (the name its ARN is derived from)
 and github_oidc_provider_enabled true. Every enabled aws-iam-role's resolved name
-(ci-apply-role-arn.py's role_name, the one copy of the rule) is at most IAM's 64 characters.
+(ci-apply-role-arn.py's role_name, the one copy of the rule) fits IAM's 64 characters: with use_fullname
+false the name is vars.name and must be at most 64; with true (the default) the null-label id must be, or
+the module truncates it and appends a hash (id_length_limit never reaches the role name).
 
 And every deployable aws-cloudtrail instance, in any stage (OQ-F, E5b4b), keeps
 its trail and the trail's KMS key: Cloud Posse's component always creates the
@@ -100,7 +102,6 @@ VIA_S3 = re.compile(r"s3\.[a-z]{2}(-[a-z]+)+-[0-9]+\.amazonaws\.com")
 # from it; the instance name, not vars.name, decides which rules apply).
 CI_INSTANCES = {"aws-iam-role/ci-plan": CI_PLAN_NAME, "aws-iam-role/ci-apply": "ci-apply",
                 "aws-iam-role/lambda-uploader": UPLOADER_NAME}
-MAX_ROLE_NAME = 64
 # The one copy of the null-label role name rule (ci-apply-role-arn.py; check-ci-state-roles.py uses it too).
 _spec = importlib.util.spec_from_file_location(
     "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py"))
@@ -221,39 +222,25 @@ def check_ci_trust(stacks: dict) -> list[str]:
     return errors
 
 
-def id_length_limit(instance: dict) -> Optional[int]:
-    """null-label's effective id_length_limit (the var over vars.context; Atmos may render it as a string):
-    None or 0 means unlimited; a non-numeric value is returned as -1, which never counts as truncating."""
-    value = normalize(ci_apply_role_arn.label(instance, "id_length_limit"))
-    if value is None:
-        return None
-    return value if isinstance(value, int) and not isinstance(value, bool) else -1
-
-
 def role_name_errors(where: str, name: str, instance: dict) -> list[str]:
-    """IAM caps a role name at 64 characters; the house iam checked it at plan, the vendored role fails at apply.
+    """The role name must fit IAM's 64 characters on its own: id_length_limit never shortens it.
 
-    A CI instance's ARN is derived from the untruncated id (ci-apply-role-arn.py), so it may set no
-    id_length_limit at all; any other role is exempt only when null-label truncates its id to 64 or less.
+    cloudposse/iam-role/aws names the role module.role_name.id (use_fullname true) from a null-label
+    that hard-codes id_length_limit 64, so a longer id is silently truncated and hashed; with
+    use_fullname false the name is var.name, never truncated, and a longer one fails the apply.
     """
-    errors = []
-    variables = instance.get("vars") or {}
-    if name in CI_INSTANCES:
-        for source, value in (("vars", variables.get("id_length_limit")),
-                              ("vars.context", (variables.get("context") or {}).get("id_length_limit"))):
-            if normalize(value) not in (None, 0):
-                errors.append(f"{where} sets {source}.id_length_limit {value!r}: null-label would truncate and hash "
-                              "the role name, so it would no longer be the ARN CI and the state backend derive "
-                              f"(ci-apply-role-arn.py); remove id_length_limit from {name}")
-    limit = id_length_limit(instance)
-    if name not in CI_INSTANCES and limit is not None and 0 < limit <= MAX_ROLE_NAME:
-        return errors  # null-label truncates the id itself
     role = ci_apply_role_arn.role_name(instance)
-    if len(role) > MAX_ROLE_NAME:
-        errors.append(f"{where} resolves the role name {role!r} ({len(role)} characters), over IAM's "
-                      f"{MAX_ROLE_NAME}: the apply would fail; shorten the lane name (settings.prefix) or the "
-                      "instance's vars.name")
-    return errors
+    if len(role) <= ci_apply_role_arn.MAX_ROLE_NAME:
+        return []
+    cap = ci_apply_role_arn.MAX_ROLE_NAME
+    if not ci_apply_role_arn.uses_fullname(instance):
+        return [f"{where} sets use_fullname false, so the role is named by vars.name {role!r} ({len(role)} characters), "
+                f"over IAM's {cap} (id_length_limit does not shorten it): the apply would fail; shorten vars.name"]
+    consequence = ("the module would truncate it and append a hash, so it would no longer be the ARN CI and the "
+                   "state backend derive (ci-apply-role-arn.py)" if name in CI_INSTANCES
+                   else "the module would silently truncate it and append a hash")
+    return [f"{where} resolves the role id {role!r} ({len(role)} characters), over IAM's {cap}: {consequence} "
+            "(id_length_limit has no effect on it); shorten the lane name (settings.prefix) or the instance's vars.name"]
 
 
 def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance: str = "") -> list[str]:

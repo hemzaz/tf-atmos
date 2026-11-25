@@ -26,7 +26,10 @@ import re
 import subprocess
 import sys
 
-ARN = re.compile(r"arn:aws:iam::\d{12}:role/[\w+=,.@-]{1,64}")
+# IAM's role-name cap, and the cap cloudposse/iam-role/aws hard-codes (id_length_limit = 64) on the
+# null-label id it names the role with when use_fullname is true: a longer id is truncated and hashed.
+MAX_ROLE_NAME = 64
+ARN = re.compile(r"arn:aws:iam::\d{12}:role/[\w+=,.@-]{1,%d}" % MAX_ROLE_NAME)
 KINDS = ("plan", "apply")
 # kind -> the stack's aws-iam-role instance (stacks/catalog/aws-iam-role/ci.yaml)
 INSTANCES = {kind: f"aws-iam-role/ci-{kind}" for kind in KINDS}
@@ -57,10 +60,16 @@ def creates_role(ci: dict) -> bool:
             and bool(variables.get("trusted_github_repos")))
 
 
+def uses_fullname(ci: dict) -> bool:
+    """The component's use_fullname (default true; Atmos may render the bool as a string)."""
+    value = (ci.get("vars") or {}).get("use_fullname")
+    return str(value).strip().lower() != "false" if isinstance(value, str) else value is not False
+
+
 def role_name(ci: dict) -> str:
-    """The role's name: the null-label id (use_fullname, the component default) or var.name."""
+    """The role's name before the module's own truncation: the null-label id (use_fullname) or var.name."""
     variables = ci.get("vars") or {}
-    if variables.get("use_fullname") is False:
+    if not uses_fullname(ci):
         return str(variables.get("name") or "")
     context = variables.get("context") or {}
     attributes = list(variables.get("attributes") or []) + list(context.get("attributes") or [])
