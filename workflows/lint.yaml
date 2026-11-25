@@ -5,6 +5,7 @@
 #   atmos workflow lint -f lint
 #   atmos workflow tflint-init -f lint            # install tflint + its .tflint.hcl plugins (network)
 #   atmos workflow actionlint -f lint             # lint .github/workflows (actionlint)
+#   atmos workflow scanner-init -f lint           # install trivy + checkov (CI: own step with GH_TOKEN)
 #   atmos workflow security-scan -f lint          # PR gate: Trivy + Checkov, fails on HIGH/CRITICAL
 #   atmos workflow security-scan-report -f lint   # nightly: every finding, never fails
 #
@@ -17,12 +18,14 @@
 # holds the checkov gate and writes the reports. lint used to run the identical
 # trivy command a second time.
 #
-# Scanner pins: checkov 3.3.21 (3.3.22 has no GitHub release, so the toolchain
-# cannot install it) and trivy v0.75.0. Keep .pre-commit-config.yaml on the
-# same versions.
+# Scanner pins (trivy, checkov): written once in scanner-init and shared by
+# security-scan and security-scan-report through a YAML anchor. Bump checkov
+# only to a version with a GitHub release (a newer PyPI-only one cannot be
+# installed by the toolchain). Keep checkov in .pre-commit-config.yaml on the
+# same version.
 #
-# tflint and trivy publish GitHub release tags with a `v` prefix (v0.64.0,
-# v0.75.0) and sign each release with a GitHub Attestation tied to that exact
+# tflint and trivy publish GitHub release tags with a `v` prefix (v<x.y.z>)
+# and sign each release with a GitHub Attestation tied to that exact
 # tag ref. The toolchain's cosign verification compares the pin here against
 # `refs/tags/<pin>`, so an unprefixed pin ("0.64.0") never matches the
 # certificate's workflow ref and install fails with "expected GitHub Workflow
@@ -453,12 +456,24 @@ workflows:
         type: shell
         command: actionlint -color
 
-  security-scan:
-    description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings
-    dependencies:
+  # Install-only: CI runs it in its own step with a read-only GH_TOKEN (the
+  # toolchain verifies the trivy release with `gh attestation verify`), so the
+  # token never reaches the scan step that runs PR code. The pins live here
+  # once; security-scan and security-scan-report alias them.
+  scanner-init:
+    description: Install the Trivy and Checkov scanners (the one place their pins live)
+    dependencies: &scanner_dependencies
       tools:
         trivy: "v0.75.0"
         checkov: "3.3.21"
+    steps:
+      - name: scanners
+        type: shell
+        command: trivy --version && checkov --version
+
+  security-scan:
+    description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings
+    dependencies: *scanner_dependencies
     steps:
       - name: reports-dir
         type: shell
@@ -639,10 +654,7 @@ workflows:
 
   security-scan-report:
     description: Report-only scan for the nightly workflow (SARIF in reports/); never fails on findings
-    dependencies:
-      tools:
-        trivy: "v0.75.0"
-        checkov: "3.3.21"
+    dependencies: *scanner_dependencies
     steps:
       - name: reports-dir
         type: shell
