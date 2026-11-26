@@ -80,6 +80,8 @@ PROD_PLAN_BRANCH = "master"
 # The CI roles (stacks/catalog/aws-iam-role/ci.yaml): the vendored aws-iam-role with GitHub OIDC trust.
 CI_ROLE_COMPONENT = "aws-iam-role"
 CI_PLAN_NAME = "ci-plan"
+# The GitHub OIDC issuer host: a trust that names it (directly or in an oidc-provider ARN) is a GitHub trust.
+GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
 # "<org>/<repo>:<constraint>": an explicit org (upstream's unqualified form takes trusted_github_org).
 TRUSTED_REPO = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:(.+)")
 # A bare branch name: no ':' (so no ref:, environment: or other claim), no wildcard.
@@ -216,10 +218,24 @@ def check_ci_trust(stacks: dict) -> list[str]:
             # The CI instances are checked by their instance name, whatever their vars say (an
             # override of name or github_oidc_provider_enabled must not drop them out of the rules).
             if name not in CI_INSTANCES and normalize(variables.get("github_oidc_provider_enabled")) is not True:
+                if names_github_trust(variables):
+                    errors.append(f"{where} trusts GitHub OIDC ({GITHUB_OIDC_HOST}) through its assume_role_policy or "
+                                  "principals, which skips every CI trust rule; trust GitHub only through "
+                                  "github_oidc_provider_enabled + trusted_github_repos on aws-iam-role/ci-* "
+                                  "(stacks/catalog/aws-iam-role/ci.yaml); remove the hand-written trust")
                 continue
             stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
             errors += ci_trust_errors(where, variables, stage, name)
     return errors
+
+
+def names_github_trust(variables: dict) -> bool:
+    """Whether assume_role_policy (a JSON string or a map) or principals mention the GitHub OIDC host."""
+    for key in ("assume_role_policy", "principals"):
+        value = variables.get(key)
+        if value and GITHUB_OIDC_HOST in (value if isinstance(value, str) else json.dumps(value)):
+            return True
+    return False
 
 
 def role_name_errors(where: str, name: str, instance: dict) -> list[str]:
@@ -275,9 +291,8 @@ def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance:
         errors.append(f"{where} sets instance_profile_enabled: true, which makes the role attachable to an EC2 "
                       f"instance; a CI role is assumed through GitHub OIDC only ({catalog}); remove it")
     if variables.get("max_session_duration") is not None:
-        errors.append(f"{where} sets max_session_duration {variables['max_session_duration']!r}: a CI role's session "
-                      f"is the component default (3600s), so a leaked token lives no longer ({catalog}); remove "
-                      "max_session_duration; the CI roles use the component default (3600s)")
+        errors.append(f"{where} sets max_session_duration {variables['max_session_duration']!r}: CI roles keep the "
+                      f"component default (3600s) so a leaked token lives no longer ({catalog}); remove it")
     if variables.get("assume_role_policy"):
         errors.append(f"{where} merges an assume_role_policy into its GitHub OIDC trust; the trust must come "
                       "from trusted_github_repos alone")

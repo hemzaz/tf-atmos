@@ -197,12 +197,40 @@ class CiTrustTest(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assert_one(self.found(self.role(kind, permissions_boundary="arn:aws:iam::1:policy/b")),
                                 "sets permissions_boundary")
-                self.assert_one(self.found(self.role(kind, instance_profile_enabled=True)),
-                                "sets instance_profile_enabled: true")
-                for bad in (3599, 7200, 43201, "abc"):
+                for true in (True, "true", "True"):
+                    self.assert_one(self.found(self.role(kind, instance_profile_enabled=true)),
+                                    "sets instance_profile_enabled: true")
+                for bad in (3600, "3600", 3599, 7200, 43201, "abc"):
                     self.assert_one(self.found(self.role(kind, max_session_duration=bad)), "sets max_session_duration")
                 self.assertEqual(self.found(self.role(kind)), [])
         self.assertEqual(self.found(self.role(instance_profile_enabled=False, permissions_boundary="")), [])
+
+    def test_uploader_rejects_boundary_instance_profile_and_session_duration(self):
+        for bad, fragment in ((dict(permissions_boundary="arn:aws:iam::1:policy/b"), "sets permissions_boundary"),
+                              (dict(instance_profile_enabled="true"), "sets instance_profile_enabled: true"),
+                              (dict(max_session_duration=3600), "sets max_session_duration")):
+            with self.subTest(fragment=fragment):
+                self.assert_one(self.found(self.uploader(**bad), stage="dev"), fragment)
+
+    GITHUB_PROVIDER = "arn:aws:iam::123456789012:oidc-provider/" + check_prod_protection.GITHUB_OIDC_HOST
+    GITHUB_TRUST = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "sts:AssumeRoleWithWebIdentity",
+                                                             "Principal": {"Federated": GITHUB_PROVIDER}}]}
+
+    def hand_written(self, **variables):
+        role = instance("aws-iam-role", stage="dev", name="ci-apply-x", github_oidc_provider_enabled=False, **variables)
+        return self.found(role, stage="dev")
+
+    def test_a_hand_written_github_trust_fails_in_every_form(self):
+        for form, variables in (("string", {"assume_role_policy": json.dumps(self.GITHUB_TRUST)}),
+                                ("map", {"assume_role_policy": self.GITHUB_TRUST}),
+                                ("principals", {"principals": {"Federated": [self.GITHUB_PROVIDER]},
+                                                "assume_role_conditions": [{"test": "StringEquals"}]})):
+            with self.subTest(form=form):
+                self.assert_one(self.hand_written(**variables), "trust GitHub only through github_oidc_provider_enabled")
+
+    def test_an_unrelated_hand_written_trust_passes(self):
+        self.assertEqual(self.hand_written(principals={"Service": ["ec2.amazonaws.com"]}), [])
+        self.assertEqual(self.hand_written(assume_role_policy=json.dumps({"Statement": []})), [])
 
     def test_ci_instance_name_hint_never_says_to_shorten_vars_name(self):
         long_role = self.role("apply", stage="dev")
