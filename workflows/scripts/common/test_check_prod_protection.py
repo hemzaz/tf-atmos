@@ -199,10 +199,9 @@ class CiTrustTest(unittest.TestCase):
                                 "sets permissions_boundary")
                 self.assert_one(self.found(self.role(kind, instance_profile_enabled=True)),
                                 "sets instance_profile_enabled: true")
-                for bad in (3599, 43201, "abc"):
+                for bad in (3599, 7200, 43201, "abc"):
                     self.assert_one(self.found(self.role(kind, max_session_duration=bad)), "sets max_session_duration")
-                for ok in (3600, "7200", 43200):
-                    self.assertEqual(self.found(self.role(kind, max_session_duration=ok)), [])
+                self.assertEqual(self.found(self.role(kind)), [])
         self.assertEqual(self.found(self.role(instance_profile_enabled=False, permissions_boundary="")), [])
 
     def test_ci_instance_name_hint_never_says_to_shorten_vars_name(self):
