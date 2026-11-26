@@ -340,8 +340,12 @@ class CheckCiStateRolesTest(unittest.TestCase):
         )
 
     def test_unresolvable_arn_fails(self):
-        self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", environment="bad name", apply=False)})),
+        self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", environment="e" * 70, apply=False)})),
                         "ci-plan role: resolved an invalid role ARN")
+        # a custom regex_replace_chars that keeps the space leaves an invalid character in the ARN
+        bad = ci("prod", environment="bad name", apply=False)
+        bad["aws-iam-role/ci-plan"]["vars"]["regex_replace_chars"] = "/[^-a-zA-Z0-9 ]/"
+        self.assert_has(stacks(**today(**{"fnx-ue1-prod": bad})), "ci-plan role: resolved an invalid role ARN")
 
 
 def sso(stage, permission_set):
