@@ -71,7 +71,10 @@ def uses_fullname(ci: dict) -> bool:
 
 
 def clean(value: str, regex: str) -> str:
-    """null-label's replace(value, regex_replace_chars, ""): "/.../" is a regex, anything else a literal."""
+    """null-label's replace(value, regex_replace_chars, ""): "/.../" is a regex, anything else a literal.
+
+    Python's re is not RE2: only a custom regex_replace_chars could diverge; the default is identical.
+    """
     if len(regex) >= 2 and regex.startswith("/") and regex.endswith("/"):
         return re.sub(regex[1:-1], "", value)
     return value.replace(regex, "")
@@ -86,6 +89,11 @@ def cased(value: str, case: str) -> str:
     return value.upper() if case == "upper" else value.lower()
 
 
+def text(value) -> str:
+    """Terraform's string form of a label value: bools are lowercase."""
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
 def role_name(ci: dict) -> str:
     """The role's name before the module's own truncation: the null-label id (use_fullname) or var.name.
 
@@ -94,19 +102,19 @@ def role_name(ci: dict) -> str:
     labels that end up empty are left out of the join; a delimiter of "" is kept.
     """
     variables = ci.get("vars") or {}
-    if not uses_fullname(ci):
-        return str(variables.get("name") or "")
     context = variables.get("context") or {}
     regex = label(ci, "regex_replace_chars") or REGEX_REPLACE_CHARS
     case = label(ci, "label_value_case") or LABEL_VALUE_CASE
+    if not uses_fullname(ci):  # iam-role 0.23.0 names the role module.this.name: the cleaned, cased label
+        return cased(clean(text(label(ci, "name") or ""), regex), case)
     delimiter = label(ci, "delimiter")
     raw = list(context.get("attributes") or []) + list(variables.get("attributes") or [])
-    # Cloud Posse's concat/compact/distinct twice: on the raw attributes, then after cleaning and casing.
-    attributes = list(dict.fromkeys(a for a in (cased(clean(str(v), regex), case) for v in dict.fromkeys(raw) if v) if a))
+    # null-label de-duplicates and compacts twice; once on the cleaned, cased strings covers both.
+    attributes = list(dict.fromkeys(a for a in (cased(clean(text(v), regex), case) for v in raw if v is not None and v != "") if a))
     parts = []
     for field in label(ci, "label_order") or LABEL_ORDER:
         values = attributes if field == "attributes" else [label(ci, field)]
-        parts += [cased(clean(str(value), regex), case) for value in values if value is not None]
+        parts += [cased(clean(text(value), regex), case) for value in values if value is not None]
     return (DELIMITER if delimiter is None else str(delimiter)).join(p for p in parts if p)
 
 

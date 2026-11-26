@@ -146,6 +146,17 @@ class NullLabelParityTest(unittest.TestCase):
                 self.assertEqual(ci_apply_role_arn.role_name(ci(environment="uE1", stage="Prod", name="ci-Apply",
                                                                 label_value_case=case)), expected)
 
+    def test_without_use_fullname_the_name_is_the_cleaned_cased_label(self):
+        # iam-role names the role module.this.name when use_fullname is false
+        self.assertEqual(ci_apply_role_arn.role_name(ci(name="CI_Apply", use_fullname=False)), "ciapply")
+        role = ci(name=None, use_fullname=False)
+        role["vars"]["context"]["name"] = "ctx"
+        self.assertEqual(ci_apply_role_arn.role_name(role), "ctx")
+        self.assertEqual(ci_apply_role_arn.role_name(ci(name=None, use_fullname=False)), "")
+
+    def test_numeric_and_bool_attributes_are_kept_as_terraform_strings(self):
+        self.assertEqual(ci_apply_role_arn.role_name(ci(attributes=[0, True, False, ""])), "fnx-ue1-prod-ci-apply-0-true-false")
+
     def test_empty_label_order_falls_back_to_the_default(self):
         # null-label: coalescelist(label_order, default order), which has no tenant
         self.assertEqual(ci_apply_role_arn.role_name(ci(label_order=[])), "ue1-prod-ci-apply")
