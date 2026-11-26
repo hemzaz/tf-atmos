@@ -12,6 +12,7 @@
 # and its house trust override, and the account's GitHub OIDC provider).
 /components/terraform/aws-iam-role/ @hemzaz
 /stacks/catalog/aws-iam-role/     @hemzaz
+/components/terraform/aws-github-oidc-provider/ @hemzaz
 /stacks/catalog/aws-github-oidc-provider/ @hemzaz
 
 # The state backend: bucket, KMS key and the state access roles.
