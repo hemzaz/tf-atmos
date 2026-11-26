@@ -10,10 +10,10 @@
 #     neither guard below: plan first.
 # Credentials: Cloud Posse's GitOps model. The jobs use NO GitHub Environment,
 # so the OIDC token's sub is repo:<org>/<repo>:ref:refs/heads/<default branch> -
-# the only subject each stack's CI apply role trusts (iam/ci
-# ci_apply_role_trusted_github_repos, after Cloud Posse's branch-pinned
-# trusted_github_repos). The role ARN is derived from the stack's iam/ci
-# instance (account ID + ci_role_name_prefix), so no environment- or
+# the only subject each stack's CI apply role trusts (aws-iam-role/ci-apply,
+# after Cloud Posse's branch-pinned trusted_github_repos). The role ARN is
+# derived from the stack's ci-apply instance (account ID + <stack>-ci-apply
+# null-label id), so no environment- or
 # repo-scoped role variable is needed.
 # THERE IS NO MANUAL APPROVAL: every push to the default branch that affects a
 # stack deploys it, production included (owner decision). Review happens on the

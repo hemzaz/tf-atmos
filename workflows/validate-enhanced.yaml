@@ -80,10 +80,10 @@ workflows:
           check check-secret-attributes python3 workflows/scripts/common/check-secret-attributes.py components/terraform
           # Every instance with a kubernetes/helm/kubectl provider runs on the
           # in-VPC runners (or has GitHub Actions off), every runner pool is
-          # well-formed and in iam/ci, and every eks admin role is trusted by
+          # well-formed and in aws-iam-role/ci-apply, and every eks admin role is trusted by
           # its state write role (docs/OPERATIONS.md, "In-cluster components").
           check check-cluster-api-ci python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform
-          # Every iam/ci plan/apply role is trusted by its stage's backend
+          # Every aws-iam-role/ci-plan and ci-apply role is trusted by its stage's backend
           # roles and may assume no other role.
           check check-ci-state-roles python3 workflows/scripts/common/check-ci-state-roles.py
           # Every prod rds/elasticache instance keeps its data-loss protections

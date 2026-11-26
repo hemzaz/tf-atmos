@@ -34,8 +34,9 @@ decision B5); no reference stack pins the other two combinations. */ -]]
 # ALL CHANGES REQUIRE CHANGE MANAGEMENT APPROVAL.
 [[- end ]]
 #
-# It owns the account's singletons: the GitHub OIDC provider (iam/ci), the
-# Auto Scaling service-linked role (iam/main), the multi-region CloudTrail
+# It owns the account's singletons: the GitHub OIDC provider
+# (aws-github-oidc-provider), the Auto Scaling service-linked role
+# (aws-iam-service-linked-roles), the multi-region CloudTrail
 # trail, AWS Config's global-resource recording and the account budget
 # (cost-optimization/main, which also counts [[ $standby ]]).
 #
@@ -378,7 +379,8 @@ components:
     # ========================================================================
     # Security
     #
-    # The account and identity layer (iam/main, iam/ci), the stack's key
+    # The account and identity layer (aws-iam-service-linked-roles,
+    # aws-github-oidc-provider, the CI roles), the stack's key
     # (kms/main), the account's singletons (cloudtrail's multi-region
     # trail, aws-config's global-resource recording) and the regional
     # security services, each from its catalog/<c>/<i>[-prod] file. DR copies

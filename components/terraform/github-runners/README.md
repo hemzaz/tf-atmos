@@ -96,7 +96,7 @@ is useless, and no reusable registration credential exists anywhere.
     runner of the pool.
   - It has minimal Session Manager actions instead of `AmazonSSMManagedInstanceCore` (which allows
     `ssm:GetParameter*` on `*`).
-  - Terraform jobs get AWS access from GitHub OIDC (the stack's `iam/ci` roles), not from the
+  - Terraform jobs get AWS access from GitHub OIDC (the stack's `aws-iam-role/ci-*` roles), not from the
     instance.
 - **The docker group is root-equivalent.** Jobs run as the unprivileged `runner` user, which is in
   the `docker` group so container jobs (the atmos image) start. That is acceptable only because

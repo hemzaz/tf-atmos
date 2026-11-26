@@ -353,7 +353,7 @@ golden() {
     fi
     # The run writes the stack file and nothing else (bar its .atmos record).
     files_list > "$out/$stack.files.after"
-    if ! diff <(echo "./$file") <(LC_ALL=C comm -13 "$out/$stack.files.before" "$out/$stack.files.after") > /dev/null; then
+    if [[ "$(LC_ALL=C comm -13 "$out/$stack.files.before" "$out/$stack.files.after")" != "./$file" ]]; then
         echo "ERROR $stack: the scaffold wrote more or less than $file:" >&2
         LC_ALL=C comm -3 "$out/$stack.files.before" "$out/$stack.files.after" >&2
         rc=1

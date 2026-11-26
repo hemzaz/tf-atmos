@@ -630,7 +630,7 @@ resource "aws_autoscaling_group" "runner" {
 }
 
 # CI starts a runner by executing this policy (autoscaling:ExecutePolicy on
-# this group only, iam/ci ci_runner_pool_names): an atomic +1, which Auto
+# this group only, aws-iam-role/ci-apply's StartRunners): an atomic +1, which Auto
 # Scaling caps at max_size. CI cannot set any other capacity.
 resource "aws_autoscaling_policy" "start" {
   count = local.enabled ? 1 : 0

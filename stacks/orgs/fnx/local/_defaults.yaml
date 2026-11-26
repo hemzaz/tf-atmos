@@ -21,8 +21,8 @@ settings:
     account: local
     account_id: "000000000000"
   # Read by terraform-ci.yml/terraform-cd.yml/drift-detection.yml to keep these
-  # emulator-only stacks out of the AWS plan/deploy/drift matrices: they have no
-  # iam/ci plan or apply role (ci-apply-role-arn.py), and are covered instead by
+  # emulator-only stacks out of the AWS plan/deploy/drift matrices: they are
+  # emulator accounts CI never deploys (ci-apply-role-arn.py), and are covered instead by
   # emulator.yml. This mirrors Cloud Posse's own Atmos GitHub Action key
   # (settings.github.actions_enabled — see
   # cloudposse/github-action-atmos-terraform-plan and

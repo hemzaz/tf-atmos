@@ -311,8 +311,8 @@ components:
         # The replica in the DR region (owner decision Q5: warm standby in
         # us-east-2; replica_regions is catalog/kms/main-prod's
         # settings.dr.region). The replica's alias is fnx-ue2-prod's
-        # settings.prefix + "-main", the name its iam/ci
-        # ci_apply_kms_key_aliases expects.
+        # settings.prefix + "-main", the alias the CI
+        # apply role's DeployKmsKeyUse statement expects.
         replica_alias_names:
           us-east-2: ue2-main
 

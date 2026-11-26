@@ -11,7 +11,7 @@
 # (deleting its lease, github-runners), lowering the capacity again.
 #
 # Requires: ASG (the pool's group, ci-components.py --pools "asg"), AWS
-# credentials of the stack's CI apply role (iam/ci ci-runner-pools.tf grants
+# credentials of the stack's CI apply role (aws-iam-role/ci-apply's StartRunners statement grants
 # ExecutePolicy on the stack's runner pools only, and
 # DescribeAutoScalingGroups). Run through `atmos workflow start-runner -f
 # ci-runners`, which installs the pinned aws-cli.

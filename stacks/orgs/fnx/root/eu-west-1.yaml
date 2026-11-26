@@ -125,8 +125,8 @@ components:
         replica_region: "{{ .settings.tfstate.replica_region }}"
         # Who may use the state, as in fnx-ue1-root (whose comment explains
         # the patterns and the CI role ARNs): each stack's exact pattern pair
-        # on its stage's roles, and its CI roles, named from iam/ci's
-        # ci_role_name_prefix in that stack's account, and the Identity
+        # on its stage's roles, and its CI roles, named
+        # <stack>-ci-plan/-apply in that stack's account, and the Identity
         # Center permission-set roles by their reserved-path pattern (Plan sets
         # on read roles, Apply sets on write roles). The EU CI roles live in the
         # prod-eu account (a hyphenated account map key: index).

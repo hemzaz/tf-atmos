@@ -16,14 +16,14 @@
 # yet. A dependency only declared in dependencies.components may share a layer
 # (Atmos applies a layer in dependency order). The backend layer has an instance
 # only in the root stacks (fnx-ue1-root; fnx-ew1-root, the EU state backend), deployed before any
-# workload stack; iam/ci reads it cross-stack. aws-account-settings (EBS default encryption, the S3
+# workload stack; the CI roles read it cross-stack. aws-account-settings (EBS default encryption, the S3
 # account public access block) shares the iam layer, before any volume or bucket exists;
 # bootstrap.yaml full applies only iam and vpc (vpc creates no volume or bucket) and leaves
 # aws-account-settings to this workflow's iam layer, its next step. The vendored aws-iam-role
 # (the network account's dns-delegation role that aws-dns-delegated's aws.primary provider
 # assumes) shares the iam layer too, as does the vendored aws-iam-service-linked-roles (the
 # Auto Scaling service-linked role kms/main's key policy names, so before the kms layer) and
-# the vendored aws-github-oidc-provider (the account's GitHub OIDC provider; iam/ci depends on
+# the vendored aws-github-oidc-provider (the account's GitHub OIDC provider; the CI roles depend on
 # it, so Atmos applies it first within the step).
 # Connectivity follows networking, security-monitoring
 # follows security (it reads cloudtrail state; its GuardDuty, Security Hub and Inspector
@@ -538,7 +538,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
 
   deploy-iam:
-    description: "Deploy the iam layer: IAM roles, the CI OIDC roles (iam/ci reads backend/main in its settings.tfstate.stack), the account settings, the vendored aws-iam-role (the network account's dns-delegation role), the vendored aws-iam-service-linked-roles and the vendored aws-github-oidc-provider"
+    description: "Deploy the iam layer: IAM roles, the CI OIDC roles (aws-iam-role/ci-* read backend/main in its settings.tfstate.stack), the account settings, the vendored aws-iam-role (the network account's dns-delegation role), the vendored aws-iam-service-linked-roles and the vendored aws-github-oidc-provider"
     steps:
       - *fixtures-stages
       - *refuse-fixtures

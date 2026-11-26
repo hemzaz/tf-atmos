@@ -5,7 +5,7 @@
 #   start  (GitHub-hosted) starts one runner in the label's pool: it executes
 #          the pool's +1 start policy (atmos workflow start-runner -f
 #          ci-runners; the CI roles may execute this stack's pools' policies
-#          only, iam/ci ci-runner-pools.tf), in the pool's own region
+#          only, aws-iam-role/ci-apply's StartRunners), in the pool's own region
 #          (inputs.region, never a repository-wide default: a us-east-2
 #          pool's group does not exist in us-east-1);
 #   run    (self-hosted, runs-on the label) an ephemeral runner of that pool

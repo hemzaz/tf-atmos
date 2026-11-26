@@ -10,9 +10,9 @@
 # account singleton (check-lane-names.py SINGLETONS), so a DR standby or an
 # account's other region imports none.
 #
-# The CI roles (iam/ci, catalog/iam/ci*.yaml) federate through it. They take
+# The CI roles (catalog/aws-iam-role/ci*.yaml) federate through it. They take
 # its ARN as github_oidc_provider_arn, derived once from the account ID in
-# catalog/iam/defaults.yaml (an IAM OIDC provider's ARN is
+# catalog/aws-iam-role/ci.yaml (an IAM OIDC provider's ARN is
 # arn:aws:iam::<account>:oidc-provider/<url host>, fixed by AWS), not read from
 # this instance's state, and list this instance in dependencies.components so
 # the iam layer (workflows/deploy-full-stack.yaml, bootstrap.yaml full)

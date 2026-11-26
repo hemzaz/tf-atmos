@@ -94,8 +94,8 @@ components:
         # get it through their OWN IAM identity policy scoped to this key —
         # by ARN (`!terraform.state kms/main .key_arn`) when the consumer
         # deploys in a later layer than kms, or by alias (`kms:ResourceAliases`
-        # condition) when it must plan/apply earlier, as iam/ci's
-        # ci_apply_kms_key_aliases does (`components/terraform/iam/README.md`)
+        # condition) when it must plan/apply earlier, as the CI apply role's
+        # DeployKmsKeyUse does (`stacks/catalog/aws-iam-role/ci.yaml`)
         # — the Cloud Posse pattern of root-account delegation plus a
         # consumer's own scoped IAM policy
         # (`cloudposse/terraform-aws-kms-key`'s default key policy) — never by

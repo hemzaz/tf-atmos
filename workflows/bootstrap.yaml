@@ -220,8 +220,8 @@ workflows:
       # name those roles by convention (they do not read the backend root
       # stack's state), so the first CD run finds its apply role. They federate
       # through the account's GitHub OIDC provider, the vendored
-      # aws-github-oidc-provider, so that applies here too (each CI role and
-      # iam/ci depend on it: Atmos applies it first within the deploy-iam step).
+      # aws-github-oidc-provider, so that applies here too (each CI role
+      # depends on it: Atmos applies it first within the deploy-iam step).
       # aws-iam-service-linked-roles is not needed here: nothing in this
       # workflow reads or depends on the Auto Scaling service-linked role; its
       # one dependent, kms/main, deploys in deploy-full-stack's kms layer,

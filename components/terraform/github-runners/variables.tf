@@ -294,6 +294,6 @@ variable "userdata_post_install" {
 
 variable "runner_role_additional_policy_arns" {
   type        = list(string)
-  description = "Managed policies attached to the runners' instance role besides the defaults (Cloud Posse's input). Terraform jobs need none: they assume the stack's iam/ci roles through GitHub OIDC"
+  description = "Managed policies attached to the runners' instance role besides the defaults (Cloud Posse's input). Terraform jobs need none: they assume the stack's aws-iam-role/ci-* roles through GitHub OIDC"
   default     = []
 }

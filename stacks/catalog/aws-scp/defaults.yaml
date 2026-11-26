@@ -101,7 +101,7 @@ components:
     #                             every account (each stack's ACCOUNT analyzer,
     #                             E5c7b; the security account's ORGANIZATION ones)
     #
-    # The deploy roles (&deploy_roles): each stack's CI apply role (iam/ci:
+    # The deploy roles (&deploy_roles): each stack's CI apply role (aws-iam-role/ci-apply:
     # <stack>-ci-apply), OrganizationAccountAccessRole (the management account's
     # way in, the bootstrap and core stacks' operator until E3e's order retires
     # it: dropping it before Identity Center is applied locks the core stacks
@@ -122,7 +122,7 @@ components:
     # else can create or re-trust a role of that name. DenyProtectedRoleTampering
     # lets only the deploy roles create, re-trust, re-policy, retag or delete
     # the CI roles and OrganizationAccountAccessRole (the CI apply role keeps
-    # managing iam/ci through Terraform; OrganizationAccountAccessRole creates
+    # managing the CI roles through Terraform; OrganizationAccountAccessRole creates
     # them at bootstrap). DenyReservedRoleTampering denies the same under
     # aws-reserved/ to every principal: only Identity Center's service-linked
     # role writes there (Identity Center user guide, "Using service-linked

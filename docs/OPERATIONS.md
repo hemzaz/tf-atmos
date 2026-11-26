@@ -188,7 +188,7 @@ Two backends, each a bucket in the management account with native S3 lockfiles
 (`use_lockfile: true`, no DynamoDB) and a read-only replica: the US one, for every stack but the
 EU ones, and the EU one (next paragraph). The US bucket, `fnx-terraform-state`
 (`settings.tfstate.bucket`), is `backend/main` in `fnx-ue1-root`
-(`settings.tfstate.stack`, which every `iam` instance that inherits `catalog/iam` depends on), and every US stack's
+(`settings.tfstate.stack`, which the CI roles, `aws-iam-role/ci-plan` and `ci-apply`, depend on), and every US stack's
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
 with management-account administrator credentials. The bucket lives in one region,
 `settings.tfstate.region` (`us-east-1`), and every US stack's backend uses it whatever the stack's
@@ -227,8 +227,8 @@ An existing bucket must be imported first: see `components/terraform/backend/REA
 
 Every role also trusts the administrator who applied `backend/main`; the stack backend picks the
 role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names start with
-`<role_prefix>` (`settings.tfstate.role_prefix`, `fnx-terraform-backend`); the CI roles' ARNs
-(`iam/ci`) are built from it too.
+`<role_prefix>` (`settings.tfstate.role_prefix`, `fnx-terraform-backend`); the CI roles
+(`aws-iam-role/ci-plan`, `ci-apply`) are named `<stack>-ci-plan`/`-apply` instead.
 
 | Role (`access_roles` key) | Access | Trusted |
 |---------------------------|--------|---------|
@@ -253,7 +253,7 @@ plan jobs do: the stack backend then assumes the stage's read role.
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` (EU:
   `root/eu-west-1.yaml`). A new stack's
-  `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles go there (iam/ci's `ci_role_name_prefix`):
+  `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles go there (`aws-iam-role/ci-plan` and `ci-apply`):
   the stack scaffold adds them ([Adding a stack](#adding-a-stack)), by hand otherwise; so does
   any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in
   `validate-all`) fails a CI role that its stage's read or write role, of the backend owning its
@@ -264,7 +264,7 @@ plan jobs do: the stack backend then assumes the stage's read role.
   every state key, requiring exactly its stage's roles to match it, and every backend region
   equal to `backend/main`'s.
   `s3:ListBucket` is bucket-wide, so every role sees key names across stages, never contents.
-- The CI apply role (`iam/ci`, `AdministratorAccess`) trusts only the default-branch subject
+- The CI apply role (`aws-iam-role/ci-apply`, `AdministratorAccess`) trusts only the default-branch subject
   (`repo:<org>/<repo>:ref:refs/heads/<default branch>`). `terraform-cd.yml` uses no GitHub
   Environment: **every merge deploys, prod included, with no manual approval**. Default-branch
   protection is the gate. PR code gets only the dev/staging plan roles; prod is planned on push
@@ -349,9 +349,9 @@ EU bucket's replication.
 | `AWS_PLAN_ROLE_ARN` | the "AWS is configured" switch: unset = AWS jobs skip. Any non-empty value enables them (by convention a `ci_plan_role_arn`); no job assumes it |
 | `AWS_REGION` | optional override (default `us-east-1`) of the hosted jobs' credentials region; the in-VPC jobs (`in-vpc.yml`) always use their runner pool's `vars.region` |
 
-No role ARN is a variable. Every AWS job assumes its stack's own `iam/ci` role, in that stack's
+No role ARN is a variable. Every AWS job assumes its stack's own `aws-iam-role/ci-plan` or `ci-apply` role, in that stack's
 account, derived by `workflows/scripts/common/ci-apply-role-arn.py` as
-`arn:aws:iam::<settings.environment.account_id>:role/<ci_role_name_prefix>-<kind>`: `--kind plan`
+`arn:aws:iam::<settings.environment.account_id>:role/<stack>-ci-<kind>`: `--kind plan`
 for PR/master plans, drift and DR checks; `--kind apply` (default) for CD. This is Cloud Posse's
 per-account planner/terraform role pair (`github-oidc-role`). `settings.environment.account_id`
 already comes from the account map (Account IDs, above), so a new or changed account needs no
@@ -722,7 +722,7 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
   by drift detection; `workflow_dispatch` plans any stack's.
 - Its first job starts one runner in the label's pool by executing the pool's +1 start policy
   (`atmos workflow start-runner -f ci-runners`; only the apply role may, on its stack's pools,
-  `iam/ci` `ci_runner_pool_names`). Its second job runs on the ephemeral runner that starts.
+  `aws-iam-role/ci-apply`'s `StartRunners` statement). Its second job runs on the ephemeral runner that starts.
 - The label is the stack's full id (its name, `{{ .atmos_stack }}`), or
   `settings.github.runner_label`. The `microservices-platform` template runs its own pool in its
   own VPC.
@@ -750,7 +750,7 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
   it (github-runners README).
 - `check-cluster-api-ci.py` (validate-all) fails an in-vpc instance whose label has no runner
   pool, or whose clusters do not admit the pool's security group; a pool missing from its
-  stack's `iam/ci` `ci_runner_pool_names`; and an instance whose providers exec a command
+  stack's `aws-iam-role/ci-apply` `StartRunners` statement; and an instance whose providers exec a command
   (`aws eks get-token`) without its tool in `dependencies.tools` (the atmos image has no aws CLI). An instance with
   `settings.github.actions_enabled: false` instead is left to an operator.
 
@@ -887,7 +887,7 @@ dimensions for every function. The comments sit in the readers' catalog files
 (`stacks/catalog/apigateway/{main,data,prod,main-standby}.yaml`,
 `stacks/catalog/monitoring/{data,data-dev,data-prod}.yaml`). A catalog file is shared by its
 importers: restoring a reader in one stack only takes that stack's own flavor. `check-lambda-packages.py`
-(in `lint`) fails an enabled instance still on the `unreleased` placeholder, and an `iam/ci` whose
+(in `lint`) fails an enabled instance still on the `unreleased` placeholder, and an `aws-iam-role/lambda-uploader` whose
 bucket name or KMS alias no longer matches the stack's `s3/lambda-artifacts` and `kms/main`.
 
 Triggers come up with their function: `data-transformer` polls `sqs/data-transform` (staging,
@@ -1013,7 +1013,7 @@ What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
 
 | Component | Warm state in `fnx-ue2-prod` | On failover |
 |-----------|------------------------------|-------------|
-| `vpc/main`, `iam/ci`, `acm/main`, GuardDuty, Security Hub, Config, `backup/main` | full | nothing |
+| `vpc/main`, `aws-iam-role/ci-*`, `acm/main`, GuardDuty, Security Hub, Config, `backup/main` | full | nothing |
 | KMS | `fnx-ue1-prod` `kms/main`'s multi-region replica, alias `ue2-main` (no `kms/main` here) | nothing |
 | `rds/main` | cross-region read replica of `fnx-ue1-prod`'s (`replicate_source_db`), `db.r5.large` | promote (CLI) |
 | `elasticache/main` | Global Datastore secondary, 2 nodes | promote (CLI) |
@@ -1028,7 +1028,7 @@ What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
 Readiness: `STACK=fnx-ue1-prod atmos workflow dr-status -f disaster-recovery` (it reports both
 vaults and the state bucket's replication) and the same for `fnx-ue2-prod`. CD deploys
 `fnx-ue2-prod` right after `fnx-ue1-prod`, whose state it reads (`kms/main`, `rds/main`,
-`elasticache/main`, `network/main`, `iam/ci`): its `settings.dr.standby_of: fnx-ue1-prod` orders it
+`elasticache/main`, `network/main`, `aws-github-oidc-provider`): its `settings.dr.standby_of: fnx-ue1-prod` orders it
 (`ci-stacks.py`), not the stack names. That order also validates `fnx-ue2-prod`'s `acm/main`
 (`api.<domain>`): it writes no validation record (`process_domain_validation_options: false`) and
 waits on the one `fnx-ue1-prod`'s `acm/main` writes for its `*.api.<domain>` SAN, the same CNAME
@@ -1044,7 +1044,7 @@ The EU pair is built the same way: `fnx-ew1-prod` (eu-west-1) fails over to `fnx
 (eu-central-1), a warm standby in the same `prod-eu` account, so EU data never leaves the EU
 (`check-data-residency.py`). Its state is in the EU backend (`fnx-ew1-root`, eu-west-1) and its
 `settings.dr.standby_of: fnx-ew1-prod` has CD deploy it right after `fnx-ew1-prod`, whose state it
-reads (`kms/main`, `iam/ci`, `acm/main`, `network/main`, `rds/main`, `elasticache/main`,
+reads (`kms/main`, `aws-github-oidc-provider`, `acm/main`, `network/main`, `rds/main`, `elasticache/main`,
 `cognito/main`). The table above holds for it with ec1 for ue2: the replica key is alias
 `ec1-main`, `rds/main` replicates `fnx-ew1-prod`'s, `elasticache/main` is the secondary of
 `fnx-ew1-prod`'s Global Datastore (`fnx-ew1-prod-cache`), `cognito/main` migrates users from

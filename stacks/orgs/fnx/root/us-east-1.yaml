@@ -6,7 +6,7 @@
 # fnx-terraform-state, its KMS key, and the stage-split read-only / read-write
 # access roles (components/terraform/backend). The EU stacks' backend is
 # fnx-ew1-root's (stacks/orgs/fnx/root/eu-west-1.yaml). Workload stacks have
-# no backend instance; their iam/ci names this instance's roles by the same
+# no backend instance; their CI roles name this instance's roles by the same
 # naming convention the stack backend uses (stacks/orgs/fnx/_defaults.yaml),
 # so no CI role ever reads this stack's state.
 #
@@ -113,11 +113,11 @@ components:
         # decision, B1 DR), read-only for every access role.
         s3_replication_enabled: true
         replica_region: "{{ .settings.tfstate.replica_region }}"
-        # Who may use the state. The CI roles are named from iam/ci's
-        # ci_role_name_prefix ("<tenant>-<environment>-<stage>-ci", see
-        # stacks/catalog/iam/ci*.yaml) in that stack's account, its
+        # Who may use the state. The CI roles are named
+        # <stack>-ci-plan/-apply (see stacks/catalog/aws-iam-role/ci.yaml) in
+        # that stack's account, its
         # settings.account_map entry (stacks/orgs/fnx/_defaults.yaml) -
-        # strings, not !terraform.state: iam/ci deploys after this instance,
+        # strings, not !terraform.state: the CI roles deploy after this instance,
         # and CI roles never read the root state. The trust is an
         # aws:PrincipalArn condition, so the roles do not have to exist yet
         # (see components/terraform/backend/iam.tf).
@@ -184,7 +184,7 @@ components:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue2-prod-ci-plan"
           write:
             # Dev/staging state: their CI apply roles (master branch subject
-            # only, see iam/ci ci_apply_role_trusted_repos), dev's
+            # only, see aws-iam-role/ci-apply), dev's
             # TerraformApplyAccess (Developers), each account's
             # AdministratorAccess, and its
             # OrganizationAccountAccessRole until Identity Center is applied

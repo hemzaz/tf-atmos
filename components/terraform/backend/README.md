@@ -21,7 +21,7 @@ the applying caller is always trusted).
   `alias/<bucket_name>-key` in both regions (`alias/fnx-terraform-state-key`,
   `alias/fnx-ew1-terraform-state-key`), so the two backends share no IAM, S3 or KMS name.
 - Every stack's backend (`stacks/orgs/fnx/_defaults.yaml`) assumes a role by naming convention;
-  `iam/ci` names the same roles. Nothing reads this instance's state.
+  the CI roles (`aws-iam-role/ci-*`) are granted them. Nothing reads this instance's state.
 
 ## Access roles
 
