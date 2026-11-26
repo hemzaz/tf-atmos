@@ -60,13 +60,11 @@ import:
 
   # --- globals: shared catalog defaults (the rest come with their instances)
 [[- if $gdpr ]]
-  - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/eks/defaults
 [[- else ]]
   - catalog/vpc/defaults
   - catalog/eks/defaults
-  - catalog/iam/defaults
   - catalog/acm/defaults
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
@@ -76,7 +74,7 @@ import:
   - catalog/vpc/main-standby
 
   # --- security
-  - catalog/iam/ci-standby
+  - catalog/aws-iam-role/ci-standby
   - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
   - catalog/aws-config/main-region

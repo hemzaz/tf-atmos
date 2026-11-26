@@ -21,7 +21,6 @@ import:
   - orgs/fnx/prod/_defaults
   - mixins/region/us-east-1
   - catalog/_base/defaults
-  - catalog/iam/defaults
   - catalog/aws-iam-role/lambda-uploader
   - catalog/kms/defaults
   - catalog/vpc/defaults

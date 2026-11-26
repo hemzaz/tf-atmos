@@ -172,7 +172,7 @@ workflows:
       - name: plan-iam
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          terraform plan --query '.metadata.component == "aws-account-settings"
           or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"
           or .metadata.component == "aws-github-oidc-provider"'
       - name: confirm_iam
@@ -185,7 +185,7 @@ workflows:
       - name: deploy-iam
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          terraform deploy --from-plan --query '.metadata.component == "aws-account-settings"
           or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"
           or .metadata.component == "aws-github-oidc-provider"'
       - name: kms_instances
@@ -545,7 +545,7 @@ workflows:
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          terraform plan --query '.metadata.component == "aws-account-settings"
           or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"
           or .metadata.component == "aws-github-oidc-provider"'
       - name: confirm
@@ -558,7 +558,7 @@ workflows:
       - name: deploy
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "iam" or .metadata.component == "aws-account-settings"
+          terraform deploy --from-plan --query '.metadata.component == "aws-account-settings"
           or .metadata.component == "aws-iam-role" or .metadata.component == "aws-iam-service-linked-roles"
           or .metadata.component == "aws-github-oidc-provider"'
 

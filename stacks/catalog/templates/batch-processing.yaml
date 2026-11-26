@@ -91,7 +91,6 @@
 import:
   - catalog/_base/defaults
   - catalog/vpc/defaults
-  - catalog/iam/defaults
   - catalog/monitoring/defaults
   - catalog/eventbridge/defaults
   - catalog/sqs/defaults

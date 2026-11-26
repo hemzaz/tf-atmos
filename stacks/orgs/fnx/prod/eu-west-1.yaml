@@ -43,7 +43,6 @@ import:
   - orgs/fnx/prod/_defaults
 
   # --- globals: catalog defaults (the rest come with their instances)
-  - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/network/defaults
   - catalog/eks/defaults
@@ -53,8 +52,10 @@ import:
   - catalog/network/main-prod
 
   # --- security
-  - catalog/iam/main-prod
-  - catalog/iam/ci-prod
+  - catalog/aws-iam-service-linked-roles/main
+  - catalog/aws-github-oidc-provider/main
+  - catalog/aws-iam-role/ci
+  - catalog/aws-iam-role/lambda-uploader
   - catalog/aws-account-settings/main
   - catalog/kms/main-prod
   - catalog/aws-cloudtrail/defaults

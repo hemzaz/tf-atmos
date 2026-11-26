@@ -57,7 +57,6 @@ import:
   - orgs/fnx/prod/_defaults
 
   # --- globals: shared catalog defaults (the rest come with their instances)
-  - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/eks/defaults
 
@@ -65,7 +64,7 @@ import:
   - catalog/vpc/main-standby
 
   # --- security
-  - catalog/iam/ci-standby
+  - catalog/aws-iam-role/ci-standby
   - catalog/aws-account-settings/main-standby
   - catalog/acm/main-standby
   - catalog/aws-config/main-region

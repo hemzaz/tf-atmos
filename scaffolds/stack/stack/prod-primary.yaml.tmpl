@@ -67,12 +67,10 @@ import:
   - catalog/external-secrets/defaults
   - catalog/ec2/defaults
   - catalog/eks/defaults
-  - catalog/iam/defaults
   - catalog/acm/defaults
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
 [[- else ]]
-  - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/network/defaults
   - catalog/eks/defaults
@@ -92,8 +90,10 @@ import:
 
   # --- security
 [[- if $data_plane ]]
-  - catalog/iam/main-prod
-  - catalog/iam/ci-prod
+  - catalog/aws-iam-service-linked-roles/main
+  - catalog/aws-github-oidc-provider/main
+  - catalog/aws-iam-role/ci
+  - catalog/aws-iam-role/lambda-uploader
   - catalog/aws-account-settings/main
   - catalog/kms/main-prod
   - catalog/secretsmanager/app-prod
@@ -106,8 +106,10 @@ import:
   - catalog/security-monitoring/main
   - catalog/backup/main-prod
 [[- else ]]
-  - catalog/iam/main-prod
-  - catalog/iam/ci-prod
+  - catalog/aws-iam-service-linked-roles/main
+  - catalog/aws-github-oidc-provider/main
+  - catalog/aws-iam-role/ci
+  - catalog/aws-iam-role/lambda-uploader
   - catalog/aws-account-settings/main
   - catalog/kms/main-prod
   - catalog/aws-cloudtrail/defaults
