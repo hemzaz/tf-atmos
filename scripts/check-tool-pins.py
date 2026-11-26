@@ -5,7 +5,8 @@ Atmos (1.229, 1.233) gives each workflow and custom command only its own
 `dependencies.tools` (no atmos.yaml-wide default; `.tool-versions` is not committed),
 so a pin repeats in every workflow that needs the tool (or is shared through a YAML anchor
 `dependencies: &name`, read here; a `dependencies: *name` alias must point at one, and
-any other text after `dependencies:` fails rather than being skipped).
+any other text after `dependencies:` fails rather than being skipped; inside a dependencies
+block a `<<: *name` merge key must name such an anchor too).
 
 Each `dependencies.tools` entry under atmos.yaml, workflows/ and stacks/ declares a
 tool (block or flow style; anything but an exact `x.y.z` pin fails). Every mention of
@@ -40,6 +41,8 @@ VERSION = r"v?\d+\.\d+\.\d+"
 Q = "[\"']?"
 DEPS_LINE = re.compile(r"^(\s*)dependencies:(.*)$")
 DEPS_TAIL = re.compile(r"^\s*(?:([&*])([\w-]+))?\s*(?:#.*)?$")
+MERGE_LINE = re.compile(r"^\s*<<:(.*)$")
+MERGE_TAIL = re.compile(r"^\s*\*([\w-]+)\s*(?:#.*)?$")
 TOOLS_LINE = re.compile(r"^(\s*)tools:\s*(#.*)?$")
 FLOW_LINE = re.compile(r"^(\s*)tools:\s*\{(.*)\}\s*(#.*)?$")
 ENTRY_LINE = re.compile(rf"^(\s*)([\w./-]+):\s*{Q}({VERSION}){Q}\s*(#.*)?$")
@@ -82,11 +85,24 @@ def declarations(lines):
             tools_indent = None
         if deps_indent is not None and indent <= deps_indent:
             deps_indent = None
+        merge = MERGE_LINE.match(line) if deps_indent is not None and indent > deps_indent else None
+        if merge:
+            alias = MERGE_TAIL.match(merge.group(1))
+            if not alias or alias.group(1) not in anchors:
+                raise PinError(
+                    f"{number}: merge key {line.strip()!r} in a dependencies block must be `<<: *name` "
+                    "naming a `dependencies: &name` block; write the tools under `dependencies:` "
+                    "or alias a `dependencies: &name` block so check-tool-pins can read the pins"
+                )
+            continue
         match = DEPS_LINE.match(line)
         if match:
             tail = DEPS_TAIL.match(match.group(2))
             if not tail:
-                raise PinError(f"{number}: unreadable dependencies line {line.strip()!r}")
+                raise PinError(
+                    f"{number}: unreadable dependencies line {line.strip()!r}; write dependencies as a block "
+                    "(`dependencies:` then `tools:` / `components:` on their own lines) so check-tool-pins can read it"
+                )
             sigil, name = tail.groups()
             if sigil == "&":
                 anchors.add(name)
