@@ -102,6 +102,8 @@ VIA_S3 = re.compile(r"s3\.[a-z]{2}(-[a-z]+)+-[0-9]+\.amazonaws\.com")
 # from it; the instance name, not vars.name, decides which rules apply).
 CI_INSTANCES = {"aws-iam-role/ci-plan": CI_PLAN_NAME, "aws-iam-role/ci-apply": "ci-apply",
                 "aws-iam-role/lambda-uploader": UPLOADER_NAME}
+# IAM's max_session_duration range in seconds (1 to 12 hours; the component's default is the minimum).
+MIN_SESSION_SECONDS, MAX_SESSION_SECONDS = 3600, 43200
 # The one copy of the null-label role name rule (ci-apply-role-arn.py; check-ci-state-roles.py uses it too).
 _spec = importlib.util.spec_from_file_location(
     "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py"))
@@ -235,12 +237,15 @@ def role_name_errors(where: str, name: str, instance: dict) -> list[str]:
     cap = ci_apply_role_arn.MAX_ROLE_NAME
     if not ci_apply_role_arn.uses_fullname(instance):
         return [f"{where} sets use_fullname false, so the role is named by vars.name {role!r} ({len(role)} characters), "
-                f"over IAM's {cap} (id_length_limit does not shorten it): the apply would fail; shorten vars.name"]
+                f"over IAM's {cap} (id_length_limit does not shorten it): the apply would fail; "
+                + ("drop the use_fullname override (vars.name is pinned)" if name in CI_INSTANCES
+                   else "shorten vars.name")]
     consequence = ("the module would truncate it and append a hash, so it would no longer be the ARN CI and the "
                    "state backend derive (ci-apply-role-arn.py)" if name in CI_INSTANCES
                    else "the module would silently truncate it and append a hash")
     return [f"{where} resolves the role id {role!r} ({len(role)} characters), over IAM's {cap}: {consequence} "
-            "(id_length_limit has no effect on it); shorten the lane name (settings.prefix) or the instance's vars.name"]
+            "(id_length_limit has no effect on it); shorten the lane name (settings.prefix)"
+            + ("" if name in CI_INSTANCES else " or the instance's vars.name")]
 
 
 def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance: str = "") -> list[str]:
@@ -264,6 +269,19 @@ def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance:
         errors.append(f"{where} enables GitHub OIDC trust with no trusted_github_repos entry: add the "
                       "\"<org>/<repo>:<branch>\" it trusts to the instance's vars.trusted_github_repos, or set "
                       "vars.enabled: false")
+    if variables.get("permissions_boundary"):
+        errors.append(f"{where} sets permissions_boundary {variables['permissions_boundary']!r}: a CI role's "
+                      f"permissions are the catalog's allow-list ({catalog}), which this lint verifies; a boundary "
+                      "would make the effective permissions differ from it (and can cap the apply role); remove it")
+    if normalize(variables.get("instance_profile_enabled")) is True:
+        errors.append(f"{where} sets instance_profile_enabled: true, which makes the role attachable to an EC2 "
+                      f"instance; a CI role is assumed through GitHub OIDC only ({catalog}); remove it")
+    duration = normalize(variables.get("max_session_duration"))
+    if duration is not None and not (isinstance(duration, int) and not isinstance(duration, bool)
+                                     and MIN_SESSION_SECONDS <= duration <= MAX_SESSION_SECONDS):
+        errors.append(f"{where} sets max_session_duration {variables['max_session_duration']!r}: IAM allows "
+                      f"{MIN_SESSION_SECONDS} to {MAX_SESSION_SECONDS} seconds (unset keeps the component's "
+                      f"{MIN_SESSION_SECONDS}); set a value in range or remove it")
     if variables.get("assume_role_policy"):
         errors.append(f"{where} merges an assume_role_policy into its GitHub OIDC trust; the trust must come "
                       "from trusted_github_repos alone")
@@ -320,6 +338,8 @@ def uploader_permission_errors(where: str, variables: dict) -> list[str]:
 
 def uploader_statements_ok(statements: Any, region: Any) -> bool:
     """The four statements the catalog renders, with one bucket ARN, one alias and this region's S3 endpoint."""
+    # Intentionally restates the catalog's statement shape (owner OQ4, won't fix): an allow-list derived
+    # from the catalog it checks would pass whatever the catalog said, and prove nothing.
     if not isinstance(statements, list):
         return False
     by_sid = {s.get("Sid"): s for s in statements if isinstance(s, dict)}

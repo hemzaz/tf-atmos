@@ -106,7 +106,8 @@ def role_name(ci: dict) -> str:
     regex = label(ci, "regex_replace_chars") or REGEX_REPLACE_CHARS
     case = label(ci, "label_value_case") or LABEL_VALUE_CASE
     if not uses_fullname(ci):  # iam-role 0.23.0 names the role module.this.name: the cleaned, cased label
-        return cased(clean(text(label(ci, "name") or ""), regex), case)
+        name = label(ci, "name")  # an explicit None check: 0 and false are the names "0" and "false"
+        return cased(clean("" if name is None else text(name), regex), case)
     delimiter = label(ci, "delimiter")
     raw = list(context.get("attributes") or []) + list(variables.get("attributes") or [])
     # null-label de-duplicates and compacts twice; once on the cleaned, cased strings covers both.

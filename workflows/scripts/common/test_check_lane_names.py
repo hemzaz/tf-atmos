@@ -504,10 +504,10 @@ class InstanceTest(unittest.TestCase):
         self.assertIn('rds/data, rds/main (rds) set the same identifier "orders"', errors[0])
 
     def test_instances_without_primary_keys_compare_all_name_inputs(self):
-        # iam/ci and iam/dev share ci_runner_pool_names but differ in ci_role_name_prefix.
+        # two instances with no primary key that share a name input but differ in another do not collide
         self.assertEqual(self.errors({"fnx-ue1-dev": stack(**{
-            "iam/ci": instance("ue1", component="iam", ci_runner_pool_names=["p"], ci_role_name_prefix="fnx-ue1-dev-ci"),
-            "iam/dev": instance("ue1", component="iam", ci_runner_pool_names=["p"]),
+            "aws-xray/a": instance("ue1", component="aws-xray", delivery_pool_names=["p"], log_prefix="fnx-ue1-dev-a"),
+            "aws-xray/b": instance("ue1", component="aws-xray", delivery_pool_names=["p"]),
         })}), [])
 
     def test_cluster_name_that_names_the_attached_cluster_is_not_primary(self):

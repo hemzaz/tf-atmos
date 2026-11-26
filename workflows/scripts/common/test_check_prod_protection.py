@@ -192,6 +192,26 @@ class CiTrustTest(unittest.TestCase):
                 self.assert_one(self.found(self.role(kind, stage="dev", eks_oidc_provider_enabled=True), stage="dev"),
                                 "sets eks_oidc_provider_enabled: true")
 
+    def test_permissions_boundary_instance_profile_and_session_duration_fail(self):
+        for kind in ("plan", "apply"):
+            with self.subTest(kind=kind):
+                self.assert_one(self.found(self.role(kind, permissions_boundary="arn:aws:iam::1:policy/b")),
+                                "sets permissions_boundary")
+                self.assert_one(self.found(self.role(kind, instance_profile_enabled=True)),
+                                "sets instance_profile_enabled: true")
+                for bad in (3599, 43201, "abc"):
+                    self.assert_one(self.found(self.role(kind, max_session_duration=bad)), "sets max_session_duration")
+                for ok in (3600, "7200", 43200):
+                    self.assertEqual(self.found(self.role(kind, max_session_duration=ok)), [])
+        self.assertEqual(self.found(self.role(instance_profile_enabled=False, permissions_boundary="")), [])
+
+    def test_ci_instance_name_hint_never_says_to_shorten_vars_name(self):
+        long_role = self.role("apply", stage="dev")
+        long_role["vars"]["context"] = {"namespace": "x" * 70}
+        for name, expected in (("aws-iam-role/ci-apply", False), ("aws-iam-role/other", True)):
+            hint = check_prod_protection.role_name_errors("w", name, long_role)[0].split("; shorten")[1]
+            self.assertEqual("vars.name" in hint, expected, hint)
+
     def test_admin_on_apply_passes(self):
         self.assertEqual(self.found(self.role("apply", managed_policy_arns=[self.ADMIN])), [])
 
@@ -224,7 +244,7 @@ class CiTrustTest(unittest.TestCase):
         off["metadata"] = {"enabled": False}
         disabled_trust = self.role(repos=["*"])
         disabled_trust["vars"]["github_oidc_provider_enabled"] = False
-        iam = instance("iam", github_oidc_enabled=True)
+        iam = instance("aws-github-oidc-provider", github_oidc_provider_enabled=True)
         self.assertEqual(self.found(dns, off, disabled_trust, iam), [])
 
     # E6a5: the Lambda package uploader as catalog/aws-iam-role/lambda-uploader.yaml renders it.
