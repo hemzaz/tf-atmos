@@ -55,7 +55,7 @@ class ApplyRoleArnTest(unittest.TestCase):
             ci_apply_role_arn.role_arn(bad)
 
     def test_unrendered_or_bad_values_fail(self):
-        for bad in (ci(account="{{ .settings.environment.account_id }}"), ci(name="a b"), ci(account="")):
+        for bad in (ci(account="{{ .settings.environment.account_id }}"), ci(name="x" * 70), ci(account="")):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "invalid role ARN"):
                 ci_apply_role_arn.role_arn(bad)
 
@@ -80,7 +80,8 @@ class RoleNameTest(unittest.TestCase):
     def test_attributes_delimiter_case_and_short_name(self):
         role = ci(attributes=["x"])
         role["vars"]["context"].update({"attributes": ["y"], "delimiter": "_", "label_value_case": "upper"})
-        self.assertEqual(ci_apply_role_arn.role_name(role), "FNX_UE1_PROD_CI-APPLY_X_Y")
+        # null-label: the context's attributes first, then the var's
+        self.assertEqual(ci_apply_role_arn.role_name(role), "FNX_UE1_PROD_CI-APPLY_Y_X")
         self.assertEqual(ci_apply_role_arn.role_name(ci(use_fullname=False)), "ci-apply")
 
     def test_use_fullname_defaults_true_and_reads_string_forms(self):
@@ -94,6 +95,60 @@ class RoleNameTest(unittest.TestCase):
         del role["vars"]["context"]["label_order"]
         # null-label 0.25.0's default order: namespace (unset), environment, stage, name; no tenant.
         self.assertEqual(ci_apply_role_arn.role_name(role), "ue1-prod-ci-apply")
+
+
+class NullLabelParityTest(unittest.TestCase):
+    """Each case is a deliberately bad input for one way the name once drifted from null-label 0.25.0."""
+
+    def test_special_characters_are_removed_per_label(self):
+        # (b) default regex_replace_chars /[^-a-zA-Z0-9]/ on each value: an underscore or dot is dropped
+        self.assertEqual(ci_apply_role_arn.role_name(ci(environment="ue1_web.app", name="ci_apply")),
+                         "fnx-ue1webapp-prod-ciapply")
+        self.assertEqual(ci_apply_role_arn.role_name(ci(attributes=["a_b"])), "fnx-ue1-prod-ci-apply-ab")
+
+    def test_a_label_that_cleans_to_empty_is_left_out(self):
+        self.assertEqual(ci_apply_role_arn.role_name(ci(stage="__")), "fnx-ue1-ci-apply")
+
+    def test_regex_replace_chars_var_beats_context_and_context_beats_default(self):
+        role = ci(environment="ue1_x", regex_replace_chars="/[q]/")
+        self.assertEqual(ci_apply_role_arn.role_name(role), "fnx-ue1_x-prod-ci-apply")
+        role = ci(environment="ue1_x")
+        role["vars"]["context"]["regex_replace_chars"] = "/[_]/"
+        self.assertEqual(ci_apply_role_arn.role_name(role), "fnx-ue1x-prod-ci-apply")
+        role["vars"]["regex_replace_chars"] = "/[^-a-zA-Z0-9_]/"  # var over context
+        self.assertEqual(ci_apply_role_arn.role_name(role), "fnx-ue1_x-prod-ci-apply")
+
+    def test_an_empty_delimiter_is_kept(self):
+        # (c) delimiter: "" joins with nothing; only null falls back to "-"
+        self.assertEqual(ci_apply_role_arn.role_name(ci(delimiter="")), "fnxue1prodci-apply")
+        role = ci()
+        role["vars"]["context"]["delimiter"] = ""
+        self.assertEqual(ci_apply_role_arn.role_name(role), "fnxue1prodci-apply")
+        self.assertEqual(ci_apply_role_arn.role_name(ci(delimiter=None)), "fnx-ue1-prod-ci-apply")
+
+    def test_attributes_are_context_then_var_distinct_and_compact(self):
+        # (d) null-label: compact(distinct(concat(context, var)))
+        role = ci(attributes=["v1", "", "dup", "v2"])
+        role["vars"]["context"]["attributes"] = ["c1", "dup", ""]
+        self.assertEqual(ci_apply_role_arn.role_name(role), "fnx-ue1-prod-ci-apply-c1-dup-v1-v2")
+
+    def test_attributes_distinct_after_cleaning_and_casing(self):
+        self.assertEqual(ci_apply_role_arn.role_name(ci(attributes=["A_b", "ab", "AB"])), "fnx-ue1-prod-ci-apply-ab")
+
+    def test_label_value_case_lowers_each_value_by_default(self):
+        # null-label's default label_value_case is lower; uppercase values are lowered
+        self.assertEqual(ci_apply_role_arn.role_name(ci(stage="PROD", attributes=["X"])), "fnx-ue1-prod-ci-apply-x")
+
+    def test_label_value_case_none_title_upper_and_unknown(self):
+        for case, expected in (("none", "fnx-uE1-Prod-ci-Apply"), ("title", "Fnx-Ue1-Prod-Ci-Apply"),
+                               ("upper", "FNX-UE1-PROD-CI-APPLY"), ("bogus", "fnx-ue1-prod-ci-apply")):
+            with self.subTest(case=case):
+                self.assertEqual(ci_apply_role_arn.role_name(ci(environment="uE1", stage="Prod", name="ci-Apply",
+                                                                label_value_case=case)), expected)
+
+    def test_empty_label_order_falls_back_to_the_default(self):
+        # null-label: coalescelist(label_order, default order), which has no tenant
+        self.assertEqual(ci_apply_role_arn.role_name(ci(label_order=[])), "ue1-prod-ci-apply")
 
 
 class PlanRoleArnTest(unittest.TestCase):

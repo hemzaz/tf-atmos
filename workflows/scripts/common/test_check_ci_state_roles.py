@@ -340,7 +340,7 @@ class CheckCiStateRolesTest(unittest.TestCase):
         )
 
     def test_unresolvable_arn_fails(self):
-        self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", environment="bad name", apply=False)})),
+        self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", environment="e" * 70, apply=False)})),
                         "ci-plan role: resolved an invalid role ARN")
 
 

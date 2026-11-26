@@ -10,7 +10,8 @@ planner/terraform machine roles) create the roles in the stack's own account, so
 is not a repository or GitHub Environment variable: it is
 arn:aws:iam::<settings.environment.account_id>:role/<null-label id>, the id the component
 names the role with (use_fullname, Cloud Posse null-label: the label_order fields of the
-instance's vars, each var over its vars.context field, joined by the delimiter). That is
+instance's vars, each var over its vars.context field, cleaned by regex_replace_chars and
+cased by label_value_case, joined by the delimiter: role_name()). That is
 <tenant>-<settings.prefix>-<stage>-ci-<kind>, the stack name plus -ci-<kind> on every
 stage stack. The apply role trusts only the branch-pinned ref subject; the plan role adds
 pull_request where the stage plans pull requests (check-prod-protection.py).
@@ -37,6 +38,9 @@ INSTANCES = {kind: f"aws-iam-role/ci-{kind}" for kind in KINDS}
 # tenant, which is why the vendored abstract sets label_order (tests/ci_roles.tftest.hcl saw it).
 LABEL_ORDER = ("namespace", "environment", "stage", "name", "attributes")
 DELIMITER = "-"
+REGEX_REPLACE_CHARS = "/[^-a-zA-Z0-9]/"
+LABEL_VALUE_CASE = "lower"
+# id_length_limit (default 0) is not modelled: the component caps the id at MAX_ROLE_NAME, and ARN rejects a longer one.
 
 
 def account_id(ci: dict) -> str:
@@ -66,20 +70,44 @@ def uses_fullname(ci: dict) -> bool:
     return str(value).strip().lower() != "false" if isinstance(value, str) else value is not False
 
 
+def clean(value: str, regex: str) -> str:
+    """null-label's replace(value, regex_replace_chars, ""): "/.../" is a regex, anything else a literal."""
+    if len(regex) >= 2 and regex.startswith("/") and regex.endswith("/"):
+        return re.sub(regex[1:-1], "", value)
+    return value.replace(regex, "")
+
+
+def cased(value: str, case: str) -> str:
+    """null-label's label_value_case: none keeps, title and upper change, any other value lowers."""
+    if case == "none":
+        return value
+    if case == "title":
+        return re.sub(r"(^|[^A-Za-z0-9_])([a-z])", lambda m: m[1] + m[2].upper(), value.lower())
+    return value.upper() if case == "upper" else value.lower()
+
+
 def role_name(ci: dict) -> str:
-    """The role's name before the module's own truncation: the null-label id (use_fullname) or var.name."""
+    """The role's name before the module's own truncation: the null-label id (use_fullname) or var.name.
+
+    null-label 0.25.0 main.tf: every label value and attribute goes through regex_replace_chars then
+    label_value_case; attributes are the context's then the var's, de-duplicated, empty ones dropped;
+    labels that end up empty are left out of the join; a delimiter of "" is kept.
+    """
     variables = ci.get("vars") or {}
     if not uses_fullname(ci):
         return str(variables.get("name") or "")
     context = variables.get("context") or {}
-    attributes = list(variables.get("attributes") or []) + list(context.get("attributes") or [])
+    regex = label(ci, "regex_replace_chars") or REGEX_REPLACE_CHARS
+    case = label(ci, "label_value_case") or LABEL_VALUE_CASE
+    delimiter = label(ci, "delimiter")
+    raw = list(context.get("attributes") or []) + list(variables.get("attributes") or [])
+    # Cloud Posse's concat/compact/distinct twice: on the raw attributes, then after cleaning and casing.
+    attributes = list(dict.fromkeys(a for a in (cased(clean(str(v), regex), case) for v in dict.fromkeys(raw) if v) if a))
     parts = []
     for field in label(ci, "label_order") or LABEL_ORDER:
         values = attributes if field == "attributes" else [label(ci, field)]
-        parts += [str(value) for value in values if value not in (None, "")]
-    name = (label(ci, "delimiter") or DELIMITER).join(parts)
-    case = label(ci, "label_value_case") or "lower"
-    return {"lower": name.lower(), "upper": name.upper(), "title": name.title()}.get(case, name)
+        parts += [cased(clean(str(value), regex), case) for value in values if value is not None]
+    return (DELIMITER if delimiter is None else str(delimiter)).join(p for p in parts if p)
 
 
 def role_arn(ci: dict, kind: str = "apply") -> str:

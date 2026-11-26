@@ -900,5 +900,34 @@ class VendoredSigningTest(unittest.TestCase):
         self.assertIn(f"the delegation role {ROLE} also allows {DEV}", errors[1])
 
 
+class RoleArnTest(unittest.TestCase):
+    """role_arn is ci-apply-role-arn.py's null-label name rule: each case is a bad input the old copy got wrong."""
+
+    def arn(self, variables=None, context=None, **vars_):
+        role = instance("aws-iam-role", {
+            "name": "dns-delegation-dev", **vars_, **(variables or {}),
+            "context": {"tenant": "fnx", "environment": "ue1", "stage": "network",
+                        "label_order": ["tenant", "environment", "stage", "name", "attributes"], **(context or {})}})
+        role["settings"] = {"environment": {"account_id": NET_ID}}
+        return check_domains.role_arn(role)
+
+    def test_matches_the_delegation_role_template(self):
+        self.assertEqual(self.arn(), ROLE)
+
+    def test_var_over_context_special_characters_case_and_delimiter(self):
+        self.assertEqual(self.arn(stage="net_work"), f"arn:aws:iam::{NET_ID}:role/fnx-ue1-network-dns-delegation-dev")
+        self.assertEqual(self.arn(name="DNS-Dev"), f"arn:aws:iam::{NET_ID}:role/fnx-ue1-network-dns-dev")
+        self.assertEqual(self.arn(delimiter=""), f"arn:aws:iam::{NET_ID}:role/fnxue1networkdns-delegation-dev")
+
+    def test_attributes_are_context_then_var(self):
+        self.assertEqual(self.arn(attributes=["v"], context={"attributes": ["c"]}),
+                         f"arn:aws:iam::{NET_ID}:role/fnx-ue1-network-dns-delegation-dev-c-v")
+
+    def test_no_account_or_no_fullname_has_no_arn(self):
+        self.assertIsNone(self.arn(use_fullname=False))
+        role = instance("aws-iam-role", {"name": "x"})
+        self.assertIsNone(check_domains.role_arn(role))
+
+
 if __name__ == "__main__":
     unittest.main()

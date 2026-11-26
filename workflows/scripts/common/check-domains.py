@@ -79,6 +79,12 @@ _spec = importlib.util.spec_from_file_location(
 )
 check_dependencies = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_dependencies)
+# The null-label name rule has one copy: the CI role ARNs' (ci-apply-role-arn.py).
+_spec = importlib.util.spec_from_file_location(
+    "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py")
+)
+ci_apply_role_arn = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ci_apply_role_arn)
 
 
 # Cloud Posse's vendored DNS components (components/terraform/<kind>).
@@ -525,22 +531,14 @@ def signer_of(stacks: dict, stack_name: str, zone: Zone, instances: dict) -> Opt
             "enable_query_logging (and the instance dnssec_enabled)")
 
 
-def role_arn(stack: dict, instance: dict) -> Optional[str]:
+def role_arn(instance: dict) -> Optional[str]:
     """The ARN of the IAM role an aws-iam-role instance creates (null-label id, use_fullname), or None."""
     variables = instance.get("vars") or {}
-    context = variables.get("context") or {}
-    settings = instance.get("settings") or {}
-    account_id = (settings.get("environment") or {}).get("account_id")
-    order = context.get("label_order") or ["tenant", "environment", "stage", "name", "attributes"]
-    labels = {**context, "name": variables.get("name", context.get("name"))}
-    parts = []
-    for label in order:
-        value = labels.get(label)
-        parts += [str(v) for v in value] if isinstance(value, list) else ([str(value)] if value else [])
-    if not account_id or not parts or variables.get("use_fullname") is False:
+    account_id = ((instance.get("settings") or {}).get("environment") or {}).get("account_id")
+    if not account_id or not ci_apply_role_arn.uses_fullname(instance):
         return None
-    path = str(variables.get("path") or "/")
-    return f"arn:aws:iam::{account_id}:role{path}{'-'.join(parts)}"
+    name = ci_apply_role_arn.role_name(instance)
+    return f"arn:aws:iam::{account_id}:role{variables.get('path') or '/'}{name}" if name else None
 
 
 WRITE_ACTION = "route53:ChangeResourceRecordSets"
@@ -684,7 +682,7 @@ def vendored_dns_errors(stacks: dict) -> list[str]:
     for stack in stacks.values():
         for name, instance in stack.get("components", {}).get("terraform", {}).items():
             if check_dependencies.is_deployable(instance) and check_dependencies.module_name(name, instance) == "aws-iam-role":
-                arn = role_arn(stack, instance)
+                arn = role_arn(instance)
                 if arn:
                     roles[arn] = instance
     for stack_name, stack in sorted(stacks.items()):
