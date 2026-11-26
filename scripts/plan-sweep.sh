@@ -79,6 +79,13 @@ set -u
 # writes private to the user running it, a caller-supplied workdir included.
 umask 077
 
+# `terraform init` pulls registry modules and providers over the network, and a
+# stalled fetch fails it once and passes on a rerun. ensure_init tries this many
+# times, sleeping INIT_RETRY_STEP seconds times the attempt number in between.
+INIT_ATTEMPTS="${PLAN_SWEEP_INIT_ATTEMPTS:-3}"
+INIT_RETRY_STEP="${PLAN_SWEEP_INIT_RETRY_STEP:-10}"
+INIT_LOG_TAIL=20
+
 # Pin the credentials instead of inheriting them. Through the default chain a
 # developer's live profile would have every plan read a real account, while CI
 # has none at all and ends somewhere else again -- and the same commit has to
@@ -779,10 +786,25 @@ ensure_init() {
   # Top-level component directories only, as the up-front loop this replaced.
   case "$1" in _* | */*) return 0 ;; esac
   ls "$d"*.tf >/dev/null 2>&1 || return 0
-  if ! (cd "$d" && terraform init -backend=false -input=false -lockfile=readonly) \
-    >"$WORK/init__$1.log" 2>&1; then
-    init_failed="$init_failed $1"
-  fi
+  # Init is idempotent and the locks stay readonly, so a retry cannot paper over
+  # a real breakage: that fails every attempt. A failure is cached in
+  # init_failed for every later stack that uses the component, so its output is
+  # printed here, once, not at each of those stacks' SKIP lines.
+  local log="$WORK/init__$1.log" n=1
+  : >"$log"
+  while ! (cd "$d" && terraform init -backend=false -input=false -lockfile=readonly) \
+    >>"$log" 2>&1; do
+    if [ "$n" -ge "$INIT_ATTEMPTS" ]; then
+      init_failed="$init_failed $1"
+      printf 'terraform init failed %s times for %s; last output:\n' "$INIT_ATTEMPTS" "$1"
+      tail -n "$INIT_LOG_TAIL" "$log" | sed 's/^/        /'
+      return 0
+    fi
+    printf 'terraform init failed for %s (attempt %s of %s); retrying in %ss\n' \
+      "$1" "$n" "$INIT_ATTEMPTS" $((n * INIT_RETRY_STEP))
+    sleep $((n * INIT_RETRY_STEP))
+    n=$((n + 1))
+  done
 }
 
 # A known-broken fixture's failing pairs move from the failing counters to
