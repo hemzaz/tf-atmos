@@ -134,6 +134,36 @@ class CheckToolPinsTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("unreadable dependencies line", err)
 
+    def test_merge_key_must_name_a_dependencies_anchor(self):
+        pins = 'x-pins: &pins\n  tools:\n    terraform: "1.16.3"\n'
+        for name, text in {
+            "top-level anchor": pins + "workflows:\n  lint:\n    dependencies:\n      <<: *pins\n",
+            "list of aliases": pins + "workflows:\n  lint:\n    dependencies:\n      <<: [*pins]\n",
+            "inline mapping": "workflows:\n  lint:\n    dependencies:\n      <<: {tools: {terraform: 1.16.3}}\n",
+        }.items():
+            with self.subTest(name=name):
+                rc, err = self.run_check({"workflows/lint.yaml": text})
+                self.assertEqual(rc, 1)
+                self.assertIn("merge key", err)
+                self.assertIn("`dependencies: &name`", err)
+
+    def test_merge_key_of_a_dependencies_anchor_is_read_with_local_override(self):
+        anchored = WORKFLOW.replace("dependencies:", "dependencies: &deps", 1)
+        merged = (
+            "workflows:\n  other:\n    dependencies:\n      <<: *deps\n"
+            '      tools:\n        tflint: "v0.64.1"\n'
+        )
+        rc, err = self.run_check({"workflows/lint.yaml": anchored + merged})
+        self.assertEqual(rc, 1)
+        self.assertIn("tflint is pinned to 2 versions", err)
+
+    def test_flow_dependencies_error_says_to_write_a_block(self):
+        for tail in ("{components: [a]}", "[]"):
+            with self.subTest(tail=tail):
+                rc, err = self.run_check({"stacks/a.yaml": f"components:\n  x:\n    dependencies: {tail}\n"})
+                self.assertEqual(rc, 1)
+                self.assertIn("write dependencies as a block", err)
+
     def test_no_declarations_fails(self):
         rc, err = self.run_check({"README.md": "nothing\n"})
         self.assertEqual(rc, 1)
