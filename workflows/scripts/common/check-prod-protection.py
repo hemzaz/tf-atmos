@@ -82,6 +82,10 @@ CI_ROLE_COMPONENT = "aws-iam-role"
 CI_PLAN_NAME = "ci-plan"
 # The GitHub OIDC issuer host: a trust that names it (directly or in an oidc-provider ARN) is a GitHub trust.
 GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
+# The component whose outputs (the provider ARN) a DRY hand-written trust would read with an Atmos function.
+GITHUB_PROVIDER_COMPONENT = "aws-github-oidc-provider"
+# An Atmos YAML function left unresolved (describe --process-functions=false keeps it as a raw string).
+ATMOS_FUNCTION = re.compile(r"(?:^|[\s\"'])!(?:terraform\.|store|exec|env)\b")
 # "<org>/<repo>:<constraint>": an explicit org (upstream's unqualified form takes trusted_github_org).
 TRUSTED_REPO = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:(.+)")
 # A bare branch name: no ':' (so no ref:, environment: or other claim), no wildcard.
@@ -219,23 +223,37 @@ def check_ci_trust(stacks: dict) -> list[str]:
             # override of name or github_oidc_provider_enabled must not drop them out of the rules).
             if name not in CI_INSTANCES and normalize(variables.get("github_oidc_provider_enabled")) is not True:
                 if names_github_trust(variables):
-                    errors.append(f"{where} trusts GitHub OIDC ({GITHUB_OIDC_HOST}) through its assume_role_policy or "
-                                  "principals, which skips every CI trust rule; trust GitHub only through "
-                                  "github_oidc_provider_enabled + trusted_github_repos on aws-iam-role/ci-* "
-                                  "(stacks/catalog/aws-iam-role/ci.yaml); remove the hand-written trust")
+                    errors.append(f"{where} trusts GitHub OIDC ({GITHUB_OIDC_HOST}) through its assume_role_policy, "
+                                  "principals or assume_role_conditions, which skips every CI trust rule; trust "
+                                  "GitHub only through github_oidc_provider_enabled + trusted_github_repos on "
+                                  "aws-iam-role/ci-* (stacks/catalog/aws-iam-role/ci.yaml); remove the hand-written "
+                                  "trust")
+                elif any(ATMOS_FUNCTION.search(trust_text(variables.get(key))) for key in ("assume_role_policy", "principals")):
+                    errors.append(f"{where} builds its assume_role_policy or principals with an Atmos function, which "
+                                  "can't be verified offline (it may resolve to a GitHub OIDC trust); write the "
+                                  "trust literally, or trust GitHub only through github_oidc_provider_enabled + "
+                                  "trusted_github_repos on aws-iam-role/ci-*")
                 continue
             stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
             errors += ci_trust_errors(where, variables, stage, name)
     return errors
 
 
+def trust_text(value: Any) -> str:
+    """A trust variable as lowercase JSON text: a JSON string is parsed and re-dumped, so \\u escapes decode."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            pass
+    return json.dumps(value).lower() if value else ""
+
+
 def names_github_trust(variables: dict) -> bool:
-    """Whether assume_role_policy (a JSON string or a map) or principals mention the GitHub OIDC host."""
-    for key in ("assume_role_policy", "principals"):
-        value = variables.get(key)
-        if value and GITHUB_OIDC_HOST in (value if isinstance(value, str) else json.dumps(value)):
-            return True
-    return False
+    """Whether the trust variables name the GitHub OIDC host, or read the provider component's outputs."""
+    needles = (GITHUB_OIDC_HOST, GITHUB_PROVIDER_COMPONENT)
+    return any(needle in trust_text(variables.get(key))
+               for key in ("assume_role_policy", "principals", "assume_role_conditions") for needle in needles)
 
 
 def role_name_errors(where: str, name: str, instance: dict) -> list[str]:

@@ -228,6 +228,36 @@ class CiTrustTest(unittest.TestCase):
             with self.subTest(form=form):
                 self.assert_one(self.hand_written(**variables), "trust GitHub only through github_oidc_provider_enabled")
 
+    def test_the_dry_and_obfuscated_github_trusts_fail(self):
+        function = f"!terraform.state {check_prod_protection.GITHUB_PROVIDER_COMPONENT} .oidc_provider_arn"
+        host = check_prod_protection.GITHUB_OIDC_HOST
+        escaped = json.dumps(self.GITHUB_TRUST).replace(host.split(".")[0], "\\u0074oken")
+        cases = {
+            "D6 function in principals": dict(principals={"Federated": [function]},
+                                              assume_role_actions=["sts:AssumeRoleWithWebIdentity"]),
+            "D6b host in assume_role_conditions": dict(
+                principals={"Federated": [function]},
+                assume_role_conditions=[{"variable": f"{host}:sub", "test": "StringLike", "values": ["x"]}]),
+            "D7 function as the policy": dict(assume_role_policy="!terraform.output gh-trust policy"),
+            "D3 unicode escapes": dict(assume_role_policy=escaped),
+            "D4 uppercase host": dict(assume_role_policy=json.dumps(self.GITHUB_TRUST).replace(host, host.upper())),
+        }
+        self.assertIn("\\u0074oken", escaped)
+        for label, variables in cases.items():
+            with self.subTest(case=label):
+                found = self.hand_written(**variables)
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue("trust GitHub only through github_oidc_provider_enabled" in found[0], found)
+        self.assertIn("can't be verified offline",
+                      self.hand_written(assume_role_policy="!terraform.output gh-trust policy")[0])
+
+    def test_eks_irsa_and_cognito_identity_trusts_pass(self):
+        irsa = {"Federated": ["arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABC"]}
+        cognito = {"Federated": ["cognito-identity.amazonaws.com"]}
+        self.assertEqual(self.hand_written(principals=irsa, assume_role_actions=["sts:AssumeRoleWithWebIdentity"]), [])
+        self.assertEqual(self.hand_written(principals=cognito, assume_role_conditions=[
+            {"test": "StringEquals", "variable": "cognito-identity.amazonaws.com:aud", "values": ["pool"]}]), [])
+
     def test_an_unrelated_hand_written_trust_passes(self):
         self.assertEqual(self.hand_written(principals={"Service": ["ec2.amazonaws.com"]}), [])
         self.assertEqual(self.hand_written(assume_role_policy=json.dumps({"Statement": []})), [])
