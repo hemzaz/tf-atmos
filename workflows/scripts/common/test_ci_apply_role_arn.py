@@ -153,6 +153,8 @@ class NullLabelParityTest(unittest.TestCase):
         role["vars"]["context"]["name"] = "ctx"
         self.assertEqual(ci_apply_role_arn.role_name(role), "ctx")
         self.assertEqual(ci_apply_role_arn.role_name(ci(name=None, use_fullname=False)), "")
+        for value, expected in ((0, "0"), (False, "false")):  # Terraform keeps them as strings, not ""
+            self.assertEqual(ci_apply_role_arn.role_name(ci(name=value, use_fullname=False)), expected)
 
     def test_numeric_and_bool_attributes_are_kept_as_terraform_strings(self):
         self.assertEqual(ci_apply_role_arn.role_name(ci(attributes=[0, True, False, ""])), "fnx-ue1-prod-ci-apply-0-true-false")

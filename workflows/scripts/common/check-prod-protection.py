@@ -80,6 +80,12 @@ PROD_PLAN_BRANCH = "master"
 # The CI roles (stacks/catalog/aws-iam-role/ci.yaml): the vendored aws-iam-role with GitHub OIDC trust.
 CI_ROLE_COMPONENT = "aws-iam-role"
 CI_PLAN_NAME = "ci-plan"
+# The GitHub OIDC issuer host: a trust that names it (directly or in an oidc-provider ARN) is a GitHub trust.
+GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
+# The component whose outputs (the provider ARN) a DRY hand-written trust would read with an Atmos function.
+GITHUB_PROVIDER_COMPONENT = "aws-github-oidc-provider"
+# An Atmos YAML function left unresolved (describe --process-functions=false keeps it as a raw string).
+ATMOS_FUNCTION = re.compile(r"(?:^|[\s\"'])!(?:terraform\.|store|exec|env)\b")
 # "<org>/<repo>:<constraint>": an explicit org (upstream's unqualified form takes trusted_github_org).
 TRUSTED_REPO = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:(.+)")
 # A bare branch name: no ':' (so no ref:, environment: or other claim), no wildcard.
@@ -216,10 +222,38 @@ def check_ci_trust(stacks: dict) -> list[str]:
             # The CI instances are checked by their instance name, whatever their vars say (an
             # override of name or github_oidc_provider_enabled must not drop them out of the rules).
             if name not in CI_INSTANCES and normalize(variables.get("github_oidc_provider_enabled")) is not True:
+                if names_github_trust(variables):
+                    errors.append(f"{where} trusts GitHub OIDC ({GITHUB_OIDC_HOST}) through its assume_role_policy, "
+                                  "principals or assume_role_conditions, which skips every CI trust rule; trust "
+                                  "GitHub only through github_oidc_provider_enabled + trusted_github_repos on "
+                                  "aws-iam-role/ci-* (stacks/catalog/aws-iam-role/ci.yaml); remove the hand-written "
+                                  "trust")
+                elif any(ATMOS_FUNCTION.search(trust_text(variables.get(key))) for key in ("assume_role_policy", "principals")):
+                    errors.append(f"{where} builds its assume_role_policy or principals with an Atmos function, which "
+                                  "can't be verified offline (it may resolve to a GitHub OIDC trust); write the "
+                                  "trust literally, or trust GitHub only through github_oidc_provider_enabled + "
+                                  "trusted_github_repos on aws-iam-role/ci-*")
                 continue
             stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
             errors += ci_trust_errors(where, variables, stage, name)
     return errors
+
+
+def trust_text(value: Any) -> str:
+    """A trust variable as lowercase JSON text: a JSON string is parsed and re-dumped, so \\u escapes decode."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            pass
+    return json.dumps(value).lower() if value else ""
+
+
+def names_github_trust(variables: dict) -> bool:
+    """Whether the trust variables name the GitHub OIDC host, or read the provider component's outputs."""
+    needles = (GITHUB_OIDC_HOST, GITHUB_PROVIDER_COMPONENT)
+    return any(needle in trust_text(variables.get(key))
+               for key in ("assume_role_policy", "principals", "assume_role_conditions") for needle in needles)
 
 
 def role_name_errors(where: str, name: str, instance: dict) -> list[str]:
@@ -235,12 +269,15 @@ def role_name_errors(where: str, name: str, instance: dict) -> list[str]:
     cap = ci_apply_role_arn.MAX_ROLE_NAME
     if not ci_apply_role_arn.uses_fullname(instance):
         return [f"{where} sets use_fullname false, so the role is named by vars.name {role!r} ({len(role)} characters), "
-                f"over IAM's {cap} (id_length_limit does not shorten it): the apply would fail; shorten vars.name"]
+                f"over IAM's {cap} (id_length_limit does not shorten it): the apply would fail; "
+                + ("drop the use_fullname override (vars.name is pinned)" if name in CI_INSTANCES
+                   else "shorten vars.name")]
     consequence = ("the module would truncate it and append a hash, so it would no longer be the ARN CI and the "
                    "state backend derive (ci-apply-role-arn.py)" if name in CI_INSTANCES
                    else "the module would silently truncate it and append a hash")
     return [f"{where} resolves the role id {role!r} ({len(role)} characters), over IAM's {cap}: {consequence} "
-            "(id_length_limit has no effect on it); shorten the lane name (settings.prefix) or the instance's vars.name"]
+            "(id_length_limit has no effect on it); shorten the lane name (settings.prefix)"
+            + ("" if name in CI_INSTANCES else " or the instance's vars.name")]
 
 
 def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance: str = "") -> list[str]:
@@ -264,6 +301,16 @@ def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance:
         errors.append(f"{where} enables GitHub OIDC trust with no trusted_github_repos entry: add the "
                       "\"<org>/<repo>:<branch>\" it trusts to the instance's vars.trusted_github_repos, or set "
                       "vars.enabled: false")
+    if variables.get("permissions_boundary"):
+        errors.append(f"{where} sets permissions_boundary {variables['permissions_boundary']!r}: a CI role's "
+                      f"permissions are the catalog's allow-list ({catalog}), which this lint verifies; a boundary "
+                      "would make the effective permissions differ from it (and can cap the apply role); remove it")
+    if normalize(variables.get("instance_profile_enabled")) is True:
+        errors.append(f"{where} sets instance_profile_enabled: true, which makes the role attachable to an EC2 "
+                      f"instance; a CI role is assumed through GitHub OIDC only ({catalog}); remove it")
+    if variables.get("max_session_duration") is not None:
+        errors.append(f"{where} sets max_session_duration {variables['max_session_duration']!r}: CI roles keep the "
+                      f"component default (3600s) so a leaked token lives no longer ({catalog}); remove it")
     if variables.get("assume_role_policy"):
         errors.append(f"{where} merges an assume_role_policy into its GitHub OIDC trust; the trust must come "
                       "from trusted_github_repos alone")
@@ -320,6 +367,8 @@ def uploader_permission_errors(where: str, variables: dict) -> list[str]:
 
 def uploader_statements_ok(statements: Any, region: Any) -> bool:
     """The four statements the catalog renders, with one bucket ARN, one alias and this region's S3 endpoint."""
+    # Intentionally restates the catalog's statement shape (owner OQ4, won't fix): an allow-list derived
+    # from the catalog it checks would pass whatever the catalog said, and prove nothing.
     if not isinstance(statements, list):
         return False
     by_sid = {s.get("Sid"): s for s in statements if isinstance(s, dict)}
