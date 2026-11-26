@@ -9,7 +9,7 @@
 # stack (settings.context.stage, settings.prefix, settings.tfstate,
 # settings.github.pull_request_plans_enabled), so nonprod, prod and the DR
 # standbys share it (a standby overrides only the provider dependency,
-# catalog/iam/ci-standby.yaml).
+# catalog/aws-iam-role/ci-standby.yaml).
 #
 # - Names: the null-label id <tenant>-<settings.prefix>-<stage>-ci-<kind>, the
 #   stack name plus -ci-plan / -ci-apply on a stage stack (a lane carries its

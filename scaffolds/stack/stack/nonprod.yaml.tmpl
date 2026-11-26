@@ -37,7 +37,6 @@ import:
   - catalog/external-secrets/defaults
   - catalog/ec2/defaults
   - catalog/eks/defaults
-  - catalog/iam/defaults
   - catalog/acm/defaults
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
@@ -50,8 +49,10 @@ import:
   - catalog/network/services
 
   # --- security
-  - catalog/iam/[[ if eq $flavor "dev" ]]dev[[ else ]]main[[ end ]]
-  - catalog/iam/ci
+  - catalog/aws-iam-service-linked-roles/main
+  - catalog/aws-github-oidc-provider/main
+  - catalog/aws-iam-role/ci
+  - catalog/aws-iam-role/lambda-uploader
   - catalog/aws-account-settings/main[[ if eq .Config.account_singletons "no" ]]-standby[[ end ]]
   - catalog/kms/main[[ $f ]]
   - catalog/secretsmanager/app

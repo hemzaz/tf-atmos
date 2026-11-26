@@ -1,20 +1,18 @@
 ---
 # =============================================================================
-# The CI roles and iam/ci in the DR warm standby stacks
+# aws-iam-role/ci-plan and aws-iam-role/ci-apply in the DR warm standby stacks
 # =============================================================================
 # The stack's GitHub Actions OIDC roles, <full id>-ci-plan/-apply: the vendored
 # aws-iam-role's aws-iam-role/ci-plan and aws-iam-role/ci-apply
-# (catalog/aws-iam-role/ci, E6a4), as in the primary stack it stands by for
+# (catalog/aws-iam-role/ci), as in the primary stack it stands by for
 # (settings.dr.standby_of). Prod trust: master only. The roles trust the
 # account's one GitHub OIDC provider, created by the primary's
 # aws-github-oidc-provider (IAM OIDC providers are per account; a second
 # create fails), so each depends on that instance cross-stack: the one value
-# this file overrides. A standby has no Lambda package uploader, and iam/ci
-# creates nothing (E6a6 deletes it).
+# this file overrides. A standby has no Lambda package uploader.
 # =============================================================================
 
 import:
-  - catalog/iam/defaults
   - catalog/aws-iam-role/ci
 
 components:
@@ -28,18 +26,6 @@ components:
             stack: "{{ .settings.dr.standby_of }}"
 
     aws-iam-role/ci-apply:
-      dependencies:
-        components:
-          - component: backend/main
-            stack: "{{ .settings.tfstate.stack }}"
-          - component: aws-github-oidc-provider
-            stack: "{{ .settings.dr.standby_of }}"
-
-    iam/ci:
-      metadata:
-        component: iam
-        inherits:
-          - iam
       dependencies:
         components:
           - component: backend/main

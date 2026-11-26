@@ -93,7 +93,6 @@
 
 import:
   - catalog/_base/defaults
-  - catalog/iam/defaults
   - catalog/monitoring/defaults
   - catalog/kinesis/defaults
   - catalog/s3/defaults

@@ -229,8 +229,7 @@ workflows:
       - name: plan-foundation
         type: atmos
         command: >-
-          terraform plan --log-order grouped --query '.metadata.component == "iam"
-          or .metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"
+          terraform plan --log-order grouped --query '.metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"
           or .metadata.component == "vpc"'
       - name: confirm_foundation
         type: confirm
@@ -242,8 +241,7 @@ workflows:
       - name: deploy-iam
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "iam"
-          or .metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"'
+          terraform deploy --from-plan --query '.metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"'
       - name: deploy-vpc
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "vpc"'
