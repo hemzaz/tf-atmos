@@ -7,7 +7,10 @@
 # --kind plan; the only principal its stage's read-only state role trusts).
 # It uses no GitHub Environment, so its OIDC sub is
 # repo:<org>/<repo>:ref:refs/heads/<default branch>, which every plan role
-# trusts. vars.AWS_PLAN_ROLE_ARN only marks AWS as configured. The scripts read the state bucket (management account) only through
+# trusts. vars.AWS_PLAN_ROLE_ARN only marks AWS as configured. The role is
+# assumed through Atmos auth (ATMOS_PROFILE=github, ATMOS_IDENTITY=ci,
+# ATMOS_CI_ROLE_ARN from the derive step; profiles/github/atmos.yaml), not
+# aws-actions/configure-aws-credentials. The scripts read the state bucket (management account) only through
 # the stack's read-only backend role (workflows/scripts/common/state-read-role.sh).
 # Optional: vars.AWS_REGION.
 name: Disaster recovery
@@ -69,13 +72,18 @@ jobs:
       - id: role
         name: Resolve the stack's CI plan role
         run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind plan
-      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: ${{ steps.role.outputs.arn }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # The atmos image has no aws CLI or jq: each DR workflow's
       # dependencies.tools installs the pinned versions through the Atmos
       # toolchain before its steps run, and dr-status.sh refuses to start
       # without them.
+      # Atmos auth (the `github` profile's `ci` identity), on this step only.
+      # ATMOS_IDENTITY does not reach the shell steps of `atmos workflow`
+      # (dr-status.sh calls aws directly), so the identity is also passed as
+      # --identity; the workflow's steps then get the assumed role's credentials.
       - name: Run DR workflow
-        run: atmos workflow "$ACTION" -f disaster-recovery
+        env:
+          ATMOS_PROFILE: github
+          ATMOS_IDENTITY: ci
+          ATMOS_CI_ROLE_ARN: ${{ steps.role.outputs.arn }}
+          ATMOS_CI_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+        run: atmos workflow "$ACTION" -f disaster-recovery --identity "$ATMOS_IDENTITY"

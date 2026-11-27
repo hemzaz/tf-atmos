@@ -1,6 +1,6 @@
 # Pull request / merge queue checks with Atmos Native CI.
 # Required configuration:
-#   vars.AWS_REGION          region for OIDC credentials (defaults to us-east-1)
+#   vars.AWS_REGION          region for the CI identity's STS call (defaults to us-east-1)
 #   vars.AWS_PLAN_ROLE_ARN   any non-empty value marks AWS as configured (plan jobs are
 #                            skipped while it is unset). Each plan assumes its own stack's
 #                            aws-iam-role/ci-plan role, derived by workflows/scripts/common/ci-apply-role-arn.py
@@ -31,6 +31,15 @@
 #     (Cloud Posse's branch-pinned model), never pull_request; see terraform-cd.yml.
 #   - Fork PRs get no OIDC token or secrets under `pull_request`; do not switch
 #     this workflow to `pull_request_target`.
+#
+# AWS auth (Atmos auth, no aws-actions/configure-aws-credentials): the plan step
+# sets ATMOS_PROFILE=github and ATMOS_IDENTITY=ci (profiles/github/atmos.yaml:
+# the job's OIDC token, so the job keeps `id-token: write`, becomes the stack's
+# plan role) and ATMOS_CI_ROLE_ARN from the derive step's output, never from a
+# PR-controlled value. They are step-level only: the derive and describe steps
+# never load the profile. An identity makes every `atmos` call in its step
+# authenticate (a few extra STS calls, harmless), and Atmos disables IMDS for
+# the subprocess. test_ci_auth_workflows.py pins all of this.
 #
 # The plan runs PR-controlled code (providers, external data sources), and
 # Terraform inherits the plan step's environment, so a token there
@@ -784,21 +793,23 @@ jobs:
         env:
           STACK: ${{ matrix.stack }}
         run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind plan
-      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: ${{ steps.role.outputs.arn }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # TFSTATE_ACCESS=read makes the stack backend assume a READ-only state
       # role (stacks/orgs/fnx/_defaults.yaml): the prod one for a prod stack,
       # the non-prod one otherwise. That role cannot write a .tflock object, so
       # the plan runs with -lock=false, as drift-detection.yml does: a plan
       # never needs the lock, and a PR plan must never block an apply.
+      # The four ATMOS_* keys sign this step in through Atmos auth (the `github`
+      # profile's `ci` identity); they are on this step only, never the job.
       - name: Plan
         id: plan
         env:
           COMPONENT: ${{ matrix.component }}
           STACK: ${{ matrix.stack }}
           TFSTATE_ACCESS: read
+          ATMOS_PROFILE: github
+          ATMOS_IDENTITY: ci
+          ATMOS_CI_ROLE_ARN: ${{ steps.role.outputs.arn }}
+          ATMOS_CI_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
         run: atmos terraform plan "$COMPONENT" -s "$STACK" -- -lock=false
       - name: Comment plan summary on the PR
         if: always() && github.event_name == 'pull_request' && steps.plan.outputs.summary != ''
