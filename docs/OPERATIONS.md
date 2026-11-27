@@ -359,6 +359,26 @@ per-account planner/terraform role pair (`github-oidc-role`). `settings.environm
 already comes from the account map (Account IDs, above), so a new or changed account needs no
 script change. `AWS_PROD_PLAN_ROLE_ARN` is gone; delete it from the repository.
 
+**CI auth.** The read-only workflows (`terraform-ci.yml` plan, `drift-detection.yml`,
+`disaster-recovery.yml`) sign in through Atmos auth, not `aws-actions/configure-aws-credentials`:
+the job keeps `id-token: write`, and the one step that runs `atmos terraform` (or `atmos workflow`)
+sets `ATMOS_PROFILE=github`, `ATMOS_IDENTITY=ci`, `ATMOS_CI_ROLE_ARN` (the derive step's output, never a
+PR-controlled value) and `ATMOS_CI_REGION`. `profiles/github/atmos.yaml` turns the job's OIDC token into
+that role (`github/oidc`, then `aws/assume-role`); the roles and their trust are unchanged. The four
+keys are never job- or workflow-level, and no `GITHUB_TOKEN` is on the plan step
+(`test_ci_auth_workflows.py` pins both). An identity makes every `atmos` call in its step
+authenticate, `describe` included: a few extra STS calls, harmless. Atmos mints a fresh session per
+command and disables IMDS for the subprocess. `atmos workflow` does not pass `ATMOS_IDENTITY` to its shell steps,
+so the DR workflow also gets `--identity "$ATMOS_IDENTITY"`.
+`terraform-cd.yml` and `in-vpc.yml` still use `configure-aws-credentials` (E4e3).
+
+**First live check** (after the first deploy; nothing has run these jobs yet), in this order, stopping at
+the first failure: (1) a dispatched `plan` of one dev component (`terraform-cd.yml`, action `plan`),
+(2) a PR plan of that component, (3) a CD run. A failure at the sign-in names the role ARN Atmos tried
+(`Missing 'assume_role'` means `ATMOS_CI_ROLE_ARN` was empty). Humans can always apply through SSO
+(`atmos login`); bootstrap never uses `ci`. Roll back by reverting the PR: the trust is identical,
+so no AWS change is needed.
+
 ## Adding a stack
 
 A stage stack (`stacks/orgs/<tenant>/<stage>/<region>.yaml`, for an existing stage and account) comes
@@ -391,7 +411,8 @@ prints the edit to make). Still by hand:
 ## Signing in
 
 Humans sign in through IAM Identity Center with Atmos auth (`atmos.yaml` `auth`, Cloud Posse's
-Evolution 4). CI never does: it uses its OIDC roles and never sets `ATMOS_PROFILE`.
+Evolution 4). CI never does: it signs in with its OIDC token through the `github` profile
+(`ATMOS_PROFILE=github`, the `ci` identity; see Repository variables), never an Identity Center profile.
 
 1. Once per machine, pick your group's profile (`profiles/<role>/atmos.yaml`: `managers`,
    `devops` or `developers`; each sets only a default identity):

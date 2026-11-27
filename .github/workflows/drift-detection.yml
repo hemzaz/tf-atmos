@@ -15,7 +15,10 @@
 #
 # Required configuration: vars.AWS_PLAN_ROLE_ARN (any non-empty value marks AWS
 # as configured), optional vars.AWS_REGION. Each stack is planned with its own
-# aws-iam-role/ci-plan role (workflows/scripts/common/ci-apply-role-arn.py --kind plan).
+# aws-iam-role/ci-plan role (workflows/scripts/common/ci-apply-role-arn.py --kind plan),
+# which the plan step assumes through Atmos auth (ATMOS_PROFILE=github,
+# ATMOS_IDENTITY=ci, ATMOS_CI_ROLE_ARN from the derive step; profiles/github/atmos.yaml).
+# There is no aws-actions/configure-aws-credentials.
 name: Drift detection
 # AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
 # there is no AWS account yet, and that variable marks AWS as configured.
@@ -129,10 +132,6 @@ jobs:
         env:
           STACK: ${{ matrix.stack }}
         run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind plan
-      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: ${{ steps.role.outputs.arn }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # A READ-only state role (stacks/orgs/fnx/_defaults.yaml: the prod one
       # for prod stacks), hence -lock=false: it cannot write a .tflock object.
       # One plan per instance (ci-components.py) instead of a stack-wide
@@ -140,11 +139,20 @@ jobs:
       # Every instance is planned (keep going) and sorted into clean, drifted
       # (its planfile's JSON changes something) or failed. The step records the
       # result for the issues job and fails only if a plan failed.
+      # The four ATMOS_* keys sign this step in through Atmos auth (the `github`
+      # profile's `ci` identity, on this step only). An identity makes every
+      # atmos call in the step authenticate, the ci-components.py describes
+      # included (a few extra STS calls, harmless); it is not split out because
+      # the loop and the describes share one step.
       - name: Plan (detailed exit code)
         shell: bash
         env:
           STACK: ${{ matrix.stack }}
           TFSTATE_ACCESS: read
+          ATMOS_PROFILE: github
+          ATMOS_IDENTITY: ci
+          ATMOS_CI_ROLE_ARN: ${{ steps.role.outputs.arn }}
+          ATMOS_CI_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
         run: |
           set -uo pipefail
           components="$(python3 workflows/scripts/common/ci-components.py --stack "$STACK")" || exit 1
