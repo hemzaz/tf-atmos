@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Fail any committed Atmos auth default: only a profile (profiles/<role>/atmos.yaml) may hold one.
 
-Usage: check-auth-defaults.py --config <describe config JSON> --profile-config <JSON> < <describe stacks JSON>
+Usage: check-auth-defaults.py --config <describe config JSON> --profile-config <JSON> --profile-config-unset <JSON> < <describe stacks JSON>
   --config: `atmos describe config --format json` (atmos.yaml as Atmos loads it);
   --profile-config: the same with the CI profile merged in, as the lint runs it:
-            ATMOS_PROFILE=<ci profile> ATMOS_CI_ROLE_ARN=<PROFILE_ROLE_ARN> atmos describe config --format json;
+            ATMOS_PROFILE=<ci profile> ATMOS_CI_ROLE_ARN=<--role-arn> atmos describe config --format json;
+  --profile-config-unset: the same with ATMOS_CI_ROLE_ARN unset (env -u);
+  --role-arn: that dummy; defaults to $ATMOS_CI_ROLE_ARN (lint.yaml sets it once, workflow-level);
   stdin:    `atmos describe stacks --process-functions=false --format json`, where each
             component's `auth` is atmos.yaml's deep-merged with its stack's own.
 Both must be described with ATMOS_PROFILE unset (lint step stack-checks does): a profile is
@@ -23,22 +25,23 @@ ERROR, each naming the file, the key and the fix:
     the working directory), or such a provider with no such instance.
   - the CI profile (what --profile-config adds to --config) is not a `github/oidc` provider with
     audience sts.amazonaws.com plus `aws/assume-role` identities via it, holds a default or
-    required, or names the role by anything but `!env ATMOS_CI_ROLE_ARN`. The last is read from the
-    resolved value: the lint sets that env to PROFILE_ROLE_ARN, so a literal ARN, another env var or
-    a missing one resolves to something else (the raw profile text would need a YAML parser here).
+    required, edits atmos.yaml's own providers or identities, adds a key outside `auth`, or names the
+    role by anything but `!env ATMOS_CI_ROLE_ARN` with no default. The last is read from the resolved
+    values: the role must equal --role-arn when the env is set and be empty when it is unset, so a
+    literal ARN, a literal hidden as the `!env` default, another env var or a missing one all fail
+    (the raw profile text would need a YAML parser here).
 A stack-level finding is reported once per stack. Every component type is walked; abstract
 instances are skipped. Exits 1 on any ERROR.
 """
 import argparse
 import json
+import os
 import sys
 
 IDENTITY_CENTER_PROVIDER = "aws/iam-identity-center"
 IDENTITY_CENTER_COMPONENT = "aws-identity-center"
 CI_PROFILE = "profiles/<ci profile>/atmos.yaml"
 CI_AUDIENCE = "sts.amazonaws.com"
-# The dummy the lint puts in ATMOS_CI_ROLE_ARN when it describes the CI profile (lint.yaml).
-PROFILE_ROLE_ARN = "arn:aws:iam::000000000000:role/lint"
 FIX = "move it to profiles/<role>/atmos.yaml and select the role with ATMOS_PROFILE=<role>"
 
 
@@ -128,19 +131,28 @@ def check_region(config: dict, stacks: dict) -> list[str]:
     ]
 
 
-def check_profile(config: dict, profile_config: dict) -> list[str]:
+def check_profile(config: dict, profile_config: dict, unset_config: dict, role_arn: str) -> list[str]:
     """What the CI profile adds to atmos.yaml's auth: an OIDC provider and generic identities."""
     base = (config or {}).get("auth") or {}
     merged = (profile_config or {}).get("auth") or {}
-    added = {
-        kind: {
-            name: entry
-            for name, entry in sorted((merged.get(kind) or {}).items())
-            if entry != (base.get(kind) or {}).get(name)
-        }
-        for kind in ("providers", "identities")
-    }
+    unset = (unset_config or {}).get("auth") or {}
     errors = [
+        f"{CI_PROFILE}: adds `{key}` outside `auth`: remove it; the profile holds auth providers and identities only"
+        for key in sorted(set(config or {}) | set(profile_config or {}))
+        if key != "auth" and (config or {}).get(key) != (profile_config or {}).get(key)
+    ]
+    added = {}
+    for kind in ("providers", "identities"):
+        added[kind] = {}
+        for name, entry in sorted((merged.get(kind) or {}).items()):
+            if name not in (base.get(kind) or {}):
+                added[kind][name] = entry
+            elif entry != base[kind][name]:
+                errors.append(
+                    f"{CI_PROFILE}: auth.{kind}.{name} edits atmos.yaml's: don't change atmos.yaml's providers"
+                    " or identities in the CI profile, add its own"
+                )
+    errors += [
         f"{CI_PROFILE}: {key}: true: remove it; CI selects the identity with ATMOS_IDENTITY=ci"
         for key in flagged(added)
     ]
@@ -167,11 +179,13 @@ def check_profile(config: dict, profile_config: dict) -> list[str]:
                 f" ({', '.join(added['providers']) or 'none'})"
             )
         role = (identity.get("principal") or {}).get("assume_role")
-        if role != PROFILE_ROLE_ARN:
+        fallback = (((unset.get("identities") or {}).get(name) or {}).get("principal") or {}).get("assume_role")
+        if role != role_arn or fallback:
             errors.append(
-                f"{CI_PROFILE}: auth.identities.{name}.principal.assume_role resolved to {role!r}, not the"
-                f" lint's ATMOS_CI_ROLE_ARN ({PROFILE_ROLE_ARN}): write `assume_role: !env ATMOS_CI_ROLE_ARN`,"
-                " never a literal ARN (CI derives it per job, ci-apply-role-arn.py)"
+                f"{CI_PROFILE}: auth.identities.{name}.principal.assume_role resolved to {role!r} with"
+                f" ATMOS_CI_ROLE_ARN={role_arn} and to {fallback!r} with it unset (it must be the first and"
+                " empty): write `assume_role: !env ATMOS_CI_ROLE_ARN` with no default and no literal ARN"
+                " (CI derives it per job, ci-apply-role-arn.py)"
             )
     return errors
 
@@ -182,16 +196,28 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--profile-config", required=True, help="the same, with the CI profile and ATMOS_CI_ROLE_ARN set"
     )
+    parser.add_argument(
+        "--profile-config-unset", required=True, help="the same as --profile-config with ATMOS_CI_ROLE_ARN unset"
+    )
+    parser.add_argument(
+        "--role-arn",
+        default=os.environ.get("ATMOS_CI_ROLE_ARN"),
+        help="the ATMOS_CI_ROLE_ARN --profile-config was described with (default: the env's)",
+    )
     args = parser.parse_args(argv)
+    if not args.role_arn:
+        parser.error("--role-arn or ATMOS_CI_ROLE_ARN: the value --profile-config was described with")
     with open(args.config) as handle:
         config = json.load(handle)
     with open(args.profile_config) as handle:
         profile_config = json.load(handle)
+    with open(args.profile_config_unset) as handle:
+        unset_config = json.load(handle)
     stacks = json.load(sys.stdin)
     defaults, in_config = check_config(config)
     defaults += check_stacks(stacks, in_config)
     region = check_region(config, stacks)
-    profile = check_profile(config, profile_config)
+    profile = check_profile(config, profile_config, unset_config, args.role_arn)
     errors = defaults + region + profile
     for error in errors:
         print(f"ERROR {error}")

@@ -56,8 +56,14 @@ workflows:
     # profile's default (profiles/<role>/atmos.yaml) fails every auth and
     # terraform command before `atmos login` and needs a live session after
     # it, and stack-checks' describes must not merge a profile in.
+    #
+    # ATMOS_CI_ROLE_ARN is the dummy role the CI profile (profiles/github/atmos.yaml,
+    # E4e1) is validated and described with: only an explicit ATMOS_PROFILE=github
+    # reads it, so it is inert for every other step. check-auth-defaults takes it as
+    # its expected value (--role-arn defaults to this env).
     env:
       ATMOS_PROFILE: ""
+      ATMOS_CI_ROLE_ARN: arn:aws:iam::000000000000:role/lint
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
@@ -69,14 +75,14 @@ workflows:
       # stack's auth section; check-auth-defaults (stack-checks) does.
       #
       # The CI profile (profiles/github/atmos.yaml, E4e1) is validated the same
-      # way, with a dummy role ARN as a command prefix: it is the one place the
-      # workflow-level empty ATMOS_PROFILE is overridden, for this command only.
+      # way, with the workflow-level dummy ATMOS_CI_ROLE_ARN: it is the one place
+      # the empty ATMOS_PROFILE is overridden, for this command only.
       - name: auth-validate
         type: shell
         command: |
           set -eu
           atmos auth validate
-          ATMOS_PROFILE=github ATMOS_CI_ROLE_ARN=arn:aws:iam::000000000000:role/lint atmos auth validate
+          ATMOS_PROFILE=github atmos auth validate
       - type: parallel
         fail:
           mode: wait_all
@@ -342,11 +348,14 @@ workflows:
           stacks_json="$(mktemp)"
           config_json="$(mktemp)"
           profile_json="$(mktemp)"
-          trap 'rm -f "$stacks_json" "$config_json" "$profile_json"' EXIT
+          profile_unset_json="$(mktemp)"
+          trap 'rm -f "$stacks_json" "$config_json" "$profile_json" "$profile_unset_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           atmos describe config --format json > "$config_json"
-          # The CI profile merged in, with the dummy ARN check-auth-defaults expects (PROFILE_ROLE_ARN).
-          ATMOS_PROFILE=github ATMOS_CI_ROLE_ARN=arn:aws:iam::000000000000:role/lint atmos describe config --format json > "$profile_json"
+          # The CI profile merged in, with the workflow's dummy ATMOS_CI_ROLE_ARN and then without
+          # it: the role must follow the env, so a literal hidden as the `!env` default shows.
+          ATMOS_PROFILE=github atmos describe config --format json > "$profile_json"
+          env -u ATMOS_CI_ROLE_ARN ATMOS_PROFILE=github atmos describe config --format json > "$profile_unset_json"
           failed=""
           # check <name> <unit test file> <check command...>: the check reads the JSON on stdin.
           check() {
@@ -365,7 +374,7 @@ workflows:
           check check-dr-pairs test_dr_pair.py python3 workflows/scripts/common/dr-pair.py --lint
           check check-sqs-visibility test_check_sqs_visibility.py python3 workflows/scripts/common/check-sqs-visibility.py
           check check-lambda-packages test_check_lambda_packages.py python3 workflows/scripts/common/check-lambda-packages.py
-          check check-auth-defaults test_check_auth_defaults.py python3 workflows/scripts/common/check-auth-defaults.py --config "$config_json" --profile-config "$profile_json"
+          check check-auth-defaults test_check_auth_defaults.py python3 workflows/scripts/common/check-auth-defaults.py --config "$config_json" --profile-config "$profile_json" --profile-config-unset "$profile_unset_json"
           check first-deploy-inputs test_check_first_deploy_inputs.py python3 workflows/scripts/common/check-first-deploy-inputs.py --warn
           if [ -n "$failed" ]; then
             echo "stack checks failed:$failed"

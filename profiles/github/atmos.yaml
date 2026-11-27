@@ -1,6 +1,6 @@
 # Cloud Posse's `github` profile for CI (E4e): the GitHub Actions OIDC token becomes
-# the CI plan/apply role. CI sets ATMOS_PROFILE=github and, per step that runs terraform,
-# ATMOS_IDENTITY=ci plus ATMOS_CI_ROLE_ARN from the derive step (ci-apply-role-arn.py);
+# the CI plan/apply role. CI will set (E4e2) ATMOS_PROFILE=github and, per step that runs
+# terraform, ATMOS_IDENTITY=ci plus ATMOS_CI_ROLE_ARN from the derive step (ci-apply-role-arn.py);
 # nothing else loads this profile, and it holds no default or required identity.
 # House deviation: Cloud Posse writes one identity per stack with a literal ARN; here the
 # ARN is the derive step's output, passed through env (check-auth-defaults enforces it).
