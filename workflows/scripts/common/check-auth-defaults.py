@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Fail any committed Atmos auth default: only a profile (profiles/<role>/atmos.yaml) may hold one.
 
-Usage: check-auth-defaults.py --config <describe config JSON> < <describe stacks JSON>
+Usage: check-auth-defaults.py --config <describe config JSON> --profile-config <JSON> < <describe stacks JSON>
   --config: `atmos describe config --format json` (atmos.yaml as Atmos loads it);
+  --profile-config: the same with the CI profile merged in, as the lint runs it:
+            ATMOS_PROFILE=<ci profile> ATMOS_CI_ROLE_ARN=<PROFILE_ROLE_ARN> atmos describe config --format json;
   stdin:    `atmos describe stacks --process-functions=false --format json`, where each
             component's `auth` is atmos.yaml's deep-merged with its stack's own.
 Both must be described with ATMOS_PROFILE unset (lint step stack-checks does): a profile is
@@ -19,6 +21,11 @@ ERROR, each naming the file, the key and the fix:
     `vars.region` of an aws-identity-center instance (its stack's region mixin is the single
     source; atmos.yaml repeats it as a literal because an `!include` there resolves against
     the working directory), or such a provider with no such instance.
+  - the CI profile (what --profile-config adds to --config) is not a `github/oidc` provider with
+    audience sts.amazonaws.com plus `aws/assume-role` identities via it, holds a default or
+    required, or names the role by anything but `!env ATMOS_CI_ROLE_ARN`. The last is read from the
+    resolved value: the lint sets that env to PROFILE_ROLE_ARN, so a literal ARN, another env var or
+    a missing one resolves to something else (the raw profile text would need a YAML parser here).
 A stack-level finding is reported once per stack. Every component type is walked; abstract
 instances are skipped. Exits 1 on any ERROR.
 """
@@ -28,6 +35,10 @@ import sys
 
 IDENTITY_CENTER_PROVIDER = "aws/iam-identity-center"
 IDENTITY_CENTER_COMPONENT = "aws-identity-center"
+CI_PROFILE = "profiles/<ci profile>/atmos.yaml"
+CI_AUDIENCE = "sts.amazonaws.com"
+# The dummy the lint puts in ATMOS_CI_ROLE_ARN when it describes the CI profile (lint.yaml).
+PROFILE_ROLE_ARN = "arn:aws:iam::000000000000:role/lint"
 FIX = "move it to profiles/<role>/atmos.yaml and select the role with ATMOS_PROFILE=<role>"
 
 
@@ -117,17 +128,71 @@ def check_region(config: dict, stacks: dict) -> list[str]:
     ]
 
 
+def check_profile(config: dict, profile_config: dict) -> list[str]:
+    """What the CI profile adds to atmos.yaml's auth: an OIDC provider and generic identities."""
+    base = (config or {}).get("auth") or {}
+    merged = (profile_config or {}).get("auth") or {}
+    added = {
+        kind: {
+            name: entry
+            for name, entry in sorted((merged.get(kind) or {}).items())
+            if entry != (base.get(kind) or {}).get(name)
+        }
+        for kind in ("providers", "identities")
+    }
+    errors = [
+        f"{CI_PROFILE}: {key}: true: remove it; CI selects the identity with ATMOS_IDENTITY=ci"
+        for key in flagged(added)
+    ]
+    if not added["providers"] or not added["identities"]:
+        errors.append(
+            f"{CI_PROFILE}: adds no auth provider or no identity to atmos.yaml's: restore the OIDC provider"
+            " (kind github/oidc) and the ci identity (kind aws/assume-role)"
+        )
+    for name, provider in added["providers"].items():
+        kind = (provider or {}).get("kind")
+        audience = ((provider or {}).get("spec") or {}).get("audience")
+        if kind != "github/oidc" or audience != CI_AUDIENCE:
+            errors.append(
+                f"{CI_PROFILE}: auth.providers.{name} is kind {kind!r} with audience {audience!r}: set"
+                f" kind: github/oidc and spec.audience: {CI_AUDIENCE} (the aud the CI roles trust)"
+            )
+    for name, identity in added["identities"].items():
+        identity = identity or {}
+        via = (identity.get("via") or {}).get("provider")
+        if identity.get("kind") != "aws/assume-role" or via not in added["providers"]:
+            errors.append(
+                f"{CI_PROFILE}: auth.identities.{name} is kind {identity.get('kind')!r} via {via!r}: set"
+                f" kind: aws/assume-role and via.provider: one of the profile's providers"
+                f" ({', '.join(added['providers']) or 'none'})"
+            )
+        role = (identity.get("principal") or {}).get("assume_role")
+        if role != PROFILE_ROLE_ARN:
+            errors.append(
+                f"{CI_PROFILE}: auth.identities.{name}.principal.assume_role resolved to {role!r}, not the"
+                f" lint's ATMOS_CI_ROLE_ARN ({PROFILE_ROLE_ARN}): write `assume_role: !env ATMOS_CI_ROLE_ARN`,"
+                " never a literal ARN (CI derives it per job, ci-apply-role-arn.py)"
+            )
+    return errors
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", required=True, help="atmos describe config --format json output")
+    parser.add_argument(
+        "--profile-config", required=True, help="the same, with the CI profile and ATMOS_CI_ROLE_ARN set"
+    )
     args = parser.parse_args(argv)
     with open(args.config) as handle:
         config = json.load(handle)
+    with open(args.profile_config) as handle:
+        profile_config = json.load(handle)
     stacks = json.load(sys.stdin)
     defaults, in_config = check_config(config)
     defaults += check_stacks(stacks, in_config)
     region = check_region(config, stacks)
-    errors = defaults + region
+    profile = check_profile(config, profile_config)
+    errors = defaults + region + profile
     for error in errors:
         print(f"ERROR {error}")
     if errors:
@@ -136,12 +201,15 @@ def main(argv=None) -> int:
             why.append(
                 "a committed default breaks CI, which cannot log in (only profiles/<role>/atmos.yaml may set one, E4d0)"
             )
+        if profile:
+            why.append("the CI profile must be an OIDC provider and a generic identity named by env")
         if region:
             why.append("the Identity Center provider's region must be the aws-identity-center stack's")
         print(f"{len(errors)} auth problem(s): {'; '.join(why)}")
         return 1
     print(
-        "no auth default or required identity outside profiles/, no profiles.default, and the"
+        "no auth default or required identity outside profiles/, no profiles.default, the CI profile"
+        " is an OIDC provider and a generic identity named by env, and the"
         " Identity Center provider's region is the aws-identity-center stack's"
     )
     return 0

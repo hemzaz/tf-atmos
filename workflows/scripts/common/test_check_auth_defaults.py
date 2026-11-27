@@ -23,6 +23,28 @@ AUTH = {
 CONFIG = {"profiles": {}, "auth": AUTH}
 
 
+CI_PROFILE_AUTH = {
+    "providers": {"github-oidc": {"kind": "github/oidc", "spec": {"audience": "sts.amazonaws.com"}}},
+    "identities": {
+        "ci": {
+            "kind": "aws/assume-role",
+            "via": {"provider": "github-oidc"},
+            # what Atmos resolves `!env ATMOS_CI_ROLE_ARN` to under the lint's dummy value
+            "principal": {"assume_role": auth_defaults.PROFILE_ROLE_ARN, "region": "us-east-1"},
+        }
+    },
+}
+
+
+def with_profile(config):
+    """`atmos describe config` with the CI profile merged into atmos.yaml's auth."""
+    merged = copy.deepcopy(config)
+    auth = merged.setdefault("auth", {})
+    for kind, entries in copy.deepcopy(CI_PROFILE_AUTH).items():
+        auth.setdefault(kind, {}).update(entries)
+    return merged
+
+
 def flag(auth, kind, name, key):
     auth = copy.deepcopy(auth)
     auth[kind].setdefault(name, {})[key] = True
@@ -137,14 +159,74 @@ class AuthDefaultsTest(unittest.TestCase):
         bad = flag(AUTH, "identities", "local-aws", "default")
         self.assertEqual(run(CONFIG, stacks(**{"vpc/defaults": component(bad, type="abstract")})), [])
 
-    def main(self, config, document):
-        with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+    def main(self, config, document, profile_config=None):
+        profile_config = profile_config if profile_config is not None else with_profile(config)
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as handle, tempfile.NamedTemporaryFile(
+            "w", suffix=".json"
+        ) as profile_handle:
             json.dump(config, handle)
             handle.flush()
+            json.dump(profile_config, profile_handle)
+            profile_handle.flush()
             out = io.StringIO()
             with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(document))), contextlib.redirect_stdout(out):
-                code = auth_defaults.main(["--config", handle.name])
+                code = auth_defaults.main(["--config", handle.name, "--profile-config", profile_handle.name])
         return code, out.getvalue().splitlines()[-1]
+
+    def test_ci_profile_passes(self):
+        self.assertEqual(auth_defaults.check_profile(CONFIG, with_profile(CONFIG)), [])
+
+    def test_ci_profile_default_or_required_fails(self):
+        for key, flag_kind, name in (
+            ("default", "identities", "ci"),
+            ("required", "identities", "ci"),
+            ("default", "providers", "github-oidc"),
+        ):
+            merged = with_profile(CONFIG)
+            merged["auth"] = flag(merged["auth"], flag_kind, name, key)
+            errors = auth_defaults.check_profile(CONFIG, merged)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertTrue(errors[0].endswith(f"atmos.yaml: auth.{flag_kind}.{name}.{key}: true: remove it; CI selects the identity with ATMOS_IDENTITY=ci"), errors[0])
+
+    def test_ci_profile_default_in_atmos_yaml_is_not_blamed_on_the_profile(self):
+        base = {"auth": flag(AUTH, "identities", "local-aws", "default")}
+        self.assertEqual(auth_defaults.check_profile(base, with_profile(base)), [])
+
+    def test_ci_profile_provider_must_be_oidc_with_the_sts_audience(self):
+        for change in ({"kind": "aws/iam-identity-center"}, {"spec": {}}, {"spec": {"audience": "other"}}):
+            merged = with_profile(CONFIG)
+            merged["auth"]["providers"]["github-oidc"].update(change)
+            errors = auth_defaults.check_profile(CONFIG, merged)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn("kind: github/oidc and spec.audience: sts.amazonaws.com", errors[0])
+
+    def test_ci_profile_identity_must_be_assume_role_via_its_provider(self):
+        for change in ({"kind": "aws/user"}, {"via": {"provider": "fnx-sso"}}, {"via": {}}):
+            merged = with_profile(CONFIG)
+            merged["auth"]["identities"]["ci"].update(change)
+            errors = auth_defaults.check_profile(CONFIG, merged)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn("kind: aws/assume-role and via.provider", errors[0])
+
+    def test_ci_profile_role_must_come_from_the_env(self):
+        for role in ("arn:aws:iam::123456789012:role/fnx-ue1-dev-ci-plan", "", None):
+            merged = with_profile(CONFIG)
+            merged["auth"]["identities"]["ci"]["principal"]["assume_role"] = role
+            errors = auth_defaults.check_profile(CONFIG, merged)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn("write `assume_role: !env ATMOS_CI_ROLE_ARN`, never a literal ARN", errors[0])
+
+    def test_profile_that_adds_nothing_fails(self):
+        errors = auth_defaults.check_profile(CONFIG, CONFIG)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("adds no auth provider or no identity", errors[0])
+
+    def test_main_fails_on_a_bad_ci_profile_and_names_it(self):
+        merged = with_profile(CONFIG)
+        merged["auth"]["providers"]["github-oidc"]["spec"] = {}
+        code, summary = self.main(CONFIG, stacks(), merged)
+        self.assertEqual(code, 1)
+        self.assertIn("the CI profile must be an OIDC provider", summary)
 
     def test_main_exit_codes(self):
         for config, document, code in (
