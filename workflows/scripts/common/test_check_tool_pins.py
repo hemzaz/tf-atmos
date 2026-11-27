@@ -3,10 +3,13 @@
 import contextlib
 import importlib.util
 import io
+import json
+import os
 import pathlib
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "check_tool_pins",
@@ -29,16 +32,33 @@ workflows:
 
 
 class CheckToolPinsTest(unittest.TestCase):
-    def run_check(self, files):
+    def run_check(self, files, describe=None, atmos_on_path=False):
+        """Run main() on `files`. `describe` is the `atmos describe workflows` JSON Atmos would
+        return (default: exactly what the line scan reads, so only the line scan is exercised);
+        atmos_on_path=True uses neither it nor the env seam."""
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             for name, text in files.items():
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(textwrap.dedent(text))
+            if describe is None:
+                describe = {}
+                for path in sorted(root.glob("workflows/*.yaml")):
+                    read = {}
+                    with contextlib.suppress(check.PinError):  # the check reports it itself
+                        for _ in check.declarations(path.read_text().splitlines(), read):
+                            pass
+                    describe[path.name] = {"workflows": {
+                        wf: {"dependencies": {"tools": {t: v for t, (v, _) in pins.items()}}} for wf, pins in read.items()
+                    }}
+            seam = root / "describe.json"
+            seam.write_text(json.dumps(describe))
+            env = {} if atmos_on_path else {check.DESCRIBE_ENV: str(seam)}
             err = io.StringIO()
-            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
-                rc = check.main(["check-tool-pins.py", str(root)])
+            with mock.patch.dict(os.environ, env), mock.patch.object(check.shutil, "which", return_value=None):
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                    rc = check.main(["check-tool-pins.py", str(root)])
             return rc, err.getvalue()
 
     def test_agreeing_pins_pass(self):
@@ -134,18 +154,53 @@ class CheckToolPinsTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("unreadable dependencies line", err)
 
-    def test_merge_key_must_name_a_dependencies_anchor(self):
+    def test_merge_key_the_line_scan_cannot_follow_fails_the_cross_check(self):
         pins = 'x-pins: &pins\n  tools:\n    terraform: "1.16.3"\n'
+        resolved = {"lint.yaml": {"workflows": {"lint": {"dependencies": {"tools": {"hashicorp/terraform": "1.16.3"}}}}}}
         for name, text in {
             "top-level anchor": pins + "workflows:\n  lint:\n    dependencies:\n      <<: *pins\n",
             "list of aliases": pins + "workflows:\n  lint:\n    dependencies:\n      <<: [*pins]\n",
-            "inline mapping": "workflows:\n  lint:\n    dependencies:\n      <<: {tools: {terraform: 1.16.3}}\n",
         }.items():
             with self.subTest(name=name):
-                rc, err = self.run_check({"workflows/lint.yaml": text})
+                rc, err = self.run_check({"workflows/lint.yaml": text}, describe=resolved)
                 self.assertEqual(rc, 1)
-                self.assertIn("merge key", err)
-                self.assertIn("`dependencies: &name`", err)
+                self.assertIn("workflow lint, tool terraform: check-tool-pins read no pin from the file but Atmos resolves 1.16.3", err)
+
+    def test_redefined_anchor_name_is_caught_by_the_cross_check(self):
+        text = WORKFLOW.replace("dependencies:", "dependencies: &deps", 1) + (
+            "  other:\n    dependencies: *deps\n    steps: []\n"
+            '  redefined:\n    x-meta: &deps\n      tools:\n        tflint: "v0.64.9"\n'
+            "  late:\n    dependencies: *deps\n    steps: []\n"
+        )
+        atmos = {"lint.yaml": {"workflows": {
+            "lint": {"dependencies": {"tools": {"hashicorp/terraform": "1.16.3", "tflint": "v0.64.0", "wasilibs/go-yamllint": "1.38.0"}}},
+            "other": {"dependencies": {"tools": {"hashicorp/terraform": "1.16.3", "tflint": "v0.64.0", "wasilibs/go-yamllint": "1.38.0"}}},
+            "late": {"dependencies": {"tools": {"tflint": "v0.64.9"}}},
+        }}}
+        rc, err = self.run_check({"workflows/lint.yaml": text}, describe=atmos)
+        self.assertEqual(rc, 1)
+        self.assertIn("workflow late, tool tflint: check-tool-pins read 0.64.0 (line 6) from the file but Atmos resolves 0.64.9", err)
+        self.assertIn("workflow late, tool terraform: check-tool-pins read 1.16.3 (line 5) from the file but Atmos resolves no pin", err)
+
+    def test_merge_key_under_components_is_not_a_tools_merge(self):
+        text = (
+            "workflows:\n  lint:\n    dependencies:\n      tools:\n        terraform: \"1.16.3\"\n"
+            "      components:\n        base: &c\n          x: 1\n        derived:\n          <<: *c\n"
+        )
+        self.assertEqual(self.run_check({"workflows/lint.yaml": text}), (0, ""))
+
+    def test_missing_atmos_fails_clearly(self):
+        rc, err = self.run_check({"workflows/lint.yaml": WORKFLOW}, atmos_on_path=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("atmos is not on PATH", err)
+        self.assertIn(check.DESCRIBE_ENV, err)
+
+    def test_atmos_resolving_a_different_version_fails_naming_both(self):
+        atmos = {"lint.yaml": {"workflows": {"lint": {"dependencies": {"tools": {
+            "hashicorp/terraform": "1.16.4", "tflint": "v0.64.0", "wasilibs/go-yamllint": "1.38.0"}}}}}}
+        rc, err = self.run_check({"workflows/lint.yaml": WORKFLOW}, describe=atmos)
+        self.assertEqual(rc, 1)
+        self.assertIn("workflow lint, tool terraform: check-tool-pins read 1.16.3 (line 5) from the file but Atmos resolves 1.16.4", err)
 
     def test_merge_key_of_a_dependencies_anchor_is_read_with_local_override(self):
         anchored = WORKFLOW.replace("dependencies:", "dependencies: &deps", 1)
