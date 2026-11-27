@@ -484,7 +484,8 @@ def main() -> int:
         print(__doc__.strip().splitlines()[2], file=sys.stderr)
         return 2
     with open(sys.argv[1]) as stacks_file, open(sys.argv[2]) as workflows_file:
-        errors = check(json.load(stacks_file), json.load(workflows_file))
+        stacks = json.load(stacks_file)
+        errors = check_dependencies.ci_apply_role_arn.flag_errors(stacks) or check(stacks, json.load(workflows_file))
     errors = check_dependencies.fixtures.fatal(errors, "check-deploy-layers")
     for error in errors:
         print(f"ERROR {error}")

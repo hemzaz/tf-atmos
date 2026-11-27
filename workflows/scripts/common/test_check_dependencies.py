@@ -139,7 +139,7 @@ class CheckDependenciesTest(unittest.TestCase):
 class BooleanReadingTest(unittest.TestCase):
     def test_a_string_false_enabled_is_not_deployable(self):
         self.assertFalse(check_dependencies.is_deployable(instance(enabled="false")))
-        stacks = {"s1": {"components": {"terraform": {"off": instance(component="ghost", enabled="False ")}}}}
+        stacks = {"s1": {"components": {"terraform": {"off": instance(component="ghost", enabled="false")}}}}
         with tempfile.TemporaryDirectory() as components:
             self.assertEqual(check_dependencies.check(stacks, components), [])
         reader = instance({"x": "!terraform.state off .id"}, [{"component": "off"}])
@@ -151,8 +151,8 @@ class BooleanReadingTest(unittest.TestCase):
 
     def test_a_garbage_enabled_is_a_clean_error_and_exit_1(self):
         stacks = {"s1": {"components": {"terraform": {"x": instance(enabled="maybe")}}}}
-        self.assertEqual(len(check_dependencies.flag_errors(stacks)), 1)
-        self.assertIn("s1: x metadata.enabled is 'maybe', not a boolean", check_dependencies.flag_errors(stacks)[0])
+        self.assertEqual(len(check_dependencies.ci_apply_role_arn.flag_errors(stacks)), 1)
+        self.assertIn("s1: x metadata.enabled is 'maybe', not a boolean", check_dependencies.ci_apply_role_arn.flag_errors(stacks)[0])
         out = io.StringIO()
         with mock.patch("sys.argv", ["x"]), mock.patch("sys.stdin", io.StringIO(json.dumps(stacks))), \
                 contextlib.redirect_stdout(out):

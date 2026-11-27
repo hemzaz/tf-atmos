@@ -55,7 +55,7 @@ class ApplyRoleArnTest(unittest.TestCase):
             ci_apply_role_arn.role_arn(bad)
 
     def test_string_booleans_are_read_like_terraform(self):
-        for value in ("false", "False ", " FALSE"):
+        for value in ("false", "0"):
             with self.subTest(vars_enabled=value), self.assertRaisesRegex(ValueError, "does not create an apply role"):
                 ci_apply_role_arn.role_arn(ci(enabled=value))
             with self.subTest(metadata_enabled=value), self.assertRaisesRegex(ValueError, "does not create an apply role"):
@@ -65,14 +65,15 @@ class ApplyRoleArnTest(unittest.TestCase):
         context_only["vars"]["context"]["enabled"] = "false"
         with self.assertRaisesRegex(ValueError, "does not create an apply role"):
             ci_apply_role_arn.role_arn(context_only)
-        for value in ("true", "True ", True):
+        for value in ("true", "1", True):
             with self.subTest(enabled=value):
                 self.assertEqual(ci_apply_role_arn.role_arn(ci(enabled=value, metadata={"enabled": value})),
                                  "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply")
 
     def test_an_unparseable_enabled_fails_loudly(self):
         for bad, where in ((ci(enabled="maybe"), "vars.enabled"), (ci(metadata={"enabled": "maybe"}), "metadata.enabled"),
-                           (ci(enabled=1), "vars.enabled")):
+                           (ci(enabled=1), "vars.enabled"), (ci(enabled="False "), "vars.enabled"),
+                           (ci(metadata={"enabled": "TRUE"}), "metadata.enabled"), (ci(enabled=" true"), "vars.enabled")):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, where + r" is .* not a boolean"):
                 ci_apply_role_arn.role_arn(bad)
 
@@ -80,17 +81,22 @@ class ApplyRoleArnTest(unittest.TestCase):
         self.assertEqual(ci_apply_role_arn.role_arn(ci(github_oidc_provider_enabled="true")),
                          "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply")
         with self.assertRaisesRegex(ValueError, "does not create an apply role"):
-            ci_apply_role_arn.role_arn(ci(github_oidc_provider_enabled="False"))
+            ci_apply_role_arn.role_arn(ci(github_oidc_provider_enabled="false"))
         with self.assertRaisesRegex(ValueError, "vars.github_oidc_provider_enabled is 'yes'"):
             ci_apply_role_arn.role_arn(ci(github_oidc_provider_enabled="yes"))
 
     def test_flag_default_is_for_none_only(self):
         self.assertIs(ci_apply_role_arn.flag(None, "x", True), True)
         self.assertIsNone(ci_apply_role_arn.flag(None, "x"))
-        self.assertIs(ci_apply_role_arn.flag("False", "x", True), False)
+        self.assertIs(ci_apply_role_arn.flag("false", "x", True), False)
+        for value in ("True", "False", "TRUE", " true", "false ", 1, 0, "yes"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "x is .* not a boolean"):
+                ci_apply_role_arn.flag(value, "x", True)
+        for value, expected in (("1", True), ("0", False), ("true", True), (False, False)):
+            self.assertIs(ci_apply_role_arn.flag(value, "x"), expected)
 
     def test_is_deployable_reads_a_string_enabled(self):
-        for metadata, expected in (({}, True), ({"enabled": "false"}, False), ({"enabled": " True"}, True),
+        for metadata, expected in (({}, True), ({"enabled": "false"}, False), ({"enabled": "true"}, True),
                                    ({"enabled": False}, False), ({"type": "abstract"}, False)):
             with self.subTest(metadata=metadata):
                 self.assertIs(ci_apply_role_arn.is_deployable({"metadata": metadata}), expected)
@@ -130,10 +136,10 @@ class RoleNameTest(unittest.TestCase):
 
     def test_use_fullname_defaults_true_and_reads_string_forms(self):
         for value, expected in ((None, True), (True, True), ("true", True), (False, False), ("false", False),
-                                (" False ", False)):
+                                ("0", False), ("1", True)):
             with self.subTest(value=value):
                 self.assertIs(ci_apply_role_arn.uses_fullname(ci(use_fullname=value)), expected)
-        for value in ("yes", "0", 1):
+        for value in ("yes", 1, "False", " false"):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "vars.use_fullname is .* not a boolean"):
                 ci_apply_role_arn.uses_fullname(ci(use_fullname=value))
 

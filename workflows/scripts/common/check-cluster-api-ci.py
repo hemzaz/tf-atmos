@@ -119,7 +119,7 @@ def cluster_components(components_dir: pathlib.Path) -> set[str]:
 def is_public(value) -> bool:
     # A Go template (dev's "{{ .settings.environment.eks_public_access }}")
     # renders to a string.
-    return value is True or str(value).strip().lower() == "true"
+    return state_roles.ci_apply_role_arn.flag(value, "vars.cluster_endpoint_public_access", False) is True
 
 
 def deployable_instances(stack: dict) -> dict:
@@ -490,6 +490,12 @@ def main() -> int:
         return 2
     cluster = cluster_components(pathlib.Path(sys.argv[1]))
     stacks = json.load(sys.stdin)
+    flag_errors = state_roles.ci_apply_role_arn.flag_errors(stacks)
+    if flag_errors:
+        for error in flag_errors:
+            print(f"ERROR {error}")
+        print(f"{len(flag_errors)} boolean problem(s)")
+        return 1
     errors = fixtures.fatal(check(stacks, cluster), "check-cluster-api-ci")
     operator_errors, warnings = check_operators(stacks, cluster)
     operator_errors = fixtures.fatal(operator_errors, "check-cluster-api-ci")

@@ -85,6 +85,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import backends  # noqa: E402
 import fixtures  # noqa: E402
 
 # check-data-residency.py's ORG_SERVICES and its account helpers, the one definition.
@@ -193,11 +194,9 @@ GLOBAL_KEYS = {"bucket_name", "assets_bucket_name", "domain_prefix"}
 
 
 def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
     return (
-        metadata.get("type") != "abstract"
-        and metadata.get("enabled", True) is not False
-        and (instance.get("vars") or {}).get("enabled") is not False
+        backends.is_deployable(instance)
+        and backends.ci_apply_role_arn.flag((instance.get("vars") or {}).get("enabled"), "vars.enabled") is not False
     )
 
 
@@ -242,7 +241,7 @@ def created(instance: dict, stage) -> list[tuple]:
         out.append((resource, value, f"vars.{key}"))
     if stage != fixtures.FIXTURE_STAGE:
         for (comp, gate, default), resource in SINGLETONS.items():
-            if comp == component and variables.get(gate, default) is True:
+            if comp == component and backends.ci_apply_role_arn.flag(variables.get(gate), f"vars.{gate}", default) is True:
                 out.append((resource, "(one per account)", f"vars.{gate}"))
         for (comp, key), resource in MAP_SINGLETONS.items():
             entries = variables.get(key) if comp == component else None
@@ -582,7 +581,8 @@ def check(stacks: dict) -> list[str]:
 
 
 def main() -> int:
-    errors = check(json.load(sys.stdin))
+    stacks = json.load(sys.stdin)
+    errors = backends.ci_apply_role_arn.flag_errors(stacks) or check(stacks)
     for error in errors:
         print(f"ERROR {error}")
     if errors:

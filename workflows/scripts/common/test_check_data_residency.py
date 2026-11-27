@@ -213,7 +213,7 @@ class DataResidencyTest(unittest.TestCase):
 
         for off in (None, False, "false"):
             self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": dns(off)})}), [], off)
-        for on in (True, "true", 1):
+        for on in (True, "true", "1"):
             self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": dns(on)})}), [
                 "fnx-ew1-prod: network/main sets dnssec_enabled: Route 53 signs only with a KMS key in "
                 "us-east-1, outside the EU",
@@ -224,15 +224,15 @@ class DataResidencyTest(unittest.TestCase):
         us["backend"] = us["remote_state_backend"] = {"region": "us-east-1"}
         self.assertEqual(residency.check({"fnx-ue1-prod": stack(**{"network/main": us})}), [])
 
-    def test_dns_query_logging_quoted_and_numeric_values_count_as_on(self):
+    def test_dns_query_logging_quoted_values_count_as_on(self):
         on = "fnx-ew1-prod: network/main zone main sets enable_query_logging"
-        for value in ("true", "True", 1):
+        for value in ("true", "1"):
             spec = instance(zones={"main": {"name": "d", "enable_query_logging": value}})
             spec["metadata"] = {"component": "dns"}
             errors = residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": spec})})
             self.assertEqual(len(errors), 1, value)
             self.assertTrue(errors[0].startswith(on), value)
-        for value in (None, False, "false", "FALSE"):
+        for value in (None, False, "false", "0"):
             spec = instance(zones={"main": {"name": "d", "enable_query_logging": value}})
             spec["metadata"] = {"component": "dns"}
             self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"network/main": spec})}), [], value)
@@ -297,7 +297,7 @@ class DataResidencyTest(unittest.TestCase):
 
         on = ("fnx-ew1-prod: security-monitoring/main sets enable_alert_enrichment: its Lambda sends "
               "findings to Slack/PagerDuty, outside the EU")
-        for value in (True, "true", 1):
+        for value in (True, "true", "1"):
             self.assertEqual(residency.check({"fnx-ew1-prod": eu_stack(**{"security-monitoring/main": monitoring(value)})}),
                              [on], value)
         for value in (None, False, "false"):

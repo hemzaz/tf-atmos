@@ -34,9 +34,18 @@ name. A selected stack without exactly one stage, or a standby whose primary is
 not a selected stack of the same stage, is an error in both list modes.
 """
 import argparse
+import importlib.util
 import json
+import pathlib
 import subprocess
 import sys
+
+# The one boolean reader of the lint scripts.
+_spec = importlib.util.spec_from_file_location(
+    "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py")
+)
+ci_apply_role_arn = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ci_apply_role_arn)
 
 # Promotion order: CD deploys dev before staging before prod.
 STAGE_ORDER = ("dev", "staging", "prod")
@@ -127,10 +136,7 @@ def ci_stacks(stacks: dict) -> list:
 
 
 def deployable(spec: dict) -> bool:
-    # The same rule as check-first-deploy-inputs.py's deployable(); kept local, not imported
-    # across the hyphenated script names.
-    metadata = (spec or {}).get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+    return ci_apply_role_arn.is_deployable(spec or {})
 
 
 def nothing_to_plan(config: dict) -> bool:
@@ -184,6 +190,11 @@ def main() -> int:
     args = parser.parse_args()
 
     stacks = describe_stacks()
+    flag_errors = ci_apply_role_arn.flag_errors(stacks)
+    if flag_errors:
+        for error in flag_errors:
+            print(f"::error::{error}", file=sys.stderr)
+        return 1
     if args.check is not None:
         error = check(stacks, args.check)
         if error:

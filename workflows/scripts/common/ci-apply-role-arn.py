@@ -56,19 +56,20 @@ def label(ci: dict, field: str):
 
 
 def flag(value, where: str, default=None):
-    """A bool var Atmos may render as a string: "true"/"false" (case and space insensitive) become bools.
+    """A bool var Atmos may render as a string, read as Terraform converts it (terraform 1.17.2 through
+    .tfvars.json, type = bool and optional(bool)): a bool, or exactly "true", "false", "1" or "0".
 
     The one boolean reader of the lint scripts: they all import this module. None gives default (the
-    value's unset meaning); anything else, "yes", "0", 1, fails loudly, because Terraform would reject
-    it too and a guess could pass a disabled role. Numeric rules (a retention of "7") are not booleans:
-    check-prod-protection.py's normalize() reads those.
+    value's unset meaning). Anything else fails loudly, because Terraform rejects it too and a guess could
+    pass a disabled role: "True", "TRUE", " true" (case and padding matter), the numbers 1 and 0, "yes".
+    Numeric rules (a retention of "7") are not booleans: check-prod-protection.py's normalize() reads those.
     """
     if value is None:
         return default
     if isinstance(value, bool):
         return value
-    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
-        return value.strip().lower() == "true"
+    if isinstance(value, str) and value in ("true", "false", "1", "0"):
+        return value in ("true", "1")
     raise ValueError(f"{where} is {value!r}, not a boolean (true or false)")
 
 
@@ -90,6 +91,55 @@ def creates_role(ci: dict) -> bool:
 def uses_fullname(ci: dict) -> bool:
     """The component's use_fullname (default true; Atmos may render the bool as a string)."""
     return flag((ci.get("vars") or {}).get("use_fullname"), "vars.use_fullname", True)
+
+
+# security-monitoring's finding routes (E5c8, owner OQ-AL) and the org service each routes: defined here, the one
+# module every lint script loads, so BOOLEAN_VARS derives from it; check-data-residency.py reads this same dict.
+MONITORING_ROUTES = {
+    "enable_guardduty_route": "aws-guardduty",
+    "enable_securityhub_route": "aws-security-hub",
+    "enable_inspector2_route": "aws-inspector2",
+}
+# The boolean vars the lint scripts decide on (flag() reads them): flag_errors() pre-scans them.
+BOOLEAN_VARS = (
+    *MONITORING_ROUTES,
+    "enabled", "github_oidc_provider_enabled", "instance_profile_enabled", "eks_oidc_provider_enabled",
+    "use_fullname", "cluster_endpoint_public_access", "is_multi_region_trail", "include_global_service_events",
+    "account_alias_enabled", "s3_block_public_access_enabled",
+    # check-data-residency, check-lane-names and check-domains (flag_on)
+    "admin_delegated", "finding_aggregator_enabled", "account_map_enabled", "create_sns_topic", "create_iam_role",
+    "dns_private_zone_enabled", "dnssec_enabled", "enable_alert_enrichment", "accessanalyzer_organization_enabled",
+    "accessanalyzer_organization_unused_access_enabled", "accessanalyzer_account_enabled",
+    "organizations_delegated_administrator_enabled", "organizations_resource_policy_enabled",
+    "multi_account_dns_delegation", "create_root_delegation", "enable_logging", "manage_log_resource_policy",
+)
+# The maps of dns zones, and the booleans each entry sets (check-domains, check-data-residency).
+ZONE_MAPS = ("zones", "external_zones")
+ZONE_FLAGS = ("enable_query_logging", "dnssec_enabled")
+
+
+def flag_errors(stacks: dict) -> list[str]:
+    """One clean error per instance whose metadata.enabled or boolean var is not true/false.
+
+    Every lint script calls this first in main(), so is_deployable()/flag() never print a traceback.
+    """
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            instance = instance or {}
+            try:
+                is_deployable(instance)
+                variables = instance.get("vars") or {}
+                for var in BOOLEAN_VARS:
+                    flag(variables.get(var), f"vars.{var}")
+                for zone_map in ZONE_MAPS:
+                    zones = variables.get(zone_map)
+                    for key, zone in sorted(zones.items()) if isinstance(zones, dict) else ():
+                        for var in ZONE_FLAGS:
+                            flag(zone.get(var) if isinstance(zone, dict) else None, f"vars.{zone_map}.{key}.{var}")
+            except ValueError as error:
+                errors.append(f"{stack_name}: {name} {error}; Atmos/Terraform reads only true or false")
+    return errors
 
 
 def clean(value: str, regex: str) -> str:

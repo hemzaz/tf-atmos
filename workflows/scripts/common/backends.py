@@ -6,18 +6,25 @@ creates the S3 bucket vars.bucket_name in vars.region and its access_roles; ever
 s3-backend instance names one of those buckets in backend.bucket. Checks resolve
 a bucket's owner with owned()/owner_of(), never by picking one of several.
 """
+import importlib.util
+import pathlib
 import re
 from dataclasses import dataclass, field
 from typing import Optional
+
+# The one boolean reader of the lint scripts (ci-apply-role-arn.py): the scripts that import backends use it too.
+_spec = importlib.util.spec_from_file_location(
+    "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py")
+)
+ci_apply_role_arn = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ci_apply_role_arn)
 
 BACKEND_COMPONENT = "backend"
 # A template over an unset setting renders "<no value>" for both sides, which would compare equal.
 AWS_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+is_deployable = ci_apply_role_arn.is_deployable
 
 
 def instances(stack: dict) -> dict:

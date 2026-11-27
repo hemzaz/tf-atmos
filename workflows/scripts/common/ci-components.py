@@ -35,11 +35,20 @@ Skipped instances are reported as a ::notice:: and errors as ::error:: on stderr
 without a valid vars.region.
 """
 import argparse
+import importlib.util
 import json
+import pathlib
 import re
 import subprocess
 import sys
 from typing import Optional
+
+# The one boolean reader of the lint scripts: metadata.enabled "false" counts as false.
+_spec = importlib.util.spec_from_file_location(
+    "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py")
+)
+ci_apply_role_arn = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ci_apply_role_arn)
 
 RUNNERS = ("hosted", "in-vpc")
 RUNNER_COMPONENT = "github-runners"
@@ -47,9 +56,7 @@ RUNNER_POOL_DEFAULT_NAME = "github-runners"
 REGION = re.compile(r"[a-z]{2}(-[a-z]+)+-\d+")
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+is_deployable = ci_apply_role_arn.is_deployable
 
 
 def github_settings(instance: dict) -> dict:
@@ -185,6 +192,11 @@ def main() -> int:
         instances = stack_instances(args.stack)
     except LookupError as error:
         print(f"::error::{error}", file=sys.stderr)
+        return 1
+    flag_errors = ci_apply_role_arn.flag_errors({args.stack: {"components": {"terraform": instances}}})
+    if flag_errors:
+        for error in flag_errors:
+            print(f"::error::{error}", file=sys.stderr)
         return 1
     affected = None
     if args.base:

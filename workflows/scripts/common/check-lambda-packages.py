@@ -28,9 +28,17 @@ must be a YAML string (quoted), and s3_key must be
 (no package exists, so the apply would fail) and not "latest" (an overwritten key
 does not redeploy the function). Exits 1 on any violation.
 """
+import importlib.util
 import json
+import pathlib
 import sys
 from typing import Any, Optional
+
+_spec = importlib.util.spec_from_file_location(
+    "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py")
+)
+ci_apply_role_arn = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ci_apply_role_arn)
 
 UPLOADER_INSTANCE = "aws-iam-role/lambda-uploader"
 UPLOADER_FIX = f"the stack file's {UPLOADER_INSTANCE} vars (stacks/catalog/aws-iam-role/lambda-uploader.yaml)"
@@ -45,14 +53,12 @@ TERRAFORM_READS = ("!terraform.state", "!terraform.output")
 PLACEHOLDER_VERSIONS = ("unreleased", "latest")
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+is_deployable = ci_apply_role_arn.is_deployable
 
 
 def is_on(value: Any) -> bool:
-    """vars.enabled as Terraform reads it (Atmos renders a templated bool as a string)."""
-    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+    """vars.enabled as Terraform reads it (Atmos renders a templated bool as a string); unset is off."""
+    return ci_apply_role_arn.flag(value, "vars.enabled", False) is True
 
 
 def module_name(name: str, instance: dict) -> str:
@@ -200,7 +206,8 @@ def check(stacks: dict) -> list[str]:
 
 
 def main() -> int:
-    errors = check(json.load(sys.stdin))
+    stacks = json.load(sys.stdin)
+    errors = ci_apply_role_arn.flag_errors(stacks) or check(stacks)
     for error in errors:
         print(f"ERROR {error}")
     if errors:

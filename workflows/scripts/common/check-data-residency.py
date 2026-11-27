@@ -135,6 +135,7 @@ from typing import Any, Iterator, NamedTuple, Optional
 
 # The sibling module, also when this file is loaded by path (tests).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import backends  # noqa: E402
 import fixtures  # noqa: E402
 
 CHECK = "check-data-residency"
@@ -213,9 +214,7 @@ GDPR_ONLY_ACCOUNTS = ("prod-eu",)
 GUARDDUTY_AUTO_ENABLE_DEFAULT = "NEW"  # aws-guardduty variables.tf auto_enable_organization_members
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+is_deployable = backends.is_deployable
 
 
 def instances(stack: dict) -> dict:
@@ -278,13 +277,14 @@ def exempt(name: str, field: str, region: str, exemptions: tuple) -> bool:
     )
 
 
-def flag_on(value: Any) -> bool:
-    """Whether Terraform would read value as a true bool: anything but null, false or "false".
+def flag_on(value: Any, where: str = "a boolean var") -> bool:
+    """Whether Terraform would read value as a true bool, by the one boolean reader (ci-apply-role-arn.py flag).
 
-    A quoted YAML "true" (or "True", or 1) becomes true for optional(bool), so only the
-    values that are certainly off count as off.
+    Unset is off; a bool or exactly "true", "false", "1" or "0" is read (what Terraform converts); anything else,
+    "True", " true", "yes" or the number 1, raises ValueError. flag_errors() pre-scans
+    the vars and zone entries these rules read, so main() reports each with its stack, instance and field.
     """
-    return value is not None and value is not False and str(value).strip().lower() != "false"
+    return backends.ci_apply_role_arn.flag(value, where, False) is True
 
 
 def query_logging_errors(where: str, zones: Any, field: str = "zones") -> list[str]:
@@ -1018,11 +1018,7 @@ def org_service_errors(stacks: dict, scoped: set) -> list[str]:
 
 # security-monitoring's finding routes (E5c8, owner OQ-AL): each flag routes the findings of one org service's
 # member detector/hub, which exists only while the region's delegated administrator enrolls the account.
-MONITORING_ROUTES = {
-    "enable_guardduty_route": "aws-guardduty",
-    "enable_securityhub_route": "aws-security-hub",
-    "enable_inspector2_route": "aws-inspector2",
-}
+MONITORING_ROUTES = backends.ci_apply_role_arn.MONITORING_ROUTES  # defined there: its BOOLEAN_VARS derive from it
 
 
 def enrolls(org: dict, member: str, member_id: str, ids: dict) -> bool:
@@ -1137,7 +1133,9 @@ def outside_reader_errors(stack_name: str, name: str, instance: dict, scoped: se
 
 def main() -> int:
     warnings: list[str] = []
-    errors = fixtures.fatal(check(json.load(sys.stdin), warnings=warnings), CHECK)
+    stacks = json.load(sys.stdin)
+    errors = backends.ci_apply_role_arn.flag_errors(stacks) or check(stacks, warnings=warnings)
+    errors = fixtures.fatal(errors, CHECK)
     for warning in warnings:
         print(f"WARNING {warning}", file=sys.stderr)
     for error in errors:

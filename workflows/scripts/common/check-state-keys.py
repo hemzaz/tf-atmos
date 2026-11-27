@@ -201,7 +201,8 @@ def check(stacks: dict) -> list[str]:
 
 
 def main() -> int:
-    errors = check(json.load(sys.stdin))
+    stacks = json.load(sys.stdin)
+    errors = backends.ci_apply_role_arn.flag_errors(stacks) or check(stacks)
     for error in errors:
         print(f"ERROR {error}")
     if errors:
