@@ -85,13 +85,16 @@ umask 077
 INIT_ATTEMPTS="${PLAN_SWEEP_INIT_ATTEMPTS:-3}"
 INIT_RETRY_STEP="${PLAN_SWEEP_INIT_RETRY_STEP:-10}"
 INIT_LOG_TAIL=20
-case "$INIT_ATTEMPTS" in '' | *[!0-9]*)
-  echo "error: PLAN_SWEEP_INIT_ATTEMPTS must be a positive integer, got '$INIT_ATTEMPTS'." >&2
+RAW_INIT_ATTEMPTS="$INIT_ATTEMPTS"
+RAW_INIT_RETRY_STEP="$INIT_RETRY_STEP"
+# At most 4 digits: a longer value could wrap in the arithmetic below.
+case "$INIT_ATTEMPTS" in '' | *[!0-9]* | ?????*)
+  echo "error: PLAN_SWEEP_INIT_ATTEMPTS must be a positive integer of at most 4 digits, got '$RAW_INIT_ATTEMPTS'." >&2
   exit 2
   ;;
 esac
-case "$INIT_RETRY_STEP" in '' | *[!0-9]*)
-  echo "error: PLAN_SWEEP_INIT_RETRY_STEP must be a non-negative integer, got '$INIT_RETRY_STEP'." >&2
+case "$INIT_RETRY_STEP" in '' | *[!0-9]* | ?????*)
+  echo "error: PLAN_SWEEP_INIT_RETRY_STEP must be a non-negative integer of at most 4 digits, got '$RAW_INIT_RETRY_STEP'." >&2
   exit 2
   ;;
 esac
@@ -99,7 +102,7 @@ esac
 INIT_ATTEMPTS=$((10#$INIT_ATTEMPTS))
 INIT_RETRY_STEP=$((10#$INIT_RETRY_STEP))
 if [ "$INIT_ATTEMPTS" -lt 1 ]; then
-  echo "error: PLAN_SWEEP_INIT_ATTEMPTS must be a positive integer, got '$INIT_ATTEMPTS'." >&2
+  echo "error: PLAN_SWEEP_INIT_ATTEMPTS must be a positive integer of at most 4 digits, got '$RAW_INIT_ATTEMPTS'." >&2
   exit 2
 fi
 

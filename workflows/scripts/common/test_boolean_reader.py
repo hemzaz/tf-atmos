@@ -131,27 +131,56 @@ class EveryReadFlagIsPrescanned(unittest.TestCase):
                     found |= {e.value for e in iterable.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
         return found
 
-    def field_names(self, script, tree, argument):
-        """(names, unresolved) the first argument of a reader call reads."""
-        names, unresolved = set(), []
-        for node in (argument,):  # the outermost accessor: the field itself, not the map it comes from
-            key = None
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" and node.args:
-                key = node.args[0]
-            elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "label" and len(node.args) > 1:
-                key = node.args[1]
-            elif isinstance(node, ast.Subscript):
-                key = node.slice
-            if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                names.add(key.value)
-            elif isinstance(key, ast.Name):
-                literal = self.literal_keys(tree, key.id)
-                table = self.TABLES.get((script, key.id))
-                if literal or table:
-                    names |= literal | set(table() if table else ())
-                else:
-                    unresolved.append(f"{script}:{node.lineno} key {key.id}")
-        return names, unresolved
+    # (script, function, parameter): a reader's own pass-through, called with a field the callers name.
+    WRAPPERS = {
+        ("check-cluster-api-ci.py", "is_public", "value"),
+        ("check-data-residency.py", "flag_on", "value"),
+        ("check-domains.py", "flag_on", "value"),
+        ("check-lambda-packages.py", "is_on", "value"),
+    }
+
+    def key_names(self, script, tree, key, line):
+        """(names, unresolved) a `.get`/subscript/label key names: a literal, or a loop/table variable."""
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            return {key.value}, []
+        if isinstance(key, ast.Name):
+            literal = self.literal_keys(tree, key.id)
+            table = self.TABLES.get((script, key.id))
+            if literal or table:
+                return literal | set(table() if table else ()), []
+        return set(), [f"{script}:{line} key {ast.unparse(key)}"]
+
+    def field_names(self, script, tree, function, node, depth=0):
+        """(names, unresolved) the first argument of a reader call reads.
+
+        Every shape must resolve to field names or be reported unresolved, so a new shape fails the test
+        until it is taught here; only the WRAPPERS pass-throughs and bare constants read no field.
+        """
+        if isinstance(node, ast.Constant):
+            return set(), []  # a literal value, not a field read
+        if isinstance(node, (ast.BoolOp, ast.IfExp)):
+            branches = node.values if isinstance(node, ast.BoolOp) else [node.body, node.orelse]
+            names, unresolved = set(), []
+            for branch in branches:
+                found, missing = self.field_names(script, tree, function, branch, depth)
+                names |= found
+                unresolved += missing
+            return names, unresolved
+        if isinstance(node, ast.Name):
+            if (script, function.name if function else None, node.id) in self.WRAPPERS:
+                return set(), []
+            assigned = [n.value for n in ast.walk(function or tree) if isinstance(n, ast.Assign) and len(n.targets) == 1
+                        and isinstance(n.targets[0], ast.Name) and n.targets[0].id == node.id]
+            if len(assigned) == 1 and depth < 3:
+                return self.field_names(script, tree, function, assigned[0], depth + 1)
+            return set(), [f"{script}:{node.lineno} variable {node.id}"]
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" and node.args:
+            return self.key_names(script, tree, node.args[0], node.lineno)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "label" and len(node.args) > 1:
+            return self.key_names(script, tree, node.args[1], node.lineno)
+        if isinstance(node, ast.Subscript):
+            return self.key_names(script, tree, node.slice, node.lineno)
+        return set(), [f"{script}:{node.lineno} expression {ast.unparse(node)}"]
 
     def test_every_field_is_in_boolean_vars_or_zone_flags(self):
         ci = backends.ci_apply_role_arn
@@ -159,6 +188,10 @@ class EveryReadFlagIsPrescanned(unittest.TestCase):
         seen, unresolved = set(), []
         for script in self.SCRIPTS:
             tree = ast.parse((HERE / script).read_text())
+            enclosing = {}  # innermost function of each node: ast.walk is breadth-first, so inner ones overwrite
+            for function in ast.walk(tree):
+                if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    enclosing.update({id(n): function for n in ast.walk(function)})
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Call) and node.args):
                     continue
@@ -168,13 +201,11 @@ class EveryReadFlagIsPrescanned(unittest.TestCase):
                 # domains' is_public(zone) reads vpc_associations, not a boolean
                 if callee == "is_public" and script == "check-domains.py":
                     continue
-                # default_on(variables, key) reads its second argument
-                argument = node.args[1] if callee == "default_on" and len(node.args) > 1 else node.args[0]
-                if isinstance(argument, ast.Name) and callee != "default_on":
-                    continue  # a wrapper's own parameter
-                if callee == "default_on":
-                    argument = ast.Subscript(value=ast.Name(id="v"), slice=argument)
-                names, missing = self.field_names(script, tree, argument)
+                if callee == "default_on":  # default_on(variables, key) reads its second argument
+                    names, missing = (self.key_names(script, tree, node.args[1], node.lineno) if len(node.args) > 1
+                                      else (set(), [f"{script}:{node.lineno} default_on without a key"]))
+                else:
+                    names, missing = self.field_names(script, tree, enclosing.get(id(node)), node.args[0])
                 seen |= names
                 unresolved += missing
         self.assertEqual(unresolved, [])

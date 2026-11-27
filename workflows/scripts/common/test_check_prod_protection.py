@@ -296,6 +296,13 @@ class CiTrustTest(unittest.TestCase):
         self.assertIn("can't be verified offline",
                       self.hand_written(assume_role_policy="!terraform.output gh-trust policy")[0])
 
+    def test_an_unknown_atmos_function_in_a_trust_fails_and_a_safe_one_passes(self):
+        found = self.hand_written(principals={"AWS": ["!newfetch x"]})
+        self.assert_one(found, "can't be verified offline")
+        self.assert_one(self.hand_written(assume_role_policy="!include trust.json"), "can't be verified offline")
+        self.assertEqual(self.hand_written(principals={"AWS": ["!aws.account_id"]}), [])
+        self.assertEqual(self.hand_written(principals={"AWS": ["!aws.account_idx"]}) != [], True)
+
     def test_eks_irsa_and_cognito_identity_trusts_pass(self):
         irsa = {"Federated": ["arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABC"]}
         cognito = {"Federated": ["cognito-identity.amazonaws.com"]}
