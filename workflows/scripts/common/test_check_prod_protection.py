@@ -1,9 +1,12 @@
 """Tests for check-prod-protection.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import copy
+import io
 import importlib.util
 import json
 import pathlib
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "check_prod_protection", pathlib.Path(__file__).with_name("check-prod-protection.py")
@@ -102,6 +105,48 @@ class CheckProdProtectionTest(unittest.TestCase):
         with self.assertRaises(KeyError):
             check_prod_protection.variable_default(COMPONENTS, "rds", "no_such_variable")
 
+
+
+class BooleanReadingTest(unittest.TestCase):
+    """metadata.enabled and the CI role's boolean vars are read like Terraform: "false" is false, garbage is an error."""
+
+    def test_a_string_false_metadata_enabled_is_not_deployable(self):
+        off = instance("rds", multi_az=False)
+        off["metadata"] = {"enabled": "false"}
+        self.assertFalse(check_prod_protection.is_deployable(off))
+        self.assertEqual(errors(stacks(**{"rds/off": off})), [])
+
+    def test_a_rendered_true_github_oidc_enabled_is_read_as_true(self):
+        role = instance("aws-iam-role", name="ci-apply", github_oidc_provider_enabled="true",
+                        trusted_github_repos=["hemzaz/tf-atmos:master"])
+        self.assertEqual(check_prod_protection.check_ci_trust(
+            {"fnx-ue1-prod": {"components": {"terraform": {"aws-iam-role/ci-apply": role}}}}), [])
+
+    def test_a_string_false_vars_enabled_skips_the_role(self):
+        role = instance("aws-iam-role", name="ci-apply", enabled="false", github_oidc_provider_enabled=True)
+        self.assertEqual(check_prod_protection.check_ci_trust(
+            {"fnx-ue1-prod": {"components": {"terraform": {"aws-iam-role/ci-apply": role}}}}), [])
+
+    def test_a_garbage_value_is_a_clean_error_naming_the_instance(self):
+        bad_metadata = instance("rds")
+        bad_metadata["metadata"] = {"enabled": "maybe"}
+        cases = {"rds/x": bad_metadata,
+                 "aws-iam-role/ci-apply": instance("aws-iam-role", name="ci-apply", github_oidc_provider_enabled="yes"),
+                 "aws-iam-role/ci-plan": instance("aws-iam-role", name="ci-plan", instance_profile_enabled=1)}
+        found = check_prod_protection.flag_errors(stacks(**cases))
+        self.assertEqual(len(found), 3, found)
+        self.assertIn("fnx-ue1-prod: aws-iam-role/ci-apply vars.github_oidc_provider_enabled is 'yes', not a boolean", found[0])
+        self.assertIn("aws-iam-role/ci-plan vars.instance_profile_enabled is 1", found[1])
+        self.assertIn("rds/x metadata.enabled is 'maybe'", found[2])
+
+    def test_main_prints_the_clean_error_and_exits_1(self):
+        bad = instance("rds")
+        bad["metadata"] = {"enabled": "maybe"}
+        out = io.StringIO()
+        with mock.patch("sys.argv", ["x", str(COMPONENTS)]), mock.patch("sys.stdin", io.StringIO(json.dumps(stacks(**{"rds/x": bad})))), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(check_prod_protection.main(), 1)
+        self.assertIn("ERROR fnx-ue1-prod: rds/x metadata.enabled is 'maybe'", out.getvalue())
 
 
 class CiTrustTest(unittest.TestCase):

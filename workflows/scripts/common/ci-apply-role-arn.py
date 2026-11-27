@@ -55,18 +55,27 @@ def label(ci: dict, field: str):
     return value if value is not None else (variables.get("context") or {}).get(field)
 
 
-def flag(value, where: str):
+def flag(value, where: str, default=None):
     """A bool var Atmos may render as a string: "true"/"false" (case and space insensitive) become bools.
 
-    check-prod-protection.py's normalize() does the same (and reads ints), but importing that module
-    loads more scripts, so this is a small mirror. None stays None (unset); anything else fails loudly,
-    because Terraform would reject it too and a guess could pass a disabled role.
+    The one boolean reader of the lint scripts: they all import this module. None gives default (the
+    value's unset meaning); anything else, "yes", "0", 1, fails loudly, because Terraform would reject
+    it too and a guess could pass a disabled role. Numeric rules (a retention of "7") are not booleans:
+    check-prod-protection.py's normalize() reads those.
     """
-    if value is None or isinstance(value, bool):
+    if value is None:
+        return default
+    if isinstance(value, bool):
         return value
     if isinstance(value, str) and value.strip().lower() in ("true", "false"):
         return value.strip().lower() == "true"
     raise ValueError(f"{where} is {value!r}, not a boolean (true or false)")
+
+
+def is_deployable(instance: dict) -> bool:
+    """Not abstract and not disabled by metadata.enabled (default true; "false" counts as false)."""
+    metadata = instance.get("metadata") or {}
+    return metadata.get("type") != "abstract" and flag(metadata.get("enabled"), "metadata.enabled", True) is not False
 
 
 def creates_role(ci: dict) -> bool:
@@ -74,14 +83,13 @@ def creates_role(ci: dict) -> bool:
     variables = ci.get("vars") or {}
     return (flag((ci.get("metadata") or {}).get("enabled"), "metadata.enabled") is not False
             and flag(label(ci, "enabled"), "vars.enabled") is not False
-            and variables.get("github_oidc_provider_enabled") is True
+            and flag(variables.get("github_oidc_provider_enabled"), "vars.github_oidc_provider_enabled") is True
             and bool(variables.get("trusted_github_repos")))
 
 
 def uses_fullname(ci: dict) -> bool:
     """The component's use_fullname (default true; Atmos may render the bool as a string)."""
-    value = (ci.get("vars") or {}).get("use_fullname")
-    return str(value).strip().lower() != "false" if isinstance(value, str) else value is not False
+    return flag((ci.get("vars") or {}).get("use_fullname"), "vars.use_fullname", True)
 
 
 def clean(value: str, regex: str) -> str:
