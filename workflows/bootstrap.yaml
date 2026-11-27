@@ -243,6 +243,9 @@ workflows:
               *NoSuchEntity*)
                 echo "This stack's CI roles trust the OIDC provider $arn, which $stack creates and which does not exist in this account yet. Bootstrap $stack first: atmos workflow full -f bootstrap -s $stack"
                 ;;
+              *"executable file not found"*|*"command not found"*)
+                echo "Cannot check the OIDC provider $arn: $error; install aws-cli (this workflow's toolchain dependency: atmos installs it; check the toolchain)"
+                ;;
               *)
                 echo "Cannot check the OIDC provider $arn: $error; run with the account's AdministratorAccess identity (atmos workflow full -f bootstrap -s <stack> --identity <account>/AdministratorAccess, or export its AWS_PROFILE)"
                 ;;

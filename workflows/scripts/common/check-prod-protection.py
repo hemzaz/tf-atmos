@@ -85,7 +85,18 @@ GITHUB_OIDC_HOST = "token.actions.githubusercontent.com"
 # The component whose outputs (the provider ARN) a DRY hand-written trust would read with an Atmos function.
 GITHUB_PROVIDER_COMPONENT = "aws-github-oidc-provider"
 # An Atmos YAML function left unresolved (describe --process-functions=false keeps it as a raw string).
-ATMOS_FUNCTION = re.compile(r"(?:^|[\s\"'])!(?:terraform\.|store|exec|env)\b")
+# An allow-list: any `!<fn>` not named here may fetch data (measured on atmos 1.233.2: !include, !include.raw and
+# !literal resolve at load; !terraform.*, !store, !exec and !env fetch at describe), so it can't be read offline.
+ATMOS_FUNCTION = re.compile(r"(?:^|[\s\"'])!([a-z][a-z0-9_.-]*)")
+SAFE_ATMOS_FUNCTIONS = frozenset({
+    "aws.account_id",           # the stack's own account id: a legitimate own-account trust, never a GitHub issuer
+    "aws.caller_identity_arn",  # the caller's own ARN
+    "aws.region",               # the region name
+    "repo-root",                # a local path
+    "cwd",                      # a local path
+    "random",                   # a random number
+    "template",                 # a Go template: its rendered text is searched like any other
+})
 # "<org>/<repo>:<constraint>": an explicit org (upstream's unqualified form takes trusted_github_org).
 TRUSTED_REPO = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:(.+)")
 # A bare branch name: no ':' (so no ref:, environment: or other claim), no wildcard.
@@ -224,7 +235,8 @@ def check_ci_trust(stacks: dict) -> list[str]:
                                   "GitHub only through github_oidc_provider_enabled + trusted_github_repos on "
                                   "aws-iam-role/ci-* (stacks/catalog/aws-iam-role/ci.yaml); remove the hand-written "
                                   "trust")
-                elif any(ATMOS_FUNCTION.search(trust_text(variables.get(key))) for key in ("assume_role_policy", "principals")):
+                elif any(fn not in SAFE_ATMOS_FUNCTIONS for key in ("assume_role_policy", "principals")
+                         for fn in ATMOS_FUNCTION.findall(trust_text(variables.get(key)))):
                     errors.append(f"{where} builds its assume_role_policy or principals with an Atmos function, which "
                                   "can't be verified offline (it may resolve to a GitHub OIDC trust); write the "
                                   "trust literally, or trust GitHub only through github_oidc_provider_enabled + "
