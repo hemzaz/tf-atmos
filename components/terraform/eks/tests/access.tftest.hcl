@@ -293,38 +293,6 @@ run "list_entries_for_ci_roles" {
   }
 }
 
-# iam/ci returns a null ci_apply_role_arn while its apply role is disabled.
-run "null_principal_is_skipped" {
-  command = plan
-
-  variables {
-    access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
-      { principal_arn = null },
-    ]
-    access_policy_associations = [
-      {
-        principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan"
-        policy_arn    = "View"
-      },
-      {
-        principal_arn = null
-        policy_arn    = "ClusterAdmin"
-      },
-    ]
-  }
-
-  assert {
-    condition     = length(aws_eks_access_entry.standard) == 1 && length(aws_eks_access_policy_association.list) == 1
-    error_message = "An entry or association with a null principal_arn must be skipped."
-  }
-
-  assert {
-    condition     = aws_eks_access_policy_association.list[0].policy_arn == "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
-    error_message = "The short name View must expand to AmazonEKSViewPolicy."
-  }
-}
-
 run "map_entries_expand_policies_and_translate_system_masters" {
   command = plan
 

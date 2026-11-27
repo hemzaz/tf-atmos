@@ -58,7 +58,7 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   component calls the first `allowed_security_groups`) add ingress rules on the EKS-managed cluster
   security group, TCP 443 only where Cloud Posse opens all protocols. A `/0` is rejected.
 - Principals read with `!terraform.state` must go in those lists: `access_entry_map` keys must be
-  literal. Null principals are skipped.
+  literal. A disabled CI role is a lint failure (`check-ci-state-roles`), not a skipped entry.
 - One access entry per principal: a principal in both `access_entries` and `access_entry_map` /
   `map_additional_iam_roles` (or twice in the list) fails a precondition, as does a list
   association whose principal has no entry. Only `STANDARD` entries may set groups, `user_name` or
