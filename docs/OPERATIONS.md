@@ -949,7 +949,8 @@ requires code-owner review).
   `.tool-versions` is a regenerated dev-shell file, not committed), so a pin repeats in every
   workflow (shared via a YAML anchor for the scanners), stack default, `terraform-ci.yml` install,
   `.pre-commit-config.yaml` and doc that names it. To bump one, change any copy and run `python3 scripts/check-tool-pins.py`: it lists every copy
-  still on the old version (lint step `tool-pins`), then run lint and validate-all. Neither
+  still on the old version (lint step `tool-pins`), then run lint and validate-all. The script also cross-checks each
+  workflow's pins against `atmos describe workflows`, so it needs atmos on PATH, which `atmos workflow lint -f lint` provides. Neither
   Dependabot nor Renovate (not configured) reads `dependencies.tools`, so bumps are by hand.
 
 Drift in CI is an issue, not a red run: `drift-detection.yml` opens one issue per drifted
