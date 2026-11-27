@@ -504,8 +504,7 @@ variable "access_entries" {
   description = <<-EOT
     List of IAM principals to allow to access the EKS cluster (STANDARD access entries).
     Use when the Principal ARN is not known at plan time or comes from an Atmos
-    YAML function. An entry whose principal_arn is null (an optional role that
-    is not created) is skipped.
+    YAML function.
     EOT
   default     = []
   nullable    = false
@@ -531,7 +530,6 @@ variable "access_policy_associations" {
     List of AWS managed EKS access policies to associate with IAM principals.
     Use when the Principal ARN or Policy ARN is not known at plan time.
     `policy_arn` can be the full ARN, the full name (AmazonEKSViewPolicy) or short name (View).
-    An association whose principal_arn is null is skipped, as in access_entries.
     EOT
   default     = []
   nullable    = false

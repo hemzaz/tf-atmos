@@ -176,11 +176,10 @@ run "apply_role_trusts_the_pinned_branch_only" {
       Version = "2012-10-17"
       Statement = [
         {
-          Sid       = "DeployKmsKeyUse"
-          Effect    = "Allow"
-          Action    = ["kms:DescribeKey", "kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*"]
-          Resource  = "*"
-          Condition = { "ForAnyValue:StringEquals" = { "kms:ResourceAliases" = ["alias/ue1-main"] } }
+          Sid      = "SyntheticDocument"
+          Effect   = "Allow"
+          Action   = ["s3:GetObject"]
+          Resource = ["arn:aws:s3:::example-bucket/*"]
         },
       ]
     })]
@@ -198,9 +197,9 @@ run "apply_role_trusts_the_pinned_branch_only" {
 
   assert {
     condition = toset([for s in jsondecode(output.role.policy).Statement : s.Sid]) == toset([
-      "AssumeStateWriteRole", "SeeRunnerPools", "StartRunners", "DeployKmsKeyUse",
+      "AssumeStateWriteRole", "SeeRunnerPools", "StartRunners", "SyntheticDocument",
     ])
-    error_message = "The apply policy merges the statements and the KMS document, nothing else."
+    error_message = "The apply policy merges policy_statements and policy_documents, nothing else."
   }
 
   assert {
@@ -208,11 +207,6 @@ run "apply_role_trusts_the_pinned_branch_only" {
       "arn:aws:autoscaling:us-east-1:222222222222:autoScalingGroup:*:autoScalingGroupName/ue1-github-runners",
     ]
     error_message = "The apply role may execute the start policy of this stack's own runner pool only."
-  }
-
-  assert {
-    condition     = one([for s in jsondecode(output.role.policy).Statement : s.Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] if s.Sid == "DeployKmsKeyUse"]) == "alias/ue1-main"
-    error_message = "The apply role's key use is scoped to kms/main's alias."
   }
 }
 
@@ -270,8 +264,8 @@ run "another_account_is_refused" {
 }
 
 # The Lambda package uploader (stacks/catalog/aws-iam-role/lambda-uploader.yaml, E6a5) as an
-# enabled stack renders it: an application repo's pinned branch, and the catalog's one policy
-# document for fnx-ue1-dev's s3/lambda-artifacts bucket and kms/main alias.
+# enabled stack renders it: an application repo's pinned branch. The policy document is synthetic:
+# lint proves the catalog's real shape against the describe output.
 run "lambda_uploader_trusts_the_app_branch_and_writes_only_its_bucket" {
   command = plan
 
@@ -285,33 +279,10 @@ run "lambda_uploader_trusts_the_app_branch_and_writes_only_its_bucket" {
       Version = "2012-10-17"
       Statement = [
         {
-          Sid       = "PutLambdaPackages"
-          Effect    = "Allow"
-          Action    = ["s3:PutObject"]
-          Resource  = ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]
-          Condition = { Null = { "s3:if-none-match" = "false" } }
-        },
-        {
-          Sid      = "ReadLambdaPackages"
+          Sid      = "SyntheticDocument"
           Effect   = "Allow"
           Action   = ["s3:GetObject"]
-          Resource = ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]
-        },
-        {
-          Sid      = "ListLambdaPackages"
-          Effect   = "Allow"
-          Action   = ["s3:ListBucket"]
-          Resource = ["arn:aws:s3:::ue1-lambda-artifacts-222222222222"]
-        },
-        {
-          Sid      = "LambdaPackageEncryption"
-          Effect   = "Allow"
-          Action   = ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"]
-          Resource = "*"
-          Condition = {
-            "ForAnyValue:StringEquals" = { "kms:ResourceAliases" = ["alias/ue1-main"] }
-            StringEquals               = { "kms:ViaService" = ["s3.us-east-1.amazonaws.com"] }
-          }
+          Resource = ["arn:aws:s3:::example-bucket/*"]
         },
       ]
     })]
@@ -334,22 +305,9 @@ run "lambda_uploader_trusts_the_app_branch_and_writes_only_its_bucket" {
 
   assert {
     condition = [for s in jsondecode(output.role.policy).Statement : [s.Sid, flatten([s.Action]), flatten([s.Resource])]] == [
-      ["PutLambdaPackages", ["s3:PutObject"], ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]],
-      ["ReadLambdaPackages", ["s3:GetObject"], ["arn:aws:s3:::ue1-lambda-artifacts-222222222222/*"]],
-      ["ListLambdaPackages", ["s3:ListBucket"], ["arn:aws:s3:::ue1-lambda-artifacts-222222222222"]],
-      ["LambdaPackageEncryption", ["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"], ["*"]],
+      ["SyntheticDocument", ["s3:GetObject"], ["arn:aws:s3:::example-bucket/*"]],
     ]
-    error_message = "The uploader may put, get and list its stage's package bucket and use its key, nothing else."
-  }
-
-  assert {
-    condition     = one([for s in jsondecode(output.role.policy).Statement : s.Condition.Null["s3:if-none-match"] if s.Sid == "PutLambdaPackages"]) == "false"
-    error_message = "PutObject is allowed only as a conditional write (If-None-Match), so released keys are immutable."
-  }
-
-  assert {
-    condition     = one([for s in jsondecode(output.role.policy).Statement : s.Condition.StringEquals["kms:ViaService"] if s.Sid == "LambdaPackageEncryption"]) == "s3.us-east-1.amazonaws.com"
-    error_message = "The uploader uses the key only through S3 in its region."
+    error_message = "The role's policy is the merged policy_documents, nothing else."
   }
 }
 

@@ -52,9 +52,9 @@ locals {
     "ModifySecurityGroupRules",
   ]
 
-  # Automation roles whose security group changes are not alerted. Nulls are
-  # dropped: iam/ci returns a null ci_apply_role_arn while its apply role is
-  # disabled.
+  # Automation roles whose security group changes are not alerted. Empty
+  # entries are dropped: a disabled aws-iam-role returns role.arn "". A
+  # stage stack's disabled CI apply role fails check-ci-state-roles in lint.
   security_group_change_excluded_role_arns = distinct(compact(var.security_group_change_excluded_role_arns))
 
   # Who made the call, for the security_group_changes rule. EventBridge

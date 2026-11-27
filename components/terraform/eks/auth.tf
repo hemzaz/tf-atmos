@@ -9,13 +9,9 @@
 #   map key.
 # - var.access_entries plus var.access_policy_associations, lists with a
 #   principal_arn field. The stacks use these, because the CI role ARNs come
-#   from `!terraform.state iam/ci`.
+#   from `!terraform.state aws-iam-role/ci-apply`.
 #
 # Divergences from Cloud Posse:
-# - A list entry whose principal_arn is null is skipped (with its policy
-#   associations). `iam/ci` returns a null ci_apply_role_arn while its apply
-#   role is disabled; the stack wiring then plans with the plan role only
-#   instead of failing.
 # - No `access_entries_for_nodes`: every node group here is a managed node
 #   group, and EKS creates their EC2_LINUX access entries itself.
 #
@@ -125,8 +121,8 @@ locals {
     ]) : a.key => a if local.enabled
   }
 
-  access_entries             = local.enabled ? [for e in var.access_entries : e if e.principal_arn != null] : []
-  access_policy_associations = local.enabled ? [for a in var.access_policy_associations : a if a.principal_arn != null] : []
+  access_entries             = local.enabled ? var.access_entries : []
+  access_policy_associations = local.enabled ? var.access_policy_associations : []
 
   # Every principal that gets an access entry, from both forms. Cloud Posse
   # only documents "do not duplicate entries"; the preconditions below

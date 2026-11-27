@@ -19,7 +19,7 @@ member's detector and hub still publish its findings to its own EventBridge.
   metric filter must be in its log group's region and the home stack's multi-region trail delivers
   this region's events to the home region, where its filters run.
 - Reads: `cloudtrail .cloudtrail_logs_log_group_name` (the vendored `aws-cloudtrail` trail),
-  `kms/main .key_arn`, `iam/ci .ci_apply_role_arn`. No service state (owner OQ-AL): one flag per
+  `kms/main .key_arn`, `aws-iam-role/ci-apply .role.arn`. No service state (owner OQ-AL): one flag per
   route, `enable_guardduty_route`, `enable_securityhub_route`, `enable_inspector2_route`, all on.
 
 ## Notes
@@ -45,7 +45,7 @@ member's detector and hub still publish its findings to its own EventBridge.
 - The rule skips calls by the roles in `security_group_change_excluded_role_arns`; the alarm still
   counts them. The catalog lists the cluster roles and AWS Load Balancer Controller IRSA roles of
   both EKS instances (`eks/main`, `eks/data`), the EKS service-linked roles (by naming
-  convention: `eks` and `eks-addons` deploy later) and the `iam/ci` apply role (from state). To
+  convention: `eks` and `eks-addons` deploy later) and the `aws-iam-role/ci-apply` role (from state). To
   exclude another role, add its exact ARN, path included, to that list in
   `stacks/catalog/security-monitoring/defaults.yaml`; wildcards are rejected. A new `eks`
   instance needs its cluster role and controller role ARNs added there.
