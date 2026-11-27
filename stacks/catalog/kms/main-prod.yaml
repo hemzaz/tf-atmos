@@ -43,8 +43,8 @@ components:
         # No named key_administrators/key_users: KMS validates every principal
         # named in a key policy at CreateKey/PutKeyPolicy time, and this repo's
         # IaC creates neither a "role/Admin" nor a "production-eks-node-role" /
-        # "production-ci-role" (iam/ci IS enabled in prod -- its real role
-        # names are "{ci_role_name_prefix}-plan"/"-apply", never
+        # "production-ci-role" (the CI roles ARE enabled in prod -- their real
+        # names are "<stack>-ci-plan"/"-apply", never
         # "production-ci-role"); naming any of them would fail the first real
         # apply with MalformedPolicyDocumentException. kms/defaults's
         # enable_default_policy (root-account delegation, the Cloud Posse
@@ -63,10 +63,10 @@ components:
         #     cluster_encryption_config_kms_key_id): the principal that calls
         #     eks:CreateCluster/UpdateClusterConfig needs kms:DescribeKey,
         #     kms:CreateGrant and kms:Encrypt on this key (AWS's
-        #     "Encrypting Kubernetes secrets" doc); iam/ci's ci_apply role is
+        #     "Encrypting Kubernetes secrets" doc); aws-iam-role/ci-apply is
         #     that principal in this repo's CI-driven deploys, granted via
-        #     ci_apply_kms_key_aliases (catalog/iam/ci-prod.yaml; scoped by
-        #     alias, not this key's ARN, since iam/ci plans and applies in the
+        #     its DeployKmsKeyUse statement (catalog/aws-iam-role/ci.yaml; scoped by
+        #     alias, not this key's ARN, since the CI roles plan and apply in the
         #     layer before this kms/main instance) -- the Cloud Posse pattern
         #     of root-account delegation plus a consumer's own scoped IAM
         #     policy (cloudposse/terraform-aws-kms-key's default key policy).

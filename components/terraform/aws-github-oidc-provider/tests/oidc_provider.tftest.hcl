@@ -1,6 +1,6 @@
 # House test of the catalog's instance (stacks/catalog/aws-github-oidc-provider, E6a3; a vendored
 # target admits tests/*.tftest.hcl: scripts/check-vendor.py TESTS): the account's one GitHub Actions
-# OIDC provider, whose ARN catalog/iam/defaults derives (arn:aws:iam::<account>:oidc-provider/
+# OIDC provider, whose ARN catalog/aws-iam-role/ci derives (arn:aws:iam::<account>:oidc-provider/
 # token.actions.githubusercontent.com) for the CI roles' trust, is created exactly once with the URL
 # and audience those roles' conditions check; enabled = false (the scaffold's account_singletons=no
 # branch) creates none; and the account-verification mixin refuses a run in another account.
@@ -37,7 +37,7 @@ run "creates_the_account_provider_once" {
     error_message = "The catalog's instance must plan exactly one OIDC provider."
   }
 
-  # The derived ARN in catalog/iam/defaults ends in this URL's host; the CI roles' trust checks
+  # The derived ARN in catalog/aws-iam-role/ci ends in this URL's host; the CI roles' trust checks
   # token.actions.githubusercontent.com:aud == sts.amazonaws.com.
   assert {
     condition     = aws_iam_openid_connect_provider.oidc["github"].url == "https://token.actions.githubusercontent.com"

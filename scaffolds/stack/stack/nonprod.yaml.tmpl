@@ -14,7 +14,7 @@
 # security, compute, services).
 [[- if eq $flavor "dev" ]]
 # Each instance's wiring is catalog/<c>/<i> and, where dev differs, its -dev
-# flavor (iam/dev, kms/main-dev, secretsmanager/infra-dev, ec2/app-server-dev,
+# flavor (kms/main-dev, secretsmanager/infra-dev, ec2/app-server-dev,
 # monitoring/data-dev, rds/main-dev, rds/data-dev, lambda/data-processor-dev);
 # this file keeps the stack's per-stage values. Sizing is fnx-ue1-dev's.
 [[- else ]]
@@ -298,9 +298,9 @@ components:
     # there is one): this stack's aws-github-oidc-provider and
     # aws-iam-service-linked-roles are off (null-label enabled: false, so they
     # create nothing; the prod standbys import neither), the instances kept so
-    # iam/ci's and kms/main's dependencies on them still resolve in this
-    # stack; iam/ci trusts that stack's provider by the ARN catalog/iam/defaults
-    # derives. It has no trail: the account's one trail, that stack's cloudtrail,
+    # the CI roles' and kms/main's dependencies on them still resolve in this
+    # stack; the CI roles trust that stack's provider by the ARN
+    # catalog/aws-iam-role/ci derives. It has no trail: the account's one trail, that stack's cloudtrail,
     # is multi-region and records this region too (E5b OQ-A), so its CIS
     # metric filters run there, beside the trail's log group
     # (catalog/security-monitoring/main-region), and aws-config below records

@@ -12,7 +12,7 @@ stack-wide `deploy --affected` / `plan -s <stack>`, because:
     settings.github.actions_enabled: false runs on neither (an operator
     applies it). Atmos (1.229 and 1.233.2) rejects --query with --affected;
   - a stack-wide bulk run builds the dependency graph from the filtered set
-    alone and fails on any dependency outside it (iam/ci -> fnx-ue1-root's
+    alone and fails on any dependency outside it (aws-iam-role/ci-apply -> fnx-ue1-root's
     backend/main).
 Order: a topological sort of the stack's deployable instances over their
 same-stack dependencies.components (the list check-dependencies.py enforces

@@ -13,10 +13,12 @@
 # backend's prod_read/prod_write roles (stacks/orgs/fnx/root/eu-west-1.yaml).
 #
 # A new account, so this stack owns the account's singletons: the GitHub OIDC
-# provider (iam/ci), the Auto Scaling service-linked role (iam/main), the
+# provider (aws-github-oidc-provider), the Auto Scaling service-linked role
+# (aws-iam-service-linked-roles), the
 # multi-region CloudTrail trail, AWS Config's global-resource recording and
 # the account budget (cost-optimization/main).
-# Today the account and identity layer (iam/main, iam/ci), kms/main
+# Today the account and identity layer (aws-iam-service-linked-roles,
+# aws-github-oidc-provider, the CI roles), kms/main
 # (replicated to eu-central-1), those singletons, networking (vpc/main, the
 # EU apex zone network/main) and the regional security services (finding
 # routing; fnx-ew1-security's GuardDuty, Security Hub and Inspector enroll
@@ -244,7 +246,8 @@ components:
     # ========================================================================
     # Security
     #
-    # The account and identity layer (iam/main, iam/ci), the stack's key
+    # The account and identity layer (aws-iam-service-linked-roles,
+    # aws-github-oidc-provider, the CI roles), the stack's key
     # (kms/main) and the prod-eu account's singletons: the multi-region
     # CloudTrail trail (cloudtrail) and AWS Config's global-resource
     # recording (aws-config); the account budget is cost-optimization/main
@@ -268,7 +271,7 @@ components:
     #     fnx-ew1-root), which trust these CI roles
     #     (stacks/orgs/fnx/root/eu-west-1.yaml);
     #   - no lambda uploader yet: the PR adding the Lambda bucket adds it.
-    # Both catalog/iam dependencies resolve to backend/main in fnx-ew1-root.
+    # The CI roles' backend/main dependency resolves to fnx-ew1-root.
     # Every finding stays in eu-west-1: no Security Hub cross-region
     # aggregation, no GuardDuty export, the alert topic on kms/main, and no
     # enrichment Lambda (check-data-residency.py fails enable_alert_enrichment
@@ -339,8 +342,8 @@ components:
     #
     # The endpoint is private, so CI runs the in-cluster instances on this
     # stack's own pool (settings.github.runner: in-vpc, owner decision Q8),
-    # which CI starts in eu-west-1 (its vars.region, #350); iam/ci lets only
-    # this stack's apply role start it (ci_runner_pool_names, security
+    # which CI starts in eu-west-1 (its vars.region, #350); aws-iam-role/ci-apply
+    # lets only this stack's pool be started (StartRunners, security
     # section). The pool's alarms name the ew1-main-alarms topic, which
     # monitoring/main (services section) creates.
     #

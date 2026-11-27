@@ -188,10 +188,10 @@ components:
     #   - KMS: no kms/main here. This region's key is fnx-ue1-prod kms/main's
     #     multi-region replica (replica_keys["us-east-2"], alias ue2-main), read
     #     cross-stack wherever fnx-ue1-prod reads kms/main.
-    #   - no iam/main: the account's cross-account role and the Auto Scaling
-    #     service-linked role are fnx-ue1-prod's iam/main.
-    #   - iam/ci trusts the account's GitHub OIDC provider, created by
-    #     fnx-ue1-prod's iam/ci.
+    #   - no aws-iam-service-linked-roles: the Auto Scaling service-linked role
+    #     is fnx-ue1-prod's.
+    #   - the CI roles trust the account's GitHub OIDC provider, created by
+    #     fnx-ue1-prod's aws-github-oidc-provider.
     #   - no cloudtrail: fnx-ue1-prod's trail is multi-region and records
     #     this region too; its CIS metric filters run there.
     #   - aws-config records this region's resources only (Cloud Posse's

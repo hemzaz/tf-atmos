@@ -14,7 +14,7 @@
 # One role per stage, so no stage can rewrite another's delegation (a dev
 # principal must never change prod.<apex> NS/DS):
 # - Trust: only that stage's account, limited by aws:PrincipalArn to its CI
-#   apply roles (<stack>-ci-apply, catalog/iam/ci*) and
+#   apply roles (<stack>-ci-apply, catalog/aws-iam-role/ci*) and
 #   OrganizationAccountAccessRole (the first deploy, before CI), the
 #   principals the SCP baseline also treats as privileged. Never the CI plan
 #   roles: plans stay read-only (a plan of aws-dns-delegated or network/main

@@ -6,7 +6,6 @@
 # Imported by the stack that owns its account's singletons (fnx-ue1-dev,
 # fnx-ue1-staging, the prod primaries); a DR standby or an account's other
 # region imports none (check-lane-names.py allows each role once per account).
-# Until E6a6 the stacks reach it through catalog/iam/{dev,main,main-prod}.
 # =============================================================================
 
 import:

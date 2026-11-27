@@ -3,7 +3,7 @@
 # interactive runbooks and are intentionally run by an operator, not CI.
 #
 # Runs only on the default branch, only for a known stack, with that stack's
-# read-only iam/ci plan role (workflows/scripts/common/ci-apply-role-arn.py
+# read-only aws-iam-role/ci-plan role (workflows/scripts/common/ci-apply-role-arn.py
 # --kind plan; the only principal its stage's read-only state role trusts).
 # It uses no GitHub Environment, so its OIDC sub is
 # repo:<org>/<repo>:ref:refs/heads/<default branch>, which every plan role

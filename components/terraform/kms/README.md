@@ -42,8 +42,8 @@ use through their own IAM policies.
   `config_delivery_role_arns`: the audit account's own recorder delivers with its IAM role, not
   the service principal, so that role gets the data key (via S3, by `aws:PrincipalArn` under a
   `*` principal, since the role is created after the key).
-- The CI apply role gets key use via `iam`'s `ci_apply_kms_key_aliases` (by alias, because
-  `iam/ci` applies in the layer before `kms/main`).
+- The CI apply role gets key use via its `DeployKmsKeyUse` statement
+  (`catalog/aws-iam-role/ci.yaml`; by alias, because the CI roles apply in the layer before `kms/main`).
 - Replicas get their own region-scoped policy; the `key_policy` output is the primary's.
 - Prod's `kms/main` is multi-region with a replica in the DR region (`replica_regions:
   [us-east-2]`) and `replica_alias_names` gives it the DR stack's alias (`ue2-main`), so

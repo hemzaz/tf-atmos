@@ -44,7 +44,7 @@ output "access_role_names" {
 }
 
 output "backend_role_arn" {
-  description = "ARN of the non-prod read/write state role (access_roles key \"write\"): what dev/staging stacks' backend assumes for apply; iam/ci grants the dev/staging CI apply roles sts:AssumeRole on it"
+  description = "ARN of the non-prod read/write state role (access_roles key \"write\"): what dev/staging stacks' backend assumes for apply; aws-iam-role/ci-apply grants the dev/staging CI apply roles sts:AssumeRole on it"
   value       = try(aws_iam_role.access["write"].arn, null)
 }
 
@@ -54,7 +54,7 @@ output "backend_role_name" {
 }
 
 output "backend_prod_role_arn" {
-  description = "ARN of the production read/write state role (access_roles key \"prod_write\"): what prod stacks' backend assumes for apply; iam/ci grants the prod CI apply role sts:AssumeRole on it"
+  description = "ARN of the production read/write state role (access_roles key \"prod_write\"): what prod stacks' backend assumes for apply; aws-iam-role/ci-apply grants the prod CI apply role sts:AssumeRole on it"
   value       = try(aws_iam_role.access["prod_write"].arn, null)
 }
 
@@ -74,12 +74,12 @@ output "backend_root_role_name" {
 }
 
 output "backend_read_role_arn" {
-  description = "ARN of the non-prod read-only state role (access_roles key \"read\"): what dev/staging stacks' backend assumes for plans; iam/ci grants the dev/staging CI plan roles sts:AssumeRole on it"
+  description = "ARN of the non-prod read-only state role (access_roles key \"read\"): what dev/staging stacks' backend assumes for plans; aws-iam-role/ci-plan grants the dev/staging CI plan roles sts:AssumeRole on it"
   value       = try(aws_iam_role.access["read"].arn, null)
 }
 
 output "backend_prod_read_role_arn" {
-  description = "ARN of the read-only state role for production state (access_roles key \"prod_read\"): what prod stacks' backend assumes for plans; iam/ci grants the prod CI plan role sts:AssumeRole on it"
+  description = "ARN of the read-only state role for production state (access_roles key \"prod_read\"): what prod stacks' backend assumes for plans; aws-iam-role/ci-plan grants the prod CI plan role sts:AssumeRole on it"
   value       = try(aws_iam_role.access["prod_read"].arn, null)
 }
 

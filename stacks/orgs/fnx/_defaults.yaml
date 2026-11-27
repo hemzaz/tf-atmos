@@ -186,8 +186,8 @@ settings:
   # The state backend every stack's terraform.backend reads (above): the bucket
   # backend/main creates in fnx-ue1-root, its region and the name prefix of its
   # access roles (<role_prefix>-role, -read-role, -prod-role, -prod-read-role,
-  # -core-role, -root-role), and stack, the stack that deploys backend/main (iam's
-  # dependency, catalog/iam). A stack keeps its state here, not in its own
+  # -core-role, -root-role), and stack, the stack that deploys backend/main (the CI roles'
+  # dependency, catalog/aws-iam-role/ci). A stack keeps its state here, not in its own
   # region: a DR stack (fnx-ue2-prod) too. An EU stack overrides all of
   # settings.tfstate: bucket, region, replica_region (an EU region),
   # role_prefix and stack (backend/main in its own root stack, in the

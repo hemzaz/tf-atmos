@@ -7,7 +7,7 @@
  *
  * As upstream, the trust policy's `principals` are the account roots of those
  * ARNs and the condition does the narrowing. That is what lets the backend
- * trust roles that do not exist yet (the CI roles of iam/ci are created
+ * trust roles that do not exist yet (the CI roles, aws-iam-role/ci-*, are created
  * after this component, and a role named directly as a principal must exist
  * when the trust policy is written). The condition is ArnLike, as upstream:
  * on an exact ARN it matches like ArnEquals, and it lets an Identity Center

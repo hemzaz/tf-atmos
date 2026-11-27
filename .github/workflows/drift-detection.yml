@@ -15,7 +15,7 @@
 #
 # Required configuration: vars.AWS_PLAN_ROLE_ARN (any non-empty value marks AWS
 # as configured), optional vars.AWS_REGION. Each stack is planned with its own
-# iam/ci plan role (workflows/scripts/common/ci-apply-role-arn.py --kind plan).
+# aws-iam-role/ci-plan role (workflows/scripts/common/ci-apply-role-arn.py --kind plan).
 name: Drift detection
 # AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
 # there is no AWS account yet, and that variable marks AWS as configured.
@@ -122,7 +122,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The stack's own iam/ci plan role, in its own account: the only
+      # The stack's own aws-iam-role/ci-plan role, in its own account: the only
       # principal its stage's read-only state role trusts.
       - id: role
         name: Resolve the stack's CI plan role

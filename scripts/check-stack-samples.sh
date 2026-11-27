@@ -12,7 +12,7 @@
 #     must resolve;
 #   - ci-apply-role-arn.py --kind plan/apply for each sample stack, as
 #     terraform-ci.yml and terraform-cd.yml resolve its CI roles (a sample with
-#     no iam/ci fails here, as it would in CI);
+#     no aws-iam-role/ci-* fails here, as it would in CI);
 #   - the one manual step a deployed lane needs, done in the scratch copy with
 #     yq (mikefarah v4):
 #     its plan/apply role ARNs added to backend/main's access roles for its
