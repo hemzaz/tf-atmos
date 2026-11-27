@@ -33,6 +33,8 @@ check_lambda_packages = load("check-lambda-packages.py")
 check_lane_names = load("check-lane-names.py")
 check_state_keys = load("check-state-keys.py")
 ci_components = load("ci-components.py")
+ci_stacks = load("ci-stacks.py")
+check_first_deploy_inputs = load("check-first-deploy-inputs.py")
 
 CHECKERS = (check_ci_state_roles, check_cluster_api_ci, check_data_residency, check_deploy_layers,
             check_domains, check_lambda_packages, check_lane_names, check_state_keys)
@@ -78,10 +80,29 @@ class GarbageIsACleanError(unittest.TestCase):
         self.assertIn("::error::s1: x metadata.enabled is 'maybe'", err.getvalue())
 
 
+class OtherScriptsAreClean(unittest.TestCase):
+    def test_first_deploy_inputs_prints_an_error_and_exits_1(self):
+        err = io.StringIO()
+        with mock.patch("sys.argv", ["x"]), mock.patch(
+                "sys.stdin", io.StringIO(json.dumps(stacks_with(metadata={"enabled": "maybe"})))), \
+                contextlib.redirect_stderr(err):
+            self.assertEqual(check_first_deploy_inputs.main(), 1)
+        self.assertIn("ERROR s1: x metadata.enabled is 'maybe'", err.getvalue())
+
+    def test_ci_stacks_prints_an_error_and_exits_1(self):
+        err = io.StringIO()
+        with mock.patch("sys.argv", ["x"]), mock.patch.object(
+                ci_stacks, "describe_stacks", return_value=stacks_with(metadata={"enabled": "maybe"})), \
+                contextlib.redirect_stderr(err):
+            self.assertEqual(ci_stacks.main(), 1)
+        self.assertIn("::error::s1: x metadata.enabled is 'maybe'", err.getvalue())
+
+
 class StringFalseIsDisabled(unittest.TestCase):
     def test_every_is_deployable_reads_a_string(self):
         for is_deployable in (backends.is_deployable, check_data_residency.is_deployable,
-                              check_lambda_packages.is_deployable, ci_components.is_deployable):
+                              check_lambda_packages.is_deployable, ci_components.is_deployable,
+                              ci_stacks.deployable, check_first_deploy_inputs.deployable):
             with self.subTest(is_deployable=is_deployable):
                 self.assertFalse(is_deployable({"metadata": {"enabled": "False"}}))
                 self.assertTrue(is_deployable({"metadata": {"enabled": " TRUE "}}))

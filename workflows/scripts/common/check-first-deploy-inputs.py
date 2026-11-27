@@ -101,6 +101,12 @@ _spec = importlib.util.spec_from_file_location(
 )
 residency = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(residency)
+# The one boolean reader of the lint scripts.
+_spec = importlib.util.spec_from_file_location(
+    "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py")
+)
+ci_apply_role_arn = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ci_apply_role_arn)
 # stack-wiring.py's EU_CORE_STACKS, the one list of the EU core stacks.
 _spec = importlib.util.spec_from_file_location(
     "stack_wiring", pathlib.Path(__file__).resolve().parents[3] / "scripts" / "stack-wiring.py"
@@ -182,9 +188,7 @@ class Finding:
         return f"{label} {where}: {self.detail} ({DOCS}: {self.row})"
 
 
-def deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+deployable = ci_apply_role_arn.is_deployable
 
 
 def instances(config: dict) -> dict:
@@ -657,6 +661,11 @@ def main() -> int:
     args = parser.parse_args()
 
     stacks = json.load(sys.stdin)
+    flag_errors = ci_apply_role_arn.flag_errors(stacks)
+    if flag_errors:
+        for error in flag_errors:
+            print(f"ERROR {error}", file=sys.stderr)
+        return 1
     # Quotes tolerated: the bootstrap workflow passes an `atmos describe stacks --query` value.
     only = [s.strip().strip('"') for s in args.stacks.split(",") if s.strip().strip('"')]
     unknown = [s for s in only if s not in stacks]
