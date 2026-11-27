@@ -19,7 +19,7 @@ workflows:
     # line wins over this (fnx-ew1-root). refuse-non-backend stops any stack
     # without a backend/main.
     stack: fnx-ue1-root
-    dependencies:
+    dependencies: &aws-cli
       tools:
         aws/aws-cli: "2.36.49"
     steps:
@@ -204,6 +204,7 @@ workflows:
 
   full:
     description: Bootstrap a workload stack - IAM only (the GitHub OIDC provider and the CI roles), the minimum for CD to take over. Needs the state backend (backend-cold-start) first.
+    dependencies: *aws-cli
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -229,11 +230,23 @@ workflows:
         command: |
           provider='{{ .steps.provider_stack.value }}'
           provider=$(printf '%s' "$provider" | tr -d '"')
-          case "$provider" in ""|null) exit 0 ;; esac
+          case "$provider" in
+            ""|null) exit 0 ;;
+            *,*) echo "More than one cross-stack OIDC provider dependency: $provider. This check reads one."; exit 1 ;;
+          esac
           stack=${provider%% *}
           arn=${provider#* }
-          if ! aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$arn" >/dev/null 2>&1; then
-            echo "This stack's CI roles trust the OIDC provider $arn, which $stack creates and which does not exist in this account yet (or this caller cannot read it). Bootstrap $stack first: atmos workflow full -f bootstrap -s $stack"
+          # Atmos hands a shell step the credentials of --identity (or the step's
+          # identity), so name one when this fails for any reason but a missing provider.
+          if ! error=$(aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$arn" 2>&1 >/dev/null); then
+            case "$error" in
+              *NoSuchEntity*)
+                echo "This stack's CI roles trust the OIDC provider $arn, which $stack creates and which does not exist in this account yet. Bootstrap $stack first: atmos workflow full -f bootstrap -s $stack"
+                ;;
+              *)
+                echo "Cannot check the OIDC provider $arn: $error; run with the account's AdministratorAccess identity (atmos workflow full -f bootstrap -s <stack> --identity <account>/AdministratorAccess, or export its AWS_PROFILE)"
+                ;;
+            esac
             exit 1
           fi
       - name: validate
