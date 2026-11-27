@@ -47,10 +47,12 @@ bootstrap.yaml, which deploys a subset as a FIRST run on a brand-new account
     Within one step Atmos applies in dependency order.
   - (FIRST_RUN) an instance reads (!terraform.state / !terraform.output) a same-stack deployable
     instance the workflow does not select: that state does not exist yet. Of the cross-stack
-    reads and declared dependencies, only two are deployed earlier in the documented order:
-    the root backend stack (settings.tfstate.stack) and, for a DR standby, an instance of its
-    primary (settings.dr.standby_of) that this workflow also applies, so the primary is
-    bootstrapped first (bootstrap.yaml's refuse-standby-before-primary enforces that live).
+    reads and declared dependencies, only these are deployed earlier in the documented order:
+    the root backend stack (settings.tfstate.stack) and an instance, that this workflow also
+    applies, of the stack this one is bootstrapped after: a DR standby's primary
+    (settings.dr.standby_of) or a lane's stage stack (the stack name without the lane's
+    -<settings.context.name> suffix), which creates the account's OIDC provider.
+    bootstrap.yaml's refuse-before-provider-stack enforces that live.
     Any other cross-stack reference fails. A `//` default (`!terraform.state c .x // "d"`) makes
     Atmos survive a missing state, but is deliberately not trusted: the read is judged as a read,
     failing closed. No bootstrap instance needs one; a default would hide the very ordering
@@ -378,7 +380,13 @@ def first_run_cross_stack_errors(stacks: dict, placements: dict, where: str, ord
             instance = instances[name]
             settings = instance.get("settings") or {}
             backend_stack = (settings.get("tfstate") or {}).get("stack")
-            primary = (settings.get("dr") or {}).get("standby_of")
+            lane = (settings.get("context") or {}).get("name")
+            stage_stack = stack_name[: -len(lane) - 1] if lane and stack_name.endswith(f"-{lane}") else None
+            before = {
+                (settings.get("dr") or {}).get("standby_of"): "primary",
+                stage_stack: "stage stack",
+            }
+            before.pop(None, None)
             targets = [
                 (dep.get("component"), dep.get("stack"), "depends on")
                 for dep in (instance.get("dependencies") or {}).get("components") or []
@@ -393,18 +401,18 @@ def first_run_cross_stack_errors(stacks: dict, placements: dict, where: str, ord
                 if stack is not None and stack == backend_stack:
                     continue
                 reader = f"{where}: {stack_name}: {name} (plan step {ordered[phase]['name']})"
-                if stack is not None and stack == primary:
-                    if component in placements.get(primary, {}):
+                if stack in before:
+                    if component in placements.get(stack, {}):
                         continue
                     errors.append(
-                        f"{reader} {verb} {component} in its primary {primary}, which this workflow does not apply: "
-                        f"select it there, or move this instance to deploy-full-stack.yaml"
+                        f"{reader} {verb} {component} in its {before[stack]} {stack}, which this workflow does not "
+                        "apply: select it there, or move this instance to deploy-full-stack.yaml"
                     )
                     continue
                 errors.append(
                     f"{reader} {verb} {component} in stack {stack}: on a first run only settings.tfstate.stack "
-                    f"({backend_stack}) and settings.dr.standby_of ({primary}) are deployed earlier. Move this to "
-                    "deploy-full-stack.yaml or drop the cross-stack reference"
+                    f"({backend_stack}), settings.dr.standby_of and a lane's stage stack are deployed earlier. "
+                    "Move this to deploy-full-stack.yaml or drop the cross-stack reference"
                 )
     return errors
 

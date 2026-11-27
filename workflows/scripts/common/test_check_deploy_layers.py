@@ -541,7 +541,7 @@ class FirstRunTest(unittest.TestCase):
         errors = self.errors("aws-iam-role", stacks=stacks)
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("dev: ci/plan (plan step plan-0) reads kms/main in stack staging: on a first run only "
-                      "settings.tfstate.stack (root) and settings.dr.standby_of (None) are deployed earlier", errors[0])
+                      "settings.tfstate.stack (root), settings.dr.standby_of and a lane's stage stack are deployed earlier", errors[0])
 
     def test_cross_stack_declared_dependency_of_another_stack_fails(self):
         stacks = {"dev": stack(ci__plan=with_settings(
@@ -569,6 +569,18 @@ class FirstRunTest(unittest.TestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("depends on oidc/main in its primary prim, which this workflow does not apply: "
                       "select it there, or move this instance to deploy-full-stack.yaml", errors[0])
+
+    def test_lane_depending_on_its_applied_stage_stack_passes(self):
+        stacks = {
+            "dev": stack(oidc__main=instance("aws-github-oidc-provider")),
+            "dev-micro": stack(ci__plan=with_settings(
+                instance("aws-iam-role", deps=[{"component": "oidc/main", "stack": "dev"}]),
+                tfstate={"stack": "root"}, context={"name": "micro"})),
+        }
+        self.assertEqual(self.errors("aws-iam-role", "aws-github-oidc-provider", stacks=stacks), [])
+        errors = self.errors("aws-iam-role", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("depends on oidc/main in its stage stack dev, which this workflow does not apply", errors[0])
 
     def test_default_read_is_not_trusted(self):
         stacks = {"s1": stack(

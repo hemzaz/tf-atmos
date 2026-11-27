@@ -209,29 +209,31 @@ workflows:
       - *refuse-fixtures
       - *preflight-targets
       - *preflight
-      # A DR standby's CI roles trust the account's OIDC provider, which its
-      # primary's aws-github-oidc-provider creates (catalog/aws-iam-role/ci-standby.yaml):
-      # bootstrapped first, its CreateRole would name a provider that does not exist.
-      # Offline preflight cannot see that, so this reads the provider from the
-      # account (the standby shares its primary's account, and the caller is its
-      # administrator). "" for a stack that is not a standby.
-      - name: standby_of
+      # A DR standby's or a lane's CI roles trust the account's OIDC provider, which
+      # another stack's aws-github-oidc-provider creates (its primary's, its stage
+      # stack's; a dependency with a `stack` in catalog/aws-iam-role/ci-standby.yaml
+      # and the lane samples): bootstrapped first, its CreateRole would name a
+      # provider that does not exist. The offline preflight cannot see that, so this
+      # reads the provider from the account (the same account, and the caller is its
+      # administrator). "<stack> <provider arn>"; empty for a stack that creates its own.
+      - name: provider_stack
         type: atmos
         command: >-
           describe stacks --process-functions=false --format json
-          --query '[.[].components.terraform["aws-iam-role/ci-apply"] | select(. != null and .settings.dr.standby_of != null)
-          | .settings.dr.standby_of + " " + .vars.github_oidc_provider_arn] | unique | join(",")'
+          --query '[.[].components.terraform["aws-iam-role/ci-apply"] | select(. != null) | . as $i
+          | $i.dependencies.components[] | select(.component == "aws-github-oidc-provider" and .stack != null)
+          | .stack + " " + $i.vars.github_oidc_provider_arn] | unique | join(",")'
         output: none
-      - name: refuse-standby-before-primary
+      - name: refuse-before-provider-stack
         type: shell
         command: |
-          standby='{{ .steps.standby_of.value }}'
-          standby=$(printf '%s' "$standby" | tr -d '"')
-          case "$standby" in ""|null) exit 0 ;; esac
-          primary=${standby%% *}
-          arn=${standby#* }
+          provider='{{ .steps.provider_stack.value }}'
+          provider=$(printf '%s' "$provider" | tr -d '"')
+          case "$provider" in ""|null) exit 0 ;; esac
+          stack=${provider%% *}
+          arn=${provider#* }
           if ! aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$arn" >/dev/null 2>&1; then
-            echo "This stack is a DR standby of $primary, and its CI roles trust the OIDC provider $arn, which does not exist in this account yet (or this caller cannot read it). Bootstrap $primary first: atmos workflow full -f bootstrap -s $primary"
+            echo "This stack's CI roles trust the OIDC provider $arn, which $stack creates and which does not exist in this account yet (or this caller cannot read it). Bootstrap $stack first: atmos workflow full -f bootstrap -s $stack"
             exit 1
           fi
       - name: validate

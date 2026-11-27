@@ -136,8 +136,8 @@ the last step.
    Both name their regions with the house `aggregator-regions_house.tf` (`aggregator_regions`): no EU region's
    Config data reaches the US aggregator, and no US data the EU one, owner 2026-11-13),
    then each workload stack's `atmos workflow full -f bootstrap -s <stack>` (a DR standby, `fnx-ue2-prod` or
-   `fnx-ec1-prod`, only after its primary: its CI roles trust the primary's OIDC provider, and `full` refuses it
-   until that provider exists in the account)
+   `fnx-ec1-prod`, or a lane only after its primary or stage stack: its CI roles trust that stack's OIDC
+   provider, and `full` refuses it until the provider exists in the account)
    and [Deploying a stack](#deploying-a-stack), only after Identity Center is applied (step 3's
    second `deploy-accounts` run): every `eks` instance admits the account's `AdministratorAccess`
    by name and its plan fails until that set is assigned there, so the preflight fails a workload
