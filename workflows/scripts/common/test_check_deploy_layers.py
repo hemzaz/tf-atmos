@@ -489,6 +489,10 @@ class SubsetWorkflowTest(unittest.TestCase):
         self.assertIn("reads lambda/fn, which is planned in the same phase", errors[1])
 
 
+def with_settings(inst, **settings):
+    return {**inst, "settings": settings}
+
+
 class FirstRunTest(unittest.TestCase):
     """bootstrap `full` runs first on a brand-new account: it may not read what it does not apply."""
 
@@ -497,7 +501,9 @@ class FirstRunTest(unittest.TestCase):
         "root": stack(backend__main=instance("backend")),
         "s1": stack(
             oidc__main=instance("aws-github-oidc-provider"),
-            ci__plan=instance("aws-iam-role", {"state": "!terraform.state backend/main -s root .role"}),
+            ci__plan=with_settings(
+                instance("aws-iam-role", {"state": "!terraform.state backend/main root .role"}), tfstate={"stack": "root"}
+            ),
             kms__main=instance("kms"),
             vpc__main=instance("vpc", {"key": "!terraform.state kms/main .key_arn"}),
         ),
@@ -524,6 +530,54 @@ class FirstRunTest(unittest.TestCase):
             vpc__main=instance("vpc", {"key": "!terraform.state kms/main .key_arn"}),
         )}
         self.assertEqual(self.errors("vpc", stacks=stacks), [])
+
+    def test_cross_stack_read_of_another_stack_fails(self):
+        # dev reads staging's kms: neither the backend nor a primary, so not deployed before a first run.
+        stacks = {
+            "dev": stack(ci__plan=with_settings(
+                instance("aws-iam-role", {"k": "!terraform.state kms/main staging .key_arn"}), tfstate={"stack": "root"})),
+            "staging": stack(kms__main=instance("kms")),
+        }
+        errors = self.errors("aws-iam-role", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dev: ci/plan (plan step plan-0) reads kms/main in stack staging: on a first run only "
+                      "settings.tfstate.stack (root) and settings.dr.standby_of (None) are deployed earlier", errors[0])
+
+    def test_cross_stack_declared_dependency_of_another_stack_fails(self):
+        stacks = {"dev": stack(ci__plan=with_settings(
+            instance("aws-iam-role", deps=[{"component": "kms/main", "stack": "staging"}]), tfstate={"stack": "root"}))}
+        errors = self.errors("aws-iam-role", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("depends on kms/main in stack staging", errors[0])
+
+    def standby_stacks(self):
+        return {
+            "prim": stack(oidc__main=instance("aws-github-oidc-provider")),
+            "stby": stack(ci__plan=with_settings(
+                instance("aws-iam-role", deps=[
+                    {"component": "backend/main", "stack": "root"},
+                    {"component": "oidc/main", "stack": "prim"},
+                ]),
+                tfstate={"stack": "root"}, dr={"standby_of": "prim"})),
+        }
+
+    def test_standby_depending_on_its_applied_primary_passes(self):
+        self.assertEqual(self.errors("aws-iam-role", "aws-github-oidc-provider", stacks=self.standby_stacks()), [])
+
+    def test_standby_depending_on_a_primary_instance_not_applied_fails(self):
+        errors = self.errors("aws-iam-role", stacks=self.standby_stacks())
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("depends on oidc/main in its primary prim, which this workflow does not apply: "
+                      "select it there, or move this instance to deploy-full-stack.yaml", errors[0])
+
+    def test_default_read_is_not_trusted(self):
+        stacks = {"s1": stack(
+            kms__main=instance("kms"),
+            vpc__main=instance("vpc", {"key": '!terraform.state kms/main .key_arn // "none"'}),
+        )}
+        errors = self.errors("vpc", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("reads kms/main, which this first run does not apply", errors[0])
 
     def test_deploy_app_still_assumes_unselected_instances_deployed(self):
         files = workflow_files(("networking", ["vpc"]), ("kms", ["kms"]))

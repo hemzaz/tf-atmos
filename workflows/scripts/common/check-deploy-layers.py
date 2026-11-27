@@ -46,9 +46,15 @@ bootstrap.yaml, which deploys a subset as a FIRST run on a brand-new account
     that is applied later: in a later phase, or by a later step of its phase.
     Within one step Atmos applies in dependency order.
   - (FIRST_RUN) an instance reads (!terraform.state / !terraform.output) a same-stack deployable
-    instance the workflow does not select: that state does not exist yet. Cross-stack reads
-    (the root stack's backend, a DR standby's primary stack) are deployed earlier in the
-    documented order and stay allowed.
+    instance the workflow does not select: that state does not exist yet. Of the cross-stack
+    reads and declared dependencies, only two are deployed earlier in the documented order:
+    the root backend stack (settings.tfstate.stack) and, for a DR standby, an instance of its
+    primary (settings.dr.standby_of) that this workflow also applies, so the primary is
+    bootstrapped first (bootstrap.yaml's refuse-standby-before-primary enforces that live).
+    Any other cross-stack reference fails. A `//` default (`!terraform.state c .x // "d"`) makes
+    Atmos survive a missing state, but is deliberately not trusted: the read is judged as a read,
+    failing closed. No bootstrap instance needs one; a default would hide the very ordering
+    this check exists to prove.
   - (CROSS_STACK_AFTER) an instance of a reader root module is planned in the
     same or an earlier phase than an instance, in any stack, of the root module
     it reads by a cross-stack data lookup no dependency declares. This one is
@@ -362,6 +368,47 @@ def order_errors(
     return errors
 
 
+def first_run_cross_stack_errors(stacks: dict, placements: dict, where: str, ordered: list[dict]) -> list[str]:
+    """FIRST_RUN: a cross-stack read or dependency of an applied instance must name the root backend
+    stack (settings.tfstate.stack) or its standby_of primary's instance that this workflow applies."""
+    errors = []
+    for stack_name, placed in sorted(placements.items()):
+        instances = stacks[stack_name].get("components", {}).get("terraform", {})
+        for name, (phase, _) in sorted(placed.items()):
+            instance = instances[name]
+            settings = instance.get("settings") or {}
+            backend_stack = (settings.get("tfstate") or {}).get("stack")
+            primary = (settings.get("dr") or {}).get("standby_of")
+            targets = [
+                (dep.get("component"), dep.get("stack"), "depends on")
+                for dep in (instance.get("dependencies") or {}).get("components") or []
+                if (dep.get("stack") or stack_name) != stack_name
+                or any(dep.get(key) is not None for key in CROSS_STACK_CONTEXT_KEYS)
+            ] + [
+                (component, stack, "reads")
+                for component, stack, _ in check_dependencies.reads(instance.get("vars", {}))
+                if stack not in (None, stack_name)
+            ]
+            for component, stack, verb in targets:
+                if stack is not None and stack == backend_stack:
+                    continue
+                reader = f"{where}: {stack_name}: {name} (plan step {ordered[phase]['name']})"
+                if stack is not None and stack == primary:
+                    if component in placements.get(primary, {}):
+                        continue
+                    errors.append(
+                        f"{reader} {verb} {component} in its primary {primary}, which this workflow does not apply: "
+                        f"select it there, or move this instance to deploy-full-stack.yaml"
+                    )
+                    continue
+                errors.append(
+                    f"{reader} {verb} {component} in stack {stack}: on a first run only settings.tfstate.stack "
+                    f"({backend_stack}) and settings.dr.standby_of ({primary}) are deployed earlier. Move this to "
+                    "deploy-full-stack.yaml or drop the cross-stack reference"
+                )
+    return errors
+
+
 def cross_stack_errors(stacks: dict, where: str, ordered: list[dict]) -> list[str]:
     """CROSS_STACK_AFTER: every reader instance planned in a later phase than every read instance."""
     def phase_indices(component_type: str) -> list[tuple[int, str]]:
@@ -394,12 +441,15 @@ def cross_stack_errors(stacks: dict, where: str, ordered: list[dict]) -> list[st
 def check_workflow(
     stacks: dict, where: str, ordered: list[dict], covers: Coverage, forbids: Coverage = None, first_run: bool = False
 ) -> list[str]:
-    errors = []
+    errors, placements = [], {}
     for stack_name, stack in sorted(stacks.items()):
         instances = stack.get("components", {}).get("terraform", {})
         prefix = f"{where}: {stack_name}: "
         placed, place_errors = place(instances, prefix, ordered, covers, forbids)
+        placements[stack_name] = placed
         errors += place_errors + order_errors(stack_name, instances, placed, prefix, ordered, first_run)
+    if first_run:
+        errors += first_run_cross_stack_errors(stacks, placements, where, ordered)
     return errors + cross_stack_errors(stacks, where, ordered)
 
 
