@@ -16,8 +16,10 @@ Terraform only warns about an undeclared one, so a misspelt or stale var is
 silently dropped.
 """
 import functools
+import importlib.util
 import json
 import os
+import pathlib
 import re
 import sys
 from typing import Any, Iterator, Optional
@@ -25,6 +27,12 @@ from typing import Any, Iterator, Optional
 # The sibling module, also when this file is loaded by path (tests, check-domains.py).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fixtures  # noqa: E402
+
+# The one boolean reader of the lint scripts (ci-apply-role-arn.py).
+_spec = importlib.util.spec_from_file_location(
+    "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py"))
+ci_apply_role_arn = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ci_apply_role_arn)
 
 FUNCTIONS = ("!terraform.state", "!terraform.output")
 # Characters that open a yq expression rather than a stack name (Atmos isExpressionStart, same in 1.229.0 and 1.233.2).
@@ -87,9 +95,19 @@ def declared(components_dir: str, module: str, kind: str) -> Optional[frozenset]
     return frozenset(names)
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata", {})
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+is_deployable = ci_apply_role_arn.is_deployable
+
+
+def flag_errors(stacks: dict) -> list[str]:
+    """Instances whose metadata.enabled is not true/false: one clean error each, before the checks read it."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(stack.get("components", {}).get("terraform", {}).items()):
+            try:
+                is_deployable(instance)
+            except ValueError as error:
+                errors.append(f"{stack_name}: {name} {error}; Terraform reads only true or false")
+    return errors
 
 
 def module_name(name: str, instance: dict) -> str:
@@ -175,7 +193,7 @@ def undeclared_vars(stacks: dict, components_dir: str) -> list[str]:
 def main() -> int:
     components_dir = sys.argv[1] if len(sys.argv) > 1 else COMPONENTS_DIR
     stacks = json.load(sys.stdin)
-    errors = check(stacks, components_dir) + undeclared_vars(stacks, components_dir)
+    errors = flag_errors(stacks) or (check(stacks, components_dir) + undeclared_vars(stacks, components_dir))
     errors = fixtures.fatal(errors, "check-dependencies") + fixtures.unguarded(stacks)
     for error in errors:
         print(f"ERROR {error}")

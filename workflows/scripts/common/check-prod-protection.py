@@ -172,9 +172,24 @@ def variable_default(components_dir: pathlib.Path, component: str, name: str) ->
     raise KeyError(f"{component}: variable {name!r} has no scalar default in variables.tf")
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+is_deployable = ci_apply_role_arn.is_deployable
+BOOLEAN_VARS = ("enabled", "github_oidc_provider_enabled", "instance_profile_enabled", "eks_oidc_provider_enabled",
+                "use_fullname")
+
+
+def flag_errors(stacks: dict) -> list[str]:
+    """Instances whose metadata.enabled, or whose CI role's boolean vars, are not true/false: one clean error each."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            try:
+                is_deployable(instance)
+                if instance.get("component") == CI_ROLE_COMPONENT:
+                    for var in BOOLEAN_VARS:
+                        ci_apply_role_arn.flag((instance.get("vars") or {}).get(var), f"vars.{var}")
+            except ValueError as error:
+                errors.append(f"{stack_name}: {name} {error}; Terraform reads only true or false")
+    return errors
 
 
 def check(stacks: dict, components_dir: pathlib.Path) -> list[str]:
@@ -215,13 +230,13 @@ def check_ci_trust(stacks: dict) -> list[str]:
             variables = instance.get("vars") or {}
             # enabled false (the Cloud Posse switch; the uploader's catalog default) creates no role.
             if (instance.get("component") != CI_ROLE_COMPONENT or not is_deployable(instance)
-                    or normalize(variables.get("enabled")) is False):
+                    or ci_apply_role_arn.flag(variables.get("enabled"), "vars.enabled") is False):
                 continue
             where = f"{stack_name}: {name} ({CI_ROLE_COMPONENT})"
             errors += role_name_errors(where, name, instance)
             # The CI instances are checked by their instance name, whatever their vars say (an
             # override of name or github_oidc_provider_enabled must not drop them out of the rules).
-            if name not in CI_INSTANCES and normalize(variables.get("github_oidc_provider_enabled")) is not True:
+            if name not in CI_INSTANCES and ci_apply_role_arn.flag(variables.get("github_oidc_provider_enabled"), "vars.github_oidc_provider_enabled") is not True:
                 if names_github_trust(variables):
                     errors.append(f"{where} trusts GitHub OIDC ({GITHUB_OIDC_HOST}) through its assume_role_policy, "
                                   "principals or assume_role_conditions, which skips every CI trust rule; trust "
@@ -291,7 +306,7 @@ def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance:
     if expected and variables.get("name") != expected:
         errors.append(f"{where} sets vars.name {variables.get('name')!r}: it must stay {expected!r} ({catalog}), "
                       "the name CI, the state backend and the docs derive the role's ARN from; drop the override")
-    if expected and normalize(variables.get("github_oidc_provider_enabled")) is not True:
+    if expected and ci_apply_role_arn.flag(variables.get("github_oidc_provider_enabled"), "vars.github_oidc_provider_enabled") is not True:
         errors.append(f"{where} sets github_oidc_provider_enabled {variables.get('github_oidc_provider_enabled')!r}: "
                       f"its only trust is GitHub OIDC from trusted_github_repos ({catalog}); drop the override")
     if variables.get("principals"):
@@ -305,7 +320,7 @@ def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance:
         errors.append(f"{where} sets permissions_boundary {variables['permissions_boundary']!r}: a CI role's "
                       f"permissions are the catalog's allow-list ({catalog}), which this lint verifies; a boundary "
                       "would make the effective permissions differ from it (and can cap the apply role); remove it")
-    if normalize(variables.get("instance_profile_enabled")) is True:
+    if ci_apply_role_arn.flag(variables.get("instance_profile_enabled"), "vars.instance_profile_enabled") is True:
         errors.append(f"{where} sets instance_profile_enabled: true, which makes the role attachable to an EC2 "
                       f"instance; a CI role is assumed through GitHub OIDC only ({catalog}); remove it")
     if variables.get("max_session_duration") is not None:
@@ -329,7 +344,7 @@ def ci_trust_errors(where: str, variables: dict, stage: Optional[str], instance:
         elif not plan and (not BRANCH.fullmatch(constraint) or constraint == "pull_request"):
             errors.append(f"{where} trusts {entry!r}: a role other than {CI_PLAN_NAME} (apply, uploader) trusts "
                           "a pinned branch only, never pull_request, an environment or another claim")
-    if normalize(variables.get("eks_oidc_provider_enabled")) is True:
+    if ci_apply_role_arn.flag(variables.get("eks_oidc_provider_enabled"), "vars.eks_oidc_provider_enabled") is True:
         errors.append(f"{where} sets eks_oidc_provider_enabled: true, which merges an EKS IRSA trust into its "
                       "GitHub OIDC trust (a Kubernetes service account could assume it); remove it from the "
                       f"role's vars ({catalog})")
@@ -493,8 +508,8 @@ def main() -> int:
         print(__doc__.splitlines()[2], file=sys.stderr)
         return 2
     described = json.load(sys.stdin)
-    errors = (check(described, pathlib.Path(sys.argv[1])) + check_ci_trust(described)
-              + check_trails(described))
+    errors = flag_errors(described) or (check(described, pathlib.Path(sys.argv[1])) + check_ci_trust(described)
+                                       + check_trails(described))
     for error in errors:
         print(f"ERROR {error}")
     if errors:

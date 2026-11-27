@@ -1,8 +1,12 @@
 """Tests for check-dependencies.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import importlib.util
+import io
+import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "check_dependencies", pathlib.Path(__file__).with_name("check-dependencies.py")
@@ -130,6 +134,30 @@ class CheckDependenciesTest(unittest.TestCase):
                 "off": instance(component="ghost", enabled=False),
             }}}}
             self.assertEqual(check_dependencies.check(stacks, components), [])
+
+
+class BooleanReadingTest(unittest.TestCase):
+    def test_a_string_false_enabled_is_not_deployable(self):
+        self.assertFalse(check_dependencies.is_deployable(instance(enabled="false")))
+        stacks = {"s1": {"components": {"terraform": {"off": instance(component="ghost", enabled="False ")}}}}
+        with tempfile.TemporaryDirectory() as components:
+            self.assertEqual(check_dependencies.check(stacks, components), [])
+        reader = instance({"x": "!terraform.state off .id"}, [{"component": "off"}])
+        described = stacks_with(reader)
+        described["s1"]["components"]["terraform"]["off"] = instance(enabled="false")
+        found = check_dependencies.check(described)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("reads off, which is abstract or disabled", found[0])
+
+    def test_a_garbage_enabled_is_a_clean_error_and_exit_1(self):
+        stacks = {"s1": {"components": {"terraform": {"x": instance(enabled="maybe")}}}}
+        self.assertEqual(len(check_dependencies.flag_errors(stacks)), 1)
+        self.assertIn("s1: x metadata.enabled is 'maybe', not a boolean", check_dependencies.flag_errors(stacks)[0])
+        out = io.StringIO()
+        with mock.patch("sys.argv", ["x"]), mock.patch("sys.stdin", io.StringIO(json.dumps(stacks))), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(check_dependencies.main(), 1)
+        self.assertIn("ERROR s1: x metadata.enabled is 'maybe'", out.getvalue())
 
 
 class OutputsAndVariablesTest(unittest.TestCase):
