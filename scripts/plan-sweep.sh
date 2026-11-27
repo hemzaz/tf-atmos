@@ -85,6 +85,16 @@ umask 077
 INIT_ATTEMPTS="${PLAN_SWEEP_INIT_ATTEMPTS:-3}"
 INIT_RETRY_STEP="${PLAN_SWEEP_INIT_RETRY_STEP:-10}"
 INIT_LOG_TAIL=20
+case "$INIT_ATTEMPTS" in '' | *[!0-9]* | 0)
+  echo "error: PLAN_SWEEP_INIT_ATTEMPTS must be a positive integer, got '$INIT_ATTEMPTS'." >&2
+  exit 2
+  ;;
+esac
+case "$INIT_RETRY_STEP" in '' | *[!0-9]*)
+  echo "error: PLAN_SWEEP_INIT_RETRY_STEP must be a non-negative integer, got '$INIT_RETRY_STEP'." >&2
+  exit 2
+  ;;
+esac
 
 # Pin the credentials instead of inheriting them. Through the default chain a
 # developer's live profile would have every plan read a real account, while CI
@@ -779,6 +789,7 @@ printf '%s\n' "-----------------------------------------------------------------
 # was never planned anyway.
 init_done=""
 init_failed=""
+init_tripped=0
 ensure_init() {
   case " $init_done " in *" $1 "*) return 0 ;; esac
   init_done="$init_done $1"
@@ -786,22 +797,31 @@ ensure_init() {
   # Top-level component directories only, as the up-front loop this replaced.
   case "$1" in _* | */*) return 0 ;; esac
   ls "$d"*.tf >/dev/null 2>&1 || return 0
-  # Init is idempotent and the locks stay readonly, so a retry cannot paper over
-  # a real breakage: that fails every attempt. A failure is cached in
-  # init_failed for every later stack that uses the component, so its output is
-  # printed here, once, not at each of those stacks' SKIP lines.
-  local log="$WORK/init__$1.log" n=1
+  # Only a transient failure (a stalled registry fetch) can pass on a retry; a
+  # deterministic breakage fails every attempt, so the locks staying readonly
+  # means a retry never hides one. A failure is cached in init_failed for every
+  # later stack that uses the component, so its output is printed here, once,
+  # not at each of those stacks' SKIP lines. Once one component has failed all
+  # its attempts the breakage is probably global (a registry outage, a lock
+  # mistake): every later component then gets one attempt and no sleep, so the
+  # sweep does not spend its job timeout asleep.
+  local log="$WORK/init__$1.log" n=1 max="$INIT_ATTEMPTS"
+  [ "$init_tripped" = 1 ] && max=1
   : >"$log"
   while ! (cd "$d" && terraform init -backend=false -input=false -lockfile=readonly) \
     >>"$log" 2>&1; do
-    if [ "$n" -ge "$INIT_ATTEMPTS" ]; then
+    if [ "$n" -ge "$max" ]; then
       init_failed="$init_failed $1"
-      printf 'terraform init failed %s times for %s; last output:\n' "$INIT_ATTEMPTS" "$1"
+      printf 'terraform init failed after %s attempt(s) for %s; last output:\n' "$max" "$1"
       tail -n "$INIT_LOG_TAIL" "$log" | sed 's/^/        /'
+      if [ "$init_tripped" = 0 ]; then
+        init_tripped=1
+        printf 'init failed after retries for %s; trying the remaining components once\n' "$1"
+      fi
       return 0
     fi
     printf 'terraform init failed for %s (attempt %s of %s); retrying in %ss\n' \
-      "$1" "$n" "$INIT_ATTEMPTS" $((n * INIT_RETRY_STEP))
+      "$1" "$n" "$max" $((n * INIT_RETRY_STEP))
     sleep $((n * INIT_RETRY_STEP))
     n=$((n + 1))
   done
