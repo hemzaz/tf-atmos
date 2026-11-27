@@ -135,7 +135,9 @@ the last step.
    collector region, so they record no IAM; the US aggregator in `fnx-ue1-security` reads the US regions only.
    Both name their regions with the house `aggregator-regions_house.tf` (`aggregator_regions`): no EU region's
    Config data reaches the US aggregator, and no US data the EU one, owner 2026-11-13),
-   then each workload stack's `atmos workflow full -f bootstrap -s <stack>`
+   then each workload stack's `atmos workflow full -f bootstrap -s <stack>` (a DR standby, `fnx-ue2-prod` or
+   `fnx-ec1-prod`, or a lane only after its primary or stage stack: its CI roles trust that stack's OIDC
+   provider, and `full` refuses it until the provider exists in the account)
    and [Deploying a stack](#deploying-a-stack), only after Identity Center is applied (step 3's
    second `deploy-accounts` run): every `eks` instance admits the account's `AdministratorAccess`
    by name and its plan fails until that set is assigned there, so the preflight fails a workload
@@ -228,7 +230,7 @@ An existing bucket must be imported first: see `components/terraform/backend/REA
 Every role also trusts the administrator who applied `backend/main`; the stack backend picks the
 role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it. Role names start with
 `<role_prefix>` (`settings.tfstate.role_prefix`, `fnx-terraform-backend`); the CI roles
-(`aws-iam-role/ci-plan`, `ci-apply`) are named `<stack>-ci-plan`/`-apply` instead.
+(`aws-iam-role/ci-plan`, `ci-apply`) are named `<tenant>-<settings.prefix>-<stage>-ci-plan`/`-apply` instead (the stack name plus `-ci-<kind>` on a stage stack).
 
 | Role (`access_roles` key) | Access | Trusted |
 |---------------------------|--------|---------|
@@ -351,7 +353,7 @@ EU bucket's replication.
 
 No role ARN is a variable. Every AWS job assumes its stack's own `aws-iam-role/ci-plan` or `ci-apply` role, in that stack's
 account, derived by `workflows/scripts/common/ci-apply-role-arn.py` as
-`arn:aws:iam::<settings.environment.account_id>:role/<stack>-ci-<kind>`: `--kind plan`
+`arn:aws:iam::<settings.environment.account_id>:role/<tenant>-<settings.prefix>-<stage>-ci-<kind>` (the stack name plus `-ci-<kind>` on a stage stack; a lane stack puts the lane name in `settings.prefix`): `--kind plan`
 for PR/master plans, drift and DR checks; `--kind apply` (default) for CD. This is Cloud Posse's
 per-account planner/terraform role pair (`github-oidc-role`). `settings.environment.account_id`
 already comes from the account map (Account IDs, above), so a new or changed account needs no
@@ -415,8 +417,8 @@ after a new `atmos login`.
 
 ## Deploying a stack
 
-After the backend: `atmos workflow full -f bootstrap -s <stack>` (IAM, including the CI roles, and
-VPCs) as the stack's account's `AdministratorAccess` ([Signing in](#signing-in), [Bootstrap order](#bootstrap-order)),
+After the backend: `atmos workflow full -f bootstrap -s <stack>` (IAM only: the GitHub OIDC provider and the CI
+roles, the minimum for CD to take over) as the stack's account's `AdministratorAccess` ([Signing in](#signing-in), [Bootstrap order](#bootstrap-order)),
 since no CI role exists yet; no stack sets a provider role, so every component runs as the caller. Then
 `atmos workflow deploy -f deploy-full-stack -s <stack>`. It runs these layers in order, each
 planned, confirmed, then applied from the saved plan. Each layer is also its own workflow

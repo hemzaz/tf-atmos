@@ -481,11 +481,121 @@ class SubsetWorkflowTest(unittest.TestCase):
     def test_bootstrap_full_is_checked(self):
         files = workflow_files(("networking", ["vpc"]), ("services", ["cognito", "lambda", "apigateway"]))
         files["bootstrap.yaml"] = {"workflows": {"full": subset_workflow(
-            ("plan", ["lambda", "apigateway"]), ("deploy", ["lambda", "apigateway"]),
+            ("plan", ["cognito", "lambda", "apigateway"]), ("deploy", ["cognito", "lambda", "apigateway"]),
         )}}
         errors = [e for e in check_deploy_layers.check(self.STACKS, files) if e.startswith("bootstrap.yaml")]
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("reads cognito/main, which is planned in the same phase", errors[0])
+        self.assertIn("reads lambda/fn, which is planned in the same phase", errors[1])
+
+
+def with_settings(inst, **settings):
+    return {**inst, "settings": settings}
+
+
+class FirstRunTest(unittest.TestCase):
+    """bootstrap `full` runs first on a brand-new account: it may not read what it does not apply."""
+
+    # The old bootstrap bug: every workload vpc reads kms/main, applied only later by deploy-full-stack.
+    STACKS = {
+        "root": stack(backend__main=instance("backend")),
+        "s1": stack(
+            oidc__main=instance("aws-github-oidc-provider"),
+            ci__plan=with_settings(
+                instance("aws-iam-role", {"state": "!terraform.state backend/main root .role"}), tfstate={"stack": "root"}
+            ),
+            kms__main=instance("kms"),
+            vpc__main=instance("vpc", {"key": "!terraform.state kms/main .key_arn"}),
+        ),
+    }
+
+    def errors(self, *types, stacks=None):
+        files = workflow_files(("iam", ["aws-github-oidc-provider", "aws-iam-role"]), ("kms", ["kms"]),
+                               ("networking", ["vpc"]), ("backend", ["backend"]))
+        files["bootstrap.yaml"] = {"workflows": {"full": subset_workflow(("plan", list(types)), ("deploy", list(types)))}}
+        return [e for e in check_deploy_layers.check(stacks or self.STACKS, files) if e.startswith("bootstrap.yaml")]
+
+    def test_vpc_reading_an_unapplied_kms_fails_with_a_fix(self):
+        errors = self.errors("aws-github-oidc-provider", "aws-iam-role", "vpc")
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("reads lambda/fn, which is planned in the same phase", errors[0])
+        self.assertIn("s1: vpc/main (plan step plan-0) reads kms/main, which this first run does not apply", errors[0])
+        self.assertIn("Select kms/main in an earlier phase, or move the reader to a later workflow", errors[0])
+
+    def test_iam_only_passes_and_cross_stack_reads_stay_allowed(self):
+        self.assertEqual(self.errors("aws-github-oidc-provider", "aws-iam-role"), [])
+
+    def test_disabled_target_is_not_a_first_run_failure(self):
+        stacks = {"s2": stack(
+            kms__main=instance("kms", enabled=False),
+            vpc__main=instance("vpc", {"key": "!terraform.state kms/main .key_arn"}),
+        )}
+        self.assertEqual(self.errors("vpc", stacks=stacks), [])
+
+    def test_cross_stack_read_of_another_stack_fails(self):
+        # dev reads staging's kms: neither the backend nor a primary, so not deployed before a first run.
+        stacks = {
+            "dev": stack(ci__plan=with_settings(
+                instance("aws-iam-role", {"k": "!terraform.state kms/main staging .key_arn"}), tfstate={"stack": "root"})),
+            "staging": stack(kms__main=instance("kms")),
+        }
+        errors = self.errors("aws-iam-role", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("dev: ci/plan (plan step plan-0) reads kms/main in stack staging: on a first run only "
+                      "settings.tfstate.stack (root), settings.dr.standby_of and a lane's stage stack are deployed earlier", errors[0])
+
+    def test_cross_stack_declared_dependency_of_another_stack_fails(self):
+        stacks = {"dev": stack(ci__plan=with_settings(
+            instance("aws-iam-role", deps=[{"component": "kms/main", "stack": "staging"}]), tfstate={"stack": "root"}))}
+        errors = self.errors("aws-iam-role", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("depends on kms/main in stack staging", errors[0])
+
+    def standby_stacks(self):
+        return {
+            "prim": stack(oidc__main=instance("aws-github-oidc-provider")),
+            "stby": stack(ci__plan=with_settings(
+                instance("aws-iam-role", deps=[
+                    {"component": "backend/main", "stack": "root"},
+                    {"component": "oidc/main", "stack": "prim"},
+                ]),
+                tfstate={"stack": "root"}, dr={"standby_of": "prim"})),
+        }
+
+    def test_standby_depending_on_its_applied_primary_passes(self):
+        self.assertEqual(self.errors("aws-iam-role", "aws-github-oidc-provider", stacks=self.standby_stacks()), [])
+
+    def test_standby_depending_on_a_primary_instance_not_applied_fails(self):
+        errors = self.errors("aws-iam-role", stacks=self.standby_stacks())
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("depends on oidc/main in its primary prim, which this workflow does not apply: "
+                      "select it there, or move this instance to deploy-full-stack.yaml", errors[0])
+
+    def test_lane_depending_on_its_applied_stage_stack_passes(self):
+        stacks = {
+            "dev": stack(oidc__main=instance("aws-github-oidc-provider")),
+            "dev-micro": stack(ci__plan=with_settings(
+                instance("aws-iam-role", deps=[{"component": "oidc/main", "stack": "dev"}]),
+                tfstate={"stack": "root"}, context={"name": "micro"})),
+        }
+        self.assertEqual(self.errors("aws-iam-role", "aws-github-oidc-provider", stacks=stacks), [])
+        errors = self.errors("aws-iam-role", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("depends on oidc/main in its stage stack dev, which this workflow does not apply", errors[0])
+
+    def test_default_read_is_not_trusted(self):
+        stacks = {"s1": stack(
+            kms__main=instance("kms"),
+            vpc__main=instance("vpc", {"key": '!terraform.state kms/main .key_arn // "none"'}),
+        )}
+        errors = self.errors("vpc", stacks=stacks)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("reads kms/main, which this first run does not apply", errors[0])
+
+    def test_deploy_app_still_assumes_unselected_instances_deployed(self):
+        files = workflow_files(("networking", ["vpc"]), ("kms", ["kms"]))
+        files["deploy-application.yaml"] = {"workflows": {"deploy-app": subset_workflow(("plan", ["vpc"]), ("deploy", ["vpc"]))}}
+        errors = [e for e in check_deploy_layers.check(self.STACKS, files) if e.startswith("deploy-application.yaml")]
+        self.assertEqual(errors, [])
 
 
 

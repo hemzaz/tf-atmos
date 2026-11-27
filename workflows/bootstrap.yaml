@@ -11,7 +11,7 @@
 #   atmos workflow backend-cold-start -f bootstrap [-s fnx-ew1-root]  # once: create the backend, move its state into it
 #   atmos workflow backend-only -f bootstrap [-s fnx-ew1-root]        # later changes to the backend
 #   atmos workflow verify -f bootstrap [-s fnx-ew1-root]              # backend describe + outputs
-#   atmos workflow full -f bootstrap -s <stack>                       # a workload stack: IAM (CI roles) and VPCs
+#   atmos workflow full -f bootstrap -s <stack>                       # a workload stack: IAM only (CI roles)
 workflows:
   backend-cold-start:
     description: Create a state backend with local state (Cloud Posse cold start), then migrate its state into the new bucket
@@ -19,7 +19,7 @@ workflows:
     # line wins over this (fnx-ew1-root). refuse-non-backend stops any stack
     # without a backend/main.
     stack: fnx-ue1-root
-    dependencies:
+    dependencies: &aws-cli
       tools:
         aws/aws-cli: "2.36.49"
     steps:
@@ -203,12 +203,52 @@ workflows:
         command: terraform deploy backend/main --from-plan
 
   full:
-    description: Bootstrap a workload stack - IAM (including the CI roles) and networking. Needs the state backend (backend-cold-start) first.
+    description: Bootstrap a workload stack - IAM only (the GitHub OIDC provider and the CI roles), the minimum for CD to take over. Needs the state backend (backend-cold-start) first.
+    dependencies: *aws-cli
     steps:
       - *fixtures-stages
       - *refuse-fixtures
       - *preflight-targets
       - *preflight
+      # A DR standby's or a lane's CI roles trust the account's OIDC provider, which
+      # another stack's aws-github-oidc-provider creates (its primary's, its stage
+      # stack's; a dependency with a `stack` in catalog/aws-iam-role/ci-standby.yaml
+      # and the lane samples): bootstrapped first, its CreateRole would name a
+      # provider that does not exist. The offline preflight cannot see that, so this
+      # reads the provider from the account (the same account, and the caller is its
+      # administrator). "<stack> <provider arn>"; empty for a stack that creates its own.
+      - name: provider_stack
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform["aws-iam-role/ci-apply"] | select(. != null) | . as $i
+          | $i.dependencies.components[] | select(.component == "aws-github-oidc-provider" and .stack != null)
+          | .stack + " " + $i.vars.github_oidc_provider_arn] | unique | join(",")'
+        output: none
+      - name: refuse-before-provider-stack
+        type: shell
+        command: |
+          provider='{{ .steps.provider_stack.value }}'
+          provider=$(printf '%s' "$provider" | tr -d '"')
+          case "$provider" in
+            ""|null) exit 0 ;;
+            *,*) echo "More than one cross-stack OIDC provider dependency: $provider. This check reads one."; exit 1 ;;
+          esac
+          stack=${provider%% *}
+          arn=${provider#* }
+          # Atmos hands a shell step the credentials of --identity (or the step's
+          # identity), so name one when this fails for any reason but a missing provider.
+          if ! error=$(aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$arn" 2>&1 >/dev/null); then
+            case "$error" in
+              *NoSuchEntity*)
+                echo "This stack's CI roles trust the OIDC provider $arn, which $stack creates and which does not exist in this account yet. Bootstrap $stack first: atmos workflow full -f bootstrap -s $stack"
+                ;;
+              *)
+                echo "Cannot check the OIDC provider $arn: $error; run with the account's AdministratorAccess identity (atmos workflow full -f bootstrap -s <stack> --identity <account>/AdministratorAccess, or export its AWS_PROFILE)"
+                ;;
+            esac
+            exit 1
+          fi
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.
@@ -222,6 +262,10 @@ workflows:
       # through the account's GitHub OIDC provider, the vendored
       # aws-github-oidc-provider, so that applies here too (each CI role
       # depends on it: Atmos applies it first within the deploy-iam step).
+      # IAM only, the minimum for CD to take over: this is a first run on a
+      # new account, so nothing it applies may read an instance it does not
+      # (the vpc reads kms/main's key, which deploy-full-stack's kms layer
+      # creates; networking follows there. check-deploy-layers.py FIRST_RUN).
       # aws-iam-service-linked-roles is not needed here: nothing in this
       # workflow reads or depends on the Auto Scaling service-linked role; its
       # one dependent, kms/main, deploys in deploy-full-stack's kms layer,
@@ -229,26 +273,22 @@ workflows:
       - name: plan-foundation
         type: atmos
         command: >-
-          terraform plan --log-order grouped --query '.metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"
-          or .metadata.component == "vpc"'
+          terraform plan --log-order grouped --query '.metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"'
       - name: confirm_foundation
         type: confirm
-        prompt: Apply the IAM and VPC plans above?
+        prompt: Apply the IAM plans above?
         default: false
       - name: guard-foundation
         type: shell
-        command: test "{{ .steps.confirm_foundation.value }}" = "true" || { echo "Bootstrap cancelled before IAM and networking."; exit 1; }
+        command: test "{{ .steps.confirm_foundation.value }}" = "true" || { echo "Bootstrap cancelled before IAM."; exit 1; }
       - name: deploy-iam
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "aws-github-oidc-provider" or .metadata.component == "aws-iam-role"'
-      - name: deploy-vpc
-        type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "vpc"'
       - type: markdown
         content: |
-          **Bootstrap complete.** Next steps:
-          - `atmos workflow deploy -f deploy-full-stack -s <stack>`
+          **Bootstrap complete** (IAM and the CI roles). Next steps:
+          - `atmos workflow deploy -f deploy-full-stack -s <stack>` (kms, then networking and the rest)
           - `atmos workflow verify -f bootstrap`
 
   verify:
