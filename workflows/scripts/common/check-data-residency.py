@@ -280,8 +280,8 @@ def exempt(name: str, field: str, region: str, exemptions: tuple) -> bool:
 def flag_on(value: Any, where: str = "a boolean var") -> bool:
     """Whether Terraform would read value as a true bool, by the one boolean reader (ci-apply-role-arn.py flag).
 
-    Unset is off; "true"/"false" strings (any case) are read; anything else, "yes" or 1 too (Terraform converts a
-    string "true"/"false" to a bool, never a number or another string), raises ValueError. flag_errors() pre-scans
+    Unset is off; a bool or exactly "true", "false", "1" or "0" is read (what Terraform converts); anything else,
+    "True", " true", "yes" or the number 1, raises ValueError. flag_errors() pre-scans
     the vars and zone entries these rules read, so main() reports each with its stack, instance and field.
     """
     return backends.ci_apply_role_arn.flag(value, where, False) is True
@@ -1018,11 +1018,7 @@ def org_service_errors(stacks: dict, scoped: set) -> list[str]:
 
 # security-monitoring's finding routes (E5c8, owner OQ-AL): each flag routes the findings of one org service's
 # member detector/hub, which exists only while the region's delegated administrator enrolls the account.
-MONITORING_ROUTES = {
-    "enable_guardduty_route": "aws-guardduty",
-    "enable_securityhub_route": "aws-security-hub",
-    "enable_inspector2_route": "aws-inspector2",
-}
+MONITORING_ROUTES = backends.ci_apply_role_arn.MONITORING_ROUTES  # defined there: its BOOLEAN_VARS derive from it
 
 
 def enrolls(org: dict, member: str, member_id: str, ids: dict) -> bool:

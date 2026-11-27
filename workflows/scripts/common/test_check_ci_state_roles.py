@@ -225,7 +225,7 @@ class CheckCiStateRolesTest(unittest.TestCase):
 
     def test_string_false_enabled_fails_like_a_bool_false(self):
         # A template renders vars.enabled "false"; Terraform reads it as false, so the role does not exist.
-        for value in (False, "false", "False "):
+        for value in (False, "false", "0"):
             with self.subTest(enabled=value):
                 roles = ci("prod")
                 roles["aws-iam-role/ci-apply"]["vars"]["enabled"] = value

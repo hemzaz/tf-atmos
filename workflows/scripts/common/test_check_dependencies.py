@@ -139,7 +139,7 @@ class CheckDependenciesTest(unittest.TestCase):
 class BooleanReadingTest(unittest.TestCase):
     def test_a_string_false_enabled_is_not_deployable(self):
         self.assertFalse(check_dependencies.is_deployable(instance(enabled="false")))
-        stacks = {"s1": {"components": {"terraform": {"off": instance(component="ghost", enabled="False ")}}}}
+        stacks = {"s1": {"components": {"terraform": {"off": instance(component="ghost", enabled="false")}}}}
         with tempfile.TemporaryDirectory() as components:
             self.assertEqual(check_dependencies.check(stacks, components), [])
         reader = instance({"x": "!terraform.state off .id"}, [{"component": "off"}])

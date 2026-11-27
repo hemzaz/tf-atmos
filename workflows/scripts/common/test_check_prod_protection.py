@@ -242,7 +242,7 @@ class CiTrustTest(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assert_one(self.found(self.role(kind, permissions_boundary="arn:aws:iam::1:policy/b")),
                                 "sets permissions_boundary")
-                for true in (True, "true", "True"):
+                for true in (True, "true", "1"):
                     self.assert_one(self.found(self.role(kind, instance_profile_enabled=true)),
                                     "sets instance_profile_enabled: true")
                 for bad in (3600, "3600", 3599, 7200, 43201, "abc"):
@@ -465,7 +465,7 @@ class CiTrustTest(unittest.TestCase):
         # E6a5 review: the module never truncates var.name, so no id_length_limit exempts a long one.
         long_name = "dns-delegation-" + "y" * 60  # 75 characters
         for limit in ({}, {"id_length_limit": 32}, {"context": {"id_length_limit": 32}}, {"id_length_limit": "64"}):
-            for flag in (False, "false", " False "):
+            for flag in (False, "false", "0"):
                 with self.subTest(limit=limit, use_fullname=flag):
                     found = self.found_as({"aws-iam-role/dns": instance(
                         "aws-iam-role", name=long_name, use_fullname=flag, **limit)})

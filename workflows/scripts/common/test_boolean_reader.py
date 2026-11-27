@@ -2,6 +2,7 @@
 
 python3 -m unittest discover -s workflows/scripts/common
 """
+import ast
 import contextlib
 import importlib.util
 import io
@@ -98,6 +99,99 @@ class OtherScriptsAreClean(unittest.TestCase):
         self.assertIn("::error::s1: x metadata.enabled is 'maybe'", err.getvalue())
 
 
+class EveryReadFlagIsPrescanned(unittest.TestCase):
+    """Every field name passed to flag(), flag_on, is_on or is_public is in BOOLEAN_VARS or ZONE_FLAGS.
+
+    Found by AST over the checkers; a dynamic key (flag_on(variables.get(flag))) is resolved from the loop or
+    table that feeds it, and an unresolvable one fails the test, so a new flag cannot miss flag_errors().
+    """
+
+    READERS = {"flag", "flag_on", "is_on", "is_public", "default_on"}
+    # (script, key variable) -> the table whose keys it walks, when no literal tuple feeds it.
+    TABLES = {
+        ("check-data-residency.py", "flag"): lambda: check_data_residency.MONITORING_ROUTES,
+        ("check-lane-names.py", "flag"): lambda: dict(check_lane_names.ANALYZER_KINDS),
+        ("check-lane-names.py", "gate"): lambda: {gate for _, gate, _ in check_lane_names.SINGLETONS},
+        ("check-domains.py", "key"): lambda: {k for k in check_domains.WIDENING_INPUTS if k.endswith("_enabled")},
+        # flag_errors() itself walks the tables it is checked against
+        ("ci-apply-role-arn.py", "var"): lambda: {*backends.ci_apply_role_arn.BOOLEAN_VARS, *backends.ci_apply_role_arn.ZONE_FLAGS},
+    }
+    SCRIPTS = ("check-ci-state-roles.py", "check-cluster-api-ci.py", "check-data-residency.py", "check-dependencies.py",
+               "check-domains.py", "check-lambda-packages.py", "check-lane-names.py", "check-prod-protection.py",
+               "ci-apply-role-arn.py")
+
+    @staticmethod
+    def literal_keys(tree, name):
+        """The str constants of a literal tuple/list a comprehension or for-loop walks as `name`."""
+        found = set()
+        for node in ast.walk(tree):
+            targets = ([(node.target, node.iter)] if isinstance(node, (ast.comprehension, ast.For)) else [])
+            for target, iterable in targets:
+                if isinstance(target, ast.Name) and target.id == name and isinstance(iterable, (ast.Tuple, ast.List)):
+                    found |= {e.value for e in iterable.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+        return found
+
+    def field_names(self, script, tree, argument):
+        """(names, unresolved) the first argument of a reader call reads."""
+        names, unresolved = set(), []
+        for node in (argument,):  # the outermost accessor: the field itself, not the map it comes from
+            key = None
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" and node.args:
+                key = node.args[0]
+            elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "label" and len(node.args) > 1:
+                key = node.args[1]
+            elif isinstance(node, ast.Subscript):
+                key = node.slice
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                names.add(key.value)
+            elif isinstance(key, ast.Name):
+                literal = self.literal_keys(tree, key.id)
+                table = self.TABLES.get((script, key.id))
+                if literal or table:
+                    names |= literal | set(table() if table else ())
+                else:
+                    unresolved.append(f"{script}:{node.lineno} key {key.id}")
+        return names, unresolved
+
+    def test_every_field_is_in_boolean_vars_or_zone_flags(self):
+        ci = backends.ci_apply_role_arn
+        allowed = set(ci.BOOLEAN_VARS) | set(ci.ZONE_FLAGS)
+        seen, unresolved = set(), []
+        for script in self.SCRIPTS:
+            tree = ast.parse((HERE / script).read_text())
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call) and node.args):
+                    continue
+                callee = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if callee not in self.READERS:
+                    continue
+                # domains' is_public(zone) reads vpc_associations, not a boolean
+                if callee == "is_public" and script == "check-domains.py":
+                    continue
+                # default_on(variables, key) reads its second argument
+                argument = node.args[1] if callee == "default_on" and len(node.args) > 1 else node.args[0]
+                if isinstance(argument, ast.Name) and callee != "default_on":
+                    continue  # a wrapper's own parameter
+                if callee == "default_on":
+                    argument = ast.Subscript(value=ast.Name(id="v"), slice=argument)
+                names, missing = self.field_names(script, tree, argument)
+                seen |= names
+                unresolved += missing
+        self.assertEqual(unresolved, [])
+        self.assertGreater(len(seen), 25, seen)  # the walk found the readers, not an empty set
+        self.assertEqual(sorted(seen - allowed), [], "read through the one reader but not pre-scanned by flag_errors()")
+
+    def test_the_monitoring_routes_are_prescanned_by_derivation(self):
+        self.assertTrue(set(check_data_residency.MONITORING_ROUTES) <= set(backends.ci_apply_role_arn.BOOLEAN_VARS))
+        self.assertEqual(check_data_residency.MONITORING_ROUTES, backends.ci_apply_role_arn.MONITORING_ROUTES)
+
+    def test_a_garbage_route_flag_is_a_located_error_not_a_traceback(self):
+        for key in check_data_residency.MONITORING_ROUTES:
+            rc, out = run_main(check_data_residency, stacks_with(component="security-monitoring", vars={key: "yes"}))
+            self.assertEqual(rc, 1)
+            self.assertIn(f"ERROR s1: x vars.{key} is 'yes', not a boolean", out)
+
+
 class OneAnswerPerField(unittest.TestCase):
     def test_residency_rejects_yes_with_a_located_error_from_main(self):
         for key in ("accessanalyzer_organization_enabled", "admin_delegated"):
@@ -108,11 +202,13 @@ class OneAnswerPerField(unittest.TestCase):
                 self.assertIn(f"ERROR s1: x vars.{key} is 'yes', not a boolean", out)
 
     def test_residency_flag_on_reads_strings_and_rejects_numbers(self):
-        self.assertFalse(check_data_residency.flag_on("False"))
-        self.assertTrue(check_data_residency.flag_on(" true "))
+        self.assertFalse(check_data_residency.flag_on("false"))
+        self.assertFalse(check_data_residency.flag_on("0"))
+        self.assertTrue(check_data_residency.flag_on("true"))
         self.assertFalse(check_data_residency.flag_on(None))
-        with self.assertRaises(ValueError):
-            check_data_residency.flag_on(1)
+        for value in (1, 0, "True", " true", "false ", "FALSE"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                check_data_residency.flag_on(value)
 
     def test_lane_names_agrees_with_flag_on_github_oidc_provider_enabled(self):
         for value in ("true", "false", True, False, None, "yes"):
@@ -138,8 +234,8 @@ class StringFalseIsDisabled(unittest.TestCase):
                               check_lambda_packages.is_deployable, ci_components.is_deployable,
                               ci_stacks.deployable, check_first_deploy_inputs.deployable):
             with self.subTest(is_deployable=is_deployable):
-                self.assertFalse(is_deployable({"metadata": {"enabled": "False"}}))
-                self.assertTrue(is_deployable({"metadata": {"enabled": " TRUE "}}))
+                self.assertFalse(is_deployable({"metadata": {"enabled": "false"}}))
+                self.assertTrue(is_deployable({"metadata": {"enabled": "1"}}))
                 self.assertTrue(is_deployable({}))
 
     def test_lane_names_reads_metadata_and_vars_enabled(self):
@@ -157,14 +253,14 @@ class StringFalseIsDisabled(unittest.TestCase):
     def test_domains_flag_on(self):
         self.assertFalse(check_domains.flag_on("false"))
         self.assertFalse(check_domains.flag_on(None))
-        self.assertTrue(check_domains.flag_on("True"))
+        self.assertTrue(check_domains.flag_on("true"))
         with self.assertRaises(ValueError):
             check_domains.flag_on("yes")
 
     def test_cluster_api_is_public(self):
         self.assertFalse(check_cluster_api_ci.is_public("false"))
         self.assertFalse(check_cluster_api_ci.is_public(None))
-        self.assertTrue(check_cluster_api_ci.is_public("True"))
+        self.assertTrue(check_cluster_api_ci.is_public("true"))
 
     def test_ci_state_roles_reads_a_rendered_true(self):
         role = {"component": "aws-iam-role", "vars": {OIDC: "true"}}
@@ -191,8 +287,10 @@ class CiComponentsSelectionIsUnchanged(unittest.TestCase):
 
     def test_bool_and_string_forms_select_the_same_set(self):
         self.assertEqual(self.selected(True), self.selected("true"))
+        self.assertEqual(self.selected(True), self.selected("1"))
         self.assertEqual(self.selected(True)[0], ["a", "b"])
-        self.assertEqual(self.selected(False), self.selected("False"))
+        self.assertEqual(self.selected(False), self.selected("false"))
+        self.assertEqual(self.selected(False), self.selected("0"))
         self.assertEqual(self.selected(False)[0], ["b"])
 
 

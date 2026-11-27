@@ -56,19 +56,20 @@ def label(ci: dict, field: str):
 
 
 def flag(value, where: str, default=None):
-    """A bool var Atmos may render as a string: "true"/"false" (case and space insensitive) become bools.
+    """A bool var Atmos may render as a string, read as Terraform converts it (terraform 1.17.2 through
+    .tfvars.json, type = bool and optional(bool)): a bool, or exactly "true", "false", "1" or "0".
 
     The one boolean reader of the lint scripts: they all import this module. None gives default (the
-    value's unset meaning); anything else, "yes", "0", 1, fails loudly, because Terraform would reject
-    it too and a guess could pass a disabled role. Numeric rules (a retention of "7") are not booleans:
-    check-prod-protection.py's normalize() reads those.
+    value's unset meaning). Anything else fails loudly, because Terraform rejects it too and a guess could
+    pass a disabled role: "True", "TRUE", " true" (case and padding matter), the numbers 1 and 0, "yes".
+    Numeric rules (a retention of "7") are not booleans: check-prod-protection.py's normalize() reads those.
     """
     if value is None:
         return default
     if isinstance(value, bool):
         return value
-    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
-        return value.strip().lower() == "true"
+    if isinstance(value, str) and value in ("true", "false", "1", "0"):
+        return value in ("true", "1")
     raise ValueError(f"{where} is {value!r}, not a boolean (true or false)")
 
 
@@ -92,8 +93,16 @@ def uses_fullname(ci: dict) -> bool:
     return flag((ci.get("vars") or {}).get("use_fullname"), "vars.use_fullname", True)
 
 
+# security-monitoring's finding routes (E5c8, owner OQ-AL) and the org service each routes: defined here, the one
+# module every lint script loads, so BOOLEAN_VARS derives from it; check-data-residency.py reads this same dict.
+MONITORING_ROUTES = {
+    "enable_guardduty_route": "aws-guardduty",
+    "enable_securityhub_route": "aws-security-hub",
+    "enable_inspector2_route": "aws-inspector2",
+}
 # The boolean vars the lint scripts decide on (flag() reads them): flag_errors() pre-scans them.
 BOOLEAN_VARS = (
+    *MONITORING_ROUTES,
     "enabled", "github_oidc_provider_enabled", "instance_profile_enabled", "eks_oidc_provider_enabled",
     "use_fullname", "cluster_endpoint_public_access", "is_multi_region_trail", "include_global_service_events",
     "account_alias_enabled", "s3_block_public_access_enabled",
