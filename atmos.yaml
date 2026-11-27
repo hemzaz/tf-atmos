@@ -55,7 +55,8 @@ stacks:
 # every non-interactive `atmos terraform plan`/`deploy`/`lint` (CI) try an SSO
 # login and fail without a TTY, even with AWS env credentials (E4d0 spike,
 # 2026-10-31). Lint step stack-checks (check-auth-defaults.py) fails one. Only
-# a role profile (profiles/<role>/atmos.yaml; CI never sets ATMOS_PROFILE)
+# a role profile (profiles/<role>/atmos.yaml; CI sets only ATMOS_PROFILE=github,
+# which holds no default: it selects its `ci` identity by ATMOS_IDENTITY)
 # sets a default, by a provisioned identity's name. That name exists only
 # after a first login, and a profile default naming a missing identity fails
 # every auth and terraform command, `atmos auth login` included: log in with

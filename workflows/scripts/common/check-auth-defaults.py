@@ -10,8 +10,8 @@ Usage: check-auth-defaults.py --config <describe config JSON> --profile-config <
   stdin:    `atmos describe stacks --process-functions=false --format json`, where each
             component's `auth` is atmos.yaml's deep-merged with its stack's own.
 Both must be described with ATMOS_PROFILE unset (lint step stack-checks does): a profile is
-the one place a human default belongs, since CI never sets ATMOS_PROFILE, and only
---profile, ATMOS_PROFILE or atmos.yaml `profiles.default` loads one.
+the one place a human default belongs, since CI sets only ATMOS_PROFILE=github (no default;
+the `ci` identity is selected by ATMOS_IDENTITY), and only --profile, ATMOS_PROFILE or atmos.yaml `profiles.default` loads one.
 
 ERROR, each naming the file, the key and the fix:
   - atmos.yaml `profiles.default`: it loads that profile, and its default, in CI too;
