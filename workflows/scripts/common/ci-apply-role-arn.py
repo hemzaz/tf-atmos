@@ -97,7 +97,16 @@ BOOLEAN_VARS = (
     "enabled", "github_oidc_provider_enabled", "instance_profile_enabled", "eks_oidc_provider_enabled",
     "use_fullname", "cluster_endpoint_public_access", "is_multi_region_trail", "include_global_service_events",
     "account_alias_enabled", "s3_block_public_access_enabled",
+    # check-data-residency, check-lane-names and check-domains (flag_on)
+    "admin_delegated", "finding_aggregator_enabled", "account_map_enabled", "create_sns_topic", "create_iam_role",
+    "dns_private_zone_enabled", "dnssec_enabled", "enable_alert_enrichment", "accessanalyzer_organization_enabled",
+    "accessanalyzer_organization_unused_access_enabled", "accessanalyzer_account_enabled",
+    "organizations_delegated_administrator_enabled", "organizations_resource_policy_enabled",
+    "multi_account_dns_delegation", "create_root_delegation", "enable_logging", "manage_log_resource_policy",
 )
+# The maps of dns zones, and the booleans each entry sets (check-domains, check-data-residency).
+ZONE_MAPS = ("zones", "external_zones")
+ZONE_FLAGS = ("enable_query_logging", "dnssec_enabled")
 
 
 def flag_errors(stacks: dict) -> list[str]:
@@ -111,8 +120,14 @@ def flag_errors(stacks: dict) -> list[str]:
             instance = instance or {}
             try:
                 is_deployable(instance)
+                variables = instance.get("vars") or {}
                 for var in BOOLEAN_VARS:
-                    flag((instance.get("vars") or {}).get(var), f"vars.{var}")
+                    flag(variables.get(var), f"vars.{var}")
+                for zone_map in ZONE_MAPS:
+                    zones = variables.get(zone_map)
+                    for key, zone in sorted(zones.items()) if isinstance(zones, dict) else ():
+                        for var in ZONE_FLAGS:
+                            flag(zone.get(var) if isinstance(zone, dict) else None, f"vars.{zone_map}.{key}.{var}")
             except ValueError as error:
                 errors.append(f"{stack_name}: {name} {error}; Atmos/Terraform reads only true or false")
     return errors

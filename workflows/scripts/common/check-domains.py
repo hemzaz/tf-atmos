@@ -107,7 +107,7 @@ def dicts(value) -> dict:
     return {k: v for k, v in (value or {}).items() if isinstance(v, dict)} if isinstance(value, dict) else {}
 
 
-def flag_on(value, where: str = "a boolean var") -> bool:
+def flag_on(value, where: str = "a boolean var") -> bool:  # located by flag_errors() beforehand
     """Whether Terraform reads value as a true bool: unset is off, "true"/"false" strings are read, else ValueError."""
     return ci_apply_role_arn.flag(value, where, False) is True
 
@@ -827,7 +827,7 @@ def log_policies(
         moved for zone in dicts(variables.get("zones")).values()
         if flag_on(zone.get("enable_query_logging")) and is_public(zone)
     } | {
-        flag_on(zone.get("dns_account")) for zone in dicts(variables.get("external_zones")).values()
+        bool(zone.get("dns_account")) for zone in dicts(variables.get("external_zones")).values()
         if flag_on(zone.get("enable_query_logging"))
     }
     found = [(account, QUERY_LOG_REGION)] if False in places else []

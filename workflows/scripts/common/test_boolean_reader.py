@@ -98,6 +98,40 @@ class OtherScriptsAreClean(unittest.TestCase):
         self.assertIn("::error::s1: x metadata.enabled is 'maybe'", err.getvalue())
 
 
+class OneAnswerPerField(unittest.TestCase):
+    def test_residency_rejects_yes_with_a_located_error_from_main(self):
+        for key in ("accessanalyzer_organization_enabled", "admin_delegated"):
+            instance = {"component": "access-analyzer", "vars": {key: "yes"}}
+            with self.subTest(key=key):
+                rc, out = run_main(check_data_residency, stacks_with(**instance))
+                self.assertEqual(rc, 1)
+                self.assertIn(f"ERROR s1: x vars.{key} is 'yes', not a boolean", out)
+
+    def test_residency_flag_on_reads_strings_and_rejects_numbers(self):
+        self.assertFalse(check_data_residency.flag_on("False"))
+        self.assertTrue(check_data_residency.flag_on(" true "))
+        self.assertFalse(check_data_residency.flag_on(None))
+        with self.assertRaises(ValueError):
+            check_data_residency.flag_on(1)
+
+    def test_lane_names_agrees_with_flag_on_github_oidc_provider_enabled(self):
+        for value in ("true", "false", True, False, None, "yes"):
+            with self.subTest(value=value):
+                try:
+                    expected = check_lane_names.backends.ci_apply_role_arn.flag(value, "v") is True
+                except ValueError:
+                    with self.assertRaises(ValueError):
+                        check_lane_names.residency.flag_on(value)
+                    continue
+                self.assertEqual(check_lane_names.residency.flag_on(value), expected)
+
+    def test_a_nested_zone_garbage_names_its_location(self):
+        instance = {"component": "dns", "vars": {"external_zones": {"corp": {"enable_query_logging": "maybe"}}}}
+        rc, out = run_main(check_domains, stacks_with(**instance))
+        self.assertEqual(rc, 1)
+        self.assertIn("ERROR s1: x vars.external_zones.corp.enable_query_logging is 'maybe', not a boolean", out)
+
+
 class StringFalseIsDisabled(unittest.TestCase):
     def test_every_is_deployable_reads_a_string(self):
         for is_deployable in (backends.is_deployable, check_data_residency.is_deployable,

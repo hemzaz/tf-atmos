@@ -277,13 +277,14 @@ def exempt(name: str, field: str, region: str, exemptions: tuple) -> bool:
     )
 
 
-def flag_on(value: Any) -> bool:
-    """Whether Terraform would read value as a true bool: anything but null, false or "false".
+def flag_on(value: Any, where: str = "a boolean var") -> bool:
+    """Whether Terraform would read value as a true bool, by the one boolean reader (ci-apply-role-arn.py flag).
 
-    A quoted YAML "true" (or "True", or 1) becomes true for optional(bool), so only the
-    values that are certainly off count as off.
+    Unset is off; "true"/"false" strings (any case) are read; anything else, "yes" or 1 too (Terraform converts a
+    string "true"/"false" to a bool, never a number or another string), raises ValueError. flag_errors() pre-scans
+    the vars and zone entries these rules read, so main() reports each with its stack, instance and field.
     """
-    return value is not None and value is not False and str(value).strip().lower() != "false"
+    return backends.ci_apply_role_arn.flag(value, where, False) is True
 
 
 def query_logging_errors(where: str, zones: Any, field: str = "zones") -> list[str]:
