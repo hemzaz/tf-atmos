@@ -173,25 +173,6 @@ def variable_default(components_dir: pathlib.Path, component: str, name: str) ->
 
 
 is_deployable = ci_apply_role_arn.is_deployable
-BOOLEAN_VARS = ("enabled", "github_oidc_provider_enabled", "instance_profile_enabled", "eks_oidc_provider_enabled",
-                "use_fullname")
-
-
-def flag_errors(stacks: dict) -> list[str]:
-    """Instances whose metadata.enabled, or whose CI role's boolean vars, are not true/false: one clean error each."""
-    errors = []
-    for stack_name, stack in sorted(stacks.items()):
-        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
-            try:
-                is_deployable(instance)
-                if instance.get("component") == CI_ROLE_COMPONENT:
-                    for var in BOOLEAN_VARS:
-                        ci_apply_role_arn.flag((instance.get("vars") or {}).get(var), f"vars.{var}")
-            except ValueError as error:
-                errors.append(f"{stack_name}: {name} {error}; Terraform reads only true or false")
-    return errors
-
-
 def check(stacks: dict, components_dir: pathlib.Path) -> list[str]:
     errors = []
     for stack_name, stack in sorted(stacks.items()):
@@ -508,7 +489,7 @@ def main() -> int:
         print(__doc__.splitlines()[2], file=sys.stderr)
         return 2
     described = json.load(sys.stdin)
-    errors = flag_errors(described) or (check(described, pathlib.Path(sys.argv[1])) + check_ci_trust(described)
+    errors = ci_apply_role_arn.flag_errors(described) or (check(described, pathlib.Path(sys.argv[1])) + check_ci_trust(described)
                                        + check_trails(described))
     for error in errors:
         print(f"ERROR {error}")

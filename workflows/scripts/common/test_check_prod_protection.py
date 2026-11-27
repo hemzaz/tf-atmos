@@ -133,7 +133,7 @@ class BooleanReadingTest(unittest.TestCase):
         cases = {"rds/x": bad_metadata,
                  "aws-iam-role/ci-apply": instance("aws-iam-role", name="ci-apply", github_oidc_provider_enabled="yes"),
                  "aws-iam-role/ci-plan": instance("aws-iam-role", name="ci-plan", instance_profile_enabled=1)}
-        found = check_prod_protection.flag_errors(stacks(**cases))
+        found = check_prod_protection.ci_apply_role_arn.flag_errors(stacks(**cases))
         self.assertEqual(len(found), 3, found)
         self.assertIn("fnx-ue1-prod: aws-iam-role/ci-apply vars.github_oidc_provider_enabled is 'yes', not a boolean", found[0])
         self.assertIn("aws-iam-role/ci-plan vars.instance_profile_enabled is 1", found[1])

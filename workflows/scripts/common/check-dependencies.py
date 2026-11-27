@@ -98,18 +98,6 @@ def declared(components_dir: str, module: str, kind: str) -> Optional[frozenset]
 is_deployable = ci_apply_role_arn.is_deployable
 
 
-def flag_errors(stacks: dict) -> list[str]:
-    """Instances whose metadata.enabled is not true/false: one clean error each, before the checks read it."""
-    errors = []
-    for stack_name, stack in sorted(stacks.items()):
-        for name, instance in sorted(stack.get("components", {}).get("terraform", {}).items()):
-            try:
-                is_deployable(instance)
-            except ValueError as error:
-                errors.append(f"{stack_name}: {name} {error}; Terraform reads only true or false")
-    return errors
-
-
 def module_name(name: str, instance: dict) -> str:
     """The component directory this instance is built from."""
     return instance.get("component") or instance.get("metadata", {}).get("component") or name
@@ -193,7 +181,7 @@ def undeclared_vars(stacks: dict, components_dir: str) -> list[str]:
 def main() -> int:
     components_dir = sys.argv[1] if len(sys.argv) > 1 else COMPONENTS_DIR
     stacks = json.load(sys.stdin)
-    errors = flag_errors(stacks) or (check(stacks, components_dir) + undeclared_vars(stacks, components_dir))
+    errors = ci_apply_role_arn.flag_errors(stacks) or (check(stacks, components_dir) + undeclared_vars(stacks, components_dir))
     errors = fixtures.fatal(errors, "check-dependencies") + fixtures.unguarded(stacks)
     for error in errors:
         print(f"ERROR {error}")

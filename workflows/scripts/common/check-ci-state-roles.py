@@ -180,7 +180,8 @@ def ci_roles(stack: dict) -> dict:
     for kind, name in ci_apply_role_arn.INSTANCES.items():
         instance = found.get(name)
         if (instance and instance.get("component") == CI_COMPONENT and backends.is_deployable(instance)
-                and (instance.get("vars") or {}).get("github_oidc_provider_enabled") is True):
+                and ci_apply_role_arn.flag((instance.get("vars") or {}).get("github_oidc_provider_enabled"),
+                                           "vars.github_oidc_provider_enabled") is True):
             roles[kind] = instance
     return roles
 
@@ -323,7 +324,8 @@ def check(stacks: dict) -> list[str]:
 
 
 def main() -> int:
-    errors = check(json.load(sys.stdin))
+    stacks = json.load(sys.stdin)
+    errors = ci_apply_role_arn.flag_errors(stacks) or check(stacks)
     for error in errors:
         print(f"ERROR {error}")
     if errors:

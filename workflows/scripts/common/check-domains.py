@@ -107,9 +107,9 @@ def dicts(value) -> dict:
     return {k: v for k, v in (value or {}).items() if isinstance(v, dict)} if isinstance(value, dict) else {}
 
 
-def flag_on(value) -> bool:
-    """Whether Terraform reads value as a true bool (check-data-residency's rule)."""
-    return value is not None and value is not False and str(value).strip().lower() != "false"
+def flag_on(value, where: str = "a boolean var") -> bool:
+    """Whether Terraform reads value as a true bool: unset is off, "true"/"false" strings are read, else ValueError."""
+    return ci_apply_role_arn.flag(value, where, False) is True
 
 
 def normalize(name: str) -> str:
@@ -906,9 +906,14 @@ def check(stacks: dict) -> tuple[list[str], list[str]]:
 
 def main() -> int:
     stacks = json.load(sys.stdin)
-    errors, warnings = check(stacks)
-    # Separate from check() (placement and quota), so each part is tested on its own fixtures.
-    errors += log_policy_name_errors(stacks) + vendored_dns_errors(stacks)
+    errors, warnings = ci_apply_role_arn.flag_errors(stacks), []
+    if not errors:
+        try:
+            errors, warnings = check(stacks)
+            # Separate from check() (placement and quota), so each part is tested on its own fixtures.
+            errors += log_policy_name_errors(stacks) + vendored_dns_errors(stacks)
+        except ValueError as error:  # a nested var (an external_zones entry) flag_errors does not scan
+            errors = [f"{error}; Atmos/Terraform reads only true or false"]
     errors = check_dependencies.fixtures.fatal(errors, "check-domains")
     for warning in warnings:
         print(f"WARN {warning}")

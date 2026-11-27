@@ -135,6 +135,7 @@ from typing import Any, Iterator, NamedTuple, Optional
 
 # The sibling module, also when this file is loaded by path (tests).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import backends  # noqa: E402
 import fixtures  # noqa: E402
 
 CHECK = "check-data-residency"
@@ -213,9 +214,7 @@ GDPR_ONLY_ACCOUNTS = ("prod-eu",)
 GUARDDUTY_AUTO_ENABLE_DEFAULT = "NEW"  # aws-guardduty variables.tf auto_enable_organization_members
 
 
-def is_deployable(instance: dict) -> bool:
-    metadata = instance.get("metadata") or {}
-    return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
+is_deployable = backends.is_deployable
 
 
 def instances(stack: dict) -> dict:
@@ -1137,7 +1136,9 @@ def outside_reader_errors(stack_name: str, name: str, instance: dict, scoped: se
 
 def main() -> int:
     warnings: list[str] = []
-    errors = fixtures.fatal(check(json.load(sys.stdin), warnings=warnings), CHECK)
+    stacks = json.load(sys.stdin)
+    errors = backends.ci_apply_role_arn.flag_errors(stacks) or check(stacks, warnings=warnings)
+    errors = fixtures.fatal(errors, CHECK)
     for warning in warnings:
         print(f"WARNING {warning}", file=sys.stderr)
     for error in errors:

@@ -92,6 +92,32 @@ def uses_fullname(ci: dict) -> bool:
     return flag((ci.get("vars") or {}).get("use_fullname"), "vars.use_fullname", True)
 
 
+# The boolean vars the lint scripts decide on (flag() reads them): flag_errors() pre-scans them.
+BOOLEAN_VARS = (
+    "enabled", "github_oidc_provider_enabled", "instance_profile_enabled", "eks_oidc_provider_enabled",
+    "use_fullname", "cluster_endpoint_public_access", "is_multi_region_trail", "include_global_service_events",
+    "account_alias_enabled", "s3_block_public_access_enabled",
+)
+
+
+def flag_errors(stacks: dict) -> list[str]:
+    """One clean error per instance whose metadata.enabled or boolean var is not true/false.
+
+    Every lint script calls this first in main(), so is_deployable()/flag() never print a traceback.
+    """
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            instance = instance or {}
+            try:
+                is_deployable(instance)
+                for var in BOOLEAN_VARS:
+                    flag((instance.get("vars") or {}).get(var), f"vars.{var}")
+            except ValueError as error:
+                errors.append(f"{stack_name}: {name} {error}; Atmos/Terraform reads only true or false")
+    return errors
+
+
 def clean(value: str, regex: str) -> str:
     """null-label's replace(value, regex_replace_chars, ""): "/.../" is a regex, anything else a literal.
 
