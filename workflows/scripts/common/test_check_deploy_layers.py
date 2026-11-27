@@ -481,11 +481,55 @@ class SubsetWorkflowTest(unittest.TestCase):
     def test_bootstrap_full_is_checked(self):
         files = workflow_files(("networking", ["vpc"]), ("services", ["cognito", "lambda", "apigateway"]))
         files["bootstrap.yaml"] = {"workflows": {"full": subset_workflow(
-            ("plan", ["lambda", "apigateway"]), ("deploy", ["lambda", "apigateway"]),
+            ("plan", ["cognito", "lambda", "apigateway"]), ("deploy", ["cognito", "lambda", "apigateway"]),
         )}}
         errors = [e for e in check_deploy_layers.check(self.STACKS, files) if e.startswith("bootstrap.yaml")]
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("reads cognito/main, which is planned in the same phase", errors[0])
+        self.assertIn("reads lambda/fn, which is planned in the same phase", errors[1])
+
+
+class FirstRunTest(unittest.TestCase):
+    """bootstrap `full` runs first on a brand-new account: it may not read what it does not apply."""
+
+    # The old bootstrap bug: every workload vpc reads kms/main, applied only later by deploy-full-stack.
+    STACKS = {
+        "root": stack(backend__main=instance("backend")),
+        "s1": stack(
+            oidc__main=instance("aws-github-oidc-provider"),
+            ci__plan=instance("aws-iam-role", {"state": "!terraform.state backend/main -s root .role"}),
+            kms__main=instance("kms"),
+            vpc__main=instance("vpc", {"key": "!terraform.state kms/main .key_arn"}),
+        ),
+    }
+
+    def errors(self, *types, stacks=None):
+        files = workflow_files(("iam", ["aws-github-oidc-provider", "aws-iam-role"]), ("kms", ["kms"]),
+                               ("networking", ["vpc"]), ("backend", ["backend"]))
+        files["bootstrap.yaml"] = {"workflows": {"full": subset_workflow(("plan", list(types)), ("deploy", list(types)))}}
+        return [e for e in check_deploy_layers.check(stacks or self.STACKS, files) if e.startswith("bootstrap.yaml")]
+
+    def test_vpc_reading_an_unapplied_kms_fails_with_a_fix(self):
+        errors = self.errors("aws-github-oidc-provider", "aws-iam-role", "vpc")
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("reads lambda/fn, which is planned in the same phase", errors[0])
+        self.assertIn("s1: vpc/main (plan step plan-0) reads kms/main, which this first run does not apply", errors[0])
+        self.assertIn("Select kms/main in an earlier phase, or move the reader to a later workflow", errors[0])
+
+    def test_iam_only_passes_and_cross_stack_reads_stay_allowed(self):
+        self.assertEqual(self.errors("aws-github-oidc-provider", "aws-iam-role"), [])
+
+    def test_disabled_target_is_not_a_first_run_failure(self):
+        stacks = {"s2": stack(
+            kms__main=instance("kms", enabled=False),
+            vpc__main=instance("vpc", {"key": "!terraform.state kms/main .key_arn"}),
+        )}
+        self.assertEqual(self.errors("vpc", stacks=stacks), [])
+
+    def test_deploy_app_still_assumes_unselected_instances_deployed(self):
+        files = workflow_files(("networking", ["vpc"]), ("kms", ["kms"]))
+        files["deploy-application.yaml"] = {"workflows": {"deploy-app": subset_workflow(("plan", ["vpc"]), ("deploy", ["vpc"]))}}
+        errors = [e for e in check_deploy_layers.check(self.STACKS, files) if e.startswith("deploy-application.yaml")]
+        self.assertEqual(errors, [])
 
 
 

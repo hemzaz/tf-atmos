@@ -29,9 +29,10 @@ select every deployable instance of every stack (COVERAGE) but the accounts
 layer's (ACCOUNTS_COMPONENTS: the organization, its OUs, SCPs and member
 accounts, in fnx-gbl-root), and none of those; `deploy` in
 deploy-accounts.yaml, which must select every deployable accounts-layer
-instance; `deploy-app` in deploy-application.yaml and `full` in
-bootstrap.yaml, which deploy a subset (instances they do not select are
-assumed deployed already). Exits 1 when:
+instance; `deploy-app` in deploy-application.yaml, which deploys a subset
+(instances it does not select are assumed deployed already); and `full` in
+bootstrap.yaml, which deploys a subset as a FIRST run on a brand-new account
+(FIRST_RUN: nothing else is deployed yet). Exits 1 when:
   - a query is not of that form, or a --from-plan step comes before any plan;
   - an instance is planned by two phases, planned but applied by no step or by
     two, or applied by a step whose phase did not plan it;
@@ -44,6 +45,10 @@ assumed deployed already). Exits 1 when:
   - an instance declares (dependencies.components only) a same-stack instance
     that is applied later: in a later phase, or by a later step of its phase.
     Within one step Atmos applies in dependency order.
+  - (FIRST_RUN) an instance reads (!terraform.state / !terraform.output) a same-stack deployable
+    instance the workflow does not select: that state does not exist yet. Cross-stack reads
+    (the root stack's backend, a DR standby's primary stack) are deployed earlier in the
+    documented order and stay allowed.
   - (CROSS_STACK_AFTER) an instance of a reader root module is planned in the
     same or an earlier phase than an instance, in any stack, of the root module
     it reads by a cross-stack data lookup no dependency declares. This one is
@@ -78,6 +83,9 @@ def not_accounts_layer(component: Optional[str]) -> bool:
 
 # (file, workflow, must select every deployable instance whose metadata.component this accepts,
 #  must select no instance whose metadata.component this accepts); None: no such rule.
+# Workflows that run first on a brand-new account (FIRST_RUN): an instance they apply must read no
+# same-stack instance they leave out, since "assumed deployed already" does not hold there.
+FIRST_RUN = frozenset({("bootstrap.yaml", "full")})
 LAYERED = (
     (FULL_STACK_FILE, ALL_LAYERS_WORKFLOW, not_accounts_layer, accounts_layer),
     (ACCOUNTS_FILE, "deploy", accounts_layer, None),
@@ -326,12 +334,21 @@ def place(
     return placed, errors
 
 
-def order_errors(stack_name: str, instances: dict, placed: dict, where: str, ordered: list[dict]) -> list[str]:
+def order_errors(
+    stack_name: str, instances: dict, placed: dict, where: str, ordered: list[dict], first_run: bool = False
+) -> list[str]:
     errors = []
     for name, (mine, my_step) in sorted(placed.items()):
         for target, reads in sorted(dependencies(stack_name, instances[name]).items()):
-            # Unselected (assumed deployed), missing or disabled: check-dependencies.py reports the latter two.
             if target not in placed:
+                # A first run has nothing deployed besides its own selection.
+                if first_run and reads and target in instances and check_dependencies.is_deployable(instances[target]):
+                    errors.append(
+                        f"{where}{name} (plan step {ordered[mine]['name']}) reads {target}, which this first run "
+                        f"does not apply: its state does not exist on a new account. Select {target} in an earlier "
+                        "phase, or move the reader to a later workflow (deploy-full-stack.yaml)"
+                    )
+                # Otherwise unselected (assumed deployed), missing or disabled: check-dependencies.py reports the latter two.
                 continue
             theirs, their_step = placed[target]
             reader = f"{where}{name} (plan step {ordered[mine]['name']})"
@@ -375,14 +392,14 @@ def cross_stack_errors(stacks: dict, where: str, ordered: list[dict]) -> list[st
 
 
 def check_workflow(
-    stacks: dict, where: str, ordered: list[dict], covers: Coverage, forbids: Coverage = None
+    stacks: dict, where: str, ordered: list[dict], covers: Coverage, forbids: Coverage = None, first_run: bool = False
 ) -> list[str]:
     errors = []
     for stack_name, stack in sorted(stacks.items()):
         instances = stack.get("components", {}).get("terraform", {})
         prefix = f"{where}: {stack_name}: "
         placed, place_errors = place(instances, prefix, ordered, covers, forbids)
-        errors += place_errors + order_errors(stack_name, instances, placed, prefix, ordered)
+        errors += place_errors + order_errors(stack_name, instances, placed, prefix, ordered, first_run)
     return errors + cross_stack_errors(stacks, where, ordered)
 
 
@@ -398,7 +415,9 @@ def check(stacks: dict, workflow_files: dict) -> list[str]:
         ordered, parse_errors = phases(steps, where)
         if file_name == FULL_STACK_FILE:
             parse_errors += layer_query_drift(workflows)
-        errors += parse_errors or check_workflow(stacks, where, ordered, covers, forbids)
+        errors += parse_errors or check_workflow(
+            stacks, where, ordered, covers, forbids, (file_name, workflow) in FIRST_RUN
+        )
     return errors
 
 

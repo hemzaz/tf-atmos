@@ -204,9 +204,9 @@ validate-aws-setup: ## Validate the existing state backend
 
 # Steps 2 and 3 call atmos directly: a nested $(MAKE) ... STACK=<value> would
 # make the child re-expand the value as make syntax ($(shell ...) would run).
-bootstrap-environment: ## Complete environment bootstrap (IAM + VPCs, backend check, validation)
+bootstrap-environment: ## Complete environment bootstrap (IAM, backend check, validation)
 	@echo "$(BLUE)Bootstrapping complete environment: "$(call sq,$(STACK))"$(NC)"
-	@echo "Step 1/3: IAM (CI roles) and networking (needs the state backend: make setup-aws-backend-cold-start)..."
+	@echo "Step 1/3: IAM, the CI roles (needs the state backend: make setup-aws-backend-cold-start)..."
 	@atmos workflow full -f bootstrap -s $(call sq,$(STACK))
 	@echo
 	@echo "Step 2/3: Validating backend setup..."

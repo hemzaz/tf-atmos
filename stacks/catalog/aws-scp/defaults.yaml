@@ -139,7 +139,7 @@ components:
     # it could create or re-trust a CI apply role and act as that. It stays a
     # protected role (a resource, not an exempt principal). The workload stacks'
     # bootstrap as OrganizationAccountAccessRole (iam, including the CI roles,
-    # and VPCs, `full -f bootstrap`) runs while these SCPs are disabled, and the
+    # `full -f bootstrap`) runs while these SCPs are disabled, and the
     # state backends stop trusting that role when Identity Center is applied,
     # before these are enabled (root/global-region.yaml; check-scp-policies.py
     # fails an enabled one while aws-identity-center is disabled, the role in
