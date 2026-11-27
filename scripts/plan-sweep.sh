@@ -85,7 +85,7 @@ umask 077
 INIT_ATTEMPTS="${PLAN_SWEEP_INIT_ATTEMPTS:-3}"
 INIT_RETRY_STEP="${PLAN_SWEEP_INIT_RETRY_STEP:-10}"
 INIT_LOG_TAIL=20
-case "$INIT_ATTEMPTS" in '' | *[!0-9]* | 0)
+case "$INIT_ATTEMPTS" in '' | *[!0-9]*)
   echo "error: PLAN_SWEEP_INIT_ATTEMPTS must be a positive integer, got '$INIT_ATTEMPTS'." >&2
   exit 2
   ;;
@@ -95,6 +95,13 @@ case "$INIT_RETRY_STEP" in '' | *[!0-9]*)
   exit 2
   ;;
 esac
+# Base 10 once, here: bash reads 08 and 09 in arithmetic as invalid octal, and 010 as 8.
+INIT_ATTEMPTS=$((10#$INIT_ATTEMPTS))
+INIT_RETRY_STEP=$((10#$INIT_RETRY_STEP))
+if [ "$INIT_ATTEMPTS" -lt 1 ]; then
+  echo "error: PLAN_SWEEP_INIT_ATTEMPTS must be a positive integer, got '$INIT_ATTEMPTS'." >&2
+  exit 2
+fi
 
 # Pin the credentials instead of inheriting them. Through the default chain a
 # developer's live profile would have every plan read a real account, while CI
@@ -812,11 +819,12 @@ ensure_init() {
     >>"$log" 2>&1; do
     if [ "$n" -ge "$max" ]; then
       init_failed="$init_failed $1"
-      printf 'terraform init failed after %s attempt(s) for %s; last output:\n' "$max" "$1"
+      printf 'terraform init failed after %s attempt(s) for %s%s; last output:\n' "$max" "$1" \
+        "$([ "$init_tripped" = 1 ] && printf ' (not retried: an earlier component already failed every attempt)')"
       tail -n "$INIT_LOG_TAIL" "$log" | sed 's/^/        /'
       if [ "$init_tripped" = 0 ]; then
         init_tripped=1
-        printf 'init failed after retries for %s; trying the remaining components once\n' "$1"
+        printf 'init failed for %s after %s attempt(s); trying the remaining components once\n' "$1" "$max"
       fi
       return 0
     fi
@@ -839,7 +847,14 @@ settle_stack() {
   unattributable=$settle_unattributable inconclusive=$settle_inconclusive
 }
 settle_for=""
+# A shell error inside this loop (arithmetic on a bad value, say) abandons the
+# loops and resumes at the summary, which would then report the pairs it did
+# reach as a pass. Each iteration counts the previous one as done, and a loop
+# that ends normally counts its last; the summary compares the counts.
+stacks_started=0 stacks_done=0 pairs_started=0 pairs_done=0 pairs_expected=0
 for s in $STACKS; do
+  stacks_done=$stacks_started
+  stacks_started=$((stacks_started + 1))
   settle_stack
   settle_for=$s settle_fail=$fail settle_errored=$errored settle_skip=$skip
   settle_unattributable=$unattributable settle_inconclusive=$inconclusive
@@ -883,7 +898,10 @@ for s in $STACKS; do
     continue
   fi
 
+  pairs_expected=$((pairs_expected + $(printf '%s\n' "$comps" | grep -c .)))
   for c in $comps; do
+    pairs_done=$pairs_started
+    pairs_started=$((pairs_started + 1))
     tag="${s}__$(printf '%s' "$c" | tr / _)"
     vf="$WORK/$tag.json"
     desc="$WORK/$tag.describe.json"
@@ -1041,7 +1059,9 @@ json.dump(section, sys.stdout)' "$STACKS_DIR/$s.json" "$s" "$c" \
       [ "$rc" -eq 0 ] && pass_full=$((pass_full + 1))
     fi
   done
+  pairs_done=$pairs_started
 done
+stacks_done=$stacks_started
 settle_stack
 
 printf '%s\n' "-------------------------------------------------------------------"
@@ -1067,6 +1087,13 @@ fi
 status=0
 if [ "$swept" -eq 0 ]; then
   printf '\n%s\n' "NOTHING WAS PLANNED: no stack/component pair reached terraform plan."
+  status=1
+fi
+# shellcheck disable=SC2086 # STACKS is a space-separated list, split on purpose
+n_stacks=$(printf '%s\n' $STACKS | grep -c .)
+if [ "$pairs_done" -ne "$pairs_expected" ] || [ "$stacks_done" -ne "$n_stacks" ]; then
+  printf '\nsweep stopped after %s of %s pairs (%s of %s stacks): a shell error aborted the pair loop, so the remaining pairs were never planned.\n' \
+    "$pairs_done" "$pairs_expected" "$stacks_done" "$n_stacks"
   status=1
 fi
 if [ "$fail" -gt 0 ] || [ "$errored" -gt 0 ]; then
