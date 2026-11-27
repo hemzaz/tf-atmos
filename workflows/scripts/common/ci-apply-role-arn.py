@@ -55,11 +55,25 @@ def label(ci: dict, field: str):
     return value if value is not None else (variables.get("context") or {}).get(field)
 
 
+def flag(value, where: str):
+    """A bool var Atmos may render as a string: "true"/"false" (case and space insensitive) become bools.
+
+    check-prod-protection.py's normalize() does the same (and reads ints), but importing that module
+    loads more scripts, so this is a small mirror. None stays None (unset); anything else fails loudly,
+    because Terraform would reject it too and a guess could pass a disabled role.
+    """
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower() == "true"
+    raise ValueError(f"{where} is {value!r}, not a boolean (true or false)")
+
+
 def creates_role(ci: dict) -> bool:
     """Whether the instance creates a GitHub-trusted role (the component's github_oidc_enabled)."""
     variables = ci.get("vars") or {}
-    return ((ci.get("metadata") or {}).get("enabled", True) is not False
-            and label(ci, "enabled") is not False
+    return (flag((ci.get("metadata") or {}).get("enabled"), "metadata.enabled") is not False
+            and flag(label(ci, "enabled"), "vars.enabled") is not False
             and variables.get("github_oidc_provider_enabled") is True
             and bool(variables.get("trusted_github_repos")))
 

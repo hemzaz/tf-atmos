@@ -223,6 +223,19 @@ class CheckCiStateRolesTest(unittest.TestCase):
         self.assert_errors(stacks(roles=roles, **today()), "is not in backend access_roles.prod_write",
                            "backend access_roles.prod_write trusts no assigned Identity Center set")
 
+    def test_string_false_enabled_fails_like_a_bool_false(self):
+        # A template renders vars.enabled "false"; Terraform reads it as false, so the role does not exist.
+        for value in (False, "false", "False "):
+            with self.subTest(enabled=value):
+                roles = ci("prod")
+                roles["aws-iam-role/ci-apply"]["vars"]["enabled"] = value
+                self.assert_has(stacks(**today(**{"fnx-ue1-prod": roles})), "aws-iam-role/ci-apply role: ")
+
+    def test_unparseable_enabled_fails_with_its_value(self):
+        roles = ci("prod")
+        roles["aws-iam-role/ci-apply"]["vars"]["enabled"] = "maybe"
+        self.assert_has(stacks(**today(**{"fnx-ue1-prod": roles})), "vars.enabled is 'maybe', not a boolean")
+
     def test_no_apply_role_needs_only_the_plan_role(self):
         roles = access_roles(prod_write=[oaar("prod")])
         self.assert_errors(stacks(roles=roles, **today(**{"fnx-ue1-prod": ci("prod", apply=False)})))

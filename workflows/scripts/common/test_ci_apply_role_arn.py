@@ -54,6 +54,28 @@ class ApplyRoleArnTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not create an apply role"):
             ci_apply_role_arn.role_arn(bad)
 
+    def test_string_booleans_are_read_like_terraform(self):
+        for value in ("false", "False ", " FALSE"):
+            with self.subTest(vars_enabled=value), self.assertRaisesRegex(ValueError, "does not create an apply role"):
+                ci_apply_role_arn.role_arn(ci(enabled=value))
+            with self.subTest(metadata_enabled=value), self.assertRaisesRegex(ValueError, "does not create an apply role"):
+                ci_apply_role_arn.role_arn(ci(metadata={"enabled": value}))
+        context_only = ci()
+        del context_only["vars"]["enabled"]
+        context_only["vars"]["context"]["enabled"] = "false"
+        with self.assertRaisesRegex(ValueError, "does not create an apply role"):
+            ci_apply_role_arn.role_arn(context_only)
+        for value in ("true", "True ", True):
+            with self.subTest(enabled=value):
+                self.assertEqual(ci_apply_role_arn.role_arn(ci(enabled=value, metadata={"enabled": value})),
+                                 "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply")
+
+    def test_an_unparseable_enabled_fails_loudly(self):
+        for bad, where in ((ci(enabled="maybe"), "vars.enabled"), (ci(metadata={"enabled": "maybe"}), "metadata.enabled"),
+                           (ci(enabled=1), "vars.enabled")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, where + r" is .* not a boolean"):
+                ci_apply_role_arn.role_arn(bad)
+
     def test_unrendered_or_bad_values_fail(self):
         for bad in (ci(account="{{ .settings.environment.account_id }}"), ci(name="x" * 70), ci(account="")):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "invalid role ARN"):
